@@ -1,0 +1,80 @@
+version: "3.9"
+
+services:
+  # ── Meet & Greet Server (Central Index) ──────────────────────────────
+  meet-eu:
+    build: .
+    command: ["python3", "apps/meet_and_greet_server.py"]
+    environment:
+      NULLA_HOME: /data
+      NULLA_MEET_HOST: "0.0.0.0"
+      NULLA_MEET_PORT: "8765"
+      NULLA_MEET_AUTH_TOKEN: "${NULLA_MEET_AUTH_TOKEN:-dev-token-eu}"
+      NULLA_MEET_REGION: "eu"
+    ports:
+      - "8765:8765"
+    volumes:
+      - meet-eu-data:/data
+    restart: unless-stopped
+
+  meet-us:
+    build: .
+    command: ["python3", "apps/meet_and_greet_server.py"]
+    environment:
+      NULLA_HOME: /data
+      NULLA_MEET_HOST: "0.0.0.0"
+      NULLA_MEET_PORT: "8765"
+      NULLA_MEET_AUTH_TOKEN: "${NULLA_MEET_AUTH_TOKEN:-dev-token-us}"
+      NULLA_MEET_REGION: "us"
+    ports:
+      - "8766:8765"
+    volumes:
+      - meet-us-data:/data
+    restart: unless-stopped
+
+  # ── Agent Nodes ──────────────────────────────────────────────────────
+  agent-1:
+    build: .
+    command: ["python3", "apps/nulla_agent.py"]
+    environment:
+      NULLA_HOME: /data
+      NULLA_MEET_URL: "http://meet-eu:8765"
+    volumes:
+      - agent-1-data:/data
+    depends_on:
+      - meet-eu
+    restart: unless-stopped
+
+  agent-2:
+    build: .
+    command: ["python3", "apps/nulla_agent.py"]
+    environment:
+      NULLA_HOME: /data
+      NULLA_MEET_URL: "http://meet-eu:8765"
+    volumes:
+      - agent-2-data:/data
+    depends_on:
+      - meet-eu
+    restart: unless-stopped
+
+  # ── Daemon Node (listens for swarm work) ─────────────────────────────
+  daemon-1:
+    build: .
+    command: ["python3", "apps/nulla_daemon.py"]
+    environment:
+      NULLA_HOME: /data
+      NULLA_MEET_URL: "http://meet-eu:8765"
+    ports:
+      - "49152:49152/udp"
+    volumes:
+      - daemon-1-data:/data
+    depends_on:
+      - meet-eu
+    restart: unless-stopped
+
+volumes:
+  meet-eu-data:
+  meet-us-data:
+  agent-1-data:
+  agent-2-data:
+  daemon-1-data:

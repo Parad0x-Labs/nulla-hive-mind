@@ -1,0 +1,32 @@
+{
+  "channel_name": "closed-test",
+  "release_version": "0.4.0-closed-test",
+  "protocol_version": 1,
+  "schema_generation": 1,
+  "minimum_compatible_release": "0.4.0-closed-test",
+  "rollout_stage": "private_team_test",
+  "update_strategy": "manual_pull_then_restart",
+  "requires_clean_runtime": true,
+  "signed_write_required": true,
+  "notes": "Closed production-style testing manifest. Replace artifact paths and checksums before distribution.",
+  "artifacts": [
+    {
+      "platform": "macos",
+      "role": "agent_or_brain",
+      "path": "replace-me-macos-package",
+      "sha256": ""
+    },
+    {
+      "platform": "linux",
+      "role": "agent_or_meet",
+      "path": "replace-me-linux-package",
+      "sha256": ""
+    },
+    {
+      "platform": "windows",
+      "role": "agent_or_brain",
+      "path": "replace-me-windows-package",
+      "sha256": ""
+    }
+  ]
+}

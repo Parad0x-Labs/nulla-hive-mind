@@ -1,0 +1,1278 @@
+from __future__ import annotations
+import re
+from datetime import datetime, timezone
+from storage.db import get_connection
+
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS persona_profiles (
+    persona_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    spirit_anchor TEXT NOT NULL,
+    tone TEXT NOT NULL,
+    verbosity TEXT NOT NULL,
+    risk_tolerance REAL NOT NULL CHECK (risk_tolerance >= 0 AND risk_tolerance <= 1),
+    explanation_depth REAL NOT NULL CHECK (explanation_depth >= 0 AND explanation_depth <= 1),
+    execution_style TEXT NOT NULL,
+    strictness REAL NOT NULL CHECK (strictness >= 0 AND strictness <= 1),
+    personality_locked INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS local_tasks (
+    task_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL DEFAULT '',
+    task_class TEXT NOT NULL,
+    task_summary TEXT NOT NULL,
+    redacted_input_hash TEXT NOT NULL,
+    environment_os TEXT,
+    environment_shell TEXT,
+    environment_runtime TEXT,
+    environment_version_hint TEXT,
+    plan_mode TEXT NOT NULL,
+    share_scope TEXT NOT NULL DEFAULT 'local_only',
+    confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+    outcome TEXT NOT NULL,
+    harmful_flag INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS learning_shards (
+    shard_id TEXT PRIMARY KEY,
+    schema_version INTEGER NOT NULL,
+    problem_class TEXT NOT NULL,
+    problem_signature TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    resolution_pattern_json TEXT NOT NULL,
+    environment_tags_json TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_node_id TEXT,
+    quality_score REAL NOT NULL CHECK (quality_score >= 0 AND quality_score <= 1),
+    trust_score REAL NOT NULL CHECK (trust_score >= 0 AND trust_score <= 1),
+    local_validation_count INTEGER NOT NULL DEFAULT 0,
+    local_failure_count INTEGER NOT NULL DEFAULT 0,
+    quarantine_status TEXT NOT NULL DEFAULT 'active',
+    risk_flags_json TEXT NOT NULL,
+    freshness_ts TEXT NOT NULL,
+    expires_ts TEXT,
+    signature TEXT,
+    origin_task_id TEXT NOT NULL DEFAULT '',
+    origin_session_id TEXT NOT NULL DEFAULT '',
+    share_scope TEXT NOT NULL DEFAULT 'local_only',
+    restricted_terms_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_learning_shards_problem_class
+ON learning_shards(problem_class);
+
+CREATE INDEX IF NOT EXISTS idx_learning_shards_problem_signature
+ON learning_shards(problem_signature);
+
+CREATE INDEX IF NOT EXISTS idx_learning_shards_trust
+ON learning_shards(trust_score);
+
+CREATE TABLE IF NOT EXISTS sniffed_context (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_peer_id TEXT NOT NULL,
+    prompt_json TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    learning_value REAL DEFAULT 0.0
+);
+
+CREATE TABLE IF NOT EXISTS dialogue_sessions (
+    session_id TEXT PRIMARY KEY,
+    last_subject TEXT,
+    topic_hints_json TEXT NOT NULL DEFAULT '[]',
+    last_intent_mode TEXT,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS session_memory_policies (
+    session_id TEXT PRIMARY KEY,
+    share_scope TEXT NOT NULL DEFAULT 'local_only',
+    restricted_terms_json TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS session_hive_watch_state (
+    session_id TEXT PRIMARY KEY,
+    watched_topic_ids_json TEXT NOT NULL DEFAULT '[]',
+    seen_post_ids_json TEXT NOT NULL DEFAULT '[]',
+    pending_topic_ids_json TEXT NOT NULL DEFAULT '[]',
+    seen_curiosity_topic_ids_json TEXT NOT NULL DEFAULT '[]',
+    seen_curiosity_run_ids_json TEXT NOT NULL DEFAULT '[]',
+    seen_agent_ids_json TEXT NOT NULL DEFAULT '[]',
+    last_active_agents INTEGER NOT NULL DEFAULT 0,
+    snooze_until TEXT NOT NULL DEFAULT '',
+    last_prompted_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dialogue_turns (
+    turn_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    raw_input TEXT NOT NULL,
+    normalized_input TEXT NOT NULL,
+    reconstructed_input TEXT NOT NULL,
+    topic_hints_json TEXT NOT NULL DEFAULT '[]',
+    reference_targets_json TEXT NOT NULL DEFAULT '[]',
+    understanding_confidence REAL NOT NULL DEFAULT 0.0,
+    quality_flags_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_dialogue_turns_session_created
+ON dialogue_turns(session_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS adaptive_lexicon (
+    term TEXT NOT NULL,
+    canonical TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'global',
+    source TEXT NOT NULL DEFAULT 'manual',
+    confidence REAL NOT NULL DEFAULT 0.75,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (term, scope)
+);
+
+CREATE TABLE IF NOT EXISTS peers (
+    peer_id TEXT PRIMARY KEY,
+    display_alias TEXT,
+    trust_score REAL NOT NULL CHECK (trust_score >= 0 AND trust_score <= 1),
+    successful_shards INTEGER NOT NULL DEFAULT 0,
+    failed_shards INTEGER NOT NULL DEFAULT 0,
+    strike_count INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active',
+    last_seen_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS shard_feedback (
+    feedback_id TEXT PRIMARY KEY,
+    shard_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    peer_id TEXT,
+    outcome TEXT NOT NULL,
+    confidence_before REAL NOT NULL CHECK (confidence_before >= 0 AND confidence_before <= 1),
+    confidence_after REAL NOT NULL CHECK (confidence_after >= 0 AND confidence_after <= 1),
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (shard_id) REFERENCES learning_shards(shard_id) ON DELETE CASCADE,
+    FOREIGN KEY (task_id) REFERENCES local_tasks(task_id) ON DELETE CASCADE,
+    FOREIGN KEY (peer_id) REFERENCES peers(peer_id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS web_notes (
+    note_id TEXT PRIMARY KEY,
+    query_hash TEXT NOT NULL,
+    source_label TEXT NOT NULL,
+    source_url_hash TEXT,
+    summary TEXT NOT NULL,
+    confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+    freshness_ts TEXT NOT NULL,
+    used_in_task_id TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (used_in_task_id) REFERENCES local_tasks(task_id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS curiosity_topics (
+    topic_id TEXT PRIMARY KEY,
+    session_id TEXT,
+    originating_task_id TEXT,
+    trace_id TEXT,
+    topic TEXT NOT NULL,
+    topic_kind TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    priority REAL NOT NULL DEFAULT 0.0,
+    source_profiles_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'queued',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_run_at TEXT,
+    candidate_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_curiosity_topics_status
+ON curiosity_topics(status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_curiosity_topics_session
+ON curiosity_topics(session_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS operator_action_requests (
+    action_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    action_kind TEXT NOT NULL,
+    scope_json TEXT NOT NULL,
+    result_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    executed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_operator_action_requests_session
+ON operator_action_requests(session_id, action_kind, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS curiosity_runs (
+    run_id TEXT PRIMARY KEY,
+    topic_id TEXT NOT NULL,
+    task_id TEXT,
+    trace_id TEXT,
+    query_text TEXT NOT NULL,
+    source_profile_ids_json TEXT NOT NULL DEFAULT '[]',
+    snippets_json TEXT NOT NULL DEFAULT '[]',
+    candidate_id TEXT,
+    outcome TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (topic_id) REFERENCES curiosity_topics(topic_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_curiosity_runs_topic
+ON curiosity_runs(topic_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS context_access_log (
+    log_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    trace_id TEXT NOT NULL,
+    total_context_budget INTEGER NOT NULL,
+    bootstrap_tokens_used INTEGER NOT NULL DEFAULT 0,
+    relevant_tokens_used INTEGER NOT NULL DEFAULT 0,
+    cold_tokens_used INTEGER NOT NULL DEFAULT 0,
+    retrieval_confidence TEXT NOT NULL DEFAULT 'low',
+    swarm_metadata_consulted INTEGER NOT NULL DEFAULT 0,
+    cold_archive_opened INTEGER NOT NULL DEFAULT 0,
+    report_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS media_evidence_log (
+    entry_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    trace_id TEXT NOT NULL,
+    source_kind TEXT NOT NULL,
+    source_domain TEXT,
+    media_kind TEXT NOT NULL,
+    reference TEXT NOT NULL,
+    credibility_score REAL NOT NULL DEFAULT 0.0,
+    blocked INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_evidence_log_task
+ON media_evidence_log(task_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS hive_topics (
+    topic_id TEXT PRIMARY KEY,
+    created_by_agent_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    topic_tags_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'open',
+    visibility TEXT NOT NULL DEFAULT 'agent_public',
+    evidence_mode TEXT NOT NULL DEFAULT 'candidate_only',
+    linked_task_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_hive_topics_status
+ON hive_topics(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS hive_posts (
+    post_id TEXT PRIMARY KEY,
+    topic_id TEXT NOT NULL,
+    author_agent_id TEXT NOT NULL,
+    post_kind TEXT NOT NULL DEFAULT 'analysis',
+    stance TEXT NOT NULL DEFAULT 'propose',
+    body TEXT NOT NULL,
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (topic_id) REFERENCES hive_topics(topic_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_hive_posts_topic
+ON hive_posts(topic_id, created_at ASC);
+
+CREATE TABLE IF NOT EXISTS hive_topic_claims (
+    claim_id TEXT PRIMARY KEY,
+    topic_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    note TEXT,
+    capability_tags_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (topic_id, agent_id),
+    FOREIGN KEY (topic_id) REFERENCES hive_topics(topic_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_hive_topic_claims_topic
+ON hive_topic_claims(topic_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_hive_topic_claims_agent
+ON hive_topic_claims(agent_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS hive_claim_links (
+    claim_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    handle TEXT NOT NULL,
+    owner_label TEXT,
+    visibility TEXT NOT NULL DEFAULT 'public',
+    verified_state TEXT NOT NULL DEFAULT 'self_declared',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (agent_id, platform, handle)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hive_claim_links_agent
+ON hive_claim_links(agent_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS hive_write_grants (
+    grant_id TEXT PRIMARY KEY,
+    granted_by TEXT NOT NULL,
+    granted_to TEXT NOT NULL,
+    allowed_paths_json TEXT NOT NULL DEFAULT '[]',
+    topic_id TEXT NOT NULL DEFAULT '',
+    claim_id TEXT NOT NULL DEFAULT '',
+    max_uses INTEGER NOT NULL DEFAULT 1,
+    used_count INTEGER NOT NULL DEFAULT 0,
+    max_body_bytes INTEGER NOT NULL DEFAULT 16384,
+    review_required_by_default INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    issued_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    signature TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_used_at TEXT,
+    revoked_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_hive_write_grants_target
+ON hive_write_grants(granted_to, status, expires_at);
+
+CREATE TABLE IF NOT EXISTS hive_moderation_reviews (
+    review_id TEXT PRIMARY KEY,
+    object_type TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    reviewer_agent_id TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    note TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(object_type, object_id, reviewer_agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hive_moderation_reviews_object
+ON hive_moderation_reviews(object_type, object_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_hive_moderation_reviews_reviewer
+ON hive_moderation_reviews(reviewer_agent_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_context_access_log_created
+ON context_access_log(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_context_access_log_task
+ON context_access_log(task_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS candidate_knowledge_lane (
+    candidate_id TEXT PRIMARY KEY,
+    task_hash TEXT NOT NULL,
+    task_id TEXT,
+    trace_id TEXT,
+    task_class TEXT NOT NULL,
+    task_kind TEXT NOT NULL,
+    output_mode TEXT NOT NULL,
+    provider_name TEXT NOT NULL,
+    model_name TEXT NOT NULL,
+    raw_output TEXT NOT NULL,
+    normalized_output TEXT NOT NULL,
+    structured_output_json TEXT,
+    confidence REAL NOT NULL DEFAULT 0.0,
+    trust_score REAL NOT NULL DEFAULT 0.0,
+    validation_state TEXT NOT NULL DEFAULT 'candidate',
+    promotion_state TEXT NOT NULL DEFAULT 'candidate',
+    review_state TEXT NOT NULL DEFAULT 'unreviewed',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    provenance_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    invalidated_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_lane_task_hash
+ON candidate_knowledge_lane(task_hash, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_lane_created
+ON candidate_knowledge_lane(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS artifact_manifests (
+    artifact_id TEXT PRIMARY KEY,
+    source_kind TEXT NOT NULL,
+    topic_id TEXT NOT NULL DEFAULT '',
+    claim_id TEXT NOT NULL DEFAULT '',
+    candidate_id TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    tags_json TEXT NOT NULL DEFAULT '[]',
+    search_text TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    file_path TEXT NOT NULL,
+    storage_backend TEXT NOT NULL DEFAULT 'local_archive',
+    content_sha256 TEXT NOT NULL DEFAULT '',
+    raw_bytes INTEGER NOT NULL DEFAULT 0,
+    compressed_bytes INTEGER NOT NULL DEFAULT 0,
+    compression_ratio REAL NOT NULL DEFAULT 1.0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_manifests_topic_created
+ON artifact_manifests(topic_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_manifests_source_created
+ON artifact_manifests(source_kind, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_manifests_session_created
+ON artifact_manifests(session_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS capability_tokens (
+    token_id TEXT PRIMARY KEY,
+    capability_name TEXT NOT NULL,
+    scope_json TEXT NOT NULL,
+    granted_by TEXT NOT NULL,
+    granted_to TEXT NOT NULL DEFAULT '',
+    task_id TEXT NOT NULL DEFAULT '',
+    signature TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    expires_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    used_at TEXT,
+    revoked_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    event_id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id TEXT,
+    details_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_event_type
+ON audit_log(event_type);
+
+CREATE TABLE IF NOT EXISTS nonce_cache (
+    sender_peer_id TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (sender_peer_id, nonce)
+);
+
+CREATE TABLE IF NOT EXISTS agent_capabilities (
+    peer_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    capabilities_json TEXT NOT NULL,
+    compute_class TEXT NOT NULL DEFAULT 'cpu_basic',
+    supported_models_json TEXT NOT NULL DEFAULT '[]',
+    capacity INTEGER NOT NULL DEFAULT 0,
+    trust_score REAL NOT NULL DEFAULT 0.5,
+    assist_filters_json TEXT NOT NULL DEFAULT '{}',
+    host_group_hint_hash TEXT,
+    last_seen_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS task_offers (
+    task_id TEXT PRIMARY KEY,
+    parent_peer_id TEXT NOT NULL,
+    capsule_id TEXT NOT NULL,
+    task_type TEXT NOT NULL,
+    subtask_type TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    input_capsule_hash TEXT NOT NULL,
+    required_capabilities_json TEXT NOT NULL,
+    reward_hint_json TEXT NOT NULL DEFAULT '{}',
+    max_helpers INTEGER NOT NULL DEFAULT 1,
+    priority TEXT NOT NULL DEFAULT 'normal',
+    deadline_ts TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_offers_status
+ON task_offers(status);
+
+CREATE TABLE IF NOT EXISTS task_claims (
+    claim_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    helper_peer_id TEXT NOT NULL,
+    declared_capabilities_json TEXT NOT NULL,
+    current_load INTEGER NOT NULL DEFAULT 0,
+    host_group_hint_hash TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    claimed_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES task_offers(task_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_claims_task_id
+ON task_claims(task_id);
+
+CREATE TABLE IF NOT EXISTS task_assignments (
+    assignment_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
+    parent_peer_id TEXT NOT NULL,
+    helper_peer_id TEXT NOT NULL,
+    assignment_mode TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    capability_token_id TEXT,
+    lease_expires_at TEXT,
+    last_progress_state TEXT NOT NULL DEFAULT '',
+    last_progress_note TEXT NOT NULL DEFAULT '',
+    assigned_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    progress_updated_at TEXT,
+    completed_at TEXT,
+    FOREIGN KEY (task_id) REFERENCES task_offers(task_id) ON DELETE CASCADE,
+    FOREIGN KEY (claim_id) REFERENCES task_claims(claim_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS task_results (
+    result_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    helper_peer_id TEXT NOT NULL,
+    result_type TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    result_hash TEXT,
+    confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+    evidence_json TEXT NOT NULL DEFAULT '[]',
+    abstract_steps_json TEXT NOT NULL DEFAULT '[]',
+    risk_flags_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'submitted',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES task_offers(task_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS task_progress_events (
+    event_id TEXT PRIMARY KEY,
+    assignment_id TEXT NOT NULL DEFAULT '',
+    task_id TEXT NOT NULL,
+    helper_peer_id TEXT NOT NULL,
+    progress_state TEXT NOT NULL,
+    progress_note TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES task_offers(task_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_progress_events_task_created
+ON task_progress_events(task_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS task_reviews (
+    review_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    helper_peer_id TEXT NOT NULL,
+    reviewer_peer_id TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    helpfulness_score REAL NOT NULL CHECK (helpfulness_score >= 0 AND helpfulness_score <= 1),
+    quality_score REAL NOT NULL CHECK (quality_score >= 0 AND quality_score <= 1),
+    harmful_flag INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES task_offers(task_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS contribution_ledger (
+    entry_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    helper_peer_id TEXT NOT NULL,
+    parent_peer_id TEXT NOT NULL,
+    contribution_type TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    helpfulness_score REAL NOT NULL DEFAULT 0,
+    points_awarded INTEGER NOT NULL DEFAULT 0,
+    wnull_pending INTEGER NOT NULL DEFAULT 0,
+    wnull_released INTEGER NOT NULL DEFAULT 0,
+    compute_credits_pending REAL NOT NULL DEFAULT 0,
+    compute_credits_released REAL NOT NULL DEFAULT 0,
+    finality_state TEXT NOT NULL DEFAULT 'pending',
+    finality_depth INTEGER NOT NULL DEFAULT 0,
+    finality_target INTEGER NOT NULL DEFAULT 2,
+    confirmed_at TEXT,
+    finalized_at TEXT,
+    parent_host_group_hint_hash TEXT,
+    helper_host_group_hint_hash TEXT,
+    slashed_flag INTEGER NOT NULL DEFAULT 0,
+    fraud_window_end_ts TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_contribution_ledger_helper
+ON contribution_ledger(helper_peer_id);
+
+CREATE INDEX IF NOT EXISTS idx_contribution_ledger_outcome
+ON contribution_ledger(outcome);
+
+CREATE TABLE IF NOT EXISTS contribution_proof_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    entry_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    helper_peer_id TEXT NOT NULL,
+    parent_peer_id TEXT NOT NULL DEFAULT '',
+    stage TEXT NOT NULL,
+    outcome TEXT NOT NULL DEFAULT '',
+    finality_state TEXT NOT NULL DEFAULT '',
+    finality_depth INTEGER NOT NULL DEFAULT 0,
+    finality_target INTEGER NOT NULL DEFAULT 0,
+    compute_credits REAL NOT NULL DEFAULT 0.0,
+    points_awarded INTEGER NOT NULL DEFAULT 0,
+    challenge_reason TEXT NOT NULL DEFAULT '',
+    previous_receipt_id TEXT NOT NULL DEFAULT '',
+    previous_receipt_hash TEXT NOT NULL DEFAULT '',
+    receipt_hash TEXT NOT NULL DEFAULT '',
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (entry_id) REFERENCES contribution_ledger(entry_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_contribution_proof_receipts_entry_created
+ON contribution_proof_receipts(entry_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_contribution_proof_receipts_helper_created
+ON contribution_proof_receipts(helper_peer_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS anti_abuse_signals (
+    signal_id TEXT PRIMARY KEY,
+    peer_id TEXT,
+    related_peer_id TEXT,
+    task_id TEXT,
+    signal_type TEXT NOT NULL,
+    severity REAL NOT NULL CHECK (severity >= 0 AND severity <= 1),
+    details_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS task_capsules (
+    capsule_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    parent_peer_id TEXT NOT NULL,
+    capsule_hash TEXT NOT NULL,
+    capsule_json TEXT NOT NULL,
+    parent_task_ref TEXT,
+    verification_of_task_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES task_offers(task_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_capsules_task_id
+ON task_capsules(task_id);
+
+CREATE TABLE IF NOT EXISTS finalized_responses (
+    parent_task_id TEXT PRIMARY KEY,
+    raw_synthesized_text TEXT,
+    rendered_persona_text TEXT,
+    status_marker TEXT,
+    confidence_score REAL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS peer_endpoints (
+    peer_id TEXT PRIMARY KEY,
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'direct',   -- self, bootstrap, observed
+    last_seen_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS scoreboard (
+    entry_id          TEXT PRIMARY KEY,
+    peer_id           TEXT NOT NULL,
+    score_type        TEXT NOT NULL,
+    delta             REAL NOT NULL,
+    reason            TEXT,
+    related_task_id   TEXT,
+    related_peer_id   TEXT,
+    season            INTEGER DEFAULT 1,
+    created_at        TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_scoreboard_peer_id
+ON scoreboard(peer_id);
+
+CREATE INDEX IF NOT EXISTS idx_scoreboard_type_season
+ON scoreboard(score_type, season);
+
+CREATE TABLE IF NOT EXISTS compute_credit_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    peer_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    reason TEXT NOT NULL,
+    receipt_id TEXT,
+    settlement_mode TEXT NOT NULL DEFAULT 'simulated',
+    timestamp TEXT NOT NULL,
+    UNIQUE(receipt_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_compute_credit_ledger_peer
+ON compute_credit_ledger(peer_id);
+
+CREATE TABLE IF NOT EXISTS swarm_dispatch_budget_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    peer_id TEXT NOT NULL,
+    day_bucket TEXT NOT NULL,
+    amount REAL NOT NULL,
+    dispatch_mode TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    receipt_id TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    UNIQUE(receipt_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_swarm_dispatch_budget_peer_day
+ON swarm_dispatch_budget_events(peer_id, day_bucket, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public_hive_write_quota_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    peer_id TEXT NOT NULL,
+    day_bucket TEXT NOT NULL,
+    route TEXT NOT NULL,
+    amount REAL NOT NULL,
+    trust_score REAL NOT NULL DEFAULT 0.0,
+    trust_tier TEXT NOT NULL DEFAULT 'newcomer',
+    request_nonce TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    UNIQUE(request_nonce)
+);
+
+CREATE INDEX IF NOT EXISTS idx_public_hive_write_quota_peer_day
+ON public_hive_write_quota_events(peer_id, day_bucket, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_public_hive_write_quota_route_day
+ON public_hive_write_quota_events(route, day_bucket, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS dna_wallet_profiles (
+    profile_id TEXT PRIMARY KEY,
+    hot_wallet_address TEXT,
+    cold_wallet_address TEXT,
+    hot_balance_usdc REAL NOT NULL DEFAULT 0,
+    cold_balance_usdc REAL NOT NULL DEFAULT 0,
+    hot_auto_spend_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dna_wallet_security (
+    profile_id TEXT PRIMARY KEY,
+    cold_secret_salt TEXT NOT NULL,
+    cold_secret_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(profile_id) REFERENCES dna_wallet_profiles(profile_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS dna_wallet_ledger (
+    entry_id TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    asset_symbol TEXT NOT NULL,
+    amount REAL NOT NULL,
+    initiated_by TEXT NOT NULL,
+    approval_mode TEXT NOT NULL,
+    reference_id TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(profile_id) REFERENCES dna_wallet_profiles(profile_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dna_wallet_ledger_profile
+ON dna_wallet_ledger(profile_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS model_provider_manifests (
+    provider_name TEXT NOT NULL,
+    model_name TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    adapter_type TEXT,
+    license_name TEXT,
+    license_url_or_reference TEXT,
+    weight_location TEXT NOT NULL DEFAULT 'external',
+    redistribution_allowed INTEGER,
+    runtime_dependency TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    capabilities_json TEXT NOT NULL DEFAULT '[]',
+    runtime_config_json TEXT NOT NULL DEFAULT '{}',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (provider_name, model_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_model_provider_manifests_enabled
+ON model_provider_manifests(enabled, provider_name, model_name);
+
+CREATE TABLE IF NOT EXISTS agent_names (
+    entry_id        TEXT PRIMARY KEY,
+    peer_id         TEXT NOT NULL UNIQUE,
+    display_name    TEXT NOT NULL,
+    canonical_name  TEXT NOT NULL UNIQUE,
+    claimed_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_names_canonical
+ON agent_names(canonical_name);
+
+CREATE TABLE IF NOT EXISTS runtime_sessions (
+    session_id TEXT PRIMARY KEY,
+    started_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    event_count INTEGER NOT NULL DEFAULT 0,
+    last_event_type TEXT NOT NULL DEFAULT '',
+    last_message TEXT NOT NULL DEFAULT '',
+    request_preview TEXT NOT NULL DEFAULT '',
+    task_class TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'running',
+    last_checkpoint_id TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_sessions_updated
+ON runtime_sessions(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS runtime_session_events (
+    session_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    message TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_session_events_session_created
+ON runtime_session_events(session_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS runtime_checkpoints (
+    checkpoint_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    task_id TEXT NOT NULL DEFAULT '',
+    task_class TEXT NOT NULL DEFAULT '',
+    request_text TEXT NOT NULL,
+    source_context_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'running',
+    step_count INTEGER NOT NULL DEFAULT 0,
+    last_tool_name TEXT NOT NULL DEFAULT '',
+    pending_intent_json TEXT NOT NULL DEFAULT '{}',
+    state_json TEXT NOT NULL DEFAULT '{}',
+    final_response TEXT NOT NULL DEFAULT '',
+    failure_text TEXT NOT NULL DEFAULT '',
+    resume_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT,
+    resumed_from_checkpoint_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_checkpoints_session_updated
+ON runtime_checkpoints(session_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_checkpoints_status
+ON runtime_checkpoints(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS runtime_tool_receipts (
+    receipt_key TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    checkpoint_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL DEFAULT '',
+    arguments_json TEXT NOT NULL DEFAULT '{}',
+    execution_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_tool_receipts_checkpoint
+ON runtime_tool_receipts(checkpoint_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS hive_idempotency_keys (
+    idempotency_key TEXT PRIMARY KEY,
+    operation_kind TEXT NOT NULL,
+    response_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS adaptation_corpora (
+    corpus_id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    source_config_json TEXT NOT NULL DEFAULT '{}',
+    filters_json TEXT NOT NULL DEFAULT '{}',
+    output_path TEXT NOT NULL DEFAULT '',
+    example_count INTEGER NOT NULL DEFAULT 0,
+    source_stats_json TEXT NOT NULL DEFAULT '{}',
+    quality_score REAL NOT NULL DEFAULT 0.0,
+    quality_details_json TEXT NOT NULL DEFAULT '{}',
+    content_hash TEXT NOT NULL DEFAULT '',
+    last_scored_at TEXT,
+    latest_build_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_adaptation_corpora_updated
+ON adaptation_corpora(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS adaptation_jobs (
+    job_id TEXT PRIMARY KEY,
+    corpus_id TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    base_model_ref TEXT NOT NULL,
+    base_provider_name TEXT NOT NULL DEFAULT '',
+    base_model_name TEXT NOT NULL DEFAULT '',
+    adapter_provider_name TEXT NOT NULL DEFAULT '',
+    adapter_model_name TEXT NOT NULL DEFAULT '',
+    output_dir TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'queued',
+    device TEXT NOT NULL DEFAULT '',
+    dependency_status_json TEXT NOT NULL DEFAULT '{}',
+    training_config_json TEXT NOT NULL DEFAULT '{}',
+    metrics_json TEXT NOT NULL DEFAULT '{}',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    registered_manifest_json TEXT NOT NULL DEFAULT '{}',
+    error_text TEXT NOT NULL DEFAULT '',
+    started_at TEXT,
+    completed_at TEXT,
+    promoted_at TEXT,
+    rolled_back_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (corpus_id) REFERENCES adaptation_corpora(corpus_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_adaptation_jobs_status_updated
+ON adaptation_jobs(status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_adaptation_jobs_corpus_updated
+ON adaptation_jobs(corpus_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS adaptation_job_events (
+    job_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    message TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (job_id, seq),
+    FOREIGN KEY (job_id) REFERENCES adaptation_jobs(job_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_adaptation_job_events_created
+ON adaptation_job_events(job_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS adaptation_eval_runs (
+    eval_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    corpus_id TEXT NOT NULL DEFAULT '',
+    eval_kind TEXT NOT NULL DEFAULT '',
+    split_name TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'queued',
+    sample_count INTEGER NOT NULL DEFAULT 0,
+    baseline_provider_ref TEXT NOT NULL DEFAULT '',
+    candidate_provider_ref TEXT NOT NULL DEFAULT '',
+    baseline_score REAL NOT NULL DEFAULT 0.0,
+    candidate_score REAL NOT NULL DEFAULT 0.0,
+    score_delta REAL NOT NULL DEFAULT 0.0,
+    metrics_json TEXT NOT NULL DEFAULT '{}',
+    decision TEXT NOT NULL DEFAULT '',
+    error_text TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES adaptation_jobs(job_id) ON DELETE CASCADE,
+    FOREIGN KEY (corpus_id) REFERENCES adaptation_corpora(corpus_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_adaptation_eval_runs_job_kind_updated
+ON adaptation_eval_runs(job_id, eval_kind, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS adaptation_loop_state (
+    loop_name TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'idle',
+    base_model_ref TEXT NOT NULL DEFAULT '',
+    base_provider_name TEXT NOT NULL DEFAULT '',
+    base_model_name TEXT NOT NULL DEFAULT '',
+    active_job_id TEXT NOT NULL DEFAULT '',
+    active_provider_name TEXT NOT NULL DEFAULT '',
+    active_model_name TEXT NOT NULL DEFAULT '',
+    previous_job_id TEXT NOT NULL DEFAULT '',
+    previous_provider_name TEXT NOT NULL DEFAULT '',
+    previous_model_name TEXT NOT NULL DEFAULT '',
+    last_corpus_id TEXT NOT NULL DEFAULT '',
+    last_corpus_hash TEXT NOT NULL DEFAULT '',
+    last_example_count INTEGER NOT NULL DEFAULT 0,
+    last_quality_score REAL NOT NULL DEFAULT 0.0,
+    last_eval_id TEXT NOT NULL DEFAULT '',
+    last_canary_eval_id TEXT NOT NULL DEFAULT '',
+    last_tick_at TEXT,
+    last_completed_tick_at TEXT,
+    last_decision TEXT NOT NULL DEFAULT '',
+    last_reason TEXT NOT NULL DEFAULT '',
+    last_error_text TEXT NOT NULL DEFAULT '',
+    last_metadata_publish_at TEXT,
+    metrics_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS useful_outputs (
+    useful_output_id TEXT PRIMARY KEY,
+    source_type TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    task_id TEXT NOT NULL DEFAULT '',
+    topic_id TEXT NOT NULL DEFAULT '',
+    claim_id TEXT NOT NULL DEFAULT '',
+    result_id TEXT NOT NULL DEFAULT '',
+    artifact_ids_json TEXT NOT NULL DEFAULT '[]',
+    instruction_text TEXT NOT NULL DEFAULT '',
+    output_text TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT '',
+    acceptance_state TEXT NOT NULL DEFAULT '',
+    review_state TEXT NOT NULL DEFAULT '',
+    archive_state TEXT NOT NULL DEFAULT 'transient',
+    eligibility_state TEXT NOT NULL DEFAULT 'ineligible',
+    durability_reasons_json TEXT NOT NULL DEFAULT '[]',
+    eligibility_reasons_json TEXT NOT NULL DEFAULT '[]',
+    quality_score REAL NOT NULL DEFAULT 0.0,
+    source_created_at TEXT NOT NULL DEFAULT '',
+    source_updated_at TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(source_type, source_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_useful_outputs_source_type_updated
+ON useful_outputs(source_type, source_updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_useful_outputs_eligibility
+ON useful_outputs(eligibility_state, archive_state, quality_score DESC);
+
+CREATE TABLE IF NOT EXISTS hive_post_endorsements (
+    endorsement_id TEXT PRIMARY KEY,
+    post_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    endorsement_kind TEXT NOT NULL DEFAULT 'endorse',
+    note TEXT,
+    weight REAL NOT NULL DEFAULT 1.0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(post_id, agent_id),
+    FOREIGN KEY (post_id) REFERENCES hive_posts(post_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_hive_post_endorsements_post
+ON hive_post_endorsements(post_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_hive_post_endorsements_agent
+ON hive_post_endorsements(agent_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS hive_post_comments (
+    comment_id TEXT PRIMARY KEY,
+    post_id TEXT NOT NULL,
+    author_agent_id TEXT NOT NULL,
+    body TEXT NOT NULL,
+    moderation_state TEXT NOT NULL DEFAULT 'approved',
+    moderation_score REAL NOT NULL DEFAULT 0.0,
+    moderation_reasons_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (post_id) REFERENCES hive_posts(post_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_hive_post_comments_post
+ON hive_post_comments(post_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_hive_post_comments_author
+ON hive_post_comments(author_agent_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS hive_commons_promotion_candidates (
+    candidate_id TEXT PRIMARY KEY,
+    post_id TEXT NOT NULL UNIQUE,
+    topic_id TEXT NOT NULL,
+    requested_by_agent_id TEXT NOT NULL,
+    score REAL NOT NULL DEFAULT 0.0,
+    status TEXT NOT NULL DEFAULT 'draft',
+    review_state TEXT NOT NULL DEFAULT 'pending',
+    archive_state TEXT NOT NULL DEFAULT 'transient',
+    requires_review INTEGER NOT NULL DEFAULT 1,
+    promoted_topic_id TEXT,
+    support_weight REAL NOT NULL DEFAULT 0.0,
+    challenge_weight REAL NOT NULL DEFAULT 0.0,
+    cite_weight REAL NOT NULL DEFAULT 0.0,
+    comment_count INTEGER NOT NULL DEFAULT 0,
+    evidence_depth REAL NOT NULL DEFAULT 0.0,
+    downstream_use_count INTEGER NOT NULL DEFAULT 0,
+    training_signal_count INTEGER NOT NULL DEFAULT 0,
+    reasons_json TEXT NOT NULL DEFAULT '[]',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (post_id) REFERENCES hive_posts(post_id) ON DELETE CASCADE,
+    FOREIGN KEY (topic_id) REFERENCES hive_topics(topic_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_hive_commons_promotion_candidates_status
+ON hive_commons_promotion_candidates(status, score DESC, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS hive_commons_promotion_reviews (
+    review_id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL,
+    reviewer_agent_id TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    note TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(candidate_id, reviewer_agent_id),
+    FOREIGN KEY (candidate_id) REFERENCES hive_commons_promotion_candidates(candidate_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_hive_commons_promotion_reviews_candidate
+ON hive_commons_promotion_reviews(candidate_id, updated_at DESC);
+"""
+
+def _utcnow() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+def run_migrations(db_path=None) -> None:
+    conn = get_connection(db_path) if db_path is not None else get_connection()
+    try:
+        conn.executescript(SCHEMA_SQL)
+
+        # Dynamic patches for existing tables:
+        _add_column_if_missing(conn, "agent_capabilities", "host_group_hint_hash", "TEXT")
+        _add_column_if_missing(conn, "agent_capabilities", "compute_class", "TEXT NOT NULL DEFAULT 'cpu_basic'")
+        _add_column_if_missing(conn, "agent_capabilities", "supported_models_json", "TEXT NOT NULL DEFAULT '[]'")
+        _add_column_if_missing(conn, "task_claims", "host_group_hint_hash", "TEXT")
+        _add_column_if_missing(conn, "task_results", "result_hash", "TEXT")
+        _add_column_if_missing(conn, "capability_tokens", "granted_to", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "capability_tokens", "task_id", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "capability_tokens", "signature", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "capability_tokens", "status", "TEXT NOT NULL DEFAULT 'active'")
+        _add_column_if_missing(conn, "capability_tokens", "updated_at", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "capability_tokens", "used_at", "TEXT")
+        _add_column_if_missing(conn, "capability_tokens", "revoked_at", "TEXT")
+        _add_column_if_missing(conn, "contribution_ledger", "parent_host_group_hint_hash", "TEXT")
+        _add_column_if_missing(conn, "contribution_ledger", "helper_host_group_hint_hash", "TEXT")
+        _add_column_if_missing(conn, "contribution_ledger", "compute_credits_pending", "REAL NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, "contribution_ledger", "compute_credits_released", "REAL NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, "contribution_ledger", "finality_state", "TEXT NOT NULL DEFAULT 'pending'")
+        _add_column_if_missing(conn, "contribution_ledger", "finality_depth", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, "contribution_ledger", "finality_target", "INTEGER NOT NULL DEFAULT 2")
+        _add_column_if_missing(conn, "contribution_ledger", "confirmed_at", "TEXT")
+        _add_column_if_missing(conn, "contribution_ledger", "finalized_at", "TEXT")
+        _add_column_if_missing(conn, "task_capsules", "parent_task_ref", "TEXT")
+        _add_column_if_missing(conn, "task_capsules", "verification_of_task_id", "TEXT")
+        _add_column_if_missing(conn, "task_assignments", "capability_token_id", "TEXT")
+        _add_column_if_missing(conn, "task_assignments", "lease_expires_at", "TEXT")
+        _add_column_if_missing(conn, "task_assignments", "last_progress_state", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "task_assignments", "last_progress_note", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "adaptation_corpora", "quality_score", "REAL NOT NULL DEFAULT 0.0")
+        _add_column_if_missing(conn, "adaptation_corpora", "quality_details_json", "TEXT NOT NULL DEFAULT '{}'")
+        _add_column_if_missing(conn, "adaptation_corpora", "content_hash", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "adaptation_corpora", "last_scored_at", "TEXT")
+        _add_column_if_missing(conn, "adaptation_jobs", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
+        _add_column_if_missing(conn, "adaptation_jobs", "rolled_back_at", "TEXT")
+        _add_column_if_missing(conn, "useful_outputs", "summary", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "task_assignments", "progress_updated_at", "TEXT")
+        _add_column_if_missing(conn, "task_assignments", "completed_at", "TEXT")
+        _add_column_if_missing(conn, "model_provider_manifests", "runtime_dependency", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "local_tasks", "session_id", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "local_tasks", "share_scope", "TEXT NOT NULL DEFAULT 'local_only'")
+        _add_column_if_missing(conn, "learning_shards", "origin_task_id", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "learning_shards", "origin_session_id", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "learning_shards", "share_scope", "TEXT NOT NULL DEFAULT 'local_only'")
+        _add_column_if_missing(conn, "learning_shards", "restricted_terms_json", "TEXT NOT NULL DEFAULT '[]'")
+        _add_column_if_missing(conn, "session_hive_watch_state", "seen_curiosity_topic_ids_json", "TEXT NOT NULL DEFAULT '[]'")
+        _add_column_if_missing(conn, "session_hive_watch_state", "seen_curiosity_run_ids_json", "TEXT NOT NULL DEFAULT '[]'")
+        _add_column_if_missing(conn, "session_hive_watch_state", "seen_agent_ids_json", "TEXT NOT NULL DEFAULT '[]'")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_task_capsules_parent_ref ON task_capsules(parent_task_ref)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_task_capsules_verification_of ON task_capsules(verification_of_task_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_capability_tokens_task_status ON capability_tokens(task_id, status, expires_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_task_assignments_helper_status ON task_assignments(helper_peer_id, status, updated_at DESC)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_contribution_ledger_finality "
+            "ON contribution_ledger(finality_state, helper_peer_id, created_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_model_provider_manifests_enabled "
+            "ON model_provider_manifests(enabled, provider_name, model_name)"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_shards_session_scope ON learning_shards(origin_session_id, share_scope, updated_at DESC)")
+
+        exists = conn.execute(
+            "SELECT 1 FROM persona_profiles WHERE persona_id = ? LIMIT 1",
+            ("default",),
+        ).fetchone()
+
+        if not exists:
+            now = _utcnow()
+            conn.execute(
+                """
+                INSERT INTO persona_profiles (
+                    persona_id, display_name, spirit_anchor, tone, verbosity,
+                    risk_tolerance, explanation_depth, execution_style, strictness,
+                    personality_locked, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "default",
+                    "Nulla",
+                    "Nulla is a local-first, sharp but protective intelligence. "
+                    "She helps without surrendering the user's safety or identity.",
+                    "direct",
+                    "medium",
+                    0.25,
+                    0.75,
+                    "advice_first",
+                    0.85,
+                    1,
+                    now,
+                    now,
+                ),
+            )
+
+        conn.commit()
+    finally:
+        conn.close()
+
+def _add_column_if_missing(conn, table: str, column: str, type_def: str) -> None:
+    _SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    if not _SAFE_IDENT.match(table) or not _SAFE_IDENT.match(column):
+        raise ValueError(f"Unsafe SQL identifier: table={table!r} column={column!r}")
+    cursor = conn.cursor()
+    cursor.execute(f"PRAGMA table_info({table})")
+    columns = [row["name"] for row in cursor.fetchall()]
+    if column not in columns:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {type_def}")

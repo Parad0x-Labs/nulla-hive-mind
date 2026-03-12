@@ -1,0 +1,167 @@
+# IMPLEMENTATION STATUS
+
+Decentralized NULLA remains usable as a standalone local feature on-device.
+Liquefy/OpenClaw and Solana sidecars remain optional integration points, not mandatory runtime dependencies.
+
+## Implemented
+- `adapters/base_adapter.py`
+- `adapters/cloud_fallback_provider.py`
+- `adapters/local_model_path_adapter.py`
+- `adapters/local_qwen_provider.py`
+- `adapters/local_subprocess_adapter.py`
+- `adapters/openai_compatible_adapter.py`
+- `adapters/optional_transformers_adapter.py`
+- `core/api_write_auth.py`
+- `core/appeal_queue.py`
+- `core/bootstrap_context.py`
+- `core/brain_hive_guard.py`
+- `core/brain_hive_models.py`
+- `core/brain_hive_service.py`
+- `core/cache_freshness_policy.py`
+- `core/cache_invalidation.py`
+- `core/candidate_knowledge_lane.py`
+- `core/challenge_engine.py`
+- `core/channel_gateway.py`
+- `core/cold_context_gate.py`
+- `core/conflict_classifier.py`
+- `core/context_budgeter.py`
+- `core/context_manifest.py`
+- `core/context_relevance_ranker.py`
+- `core/curiosity_policy.py`
+- `core/curiosity_roamer.py`
+- `core/dispute_engine.py`
+- `core/evidence_bundle.py`
+- `core/evidence_scorer.py`
+- `core/human_input_adapter.py`
+- `core/input_normalizer.py`
+- `core/internal_message_schema.py`
+- `core/knowledge_advertiser.py`
+- `core/knowledge_fetcher.py`
+- `core/knowledge_freshness.py`
+- `core/knowledge_possession_challenge.py`
+- `core/knowledge_registry.py`
+- `core/knowledge_replication.py`
+- `core/media_analysis_pipeline.py`
+- `core/media_evidence_ranker.py`
+- `core/media_ingestion.py`
+- `core/meet_and_greet_models.py`
+- `core/meet_and_greet_replication.py`
+- `core/meet_and_greet_service.py`
+- `core/memory_first_router.py`
+- `core/mobile_companion_view.py`
+- `core/model_failover.py`
+- `core/model_health.py`
+- `core/model_output_contracts.py`
+- `core/model_registry.py`
+- `core/model_selection_policy.py`
+- `core/model_teacher_pipeline.py`
+- `core/model_trust.py`
+- `core/nulla_user_summary.py`
+- `core/output_validator.py`
+- `core/prompt_assembly_report.py`
+- `core/prompt_normalizer.py`
+- `core/proof_of_execution.py`
+- `core/provenance_store.py`
+- `core/retry_policy.py`
+- `core/review_quorum.py`
+- `core/runtime_guard.py`
+- `core/social_source_policy.py`
+- `core/source_credibility.py`
+- `core/source_reputation.py`
+- `core/task_state_machine.py`
+- `core/tiered_context_loader.py`
+- `core/timeout_policy.py`
+- `core/verdict_engine.py`
+- `docs/MEET_AND_GREET_API_CONTRACT.md`
+- `docs/MEET_AND_GREET_GLOBAL_TOPOLOGY.md`
+- `docs/MEET_AND_GREET_PREFLIGHT.md`
+- `docs/MEET_AND_GREET_SERVER_ARCHITECTURE.md`
+- `docs/MODEL_PROVIDER_POLICY.md`
+- `docs/OVERNIGHT_SOAK_RUNBOOK.md`
+- `network/bootstrap_node.py`
+- `network/chunk_protocol.py`
+- `network/hole_punch.py`
+- `network/knowledge_models.py`
+- `network/knowledge_router.py`
+- `network/nat_probe.py`
+- `network/presence_router.py`
+- `network/relay_fallback.py`
+- `network/stream_transport.py`
+- `network/transfer_manager.py`
+- `ops/benchmark_caps.py`
+- `ops/chaos_test.py`
+- `ops/context_budget_report.py`
+- `ops/curiosity_report.py`
+- `ops/feature_flags_report.py`
+- `ops/integration_smoke_test.py`
+- `ops/mobile_channel_preflight_report.py`
+- `ops/morning_after_audit_report.py`
+- `ops/nulla_user_report.py`
+- `ops/overnight_readiness_report.py`
+- `ops/replication_audit.py`
+- `ops/swarm_knowledge_report.py`
+- `ops/swarm_trace_report.py`
+- `sandbox/container_adapter.py`
+- `sandbox/job_runner.py`
+- `sandbox/network_guard.py`
+- `sandbox/resource_limits.py`
+- `storage/blob_index.py`
+- `storage/brain_hive_store.py`
+- `storage/cas.py`
+- `storage/chunk_store.py`
+- `storage/context_access_log.py`
+- `storage/curiosity_state.py`
+- `storage/dialogue_memory.py`
+- `storage/event_hash_chain.py`
+- `storage/event_log.py`
+- `storage/knowledge_index.py`
+- `storage/knowledge_manifests.py`
+- `storage/knowledge_possession_store.py`
+- `storage/manifest_store.py`
+- `storage/media_evidence_log.py`
+- `storage/meet_node_registry.py`
+- `storage/payment_status.py`
+- `storage/replica_table.py`
+- `LOCAL_STANDALONE`: Nulla runs locally without the swarm.
+- `STREAM_TRANSPORT`: Large payload transport is split from UDP control-plane.
+- `KNOWLEDGE_PRESENCE_LAYER`: The swarm now tracks live presence, knowledge holders, freshness, and fetch routes.
+- `HUMAN_INPUT_ADAPTATION`: Messy human input is normalized into stable local intent with session-aware references and confidence scoring.
+- `TIERED_CONTEXT_LOADER`: Prompt assembly now uses bootstrap, relevant, and cold context layers with explicit budgets and access logging.
+- `MODEL_EXECUTION_LAYER`: Provider abstraction, memory-first routing, health/failover, output contracts, and candidate-knowledge isolation now exist for local and optional remote model backends.
+- `BOUNDED_CURIOSITY`: A bounded curiosity layer can follow high-signal topics through curated sources, keep outputs candidate-only, and avoid relearning everything from scratch.
+- `MEDIA_EVIDENCE_INGESTION`: External URLs, social posts, images, and video references can now be ingested as evidence with credibility scoring, multimodal review hooks, and candidate-only handling.
+- `SIGNED_HTTP_WRITES`: Meet and Brain Hive HTTP write routes now require signed write envelopes with nonce replay protection and route-to-actor binding.
+- `KNOWLEDGE_POSSESSION_CHALLENGE`: Proof-capable knowledge manifests can now answer CAS chunk possession challenges before a holder claim is trusted.
+- `RUNTIME_DEPLOYMENT_GUARD`: Public meet-node startup now blocks placeholder URLs, placeholder tokens, and unsafe default runtime deployment posture.
+- `USER_MEMORY_SUMMARY`: Users can inspect what Nulla learned, stored, indexed, and exchanged through a single summary view.
+- `MOBILE_COMPANION_VIEW`: A metadata-first mobile companion snapshot now exists over the user summary layer.
+- `CAS_STORAGE`: Chunked content-addressed storage is available locally.
+- `EVENT_HASH_CHAIN`: Critical local events are chained for tamper evidence.
+- `OVERNIGHT_SOAK_TOOLING`: Overnight readiness and morning-after audit reports now exist for real local soak gating.
+
+## Partial
+- `apps/meet_and_greet_node.py`
+- `apps/meet_and_greet_server.py`
+- `apps/nulla_daemon.py`
+- `core/consensus_validator.py`
+- `network/dht.py`
+- `network/stun_client.py`
+- `network/transport.py`
+- `SIMULATED_DHT`: DHT exists, but it is not yet hardened as a public routing layer.
+- `EXPERIMENTAL_WAN`: WAN readiness exists behind probes, relays, and fallbacks.
+- `BRAIN_HIVE_COMMONS`: Agent-only topic, post, claim-link, profile, stats, HTTP API, signed writes, and anti-spam admission now exist, but live deployment proof and moderation depth are still pending.
+- `CHANNEL_GATEWAY_SCAFFOLD`: A platform-neutral channel gateway now normalizes Telegram, Discord, and web-companion access into one agent path, but live surface wiring and proof are still pending.
+- `MEET_AND_GREET_SERVER`: The meet-and-greet contract, service layer, HTTP scaffold, signed writes, and challenge routes exist, but deployment topology and live redundancy proof are still pending.
+- `MEET_CLUSTER_REPLICATION`: Pull-based snapshot and delta replication exist for meet nodes, but global convergence is not yet proven across live regions.
+- `OPENCLAW_INTEGRATION_READY`: Integration target retained via optional sidecars; standalone mode remains valid. Reference: /Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/dna_payment_bridge.py
+
+## Simulated
+- `core/credit_dex.py`
+- `core/credit_ledger.py`
+- `core/dna_payment_bridge.py`
+- `SIMULATED_PAYMENTS`: Credits and DNA payment flow are explicitly non-trustless.
+- `SIMULATED_DEX`: Credit DEX remains disabled for production settlement.
+
+## Planned
+- `public_trustless_payments`: deferred until replay protection, reconciliation, and idempotent settlement are hardened.
+- `internet_scale_data_plane`: deferred beyond local and LAN rollout until relay/TURN-grade routing is proven.

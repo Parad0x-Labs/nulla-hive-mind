@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+from core.execution_gate import ExecutionGate
+from core.liquefy_bridge import apply_local_execution_safety
+from sandbox.job_runner import JobRunner
+from sandbox.network_guard import parse_command
+from sandbox.resource_limits import ExecutionPolicy
+
+class SandboxRunner:
+    """
+    Acts as the single point of OS-level command execution.
+    Requires an explicit allowance from the local ExecutionGate prior to launching any process.
+    """
+    
+    ALLOWED_COMMANDS = [
+        "dir", "ls", "pwd",
+        "echo", "cat", "type", "head", "tail", "wc",
+        "rg", "grep", "find", "sed",
+        "npm", "npx", "yarn", "pnpm",
+        "cargo", "python", "python3", "pytest",
+        "git", "node", "nodejs", "env",
+    ]
+    
+    def __init__(self, gate: ExecutionGate, workspace_path: str):
+        self.gate = gate
+        self.workspace = workspace_path
+        self.job_runner = JobRunner(
+            ExecutionPolicy(
+                workspace_root=Path(workspace_path).resolve(),
+                writable_roots=(Path(workspace_path).resolve(),),
+                max_seconds=120,
+                max_output_kb=256,
+                allow_network_egress=False,
+            )
+        )
+        
+    def run_command(self, cmd: str, *, cwd: str | None = None) -> dict:
+        """
+        Takes an arbitrary shell command, asks the Execution Gate, and runs it if allowed.
+        """
+        # Step 1: Pre-flight check with the ExecutionGate
+        target_cwd = cwd or self.workspace
+        if not apply_local_execution_safety(sandbox_context={"workspace": target_cwd}, payload={"cmd": cmd}):
+            return {"error": "Liquefy safety guard blocked execution", "status": "blocked_by_policy"}
+            
+        gate_result = self.gate.evaluate_command(cmd)
+        
+        if gate_result["decision"] == "blocked":
+            return {"error": gate_result["reason"], "status": "blocked_by_policy"}
+            
+        if gate_result["decision"] == "advice_only":
+            return {"error": gate_result["reason"], "status": "user_action_required"}
+
+        if gate_result["decision"] == "simulate_only":
+            return {"error": gate_result["reason"], "status": "simulate_only"}
+            
+        # Optional Simulator check could go here if decision == "simulate"
+        
+        # Step 2: Validate whitelist
+        allowed = False
+        argv = parse_command(cmd)
+        if not argv:
+            return {"error": "Empty command.", "status": "blocked_by_policy"}
+        base_cmd = argv[0].lower()
+        if base_cmd == "env":
+            index = 1
+            while index < len(argv):
+                token = str(argv[index] or "")
+                if "=" in token and not token.startswith("-"):
+                    index += 1
+                    continue
+                base_cmd = str(argv[index] or "").lower() if index < len(argv) else "env"
+                break
+        if base_cmd in self.ALLOWED_COMMANDS:
+            allowed = True
+            
+        if not allowed:
+            return {"error": f"Base command '{base_cmd}' not in Sandbox whitelist.", "allowed": self.ALLOWED_COMMANDS}
+            
+        # Step 3: Proceed with execution
+        try:
+            print(f"  [SANDBOX RUN] Executing: {cmd}")
+            result = self.job_runner.run(argv, cwd=target_cwd)
+            return {
+                "cmd": cmd,
+                "cwd": str(target_cwd),
+                "returncode": result.returncode,
+                "stdout": result.stdout[-4000:] if result.stdout else "",
+                "stderr": result.stderr[-2000:] if result.stderr else "",
+                "success": (result.returncode == 0),
+                "status": "executed",
+                "base_command": base_cmd,
+            }
+        except subprocess.TimeoutExpired:
+            return {"error": f"Command timed out after 120s: {cmd}"}
+        except ValueError as e:
+            return {"error": f"Sandbox execution blocked: {str(e)}", "status": "blocked_by_policy"}
+        except Exception as e:
+            return {"error": f"Sandbox execution failure: {str(e)}"}

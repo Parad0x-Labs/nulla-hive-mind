@@ -1,0 +1,155 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
+
+from apps.nulla_agent import NullaAgent
+from core.memory_first_router import ModelExecutionDecision
+from core.persistent_memory import (
+    conversation_log_path,
+    ensure_memory_files,
+    memory_entries_path,
+    memory_path,
+    session_summaries_path,
+    user_heuristics_path,
+)
+from core.runtime_continuity import configure_runtime_continuity_db_path, reset_runtime_continuity_state
+from core.user_preferences import default_preferences, save_preferences
+from storage.db import DEFAULT_DB_PATH, get_connection
+from storage.migrations import run_migrations
+
+
+RUNTIME_TABLES = (
+    "audit_log",
+    "compute_credit_ledger",
+    "contribution_ledger",
+    "curiosity_runs",
+    "curiosity_topics",
+    "dna_wallet_ledger",
+    "dna_wallet_profiles",
+    "dna_wallet_security",
+    "event_log_v2",
+    "hive_idempotency_keys",
+    "knowledge_holders",
+    "knowledge_manifests",
+    "learning_shards",
+    "local_tasks",
+    "runtime_checkpoints",
+    "runtime_session_events",
+    "runtime_sessions",
+    "runtime_tool_receipts",
+    "session_hive_watch_state",
+    "session_memory_policies",
+    "swarm_dispatch_budget_events",
+    "web_notes",
+)
+
+MEMORY_TEMPLATE = (
+    "# NULLA Persistent Memory\n\n"
+    "## Identity\n\n"
+    "- **My name**: NULLA\n"
+    "- **Owner's name**: unknown\n\n"
+    "## Privacy Pact\n\n"
+    "- Not set yet.\n\n"
+    "## Learned Knowledge\n\n"
+)
+
+FORBIDDEN_CHAT_LEAKS = (
+    "invalid tool payload",
+    "missing_intent",
+    "i won't fake it",
+    "traceback",
+)
+
+
+def normalize_response_text(text: str) -> str:
+    return " ".join(str(text or "").split())
+
+
+def make_stub_context(
+    *,
+    local_candidates: list | None = None,
+    swarm_metadata: list | None = None,
+    retrieval_confidence_score: float = 0.0,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        local_candidates=list(local_candidates or []),
+        swarm_metadata=list(swarm_metadata or []),
+        retrieval_confidence_score=float(retrieval_confidence_score),
+        assembled_context=lambda: "",
+        context_snippets=lambda: [],
+        report=SimpleNamespace(
+            retrieval_confidence=float(retrieval_confidence_score),
+            total_tokens_used=lambda: 0,
+            to_dict=lambda: {"external_evidence_attachments": []},
+        ),
+    )
+
+
+def memory_hit_decision(*, output_text: str = "", trust_score: float = 0.82) -> ModelExecutionDecision:
+    return ModelExecutionDecision(
+        source="memory_hit",
+        task_hash="test-memory-hit",
+        output_text=output_text,
+        confidence=trust_score,
+        trust_score=trust_score,
+        used_model=False,
+        validation_state="not_run",
+    )
+
+
+@pytest.fixture(autouse=True)
+def runtime_storage_reset() -> None:
+    configure_runtime_continuity_db_path(DEFAULT_DB_PATH)
+    run_migrations()
+    ensure_memory_files()
+    reset_runtime_continuity_state()
+
+    conn = get_connection()
+    try:
+        for table in RUNTIME_TABLES:
+            try:
+                conn.execute(f"DELETE FROM {table}")
+            except Exception:
+                continue
+        conn.commit()
+    finally:
+        conn.close()
+
+    memory_path().write_text(MEMORY_TEMPLATE, encoding="utf-8")
+    conversation_log_path().write_text("", encoding="utf-8")
+    memory_entries_path().write_text("", encoding="utf-8")
+    session_summaries_path().write_text("", encoding="utf-8")
+    user_heuristics_path().write_text("", encoding="utf-8")
+    save_preferences(default_preferences())
+
+
+@pytest.fixture
+def context_result_factory():
+    return make_stub_context
+
+
+@pytest.fixture
+def response_normalizer():
+    return normalize_response_text
+
+
+@pytest.fixture
+def forbidden_chat_leaks():
+    return FORBIDDEN_CHAT_LEAKS
+
+
+@pytest.fixture
+def make_agent(monkeypatch, context_result_factory):
+    def factory(*, backend_name: str = "test-backend", device: str = "test-device", persona_id: str = "default") -> NullaAgent:
+        agent = NullaAgent(backend_name=backend_name, device=device, persona_id=persona_id)
+        monkeypatch.setattr(agent, "_sync_public_presence", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent, "_start_public_presence_heartbeat", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent, "_start_idle_commons_loop", lambda *args, **kwargs: None)
+        agent.start()
+        agent.context_loader.load = Mock(return_value=context_result_factory())  # type: ignore[assignment]
+        return agent
+
+    return factory

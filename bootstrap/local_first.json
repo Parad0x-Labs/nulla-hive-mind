@@ -1,0 +1,29 @@
+{
+  "expires_at": "2026-03-12T18:53:09.722370+00:00",
+  "published_at": "2026-03-12T18:38:09.722370+00:00",
+  "publisher_peer_id": "e22055438b2e5e2122e59d722b50690665151696f1fc5527c9b00e27e4598a25",
+  "record_count": 1,
+  "records": [
+    {
+      "capabilities": [
+        "research",
+        "classification",
+        "ranking",
+        "validation"
+      ],
+      "capacity": 4,
+      "endpoint": {
+        "host": "188.69.169.126",
+        "port": 49152
+      },
+      "host_group_hint_hash": null,
+      "last_seen_at": "2026-03-12T18:37:39.503391+00:00",
+      "peer_id": "e22055438b2e5e2122e59d722b50690665151696f1fc5527c9b00e27e4598a25",
+      "status": "idle",
+      "trust_score": 0.5
+    }
+  ],
+  "signature": "8NKaD+Vc2Gcl2yQmcyK/qzqedUXhrXvk0vgjpVwezOJ5x6eTNMTsaA/Dm+GYN1dPO/+fW9WUtKriIwdW7lEtCQ==",
+  "snapshot_hash": "3a7b2dd3095a6612c55ab6838d3782a2fa86a911af701ef713f561b0f64d10e9",
+  "topic_name": "local_first"
+}

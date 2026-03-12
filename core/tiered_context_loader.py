@@ -1,0 +1,540 @@
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Any
+
+from core.bootstrap_context import build_bootstrap_context
+from core.cold_context_gate import ColdContextDecision, evaluate_cold_context_gate
+from core.context_budgeter import BudgetedLayer, ContextBudget, budget_layer, normalize_budget
+from core.context_relevance_ranker import rank_context_items, retrieval_confidence
+from core.knowledge_fetcher import consult_relevant_swarm_metadata
+from core.persistent_memory import search_relevant_memory, search_session_summaries, search_user_heuristics
+from core.liquefy_bridge import lookup_cold_archive_candidates
+from core.prompt_assembly_report import ContextItem, PromptAssemblyReport
+from core.shard_matcher import find_local_candidates
+from core.shard_ranker import rank
+from core.task_router import context_strategy
+from storage.context_access_log import record_context_access
+from storage.db import get_connection
+from storage.dialogue_memory import recent_dialogue_turns, session_lexicon
+from storage.payment_status import list_payment_status
+from storage.swarm_memory import search_recent_contexts
+
+
+@dataclass
+class TieredContextResult:
+    bootstrap_items: list[ContextItem]
+    relevant_items: list[ContextItem]
+    cold_items: list[ContextItem]
+    local_candidates: list[dict[str, Any]]
+    swarm_metadata: list[dict[str, Any]]
+    report: PromptAssemblyReport
+    retrieval_confidence_score: float
+    cold_decision: ColdContextDecision
+
+    def assembled_context(self) -> str:
+        sections: list[str] = []
+        if self.bootstrap_items:
+            sections.append("Bootstrap Context:\n" + "\n".join(f"- {item.title}: {item.content}" for item in self.bootstrap_items))
+        if self.relevant_items:
+            sections.append("Relevant Context:\n" + "\n".join(f"- {item.title}: {item.content}" for item in self.relevant_items))
+        if self.cold_items:
+            sections.append("Cold Context:\n" + "\n".join(f"- {item.title}: {item.content}" for item in self.cold_items))
+        return "\n\n".join(sections)
+
+    def context_snippets(self) -> list[dict[str, Any]]:
+        snippets: list[dict[str, Any]] = []
+        for item in self.relevant_items + self.cold_items:
+            snippets.append(
+                {
+                    "title": item.title,
+                    "source_type": item.source_type,
+                    "summary": item.content,
+                    "confidence": item.confidence,
+                    "priority": item.priority,
+                    "metadata": dict(item.metadata),
+                }
+            )
+        return snippets
+
+    def retrieval_profile(self) -> dict[str, Any]:
+        return {
+            "retrieval_confidence": self.report.retrieval_confidence,
+            "retrieval_confidence_score": self.retrieval_confidence_score,
+            "swarm_metadata_consulted": bool(self.report.swarm_metadata_consulted),
+            "cold_archive_opened": bool(self.report.cold_archive_opened),
+            "local_candidate_count": len(self.local_candidates),
+            "swarm_metadata_count": len(self.swarm_metadata),
+        }
+
+
+def _local_candidate_items(task: Any, classification: dict[str, Any]) -> tuple[list[ContextItem], list[dict[str, Any]]]:
+    ranked = rank(find_local_candidates(task, classification), task)
+    items: list[ContextItem] = []
+    for candidate in ranked[:8]:
+        pattern = list(candidate.get("resolution_pattern") or [])[:4]
+        content = (
+            f"{candidate.get('summary', '')} "
+            f"Pattern: {', '.join(str(step) for step in pattern) or 'n/a'}."
+        ).strip()
+        items.append(
+            ContextItem(
+                item_id=f"local-shard-{candidate['shard_id']}",
+                layer="relevant",
+                source_type="local_shard",
+                title=f"Local shard {candidate['problem_class']}",
+                content=content[:420],
+                priority=float(candidate.get("score") or 0.0),
+                confidence=float(candidate.get("score") or 0.0),
+                include_reason="local_shard_match",
+                metadata={
+                    "shard_id": candidate["shard_id"],
+                    "problem_class": candidate["problem_class"],
+                    "freshness_ts": candidate.get("freshness_ts"),
+                    "trust_score": candidate.get("trust_score"),
+                },
+                provenance={"source_node_id": candidate.get("source_node_id")},
+            )
+        )
+    return items, ranked
+
+
+def _dialogue_items(session_id: str) -> list[ContextItem]:
+    items: list[ContextItem] = []
+    for turn in recent_dialogue_turns(session_id, limit=6):
+        items.append(
+            ContextItem(
+                item_id=f"dialogue-{turn['turn_id']}",
+                layer="relevant",
+                source_type="dialogue_turn",
+                title="Recent dialogue turn",
+                content=str(turn.get("reconstructed_input") or turn.get("normalized_input") or "")[:260],
+                confidence=float(turn.get("understanding_confidence") or 0.0),
+                include_reason="recent_dialogue_memory",
+                metadata={
+                    "created_at": turn.get("created_at"),
+                    "topic_hints": list(turn.get("topic_hints") or []),
+                },
+            )
+        )
+    return items
+
+
+def _persistent_memory_items(query_text: str, topic_hints: list[str]) -> list[ContextItem]:
+    items: list[ContextItem] = []
+    for entry in search_relevant_memory(query_text, topic_hints=topic_hints, limit=4):
+        category = str(entry.get("category") or "fact")
+        items.append(
+            ContextItem(
+                item_id=f"runtime-memory-{category}-{abs(hash(str(entry.get('text') or '')))}",
+                layer="relevant",
+                source_type="runtime_memory",
+                title=f"Persistent memory {category}",
+                content=str(entry.get("text") or "")[:320],
+                priority=float(entry.get("score") or 0.0),
+                confidence=float(entry.get("confidence") or 0.0),
+                include_reason="relevant_persistent_memory",
+                metadata={
+                    "category": category,
+                    "created_at": entry.get("created_at"),
+                    "session_id": entry.get("session_id"),
+                },
+            )
+        )
+    return items
+
+
+def _user_heuristic_items(query_text: str, topic_hints: list[str]) -> list[ContextItem]:
+    items: list[ContextItem] = []
+    for entry in search_user_heuristics(query_text, topic_hints=topic_hints, limit=4):
+        category = str(entry.get("category") or "heuristic")
+        signal = str(entry.get("signal") or category)
+        items.append(
+            ContextItem(
+                item_id=f"user-heuristic-{category}-{signal}",
+                layer="relevant",
+                source_type="user_heuristic",
+                title=f"User heuristic {category}",
+                content=str(entry.get("text") or "")[:320],
+                priority=float(entry.get("score") or 0.0),
+                confidence=float(entry.get("confidence") or 0.0),
+                include_reason="inferred_user_heuristic",
+                metadata={
+                    "category": category,
+                    "signal": signal,
+                    "mentions": int(entry.get("mentions") or 0),
+                    "updated_at": entry.get("updated_at"),
+                },
+            )
+        )
+    return items
+
+
+def _session_summary_items(query_text: str, topic_hints: list[str], *, session_id: str) -> list[ContextItem]:
+    items: list[ContextItem] = []
+    for entry in search_session_summaries(
+        query_text,
+        topic_hints=topic_hints,
+        limit=2,
+        exclude_session_id=session_id,
+    ):
+        items.append(
+            ContextItem(
+                item_id=f"session-summary-{abs(hash(str(entry.get('session_id') or '')))}",
+                layer="relevant",
+                source_type="session_summary",
+                title="Prior session continuity",
+                content=str(entry.get("summary") or "")[:360],
+                priority=float(entry.get("score") or 0.0),
+                confidence=0.68,
+                include_reason="relevant_session_summary",
+                metadata={
+                    "created_at": entry.get("created_at"),
+                    "session_id": entry.get("session_id"),
+                    "turn_count": entry.get("turn_count"),
+                },
+            )
+        )
+    return items
+
+
+def _shared_swarm_context_items(query_text: str) -> list[ContextItem]:
+    items: list[ContextItem] = []
+    for idx, entry in enumerate(search_recent_contexts(query_text, limit=2), start=1):
+        content = (
+            f"Prompt: {entry.get('prompt_preview') or 'n/a'} "
+            f"Result: {entry.get('result_preview') or 'n/a'}"
+        ).strip()
+        items.append(
+            ContextItem(
+                item_id=f"swarm-context-{idx}-{abs(hash(content))}",
+                layer="relevant",
+                source_type="swarm_context",
+                title="Shared swarm memory",
+                content=content[:380],
+                priority=float(entry.get("score") or 0.0),
+                confidence=0.62,
+                include_reason="shared_swarm_context",
+                metadata={
+                    "created_at": entry.get("timestamp"),
+                    "parent_peer_id": entry.get("parent_peer_id"),
+                    "learning_value": entry.get("learning_value"),
+                },
+            )
+        )
+    return items
+
+
+def _final_response_items(query_text: str) -> list[ContextItem]:
+    tokens = {token for token in "".join(ch if ch.isalnum() else " " for ch in query_text.lower()).split() if len(token) >= 3}
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT parent_task_id, rendered_persona_text, status_marker, confidence_score, created_at
+            FROM finalized_responses
+            ORDER BY created_at DESC
+            LIMIT 20
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    items: list[ContextItem] = []
+    for row in rows:
+        rendered = str(row["rendered_persona_text"] or "")
+        if tokens:
+            overlap = len(tokens & {token for token in "".join(ch if ch.isalnum() else " " for ch in rendered.lower()).split() if len(token) >= 3})
+            if overlap == 0:
+                continue
+        items.append(
+            ContextItem(
+                item_id=f"final-response-{row['parent_task_id']}",
+                layer="relevant",
+                source_type="final_response",
+                title=f"Final response {row['status_marker'] or 'unknown'}",
+                content=rendered[:320],
+                confidence=float(row["confidence_score"] or 0.0),
+                include_reason="prior_final_response",
+                metadata={"created_at": row["created_at"], "task_id": row["parent_task_id"]},
+            )
+        )
+    return items
+
+
+def _shorthand_items(session_id: str, query_text: str) -> list[ContextItem]:
+    lexicon = session_lexicon(session_id)
+    lower = query_text.lower()
+    selected = [(term, canonical) for term, canonical in lexicon.items() if term in lower or canonical in lower][:4]
+    if not selected:
+        return []
+    return [
+        ContextItem(
+            item_id=f"shorthand-{term}",
+            layer="relevant",
+            source_type="shorthand",
+            title="User shorthand mapping",
+            content=f"{term} maps to {canonical}.",
+            confidence=0.7,
+            include_reason="user_shorthand_memory",
+        )
+        for term, canonical in selected
+    ]
+
+
+def _payment_items(query_text: str) -> list[ContextItem]:
+    if not any(token in query_text.lower() for token in ("credit", "payment", "receipt", "dna", "settlement")):
+        return []
+    items: list[ContextItem] = []
+    for marker in list_payment_status(limit=5):
+        items.append(
+            ContextItem(
+                item_id=f"payment-{marker['task_or_transfer_id']}",
+                layer="relevant",
+                source_type="payment_status",
+                title=f"Payment marker {marker['status']}",
+                content=(
+                    f"Payer {marker['payer_peer_id'][:12]}..., payee {marker['payee_peer_id'][:12]}..., "
+                    f"status {marker['status']}."
+                ),
+                confidence=0.45,
+                include_reason="payment_metadata",
+                metadata={"updated_at": marker.get("updated_at"), "receipt_reference": marker.get("receipt_reference")},
+            )
+        )
+    return items
+
+
+def _swarm_metadata_items(
+    task: Any,
+    classification: dict[str, Any],
+    *,
+    allow_swarm_metadata: bool,
+    allow_swarm_fetch: bool,
+) -> tuple[list[ContextItem], list[dict[str, Any]], bool]:
+    if not allow_swarm_metadata:
+        return [], [], False
+    result = consult_relevant_swarm_metadata(
+        classification.get("task_class", "unknown"),
+        getattr(task, "task_summary", ""),
+        limit=4,
+        allow_fetch=allow_swarm_fetch,
+    )
+    items: list[ContextItem] = []
+    for entry in result["items"]:
+        tags = [str(tag) for tag in list(entry.get("topic_tags") or [])[:4] if str(tag).strip()]
+        problem_class = str(entry.get("problem_class") or "unknown").strip() or "unknown"
+        utility = float(entry.get("utility_score") or 0.0)
+        trust = float(entry.get("trust_weight") or 0.0)
+        quality = float(entry.get("quality_score") or 0.0)
+        status_note = (
+            "Live swarm fetch requested from the holder."
+            if bool(entry.get("fetched"))
+            else "Metadata-only remote context."
+        )
+        items.append(
+            ContextItem(
+                item_id=f"swarm-{entry['shard_id']}-{entry['holder_peer_id']}",
+                layer="relevant",
+                source_type="swarm_remote_context" if bool(entry.get("fetched")) else "swarm_metadata",
+                title=f"Swarm shard {problem_class}",
+                content=(
+                    f"{status_note} Holder {entry['holder_peer_id'][:12]}..., region {entry.get('home_region', 'global')}, "
+                    f"problem class {problem_class}, tags {', '.join(tags) or 'n/a'}, utility {utility:.2f}, "
+                    f"quality {quality:.2f}, trust {trust:.2f}, fetch method {dict(entry.get('fetch_route') or {}).get('method', 'unknown')}."
+                ),
+                priority=float(entry.get("relevance_score") or 0.0),
+                confidence=min(0.8, float(entry.get("trust_weight") or 0.0) + 0.15),
+                include_reason="swarm_fetch_requested" if bool(entry.get("fetched")) else "swarm_metadata_only",
+                metadata={
+                    "freshness_ts": entry.get("freshness_ts"),
+                    "home_region": entry.get("home_region"),
+                    "shard_id": entry["shard_id"],
+                    "problem_class": problem_class,
+                    "utility_score": utility,
+                    "quality_score": quality,
+                    "fetched": bool(entry.get("fetched")),
+                },
+                provenance={"fetch_route": entry.get("fetch_route")},
+            )
+        )
+    return items, result["items"], bool(result.get("consulted"))
+
+
+def _cold_context_items(query_text: str, session_id: str) -> list[ContextItem]:
+    items: list[ContextItem] = []
+    older_turns = recent_dialogue_turns(session_id, limit=10)[4:]
+    for turn in older_turns[:2]:
+        items.append(
+            ContextItem(
+                item_id=f"cold-dialogue-{turn['turn_id']}",
+                layer="cold",
+                source_type="cold_archive",
+                title="Older dialogue archive",
+                content=str(turn.get("reconstructed_input") or turn.get("normalized_input") or "")[:260],
+                confidence=0.4,
+                include_reason="older_dialogue_archive",
+                metadata={"created_at": turn.get("created_at")},
+            )
+        )
+    for archive in lookup_cold_archive_candidates(query_text, limit=2):
+        items.append(
+            ContextItem(
+                item_id=f"cold-archive-{archive['archive_id']}",
+                layer="cold",
+                source_type="cold_archive",
+                title=f"Archive candidate {archive['storage_backend']}",
+                content=str(archive.get("preview") or "")[:280],
+                confidence=float(archive.get("confidence_score") or 0.0),
+                include_reason="archive_lookup",
+                metadata={
+                    "created_at": archive.get("created_at"),
+                    "storage_backend": archive.get("storage_backend"),
+                    "archive_id": archive.get("archive_id"),
+                },
+            )
+        )
+    return items
+
+
+def _report_exclusions(report: PromptAssemblyReport, layer: BudgetedLayer) -> None:
+    for item, reason in layer.excluded:
+        if reason == "trimmed_to_fit":
+            report.trimming_decisions.append(f"{item.title} trimmed to fit {item.layer} budget.")
+            report.items_excluded.append(item.to_record(included=False, reason=reason))
+        else:
+            report.items_excluded.append(item.to_record(included=False, reason=reason))
+
+
+class TieredContextLoader:
+    def load(
+        self,
+        *,
+        task: Any,
+        classification: dict[str, Any],
+        interpretation: Any,
+        persona: Any,
+        session_id: str,
+        total_context_budget: int | None = None,
+    ) -> TieredContextResult:
+        strategy = context_strategy(
+            classification.get("task_class", "unknown"),
+            context=getattr(interpretation, "as_context", lambda: {})(),
+            user_input=getattr(interpretation, "reconstructed_text", "") or getattr(task, "task_summary", ""),
+        )
+        budget = normalize_budget(
+            ContextBudget(
+                total_tokens=int(total_context_budget or strategy["total_context_budget"]),
+                bootstrap_tokens=int(strategy["bootstrap_budget"]),
+                relevant_tokens=int(strategy["relevant_budget"]),
+                cold_tokens=int(strategy["cold_budget"]),
+                max_bootstrap_items=int(strategy["max_bootstrap_items"]),
+                max_relevant_items=int(strategy["max_relevant_items"]),
+                max_cold_items=int(strategy["max_cold_items"]),
+            )
+        )
+
+        bootstrap_candidates = build_bootstrap_context(
+            persona=persona,
+            task=task,
+            classification=classification,
+            interpretation=interpretation,
+            session_id=session_id,
+        )
+        bootstrap_layer = budget_layer(
+            bootstrap_candidates,
+            token_budget=budget.bootstrap_tokens,
+            max_items=budget.max_bootstrap_items,
+        )
+
+        local_items, local_candidates = _local_candidate_items(task, classification)
+        query_text = getattr(interpretation, "reconstructed_text", "") or getattr(task, "task_summary", "")
+        topic_hints = list(getattr(interpretation, "topic_hints", []) or [])
+        relevant_candidates = list(local_items)
+        relevant_candidates.extend(_dialogue_items(session_id))
+        relevant_candidates.extend(_user_heuristic_items(query_text, topic_hints))
+        relevant_candidates.extend(_persistent_memory_items(query_text, topic_hints))
+        relevant_candidates.extend(_session_summary_items(query_text, topic_hints, session_id=session_id))
+        relevant_candidates.extend(_shared_swarm_context_items(query_text))
+        relevant_candidates.extend(_final_response_items(getattr(task, "task_summary", "")))
+        relevant_candidates.extend(
+            _shorthand_items(
+                session_id,
+                getattr(interpretation, "reconstructed_text", "") or getattr(interpretation, "normalized_text", ""),
+            )
+        )
+        relevant_candidates.extend(_payment_items(getattr(task, "task_summary", "")))
+        swarm_items, swarm_metadata, swarm_consulted = _swarm_metadata_items(
+            task,
+            classification,
+            allow_swarm_metadata=bool(strategy.get("allow_swarm_metadata", False)),
+            allow_swarm_fetch=bool(strategy.get("allow_swarm_fetch", False)),
+        )
+        relevant_candidates.extend(swarm_items)
+        ranked_relevant = rank_context_items(
+            relevant_candidates,
+            query_text=getattr(task, "task_summary", ""),
+            topic_hints=topic_hints,
+            task_class=str(classification.get("task_class", "unknown")),
+        )
+        confidence_label, confidence_score = retrieval_confidence(ranked_relevant)
+        relevant_layer = budget_layer(
+            ranked_relevant,
+            token_budget=budget.relevant_tokens,
+            max_items=budget.max_relevant_items,
+        )
+
+        cold_decision = evaluate_cold_context_gate(
+            user_text=getattr(interpretation, "reconstructed_text", "") or getattr(task, "task_summary", ""),
+            task_class=str(classification.get("task_class", "unknown")),
+            relevant_confidence_score=confidence_score,
+            strategy=strategy,
+        )
+        cold_candidates = _cold_context_items(getattr(task, "task_summary", ""), session_id) if cold_decision.allow else []
+        ranked_cold = rank_context_items(
+            cold_candidates,
+            query_text=getattr(task, "task_summary", ""),
+            topic_hints=list(getattr(interpretation, "topic_hints", []) or []),
+            task_class=str(classification.get("task_class", "unknown")),
+        )
+        cold_layer = budget_layer(
+            ranked_cold,
+            token_budget=budget.cold_tokens if cold_decision.allow else 0,
+            max_items=budget.max_cold_items,
+        )
+
+        report = PromptAssemblyReport(
+            task_id=str(getattr(task, "task_id", "")),
+            trace_id=str(getattr(task, "task_id", "")),
+            total_context_budget=budget.total_tokens,
+            bootstrap_budget=budget.bootstrap_tokens,
+            relevant_budget=budget.relevant_tokens,
+            cold_budget=budget.cold_tokens if cold_decision.allow else 0,
+            bootstrap_tokens_used=bootstrap_layer.used_tokens,
+            relevant_tokens_used=relevant_layer.used_tokens,
+            cold_tokens_used=cold_layer.used_tokens,
+            bootstrap_chars_used=bootstrap_layer.used_chars,
+            relevant_chars_used=relevant_layer.used_chars,
+            cold_chars_used=cold_layer.used_chars,
+            swarm_metadata_consulted=swarm_consulted,
+            cold_archive_opened=bool(cold_decision.allow and cold_layer.included),
+            retrieval_confidence=confidence_label,
+        )
+        for item in bootstrap_layer.included + relevant_layer.included + cold_layer.included:
+            report.items_included.append(item.to_record(included=True, reason=item.include_reason or "included"))
+        _report_exclusions(report, bootstrap_layer)
+        _report_exclusions(report, relevant_layer)
+        _report_exclusions(report, cold_layer)
+        report.stayed_under_budget = report.total_tokens_used() <= budget.total_tokens
+
+        record_context_access(report.to_dict())
+
+        return TieredContextResult(
+            bootstrap_items=bootstrap_layer.included,
+            relevant_items=relevant_layer.included,
+            cold_items=cold_layer.included,
+            local_candidates=local_candidates,
+            swarm_metadata=swarm_metadata,
+            report=report,
+            retrieval_confidence_score=confidence_score,
+            cold_decision=cold_decision,
+        )

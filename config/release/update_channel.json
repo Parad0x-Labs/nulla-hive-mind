@@ -1,0 +1,32 @@
+{
+  "channel_name": "closed-test",
+  "release_version": "0.4.0-closed-test",
+  "protocol_version": 1,
+  "schema_generation": 1,
+  "minimum_compatible_release": "0.4.0-closed-test",
+  "rollout_stage": "private_team_test",
+  "update_strategy": "manual_pull_then_restart",
+  "requires_clean_runtime": true,
+  "signed_write_required": true,
+  "notes": "Closed production-style testing manifest generated from the latest installer bundle.",
+  "artifacts": [
+    {
+      "platform": "macos",
+      "role": "agent_or_brain",
+      "path": "build/installer/Decentralized_NULLA_Installer_20260311_161729.zip",
+      "sha256": "7edd16c0639876c2c2d02f50b05a7469fffc93ce64c82596bfc17a10d0ad8757"
+    },
+    {
+      "platform": "linux",
+      "role": "agent_or_meet",
+      "path": "build/installer/Decentralized_NULLA_Installer_20260311_161729.tar.gz",
+      "sha256": "7c275167331af549adfdb7b3a46983f10653d97f0522eadb5bf11149a9a3868c"
+    },
+    {
+      "platform": "windows",
+      "role": "agent_or_brain",
+      "path": "build/installer/Decentralized_NULLA_Installer_20260311_161729.zip",
+      "sha256": "7edd16c0639876c2c2d02f50b05a7469fffc93ce64c82596bfc17a10d0ad8757"
+    }
+  ]
+}

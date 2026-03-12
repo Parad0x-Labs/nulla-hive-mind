@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+import pytest
+
+from core.persistent_memory import (
+    append_conversation_event,
+    maybe_handle_memory_command,
+    recent_conversation_events,
+    search_session_summaries,
+    search_user_heuristics,
+    summarize_memory,
+)
+
+
+def test_memory_commands_remember_and_show_current_contract():
+    handled, response = maybe_handle_memory_command("remember that I am building a next-gen Telegram bot", session_id="openclaw:memory")
+    assert handled is True
+    assert "remember" in response.lower()
+
+    handled, response = maybe_handle_memory_command("/memory", session_id="openclaw:memory")
+    assert handled is True
+    assert "telegram bot" in response.lower()
+    assert any("telegram bot" in line.lower() for line in summarize_memory(limit=8))
+
+
+def test_append_conversation_event_updates_local_heuristics_and_session_summary():
+    append_conversation_event(
+        session_id="openclaw:heuristics",
+        user_input="Be brutally honest, concise, use official docs and GitHub repos, and help me build a Telegram bot in Python.",
+        assistant_output="Understood.",
+        source_context={"surface": "openclaw", "platform": "openclaw", "conversation_history": []},
+    )
+
+    events = recent_conversation_events("openclaw:heuristics", limit=4)
+    heuristics = search_user_heuristics("telegram bot github docs python", topic_hints=["telegram", "python"], limit=8)
+    summaries = search_session_summaries("telegram bot python docs", topic_hints=["telegram", "python"], limit=3)
+
+    assert len(events) == 1
+    assert any(row["category"] == "response_style" for row in heuristics)
+    assert any(row["category"] == "source_preference" for row in heuristics)
+    assert any(row["category"] == "preferred_stack" for row in heuristics)
+    assert any(row["category"] == "project_focus" for row in heuristics)
+    assert summaries
+    assert "telegram bot" in summaries[0]["summary"].lower()
+
+
+def test_local_first_utility_answer_does_not_need_context_loader(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("local utility answer should not load retrieval context")  # type: ignore[attr-defined]
+
+    result = agent.run_once(
+        "what is the day today ?",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert result["response_class"] == "utility_answer"
+    assert "today is" in result["response"].lower()
+
+
+def test_session_summary_recall_handles_light_paraphrase_current_contract():
+    append_conversation_event(
+        session_id="openclaw:semantic-memory",
+        user_input="I am building a next-generation Telegram bot with strong moderation controls.",
+        assistant_output="Stored.",
+        source_context={"surface": "openclaw", "platform": "openclaw", "conversation_history": []},
+    )
+
+    summaries = search_session_summaries("messaging automation with anti abuse controls", topic_hints=["messaging"], limit=3)
+    assert summaries
+
+
+@pytest.mark.xfail(strict=False, reason="The runtime captures heuristics, but it does not yet adapt strongly from long-horizon behavior without explicit markers.")
+def test_future_personalization_can_infer_user_style_from_behavior_without_direct_commands(make_agent):
+    agent = make_agent()
+    for prompt in (
+        "short answer only",
+        "again, keep it blunt",
+        "no fluff",
+        "focus on Python and official docs",
+    ):
+        append_conversation_event(
+            session_id="openclaw:future-personalization",
+            user_input=prompt,
+            assistant_output="Applied.",
+            source_context={"surface": "openclaw", "platform": "openclaw", "conversation_history": []},
+        )
+
+    result = agent.run_once(
+        "help me sketch a bot plan",
+        session_id_override="openclaw:future-personalization",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert "official docs first" in result["response"].lower()
+    assert len(result["response"].splitlines()) <= 4

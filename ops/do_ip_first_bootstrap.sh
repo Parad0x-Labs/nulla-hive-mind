@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+KEY_PATH="${1:-$HOME/Desktop/nulla-ssh/nulla_do_ed25519_v2}"
+
+if [[ ! -f "$KEY_PATH" ]]; then
+  echo "ERROR: key not found: $KEY_PATH" >&2
+  echo "Usage: bash ops/do_ip_first_bootstrap.sh /path/to/private_key" >&2
+  exit 1
+fi
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TLS_DIR_LOCAL="$(mktemp -d /tmp/nulla-ipfirst-tls.XXXXXX)"
+EU_IP="104.248.81.71"
+US_IP="157.245.211.185"
+APAC_IP="159.65.136.157"
+WATCH_IP="161.35.145.74"
+NODES=("$EU_IP" "$US_IP" "$APAC_IP" "$WATCH_IP")
+MESH_PSK_B64="${NULLA_MESH_PSK_B64:-}"
+REMOTE_MESH_ENV=""
+if [[ -n "$MESH_PSK_B64" ]]; then
+  REMOTE_MESH_ENV="NULLA_MESH_PSK_B64='$MESH_PSK_B64'"
+fi
+
+cleanup() {
+  rm -rf "$TLS_DIR_LOCAL"
+}
+trap cleanup EXIT
+
+if ! command -v openssl >/dev/null 2>&1; then
+  echo "ERROR: openssl is required locally to generate closed-test TLS certificates." >&2
+  exit 1
+fi
+
+ssh_cmd=(ssh -i "$KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new)
+rsync_ssh=(ssh -i "$KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new)
+
+run_ssh() {
+  local ip="$1"
+  shift
+  "${ssh_cmd[@]}" "root@${ip}" "$@"
+}
+
+MEET_PROC_PATTERN='^/opt/Decentralized_NULLA/\.venv/bin/python /opt/Decentralized_NULLA/ops/run_meet_node_from_config.py'
+WATCH_PROC_PATTERN='^/opt/Decentralized_NULLA/\.venv/bin/python /opt/Decentralized_NULLA/ops/run_brain_hive_watch_from_config.py'
+
+generate_node_cert() {
+  local common_name="$1"
+  local ip_addr="$2"
+  local base_name="$3"
+  local key_path="$TLS_DIR_LOCAL/${base_name}-key.pem"
+  local csr_path="$TLS_DIR_LOCAL/${base_name}.csr"
+  local cert_path="$TLS_DIR_LOCAL/${base_name}-cert.pem"
+  local ext_path="$TLS_DIR_LOCAL/${base_name}.ext"
+
+  cat >"$ext_path" <<EOF
+subjectAltName=IP:${ip_addr}
+extendedKeyUsage=serverAuth
+keyUsage=digitalSignature,keyEncipherment
+EOF
+
+  openssl req -new -nodes -newkey rsa:2048 \
+    -keyout "$key_path" \
+    -out "$csr_path" \
+    -subj "/CN=${common_name}" >/dev/null 2>&1
+
+  openssl x509 -req \
+    -in "$csr_path" \
+    -CA "$TLS_DIR_LOCAL/cluster-ca.pem" \
+    -CAkey "$TLS_DIR_LOCAL/cluster-ca-key.pem" \
+    -CAcreateserial \
+    -out "$cert_path" \
+    -days 825 \
+    -sha256 \
+    -extfile "$ext_path" >/dev/null 2>&1
+}
+
+echo "[1/9] SSH connectivity checks"
+for ip in "${NODES[@]}"; do
+  run_ssh "$ip" "echo connected:\$(hostname)"
+done
+
+echo "[2/9] Generate closed-test cluster CA and IP certificates"
+openssl req -x509 -nodes -newkey rsa:4096 \
+  -keyout "$TLS_DIR_LOCAL/cluster-ca-key.pem" \
+  -out "$TLS_DIR_LOCAL/cluster-ca.pem" \
+  -days 1825 \
+  -subj "/CN=NULLA Closed Test Cluster CA" >/dev/null 2>&1
+generate_node_cert "seed-eu-1" "$EU_IP" "seed-eu-1"
+generate_node_cert "seed-us-1" "$US_IP" "seed-us-1"
+generate_node_cert "seed-apac-1" "$APAC_IP" "seed-apac-1"
+generate_node_cert "watch-edge-1" "$WATCH_IP" "watch-edge-1"
+
+echo "[3/9] Sync repo to droplets"
+for ip in "${NODES[@]}"; do
+  rsync -az --delete \
+    --exclude '.nulla_local*' \
+    --exclude 'storage/*.db' \
+    --exclude 'data/keys/*' \
+    --exclude '__pycache__/' \
+    --exclude '.venv/' \
+    -e "${rsync_ssh[*]}" \
+    "${REPO_DIR}/" "root@${ip}:/opt/Decentralized_NULLA/"
+done
+
+echo "[4/9] Sync TLS bundle to droplets"
+for ip in "${NODES[@]}"; do
+  run_ssh "$ip" "mkdir -p /opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/tls"
+done
+rsync -az -e "${rsync_ssh[*]}" "$TLS_DIR_LOCAL/cluster-ca.pem" "root@${EU_IP}:/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/tls/cluster-ca.pem"
+rsync -az -e "${rsync_ssh[*]}" "$TLS_DIR_LOCAL/cluster-ca.pem" "root@${US_IP}:/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/tls/cluster-ca.pem"
+rsync -az -e "${rsync_ssh[*]}" "$TLS_DIR_LOCAL/cluster-ca.pem" "root@${APAC_IP}:/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/tls/cluster-ca.pem"
+rsync -az -e "${rsync_ssh[*]}" "$TLS_DIR_LOCAL/cluster-ca.pem" "root@${WATCH_IP}:/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/tls/cluster-ca.pem"
+rsync -az -e "${rsync_ssh[*]}" "$TLS_DIR_LOCAL/seed-eu-1-cert.pem" "$TLS_DIR_LOCAL/seed-eu-1-key.pem" "root@${EU_IP}:/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/tls/"
+rsync -az -e "${rsync_ssh[*]}" "$TLS_DIR_LOCAL/seed-us-1-cert.pem" "$TLS_DIR_LOCAL/seed-us-1-key.pem" "root@${US_IP}:/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/tls/"
+rsync -az -e "${rsync_ssh[*]}" "$TLS_DIR_LOCAL/seed-apac-1-cert.pem" "$TLS_DIR_LOCAL/seed-apac-1-key.pem" "root@${APAC_IP}:/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/tls/"
+rsync -az -e "${rsync_ssh[*]}" "$TLS_DIR_LOCAL/watch-edge-1-cert.pem" "$TLS_DIR_LOCAL/watch-edge-1-key.pem" "root@${WATCH_IP}:/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/tls/"
+for ip in "${NODES[@]}"; do
+  run_ssh "$ip" "find /opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/tls -maxdepth 1 -name '*-key.pem' -exec chmod 600 {} + && find /opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/tls -maxdepth 1 \\( -name '*-cert.pem' -o -name 'cluster-ca.pem' \\) -exec chmod 644 {} +"
+done
+
+echo "[5/9] Install runtime dependencies"
+for ip in "${NODES[@]}"; do
+  run_ssh "$ip" "apt-get update && apt-get install -y python3 python3-venv rsync curl openssl && cd /opt/Decentralized_NULLA && python3 -m venv .venv && . .venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt"
+done
+
+echo "[6/9] Set strong meet auth tokens"
+CLUSTER_MEET_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+run_ssh "$EU_IP" "python3 -c \"import json; tok='${CLUSTER_MEET_TOKEN}'; p='/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/seed-eu-1.json'; o=json.load(open(p)); o['auth_token']=tok; rc=dict(o.get('replication_config', {})); rc['auth_token']=tok; o['replication_config']=rc; json.dump(o,open(p,'w'),indent=2); print('EU token updated')\""
+run_ssh "$US_IP" "python3 -c \"import json; tok='${CLUSTER_MEET_TOKEN}'; p='/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/seed-us-1.json'; o=json.load(open(p)); o['auth_token']=tok; rc=dict(o.get('replication_config', {})); rc['auth_token']=tok; o['replication_config']=rc; json.dump(o,open(p,'w'),indent=2); print('US token updated')\""
+run_ssh "$APAC_IP" "python3 -c \"import json; tok='${CLUSTER_MEET_TOKEN}'; p='/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/seed-apac-1.json'; o=json.load(open(p)); o['auth_token']=tok; rc=dict(o.get('replication_config', {})); rc['auth_token']=tok; o['replication_config']=rc; json.dump(o,open(p,'w'),indent=2); print('APAC token updated')\""
+run_ssh "$WATCH_IP" "python3 -c \"import json; tok='${CLUSTER_MEET_TOKEN}'; p='/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/watch-edge-1.json'; o=json.load(open(p)); o['auth_token']=tok; json.dump(o,open(p,'w'),indent=2); print('Watch token updated')\""
+
+echo "[7/9] Start meet nodes"
+run_ssh "$EU_IP" "pkill -f '$MEET_PROC_PATTERN' || true; mkdir -p /var/lib/nulla/meet-eu-1 /var/log/nulla; cd /opt/Decentralized_NULLA; nohup env PYTHONPATH=/opt/Decentralized_NULLA NULLA_HOME=/var/lib/nulla/meet-eu-1 ${REMOTE_MESH_ENV} /opt/Decentralized_NULLA/.venv/bin/python /opt/Decentralized_NULLA/ops/run_meet_node_from_config.py --config /opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/seed-eu-1.json >/var/log/nulla/meet-eu-1.log 2>&1 </dev/null &"
+run_ssh "$US_IP" "pkill -f '$MEET_PROC_PATTERN' || true; mkdir -p /var/lib/nulla/meet-us-1 /var/log/nulla; cd /opt/Decentralized_NULLA; nohup env PYTHONPATH=/opt/Decentralized_NULLA NULLA_HOME=/var/lib/nulla/meet-us-1 ${REMOTE_MESH_ENV} /opt/Decentralized_NULLA/.venv/bin/python /opt/Decentralized_NULLA/ops/run_meet_node_from_config.py --config /opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/seed-us-1.json >/var/log/nulla/meet-us-1.log 2>&1 </dev/null &"
+run_ssh "$APAC_IP" "pkill -f '$MEET_PROC_PATTERN' || true; mkdir -p /var/lib/nulla/meet-apac-1 /var/log/nulla; cd /opt/Decentralized_NULLA; nohup env PYTHONPATH=/opt/Decentralized_NULLA NULLA_HOME=/var/lib/nulla/meet-apac-1 ${REMOTE_MESH_ENV} /opt/Decentralized_NULLA/.venv/bin/python /opt/Decentralized_NULLA/ops/run_meet_node_from_config.py --config /opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/seed-apac-1.json >/var/log/nulla/meet-apac-1.log 2>&1 </dev/null &"
+
+echo "[8/9] Start watch edge"
+run_ssh "$WATCH_IP" "pkill -f '$WATCH_PROC_PATTERN' || true; mkdir -p /var/lib/nulla/watch-edge-1 /var/log/nulla; cd /opt/Decentralized_NULLA; nohup env PYTHONPATH=/opt/Decentralized_NULLA NULLA_HOME=/var/lib/nulla/watch-edge-1 ${REMOTE_MESH_ENV} /opt/Decentralized_NULLA/.venv/bin/python /opt/Decentralized_NULLA/ops/run_brain_hive_watch_from_config.py --config /opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/watch-edge-1.json >/var/log/nulla/watch-edge-1.log 2>&1 </dev/null &"
+
+echo "[9/9] Health checks"
+sleep 3
+curl --cacert "$TLS_DIR_LOCAL/cluster-ca.pem" -fsS "https://${EU_IP}:8766/v1/health" >/dev/null && echo "OK meet-eu health"
+curl --cacert "$TLS_DIR_LOCAL/cluster-ca.pem" -fsS "https://${US_IP}:8766/v1/health" >/dev/null && echo "OK meet-us health"
+curl --cacert "$TLS_DIR_LOCAL/cluster-ca.pem" -fsS "https://${APAC_IP}:8766/v1/health" >/dev/null && echo "OK meet-apac health"
+curl --cacert "$TLS_DIR_LOCAL/cluster-ca.pem" -fsS "https://${WATCH_IP}:8788/health" >/dev/null && echo "OK watch health"
+curl --cacert "$TLS_DIR_LOCAL/cluster-ca.pem" -fsS "https://${WATCH_IP}:8788/api/dashboard" >/dev/null && echo "OK watch dashboard"
+
+echo "Bootstrap complete."
+echo "Watcher URL: https://${WATCH_IP}:8788/brain-hive"

@@ -1,0 +1,569 @@
+from __future__ import annotations
+
+import unittest
+from unittest.mock import patch
+
+from apps.brain_hive_watch_server import (
+    BrainHiveWatchServerConfig,
+    build_server,
+    fetch_dashboard_from_upstreams,
+    fetch_topic_from_upstreams,
+    fetch_topic_posts_from_upstreams,
+)
+from core.brain_hive_dashboard import (
+    _augment_dashboard_with_trading_scanner,
+    _build_trading_learning_payload,
+    _safe_list_recent_topic_claims_feed,
+    build_dashboard_snapshot,
+    _safe_list_topic_claims,
+    render_dashboard_html,
+    render_topic_detail_html,
+)
+
+
+class BrainHiveWatchServerTests(unittest.TestCase):
+    def test_fetch_dashboard_falls_back_to_second_upstream(self) -> None:
+        calls: list[tuple[str, str | None]] = []
+
+        def fake_fetch(url: str, token: str | None) -> dict:
+            calls.append((url, token))
+            if "seed-eu" in url:
+                raise ValueError("eu unavailable")
+            return {"ok": True, "result": {"stats": {"active_agents": 3}}}
+
+        result = fetch_dashboard_from_upstreams(
+            ("https://seed-eu.example.nulla", "https://seed-us.example.nulla"),
+            auth_token="cluster-token",
+            fetch_json=fake_fetch,
+        )
+        self.assertEqual(result["source_meet_url"], "https://seed-us.example.nulla")
+        self.assertEqual(result["stats"]["active_agents"], 3)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][1], "cluster-token")
+        self.assertEqual(calls[1][1], "cluster-token")
+
+    def test_fetch_dashboard_raises_when_all_upstreams_fail(self) -> None:
+        def fake_fetch(url: str, token: str | None) -> dict:  # noqa: ARG001
+            raise ValueError("unreachable")
+
+        with self.assertRaisesRegex(ValueError, "All upstream meet nodes failed"):
+            fetch_dashboard_from_upstreams(
+                ("https://seed-eu.example.nulla", "https://seed-us.example.nulla"),
+                fetch_json=fake_fetch,
+            )
+
+    def test_fetch_dashboard_uses_per_upstream_token_override(self) -> None:
+        tokens: dict[str, str | None] = {}
+
+        def fake_fetch(url: str, token: str | None) -> dict:
+            tokens[url] = token
+            return {"ok": True, "result": {"stats": {"active_agents": 1}}}
+
+        fetch_dashboard_from_upstreams(
+            ("https://seed-eu.example.nulla",),
+            auth_token="cluster-token",
+            auth_tokens_by_base_url={"https://seed-eu.example.nulla": "eu-token"},
+            fetch_json=fake_fetch,
+        )
+        self.assertEqual(tokens["https://seed-eu.example.nulla/v1/hive/dashboard"], "eu-token")
+
+    def test_fetch_dashboard_prefers_fresher_trading_presence(self) -> None:
+        def fake_fetch(url: str, token: str | None) -> dict:  # noqa: ARG001
+            if "seed-eu" in url:
+                return {
+                    "ok": True,
+                    "result": {
+                        "generated_at": "2026-03-09T00:20:00+00:00",
+                        "stats": {"active_agents": 1},
+                        "trading_learning": {
+                            "latest_heartbeat": {"last_tick_ts": 1773000000.0},
+                            "topics": [{"updated_at": "2026-03-09T00:00:00+00:00"}],
+                        },
+                    },
+                }
+            return {
+                "ok": True,
+                "result": {
+                    "generated_at": "2026-03-09T00:20:00+00:00",
+                    "stats": {"active_agents": 1},
+                    "trading_learning": {
+                        "latest_heartbeat": {"last_tick_ts": 1773000000.0},
+                        "topics": [{"updated_at": "2026-03-09T00:19:45+00:00"}],
+                    },
+                },
+            }
+
+        result = fetch_dashboard_from_upstreams(
+            ("https://seed-eu.example.nulla", "https://seed-us.example.nulla"),
+            fetch_json=fake_fetch,
+        )
+
+        self.assertEqual(result["source_meet_url"], "https://seed-us.example.nulla")
+
+    def test_dashboard_snapshot_uses_topic_posts_for_trading_learning(self) -> None:
+        class FakeRecord:
+            def __init__(self, data: dict) -> None:
+                self._data = data
+
+            def model_dump(self, mode: str = "json") -> dict:  # noqa: ARG002
+                return dict(self._data)
+
+        class FakeHive:
+            def get_stats(self) -> FakeRecord:
+                return FakeRecord({"active_agents": 0, "task_stats": {}, "region_stats": [], "total_topics": 1, "total_posts": 0})
+
+            def list_topics(self, *, limit: int = 100, include_flagged: bool = False, status: str | None = None):  # noqa: ARG002
+                return [
+                    FakeRecord(
+                        {
+                            "topic_id": "topic-1",
+                            "title": "NULLA Trading Learning Desk",
+                            "summary": "Manual trader desk",
+                            "status": "researching",
+                            "topic_tags": ["trading_learning", "manual_trader"],
+                            "created_at": "2026-03-09T00:00:00+00:00",
+                            "updated_at": "2026-03-09T00:40:00+00:00",
+                            "created_by_agent_id": "agent-1",
+                            "creator_display_name": "NULLA",
+                            "creator_claim_label": "NULLA",
+                            "linked_task_id": "trading-learning-manual-trader",
+                        }
+                    )
+                ][:limit]
+
+            def list_agent_profiles(self, *, limit: int = 100):  # noqa: ARG002
+                return []
+
+            def list_recent_posts_feed(self, *, limit: int = 50):  # noqa: ARG002
+                return []
+
+            def list_posts(self, topic_id: str, *, limit: int = 200, include_flagged: bool = False):  # noqa: ARG002
+                if topic_id != "topic-1":
+                    return []
+                return [
+                    FakeRecord(
+                        {
+                            "post_id": "post-1",
+                            "topic_id": "topic-1",
+                            "topic_title": "NULLA Trading Learning Desk",
+                            "author_agent_id": "agent-1",
+                            "author_display_name": "NULLA",
+                            "author_claim_label": "NULLA",
+                            "post_kind": "summary",
+                            "stance": "summarize",
+                            "body": "fresh trading summary",
+                            "created_at": "2026-03-09T00:39:30+00:00",
+                            "evidence_refs": [
+                                {"kind": "trading_learning_lab_summary", "summary": {"token_learnings": 2349, "missed_opportunities": 47}},
+                                {"kind": "trading_runtime_heartbeat", "heartbeat": {"last_tick_ts": 1773016770.0, "tracked_tokens": 48}},
+                            ],
+                        }
+                    )
+                ][:limit]
+
+        summary_stub = {
+            "mesh_index": {"knowledge_manifests": 0, "own_indexed_shards": 0, "remote_indexed_shards": 0},
+            "learning": {
+                "total_learning_shards": 0,
+                "local_generated_shards": 0,
+                "peer_received_shards": 0,
+                "web_derived_shards": 0,
+                "recent_learning": [],
+                "top_problem_classes": [],
+                "top_topic_tags": [],
+            },
+            "knowledge_lanes": {
+                "private_store_shards": 0,
+                "shareable_store_shards": 0,
+                "legacy_unscoped_store_shards": 0,
+                "candidate_rows": 0,
+                "artifact_manifests": 0,
+                "mesh_manifests": 0,
+                "own_mesh_manifests": 0,
+                "remote_mesh_manifests": 0,
+                "share_scope_supported": True,
+                "artifact_lane_supported": True,
+            },
+            "memory": {
+                "local_task_count": 0,
+                "finalized_response_count": 0,
+                "mesh_learning_rows": 0,
+                "recent_tasks": [],
+                "recent_final_responses": [],
+            },
+        }
+
+        with patch("core.brain_hive_dashboard.build_user_summary", return_value=summary_stub), patch(
+            "core.brain_hive_dashboard.count_artifact_manifests", return_value=0
+        ):
+            snapshot = build_dashboard_snapshot(hive=FakeHive(), topic_limit=12, post_limit=24, agent_limit=24)
+
+        trading = snapshot["trading_learning"]
+        self.assertEqual(snapshot["knowledge_overview"]["mesh_manifests"], 0)
+        self.assertEqual(trading["lab_summary"]["token_learnings"], 2349)
+        self.assertEqual(trading["lab_summary"]["missed_opportunities"], 47)
+        self.assertEqual(trading["latest_heartbeat"]["tracked_tokens"], 48)
+
+    def test_dashboard_snapshot_always_reports_visible_agents(self) -> None:
+        class FakeRecord:
+            def __init__(self, data: dict) -> None:
+                self._data = data
+
+            def model_dump(self, mode: str = "json") -> dict:  # noqa: ARG002
+                return dict(self._data)
+
+        class FakeHive:
+            def get_stats(self) -> FakeRecord:
+                return FakeRecord({"active_agents": 1, "task_stats": {}, "region_stats": [], "total_topics": 0, "total_posts": 0})
+
+            def list_topics(self, *, limit: int = 100, include_flagged: bool = False, status: str | None = None):  # noqa: ARG002
+                return []
+
+            def list_agent_profiles(self, *, limit: int = 100):  # noqa: ARG002
+                return [
+                    FakeRecord({"agent_id": "agent-online", "display_name": "NULLA", "online": True}),
+                    FakeRecord({"agent_id": "agent-offline", "display_name": "NULLA-old", "online": False}),
+                ][:limit]
+
+            def list_recent_posts_feed(self, *, limit: int = 50):  # noqa: ARG002
+                return []
+
+        summary_stub = {
+            "mesh_index": {"knowledge_manifests": 0, "own_indexed_shards": 0, "remote_indexed_shards": 0},
+            "learning": {
+                "total_learning_shards": 0,
+                "local_generated_shards": 0,
+                "peer_received_shards": 0,
+                "web_derived_shards": 0,
+                "recent_learning": [],
+                "top_problem_classes": [],
+                "top_topic_tags": [],
+            },
+            "knowledge_lanes": {
+                "private_store_shards": 0,
+                "shareable_store_shards": 0,
+                "legacy_unscoped_store_shards": 0,
+                "candidate_rows": 0,
+                "artifact_manifests": 0,
+                "mesh_manifests": 0,
+                "own_mesh_manifests": 0,
+                "remote_mesh_manifests": 0,
+                "share_scope_supported": True,
+                "artifact_lane_supported": True,
+            },
+            "memory": {
+                "local_task_count": 0,
+                "finalized_response_count": 0,
+                "mesh_learning_rows": 0,
+                "recent_tasks": [],
+                "recent_final_responses": [],
+            },
+        }
+
+        with patch("core.brain_hive_dashboard.build_user_summary", return_value=summary_stub), patch(
+            "core.brain_hive_dashboard.count_artifact_manifests", return_value=0
+        ):
+            snapshot = build_dashboard_snapshot(hive=FakeHive(), topic_limit=12, post_limit=24, agent_limit=24)
+
+        self.assertEqual(snapshot["stats"]["presence_agents"], 1)
+        self.assertEqual(snapshot["stats"]["active_agents"], 1)
+        self.assertEqual(snapshot["stats"]["visible_agents"], 2)
+        self.assertEqual(len(snapshot["agents"]), 2)
+
+    def test_dashboard_html_uses_custom_api_endpoint(self) -> None:
+        html = render_dashboard_html(api_endpoint="/api/dashboard", topic_base_path="/brain-hive/topic")
+        self.assertIn("/api/dashboard", html)
+        self.assertIn("/brain-hive/topic", html)
+        self.assertIn("NULLA Brain Hive", html)
+        self.assertIn("https://x.com/Parad0x_Labs", html)
+        self.assertIn("https://x.com/nulla_ai", html)
+        self.assertIn("https://github.com/Parad0x-Labs/", html)
+        self.assertIn("https://discord.gg/WuqCDnyfZ8", html)
+        self.assertIn("https://pump.fun/coin/8EeDdvCRmFAzVD4takkBrNNwkeUTUQh4MscRK5Fzpump", html)
+        self.assertNotIn("footerCopyToken", html)
+        self.assertNotIn("footerTokenLink", html)
+        self.assertIn("Follow NULLA on X", html)
+        self.assertIn("Active Learnings", html)
+        self.assertIn("learningProgramList", html)
+        self.assertIn("fold-card", html)
+        self.assertIn("buildTradingEvidenceSummary", html)
+        self.assertIn("split(/\\n+/)", html)
+        self.assertIn("Task Event Stream", html)
+        self.assertIn("renderTaskEventFold", html)
+        self.assertIn("Older task events", html)
+        self.assertIn("function tradingPresenceState(", html)
+        self.assertIn("const presenceState = tradingPresenceState(trading, data.generated_at, data.agents || []);", html)
+        self.assertIn("const uiState = { openDetails: Object.create(null) };", html)
+        self.assertIn("function renderInto(containerId, html, {preserveDetails = false} = {})", html)
+        self.assertIn("data-open-key", html)
+        self.assertIn("data-open-chip", html)
+        self.assertIn("Token Trading", html)
+        self.assertIn("Agent Knowledge Growth", html)
+        self.assertIn("Knowledge Lanes", html)
+        self.assertIn("Mesh manifests", html)
+
+    def test_build_trading_learning_payload_extracts_learning_lab_and_flow(self) -> None:
+        payload = _build_trading_learning_payload(
+            topics=[
+                {
+                    "topic_id": "topic-1",
+                    "title": "NULLA Trading Learning Desk",
+                    "summary": "Manual trader desk",
+                    "topic_tags": ["trading_learning", "manual_trader"],
+                }
+            ],
+            posts=[
+                {
+                    "topic_id": "topic-1",
+                    "topic_title": "NULLA Trading Learning Desk",
+                    "created_at": "2026-03-08T21:01:32+00:00",
+                    "evidence_refs": [
+                        {"kind": "trading_learning_lab_summary", "summary": {"token_learnings": 2234, "discoveries": 353}},
+                        {"kind": "trading_decision_funnel", "summary": {"pass": 111, "buy_rejected": 65, "buy": 0}},
+                        {
+                            "kind": "trading_missed_mooners",
+                            "items": [{"id": 50, "token_mint": "MintA", "token_name": "TokenA", "potential_gain_pct": 250.0}],
+                        },
+                        {
+                            "kind": "trading_hidden_edges",
+                            "items": [{"id": 1, "metric": "max_price_change", "score": 0.76, "support": 277}],
+                        },
+                        {
+                            "kind": "trading_discoveries",
+                            "items": [{"id": 353, "source": "pattern_miner", "discovery": "Edge found", "ts": 1773002889.0}],
+                        },
+                        {
+                            "kind": "trading_pattern_health",
+                            "summary": {"total_patterns": 209, "by_action": [{"action": "BUY", "count": 94}]},
+                        },
+                        {
+                            "kind": "trading_live_flow",
+                            "items": [{"kind": "PASS", "token_mint": "MintA", "token_name": "TokenA", "detail": "LOW_LIQ", "ts": 1773003680.0}],
+                        },
+                        {
+                            "kind": "trading_runtime_heartbeat",
+                            "heartbeat": {"tick": 5, "tracked_tokens": 48},
+                        },
+                    ],
+                }
+            ],
+        )
+        self.assertEqual(payload["topic_count"], 1)
+        self.assertEqual(payload["lab_summary"]["token_learnings"], 2234)
+        self.assertEqual(payload["decision_funnel"]["pass"], 111)
+        self.assertEqual(len(payload["missed_mooners"]), 1)
+        self.assertEqual(len(payload["hidden_edges"]), 1)
+        self.assertEqual(len(payload["discoveries"]), 1)
+        self.assertEqual(len(payload["flow"]), 1)
+        self.assertEqual(payload["pattern_health"]["total_patterns"], 209)
+        self.assertEqual(payload["latest_heartbeat"]["tick"], 5)
+
+    def test_build_trading_learning_payload_reads_compact_learning_lab_summary(self) -> None:
+        payload = _build_trading_learning_payload(
+            topics=[
+                {
+                    "topic_id": "topic-1",
+                    "title": "NULLA Trading Learning Desk",
+                    "summary": "Manual trader desk",
+                    "topic_tags": ["trading_learning", "manual_trader"],
+                }
+            ],
+            posts=[
+                {
+                    "topic_id": "topic-1",
+                    "topic_title": "NULLA Trading Learning Desk",
+                    "created_at": "2026-03-09T07:05:45+00:00",
+                    "evidence_refs": [
+                        {
+                            "kind": "trading_learning_lab_summary",
+                            "summary": {
+                                "token_learnings": 2642,
+                                "missed_opportunities": 62,
+                                "discoveries": 445,
+                                "hidden_edges": 20,
+                                "mined_patterns": 198,
+                                "learning_events": 11802,
+                                "decision_funnel": {"pass": 180, "buy_rejected": 27, "buy": 0},
+                                "missed_mooner_items": [{"id": 68, "token_mint": "MintMiss"}],
+                                "hidden_edge_items": [{"id": 1, "metric": "max_price_change", "score": 0.76}],
+                                "discovery_items": [{"id": 445, "discovery": "Edge found", "ts": 1773002889.0}],
+                                "pattern_health": {"total_patterns": 198},
+                                "flow_items": [{"kind": "PASS", "token_name": "TokenA", "detail": "LOW_LIQ", "ts": 1773003680.0}],
+                            },
+                        },
+                        {"kind": "trading_runtime_heartbeat", "heartbeat": {"tick": 104, "tracked_tokens": 48}},
+                    ],
+                }
+            ],
+        )
+
+        self.assertEqual(payload["lab_summary"]["token_learnings"], 2642)
+        self.assertEqual(payload["decision_funnel"]["pass"], 180)
+        self.assertEqual(len(payload["missed_mooners"]), 1)
+        self.assertEqual(len(payload["hidden_edges"]), 1)
+        self.assertEqual(len(payload["discoveries"]), 1)
+        self.assertEqual(len(payload["flow"]), 1)
+        self.assertEqual(payload["pattern_health"]["total_patterns"], 198)
+        self.assertEqual(payload["latest_heartbeat"]["tick"], 104)
+
+    def test_augment_dashboard_with_trading_scanner_adds_live_agent(self) -> None:
+        stats, agents = _augment_dashboard_with_trading_scanner(
+            stats={"active_agents": 0},
+            agents=[],
+            trading_learning={
+                "latest_summary": {"total_calls": 0},
+                "latest_heartbeat": {
+                    "last_tick_ts": 1773014430.0,
+                    "tracked_tokens": 48,
+                },
+            },
+            generated_at="2026-03-09T00:01:31+00:00",
+        )
+
+        self.assertEqual(stats["presence_agents"], 0)
+        self.assertEqual(stats["active_agents"], 1)
+        self.assertEqual(stats["visible_agents"], 1)
+        self.assertEqual(len(agents), 1)
+        self.assertEqual(agents[0]["agent_id"], "nulla:trading-scanner")
+        self.assertTrue(agents[0]["online"])
+
+    def test_augment_dashboard_with_trading_scanner_skips_old_heartbeat(self) -> None:
+        stats, agents = _augment_dashboard_with_trading_scanner(
+            stats={"active_agents": 0},
+            agents=[],
+            trading_learning={
+                "latest_summary": {"total_calls": 0},
+                "latest_heartbeat": {
+                    "last_tick_ts": 1772990000.0,
+                    "tracked_tokens": 48,
+                },
+            },
+            generated_at="2026-03-09T00:30:00+00:00",
+        )
+
+        self.assertEqual(stats["active_agents"], 0)
+        self.assertEqual(agents, [])
+
+    def test_augment_dashboard_with_trading_scanner_falls_back_to_recent_topic_activity(self) -> None:
+        stats, agents = _augment_dashboard_with_trading_scanner(
+            stats={"active_agents": 0},
+            agents=[],
+            trading_learning={
+                "latest_summary": {"total_calls": 0},
+                "latest_heartbeat": {
+                    "last_tick_ts": 1772990000.0,
+                    "tracked_tokens": 48,
+                },
+                "topics": [
+                    {
+                        "topic_id": "topic-1",
+                        "updated_at": "2026-03-09T00:01:10+00:00",
+                    }
+                ],
+            },
+            generated_at="2026-03-09T00:01:31+00:00",
+        )
+
+        self.assertEqual(stats["presence_agents"], 0)
+        self.assertEqual(stats["active_agents"], 1)
+        self.assertEqual(stats["visible_agents"], 1)
+        self.assertEqual(len(agents), 1)
+        self.assertEqual(agents[0]["agent_id"], "nulla:trading-scanner")
+        self.assertTrue(agents[0]["online"])
+
+    def test_augment_dashboard_with_trading_scanner_keeps_visible_stale_topic_activity(self) -> None:
+        stats, agents = _augment_dashboard_with_trading_scanner(
+            stats={"active_agents": 0},
+            agents=[],
+            trading_learning={
+                "latest_summary": {"total_calls": 0},
+                "latest_heartbeat": {
+                    "last_tick_ts": 1772990000.0,
+                    "tracked_tokens": 48,
+                },
+                "topics": [
+                    {
+                        "topic_id": "topic-1",
+                        "updated_at": "2026-03-09T00:08:00+00:00",
+                    }
+                ],
+            },
+            generated_at="2026-03-09T00:15:00+00:00",
+        )
+
+        self.assertEqual(stats["presence_agents"], 0)
+        self.assertEqual(stats["active_agents"], 0)
+        self.assertEqual(stats["visible_agents"], 1)
+        self.assertEqual(len(agents), 1)
+        self.assertFalse(agents[0]["online"])
+        self.assertEqual(agents[0]["status"], "stale")
+
+    def test_safe_list_recent_topic_claims_feed_handles_older_service(self) -> None:
+        class LegacyHiveService:
+            pass
+
+        self.assertEqual(_safe_list_recent_topic_claims_feed(LegacyHiveService(), limit=48), [])
+
+    def test_safe_list_topic_claims_handles_older_service(self) -> None:
+        class LegacyHiveService:
+            pass
+
+        self.assertEqual(_safe_list_topic_claims(LegacyHiveService(), "topic-1", limit=24), [])
+
+    def test_fetch_topic_from_upstreams_falls_back_to_second_upstream(self) -> None:
+        calls: list[tuple[str, str | None]] = []
+
+        def fake_fetch(url: str, token: str | None) -> dict:
+            calls.append((url, token))
+            if "seed-eu" in url:
+                raise ValueError("eu unavailable")
+            return {"ok": True, "result": {"topic_id": "topic-123", "title": "Agent commons: tooling"}, "error": None}
+
+        result = fetch_topic_from_upstreams(
+            ("https://seed-eu.example.nulla", "https://seed-us.example.nulla"),
+            topic_id="topic-123",
+            auth_token="cluster-token",
+            fetch_json=fake_fetch,
+        )
+        self.assertEqual(result["topic_id"], "topic-123")
+        self.assertEqual(result["source_meet_url"], "https://seed-us.example.nulla")
+        self.assertEqual(len(calls), 2)
+
+    def test_fetch_topic_posts_from_upstreams_uses_matching_token_override(self) -> None:
+        tokens: dict[str, str | None] = {}
+
+        def fake_fetch(url: str, token: str | None) -> dict:
+            tokens[url] = token
+            return {"ok": True, "result": [{"post_id": "post-1"}], "error": None}
+
+        result = fetch_topic_posts_from_upstreams(
+            ("https://seed-eu.example.nulla",),
+            topic_id="topic-123",
+            auth_token="cluster-token",
+            auth_tokens_by_base_url={"https://seed-eu.example.nulla": "eu-token"},
+            fetch_json=fake_fetch,
+        )
+        self.assertEqual(result[0]["post_id"], "post-1")
+        self.assertEqual(tokens["https://seed-eu.example.nulla/v1/hive/topics/topic-123/posts?limit=120"], "eu-token")
+
+    def test_topic_detail_html_uses_custom_endpoints(self) -> None:
+        html = render_topic_detail_html(
+            topic_api_endpoint="/api/topic/topic-123",
+            posts_api_endpoint="/api/topic/topic-123/posts",
+        )
+        self.assertIn("/api/topic/topic-123", html)
+        self.assertIn("/api/topic/topic-123/posts", html)
+        self.assertIn("Showing latest", html)
+        self.assertIn("buildLineStructuredSummary", html)
+        self.assertIn("split(/\\n+/)", html)
+
+    def test_build_server_rejects_partial_tls_config(self) -> None:
+        with self.assertRaises(ValueError):
+            build_server(
+                BrainHiveWatchServerConfig(
+                    host="127.0.0.1",
+                    port=0,
+                    tls_certfile="/tmp/fake-cert.pem",
+                    tls_keyfile=None,
+                )
+            )

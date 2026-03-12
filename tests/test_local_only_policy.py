@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import unittest
+
+from core import policy_engine
+from core.model_selection_policy import ModelSelectionRequest, select_provider
+from storage.model_provider_manifest import ModelProviderManifest
+
+
+class LocalOnlyPolicyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._old_cache = getattr(policy_engine, "_POLICY_CACHE", None)
+
+    def tearDown(self) -> None:
+        policy_engine._POLICY_CACHE = self._old_cache
+
+    def test_local_only_mode_disables_web_and_remote_only(self) -> None:
+        policy_engine._POLICY_CACHE = {
+            "system": {
+                "local_only_mode": True,
+                "allow_web_fallback": True,
+                "allow_remote_only_without_backend": True,
+            }
+        }
+        self.assertFalse(policy_engine.allow_web_fallback())
+        self.assertFalse(policy_engine.allow_remote_only_without_backend())
+
+    def test_local_only_mode_filters_remote_model_providers(self) -> None:
+        policy_engine._POLICY_CACHE = {"system": {"local_only_mode": True}}
+        local_manifest = ModelProviderManifest(
+            provider_name="local-qwen-http",
+            model_name="qwen-local",
+            source_type="http",
+            adapter_type="openai_compatible",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="ollama",
+            capabilities=["summarize", "structured_json"],
+            runtime_config={"base_url": "http://127.0.0.1:11434"},
+        )
+        remote_manifest = ModelProviderManifest(
+            provider_name="remote-http",
+            model_name="remote-model",
+            source_type="http",
+            adapter_type="openai_compatible",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="remote-provider",
+            capabilities=["summarize", "structured_json"],
+            runtime_config={"base_url": "https://provider.example"},
+        )
+        selected = select_provider(
+            [remote_manifest, local_manifest],
+            ModelSelectionRequest(task_kind="summarization", output_mode="summary_block", allow_paid_fallback=True),
+        )
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.provider_id, local_manifest.provider_id)
+
+    def test_outbound_shard_validation_blocks_secret_like_content(self) -> None:
+        shard = {
+            "schema_version": 1,
+            "problem_class": "security_hardening",
+            "summary": "Operator email is saulius@example.com and the API key is sk-testsecret1234567890.",
+            "resolution_pattern": ["identify_sensitive_surfaces", "remove_secret_exposure_paths"],
+            "risk_flags": [],
+        }
+        self.assertFalse(
+            policy_engine.validate_outbound_shard(
+                shard,
+                share_scope="hive_mind",
+                restricted_terms=["saulius@example.com"],
+            )
+        )
+
+    def test_outbound_shard_validation_rejects_local_only_scope(self) -> None:
+        shard = {
+            "schema_version": 1,
+            "problem_class": "system_design",
+            "summary": "Generic reusable swarm topology pattern.",
+            "resolution_pattern": ["review_problem", "compare_topology", "document_tradeoffs"],
+            "risk_flags": [],
+        }
+        self.assertFalse(policy_engine.validate_outbound_shard(shard, share_scope="local_only"))
+
+
+if __name__ == "__main__":
+    unittest.main()

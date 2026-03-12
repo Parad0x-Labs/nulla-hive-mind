@@ -1,0 +1,318 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from apps.nulla_agent import NullaAgent
+from core.execution_gate import ExecutionGate
+from core.local_operator_actions import list_operator_tools
+from core.persistent_memory import maybe_handle_memory_command
+from core.user_preferences import maybe_handle_preference_command
+from core.runtime_paths import data_path
+from storage.db import get_connection
+from storage.migrations import run_migrations
+from storage.replica_table import holders_for_shard
+
+
+def _count_learning_shards() -> int:
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT COUNT(*) AS n FROM learning_shards").fetchone()
+        return int(row["n"] or 0)
+    finally:
+        conn.close()
+
+
+def _count_pending_actions() -> int:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM operator_action_requests WHERE status = 'pending_approval'"
+        ).fetchone()
+        return int(row["n"] or 0)
+    finally:
+        conn.close()
+
+
+class OperatorActionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        run_migrations()
+        prefs_path = data_path("user_preferences.json")
+        if prefs_path.exists():
+            prefs_path.unlink()
+        conn = get_connection()
+        try:
+            for table in ("operator_action_requests", "learning_shards", "local_tasks", "knowledge_holders", "knowledge_manifests"):
+                try:
+                    conn.execute(f"DELETE FROM {table}")
+                except Exception:
+                    continue
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_disk_inspection_creates_cleanup_preview(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "big.bin").write_bytes(b"x" * 4096)
+            temp_root = root / "temp"
+            temp_root.mkdir()
+            (temp_root / "cache.bin").write_bytes(b"y" * 2048)
+            with mock.patch("core.local_operator_actions.tempfile.gettempdir", return_value=str(temp_root)):
+                result = agent.run_once(
+                    f'find disk bloat in "{root}"',
+                    source_context={"surface": "openclaw", "platform": "openclaw"},
+                )
+        self.assertEqual(result["mode"], "tool_preview")
+        self.assertIn("Safe temp cleanup preview", result["response"])
+        self.assertGreaterEqual(_count_pending_actions(), 1)
+
+    def test_cleanup_temp_files_executes_and_promotes_learning_shard(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_root = Path(tmpdir)
+            (temp_root / "one.tmp").write_bytes(b"a" * 1024)
+            (temp_root / "two.tmp").write_bytes(b"b" * 2048)
+            nested = temp_root / "nested"
+            nested.mkdir()
+            (nested / "three.tmp").write_bytes(b"c" * 1024)
+            with mock.patch("core.local_operator_actions.tempfile.gettempdir", return_value=str(temp_root)):
+                preview = agent.run_once(
+                    f'find disk bloat in "{temp_root}"',
+                    source_context={"surface": "openclaw", "platform": "openclaw"},
+                )
+                before_shards = _count_learning_shards()
+                result = agent.run_once(
+                    "fuck it, clean all temp files",
+                    source_context={"surface": "openclaw", "platform": "openclaw"},
+                )
+                remaining_entries = list(temp_root.iterdir())
+        self.assertEqual(preview["mode"], "tool_preview")
+        self.assertEqual(result["mode"], "tool_executed")
+        self.assertIn("Temp cleanup finished.", result["response"])
+        self.assertEqual(before_shards + 1, _count_learning_shards())
+        self.assertEqual(remaining_entries, [])
+
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                """
+                SELECT shard_id, share_scope
+                FROM learning_shards
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None
+        self.assertEqual(str(row["share_scope"]), "local_only")
+        self.assertFalse(holders_for_shard(str(row["shard_id"])))
+
+    def test_hive_scope_can_republish_existing_session_shard(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
+        agent.start()
+        session_id = "openclaw:test-hive-share"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_root = Path(tmpdir)
+            (temp_root / "one.tmp").write_bytes(b"a" * 1024)
+            with mock.patch("core.local_operator_actions.tempfile.gettempdir", return_value=str(temp_root)):
+                preview = agent.run_once(
+                    f'find disk bloat in "{temp_root}"',
+                    session_id_override=session_id,
+                    source_context={"surface": "openclaw", "platform": "openclaw"},
+                )
+                result = agent.run_once(
+                    "fuck it, clean all temp files",
+                    session_id_override=session_id,
+                    source_context={"surface": "openclaw", "platform": "openclaw"},
+                )
+        self.assertEqual(preview["mode"], "tool_preview")
+        self.assertEqual(result["mode"], "tool_executed")
+
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                """
+                SELECT shard_id, share_scope
+                FROM learning_shards
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None
+        shard_id = str(row["shard_id"])
+        self.assertEqual(str(row["share_scope"]), "local_only")
+        self.assertFalse(holders_for_shard(shard_id))
+
+        handled, response = maybe_handle_memory_command("shared pack", session_id=session_id)
+        self.assertTrue(handled)
+        self.assertIn("SHARED PACK", response)
+
+        conn = get_connection()
+        try:
+            updated = conn.execute(
+                "SELECT share_scope FROM learning_shards WHERE shard_id = ?",
+                (shard_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert updated is not None
+        self.assertEqual(str(updated["share_scope"]), "hive_mind")
+        holders = holders_for_shard(shard_id)
+        self.assertTrue(any(holder["access_mode"] == "hive_mind" for holder in holders))
+
+    def test_list_tools_reports_discovered_inventory(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
+        agent.start()
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "DISCORD_WEBHOOK_URL": "https://example.test/webhook",
+                "TELEGRAM_BOT_TOKEN": "tg-token",
+                "TELEGRAM_CHAT_ID": "1234",
+            },
+            clear=False,
+        ):
+            result = agent.run_once(
+                "list tools",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+        self.assertEqual(result["mode"], "tool_preview")
+        self.assertIn("inspect_disk_usage", result["response"])
+        self.assertIn("discord_post", result["response"])
+        self.assertIn("telegram_send", result["response"])
+
+    def test_inspect_processes_reports_top_rows(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
+        agent.start()
+        fake_completed = mock.Mock(
+            returncode=0,
+            stdout="  10 15.0  2.5 python\n  99  4.0 10.0 chrome\n",
+        )
+        with mock.patch("core.local_operator_actions.subprocess.run", return_value=fake_completed):
+            result = agent.run_once(
+                "what processes are eating memory",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+        self.assertEqual(result["mode"], "tool_preview")
+        self.assertIn("Top running processes", result["response"])
+        self.assertIn("chrome", result["response"])
+
+    def test_inspect_services_reports_rows(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
+        agent.start()
+        fake_rows = [
+            {"name": "ssh.service", "state": "running", "detail": "OpenSSH server daemon"},
+            {"name": "cron.service", "state": "running", "detail": "Regular background program processing daemon"},
+        ]
+        with mock.patch("core.local_operator_actions._inspect_services", return_value=fake_rows):
+            result = agent.run_once(
+                "what services are running",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+        self.assertEqual(result["mode"], "tool_preview")
+        self.assertIn("Visible services", result["response"])
+        self.assertIn("ssh.service", result["response"])
+
+    def test_move_path_executes_and_promotes_learning_shard(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            source_dir = base / "source"
+            destination_dir = base / "archive"
+            source_dir.mkdir()
+            destination_dir.mkdir()
+            source_file = source_dir / "report.txt"
+            source_file.write_text("hello", encoding="utf-8")
+
+            preview = agent.run_once(
+                f'move "{source_file}" to "{destination_dir}"',
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+            action_id = preview["response"].strip().split()[-1]
+            before_shards = _count_learning_shards()
+            result = agent.run_once(
+                f"approve move {action_id}",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+            moved_file = destination_dir / "report.txt"
+            moved_exists = moved_file.exists()
+            source_exists = source_file.exists()
+
+        self.assertEqual(preview["mode"], "tool_preview")
+        self.assertIn("Move preview ready.", preview["response"])
+        self.assertEqual(result["mode"], "tool_executed")
+        self.assertIn("Move finished.", result["response"])
+        self.assertEqual(before_shards + 1, _count_learning_shards())
+        self.assertFalse(source_exists)
+        self.assertTrue(moved_exists)
+
+    def test_schedule_calendar_event_executes_without_micro_approval_by_default(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+
+            def _fake_data_path(*parts: str) -> Path:
+                return base.joinpath(*parts)
+
+            with mock.patch("core.local_operator_actions.data_path", side_effect=_fake_data_path):
+                before_shards = _count_learning_shards()
+                result = agent.run_once(
+                    'schedule a meeting "Ops Sync" on 2026-03-08 15:30 for 45m',
+                    source_context={"surface": "openclaw", "platform": "openclaw"},
+                )
+                outbox = base / "calendar_outbox"
+                files = list(outbox.glob("*.ics"))
+                ics_content = files[0].read_text(encoding="utf-8") if files else ""
+
+        self.assertEqual(result["mode"], "tool_executed")
+        self.assertIn("Calendar event created.", result["response"])
+        self.assertNotIn("Workflow:", result["response"])
+        self.assertEqual(before_shards + 1, _count_learning_shards())
+        self.assertEqual(len(files), 1)
+        self.assertIn("SUMMARY:Ops Sync", ics_content)
+
+    def test_execution_gate_exposes_command_evaluator(self) -> None:
+        decision = ExecutionGate.evaluate_command("ls")
+        self.assertIn(decision["decision"], {"simulate_only", "sandbox", "advice_only"})
+        self.assertIn("reason", decision)
+
+    def test_autonomy_modes_change_calendar_approval_requirements(self) -> None:
+        maybe_handle_preference_command("set autonomy balanced")
+        decision = ExecutionGate.evaluate_local_action(
+            "schedule_calendar_event",
+            destructive=True,
+            user_approved=False,
+            writes_workspace=True,
+        )
+        self.assertTrue(decision.requires_user_approval)
+
+        maybe_handle_preference_command("set autonomy hands_off")
+        decision = ExecutionGate.evaluate_local_action(
+            "schedule_calendar_event",
+            destructive=True,
+            user_approved=False,
+            writes_workspace=True,
+        )
+        self.assertFalse(decision.requires_user_approval)
+
+    def test_tool_list_contains_new_operator_surfaces(self) -> None:
+        tool_ids = {tool["tool_id"] for tool in list_operator_tools()}
+        self.assertIn("inspect_processes", tool_ids)
+        self.assertIn("inspect_services", tool_ids)
+        self.assertIn("move_path", tool_ids)
+        self.assertIn("schedule_calendar_event", tool_ids)
+
+
+if __name__ == "__main__":
+    unittest.main()

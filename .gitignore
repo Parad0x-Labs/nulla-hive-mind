@@ -1,0 +1,71 @@
+# OS / editor noise
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python cache / test / packaging output
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.eggs/
+*.egg-info/
+dist/
+build/
+pip-wheel-metadata/
+
+# Local environments
+.venv/
+venv/
+env/
+
+# Local runtime state, personal memory, generated workspaces
+.nulla_local/
+.openclaw/
+memory/
+generated/
+workspace/
+sandbox_workspace/
+install_doctor.json
+.worktrees/
+
+# Databases, logs, pid files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.log
+*.pid
+
+# Keys, secrets, machine identity, env files
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.b64
+data/keys/
+network/identity.json
+
+# Local packaging / build metadata
+decentralized_nulla.egg-info/
+
+# Local model staging: keep the tiny test fixture, ignore everything else
+data/trainable_models/*
+!data/trainable_models/sshleifer-tiny-gpt2/
+!data/trainable_models/sshleifer-tiny-gpt2/**

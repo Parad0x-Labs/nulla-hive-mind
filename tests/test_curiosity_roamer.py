@@ -1,0 +1,263 @@
+from __future__ import annotations
+
+import unittest
+import uuid
+from unittest import mock
+
+from apps.nulla_agent import NullaAgent
+from core.curiosity_policy import CuriosityConfig
+from core.curiosity_roamer import CuriosityRoamer, curiosity_interest_score, derive_curiosity_topics
+from core.human_input_adapter import HumanInputInterpretation
+from storage.curiosity_state import recent_curiosity_runs, recent_curiosity_topics
+from storage.db import get_connection
+from storage.migrations import run_migrations
+
+
+def _interpretation(text: str, *, topics: list[str] | None = None, confidence: float = 0.83) -> HumanInputInterpretation:
+    return HumanInputInterpretation(
+        raw_text=text,
+        normalized_text=text,
+        reconstructed_text=text,
+        intent_mode="request",
+        topic_hints=list(topics or []),
+        reference_targets=[],
+        understanding_confidence=confidence,
+        quality_flags=[],
+        needs_clarification=False,
+        turn_id=None,
+    )
+
+
+class CuriosityRoamerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        run_migrations()
+        conn = get_connection()
+        try:
+            for table in ("curiosity_runs", "curiosity_topics", "candidate_knowledge_lane", "web_notes", "learning_shards", "local_tasks"):
+                conn.execute(f"DELETE FROM {table}")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_derive_topics_prefers_technical_sources_for_bot_building(self) -> None:
+        config = CuriosityConfig(
+            enabled=True,
+            mode="bounded_auto",
+            auto_execute_task_classes=("research", "system_design"),
+            max_topics_per_task=2,
+            max_queries_per_topic=2,
+            max_snippets_per_query=3,
+            prefer_metadata_first=True,
+            allow_news_pulse=True,
+            news_max_topics_per_task=1,
+            technical_max_topics_per_task=2,
+            min_interest_score=0.56,
+            min_understanding_confidence=0.5,
+            skip_if_retrieval_confidence_at_least=0.84,
+            max_total_roam_seconds=8,
+            auto_promote_to_canonical=False,
+        )
+        topics = derive_curiosity_topics(
+            user_input="research telegram discord bot building best practices",
+            classification={"task_class": "research"},
+            interpretation=_interpretation("research telegram discord bot building best practices", topics=["telegram bot", "discord", "app"]),
+            config=config,
+        )
+        self.assertTrue(topics)
+        combined_profile_ids = {profile.profile_id for topic in topics for profile in topic.source_profiles}
+        self.assertIn("messaging_platform_docs", combined_profile_ids)
+        self.assertIn("reputable_repos", combined_profile_ids)
+
+    def test_bounded_auto_records_candidate_only(self) -> None:
+        roamer = CuriosityRoamer(
+            CuriosityConfig(
+                enabled=True,
+                mode="bounded_auto",
+                auto_execute_task_classes=("research",),
+                max_topics_per_task=1,
+                max_queries_per_topic=1,
+                max_snippets_per_query=2,
+                prefer_metadata_first=True,
+                allow_news_pulse=True,
+                news_max_topics_per_task=1,
+                technical_max_topics_per_task=2,
+                min_interest_score=0.40,
+                min_understanding_confidence=0.4,
+                skip_if_retrieval_confidence_at_least=0.95,
+                max_total_roam_seconds=8,
+                auto_promote_to_canonical=False,
+            )
+        )
+        task = mock.Mock(task_id=f"task-{uuid.uuid4().hex}", task_summary="telegram bot building")
+        interpretation = _interpretation("telegram bot building", topics=["telegram bot", "discord"])
+        context_result = mock.Mock(retrieval_confidence_score=0.22)
+        with mock.patch("retrieval.web_adapter.WebAdapter.search_query", return_value=[{"summary": "Use official docs and avoid token leaks.", "source_label": "duckduckgo.com"}]):
+            result = roamer.maybe_roam(
+                task=task,
+                user_input="research telegram bot building",
+                classification={"task_class": "research"},
+                interpretation=interpretation,
+                context_result=context_result,
+                session_id="curiosity-test",
+            )
+        self.assertTrue(result.candidate_ids)
+        conn = get_connection()
+        try:
+            candidate = conn.execute("SELECT provider_name, promotion_state FROM candidate_knowledge_lane LIMIT 1").fetchone()
+            self.assertEqual(candidate["provider_name"], "curiosity_roamer")
+            self.assertEqual(candidate["promotion_state"], "candidate")
+            learning_shards = conn.execute("SELECT COUNT(*) AS c FROM learning_shards").fetchone()["c"]
+            self.assertEqual(learning_shards, 0)
+        finally:
+            conn.close()
+
+    def test_news_topics_get_short_lived_profile(self) -> None:
+        topics = derive_curiosity_topics(
+            user_input="give me the news pulse for planet earth today",
+            classification={"task_class": "research"},
+            interpretation=_interpretation("give me the news pulse for planet earth today", topics=["news"]),
+        )
+        self.assertTrue(any(topic.topic_kind == "news" for topic in topics))
+        news_topic = next(topic for topic in topics if topic.topic_kind == "news")
+        self.assertEqual(news_topic.source_profiles[0].profile_id, "reputable_news")
+
+    def test_blocked_domains_do_not_become_candidates(self) -> None:
+        roamer = CuriosityRoamer(
+            CuriosityConfig(
+                enabled=True,
+                mode="bounded_auto",
+                auto_execute_task_classes=("research",),
+                max_topics_per_task=1,
+                max_queries_per_topic=1,
+                max_snippets_per_query=2,
+                prefer_metadata_first=True,
+                allow_news_pulse=True,
+                news_max_topics_per_task=1,
+                technical_max_topics_per_task=2,
+                min_interest_score=0.40,
+                min_understanding_confidence=0.4,
+                skip_if_retrieval_confidence_at_least=0.95,
+                max_total_roam_seconds=8,
+                auto_promote_to_canonical=False,
+            )
+        )
+        task = mock.Mock(task_id=f"task-{uuid.uuid4().hex}", task_summary="planet earth news")
+        interpretation = _interpretation("planet earth news", topics=["news"])
+        context_result = mock.Mock(retrieval_confidence_score=0.12)
+        with mock.patch(
+            "retrieval.web_adapter.WebAdapter.search_query",
+            return_value=[
+                {"summary": "Propaganda snippet", "source_label": "duckduckgo.com", "origin_domain": "rt.com"},
+                {"summary": "Wire update", "source_label": "duckduckgo.com", "origin_domain": "reuters.com"},
+            ],
+        ):
+            result = roamer.maybe_roam(
+                task=task,
+                user_input="give me a pulse on planet earth news",
+                classification={"task_class": "research"},
+                interpretation=interpretation,
+                context_result=context_result,
+                session_id="cred-test",
+            )
+        self.assertTrue(result.candidate_ids)
+        conn = get_connection()
+        try:
+            row = conn.execute("SELECT structured_output_json FROM candidate_knowledge_lane ORDER BY created_at DESC LIMIT 1").fetchone()
+        finally:
+            conn.close()
+        self.assertIn("reuters.com", row["structured_output_json"])
+        self.assertNotIn("rt.com", row["structured_output_json"])
+
+    def test_cache_hit_prevents_repeat_fetch(self) -> None:
+        roamer = CuriosityRoamer(
+            CuriosityConfig(
+                enabled=True,
+                mode="bounded_auto",
+                auto_execute_task_classes=("research",),
+                max_topics_per_task=1,
+                max_queries_per_topic=1,
+                max_snippets_per_query=1,
+                prefer_metadata_first=True,
+                allow_news_pulse=True,
+                news_max_topics_per_task=1,
+                technical_max_topics_per_task=1,
+                min_interest_score=0.40,
+                min_understanding_confidence=0.4,
+                skip_if_retrieval_confidence_at_least=0.95,
+                max_total_roam_seconds=8,
+                auto_promote_to_canonical=False,
+            )
+        )
+        task = mock.Mock(task_id=f"task-{uuid.uuid4().hex}", task_summary="telegram bot building")
+        interpretation = _interpretation("telegram bot building", topics=["telegram bot"])
+        context_result = mock.Mock(retrieval_confidence_score=0.22)
+        with mock.patch("retrieval.web_adapter.WebAdapter.search_query", return_value=[{"summary": "Use official docs.", "source_label": "duckduckgo.com"}]):
+            first = roamer.maybe_roam(
+                task=task,
+                user_input="research telegram bot building",
+                classification={"task_class": "research"},
+                interpretation=interpretation,
+                context_result=context_result,
+                session_id="curiosity-cache",
+            )
+        with mock.patch("retrieval.web_adapter.WebAdapter.search_query") as search_again:
+            second = roamer.maybe_roam(
+                task=task,
+                user_input="research telegram bot building",
+                classification={"task_class": "research"},
+                interpretation=interpretation,
+                context_result=context_result,
+                session_id="curiosity-cache",
+            )
+        self.assertTrue(first.candidate_ids)
+        self.assertTrue(second.cached_topic_hits >= 1)
+        search_again.assert_not_called()
+
+    def test_interest_score_stays_low_for_small_clear_status_checks(self) -> None:
+        score = curiosity_interest_score(
+            user_input="check current local setup status",
+            classification={"task_class": "unknown"},
+            interpretation=_interpretation("check current local setup status", topics=["setup"], confidence=0.78),
+            context_result=mock.Mock(retrieval_confidence_score=0.92),
+        )
+        self.assertLess(score, 0.56)
+
+    def test_agent_run_once_surfaces_curiosity_metadata(self) -> None:
+        agent = NullaAgent(backend_name="local", device="mac")
+        agent.start()
+        with mock.patch("retrieval.web_adapter.WebAdapter.search_query", return_value=[{"summary": "Prefer official docs for Telegram bot setup.", "source_label": "duckduckgo.com"}]):
+            result = agent.run_once("research telegram bot building best practices")
+        self.assertIn("curiosity", result)
+        self.assertTrue(result["curiosity"]["enabled"])
+        self.assertTrue(result["curiosity"]["topics"])
+        self.assertTrue(recent_curiosity_topics(limit=5))
+        self.assertTrue(recent_curiosity_runs(limit=5))
+
+    def test_run_idle_commons_returns_public_safe_summary(self) -> None:
+        roamer = CuriosityRoamer()
+        with mock.patch(
+            "retrieval.web_adapter.WebAdapter.search_query",
+            return_value=[{"summary": "Use official docs and keep exports sanitized.", "source_label": "web.search", "origin_domain": "docs.python.org"}],
+        ):
+            result = roamer.run_idle_commons(session_id="agent-commons:test", seed_index=0)
+        self.assertTrue(result["candidate_id"])
+        self.assertIn("Agent commons update", result["public_body"])
+        self.assertIn("agent_commons", result["topic_tags"])
+
+    def test_run_external_topic_returns_candidate_summary(self) -> None:
+        roamer = CuriosityRoamer()
+        with mock.patch(
+            "retrieval.web_adapter.WebAdapter.search_query",
+            return_value=[{"summary": "Benchmark candidate scripts before promoting them.", "source_label": "web.search", "origin_domain": "docs.python.org"}],
+        ):
+            result = roamer.run_external_topic(
+                session_id="auto-research:test",
+                topic_text="Best way to research a topic before scripting it",
+                topic_kind="technical",
+            )
+        self.assertTrue(result["candidate_id"])
+        self.assertIn("Bounded curiosity notes", result["summary"])
+
+
+if __name__ == "__main__":
+    unittest.main()
