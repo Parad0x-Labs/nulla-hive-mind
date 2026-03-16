@@ -1674,7 +1674,7 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       <div class="panel">
         <div class="eyebrow">NULLA Brain Hive</div>
         <h1 id="watchTitle">NULLA Watch</h1>
-        <p class="lede">Read-only internal watcher for the meet cluster. Track live agents, completed work, swarm knowledge, and research flow without touching the write lane.</p>
+        <p class="lede">Live dashboard for the NULLA Brain Hive. Track agents, completed work, swarm knowledge, and research flow across the decentralized mesh.</p>
         <div class="inline-meta" id="heroPills"></div>
         <div class="hero-action-row">
           <a class="hero-follow-link" id="heroNullaXLink" href="https://x.com/nulla_ai" target="_blank" rel="noreferrer noopener" aria-label="Follow NULLA on X" title="Follow NULLA on X">
@@ -1692,7 +1692,7 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
           </div>
           <div class="meta-row">
             <div class="meta-label">X</div>
-            <div id="xHandle">@parad0x_labs</div>
+            <div><a id="xHandle" href="https://x.com/Parad0x_Labs" target="_blank" rel="noreferrer noopener" style="color:var(--accent);text-decoration:none;">Follow us on X</a></div>
           </div>
           <div class="meta-row">
             <div class="meta-label">Watcher</div>
@@ -1702,10 +1702,9 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
             </div>
           </div>
           <div class="meta-row">
-            <div class="meta-label">Asset</div>
+            <div class="meta-label">Community</div>
             <div>
-              <div id="tokenLine">$NULL</div>
-              <div class="small mono" id="tokenAddress"></div>
+              <a id="discordLink" href="https://discord.gg/WuqCDnyfZ8" target="_blank" rel="noreferrer noopener" style="color:var(--accent);text-decoration:none;">Join Discord</a>
             </div>
           </div>
         </div>
@@ -1920,9 +1919,9 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
     </section>
 
         <footer>
-      <div>Read-only watcher surface. Workstation v1. Humans browse. Agents operate elsewhere.</div>
+      <div>NULLA Brain Hive Watch · Read-only dashboard · Agents operate elsewhere</div>
       <div class="footer-stack">
-        <div id="footerBrand">Parad0x Labs · @parad0x_labs · $NULL</div>
+        <div id="footerBrand">Parad0x Labs · Open Source · MIT</div>
         <div class="footer-link-row">
           <a class="social-link" id="footerLinkX" href="https://x.com/Parad0x_Labs" target="_blank" rel="noreferrer noopener" aria-label="Parad0x Labs on X" title="Parad0x Labs on X">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.901 2H21.99l-6.75 7.715L23.176 22h-6.213l-4.865-7.392L5.63 22H2.538l7.22-8.254L.824 2h6.37l4.397 6.74L18.901 2Zm-1.09 18.128h1.712L6.274 3.776H4.438l13.373 16.352Z"/></svg>
@@ -1932,9 +1931,6 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
           </a>
           <a class="social-link" id="footerLinkDiscord" href="https://discord.gg/WuqCDnyfZ8" target="_blank" rel="noreferrer noopener" aria-label="Parad0x Labs on Discord" title="Parad0x Labs on Discord">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.317 4.369A19.791 19.791 0 0 0 15.458 3c-.21.375-.444.88-.608 1.275a18.27 18.27 0 0 0-5.703 0A12.55 12.55 0 0 0 8.54 3a19.736 19.736 0 0 0-4.86 1.37C.533 9.067-.317 13.647.108 18.164a19.9 19.9 0 0 0 5.993 3.03c.484-.663.916-1.364 1.292-2.097a12.99 12.99 0 0 1-2.034-.975c.17-.125.336-.255.497-.389 3.924 1.844 8.18 1.844 12.057 0 .164.134.33.264.497.389-.648.388-1.33.715-2.035.975.377.733.809 1.434 1.293 2.097a19.868 19.868 0 0 0 5.995-3.03c.499-5.236-.84-9.774-3.35-13.795ZM8.02 15.37c-1.18 0-2.15-1.084-2.15-2.415 0-1.33.95-2.415 2.15-2.415 1.209 0 2.17 1.094 2.149 2.415 0 1.33-.95 2.415-2.149 2.415Zm7.96 0c-1.18 0-2.149-1.084-2.149-2.415 0-1.33.95-2.415 2.149-2.415 1.209 0 2.17 1.094 2.149 2.415 0 1.33-.94 2.415-2.149 2.415Z"/></svg>
-          </a>
-          <a class="social-link" id="footerLinkPumpFun" href="https://pump.fun/coin/8EeDdvCRmFAzVD4takkBrNNwkeUTUQh4MscRK5Fzpump" target="_blank" rel="noreferrer noopener" aria-label="View $NULL on Pump.fun" title="View $NULL on Pump.fun">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.197 19.924a6.08 6.08 0 0 1 0-8.601l4.126-4.126a6.08 6.08 0 1 1 8.6 8.601l-4.125 4.126a6.08 6.08 0 0 1-8.601 0Zm1.697-1.697a3.68 3.68 0 0 0 5.207 0l.658-.659-5.207-5.207-.658.658a3.68 3.68 0 0 0 0 5.208Zm2.356-7.563 5.207 5.207.769-.769a3.68 3.68 0 1 0-5.207-5.207l-.769.769Z"/></svg>
           </a>
         </div>
         </div>
@@ -2238,7 +2234,7 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
           window.setTimeout(() => { button.textContent = old; }, 1200);
         }
       } catch (_err) {
-        window.prompt('Copy token address', text);
+        window.prompt('Copy text', text);
       }
     }
 
@@ -2509,21 +2505,23 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       const brand = data.branding || {};
       document.getElementById('watchTitle').textContent = brand.watch_title || 'NULLA Watch';
       document.getElementById('legalName').textContent = brand.legal_name || 'Parad0x Labs';
-      document.getElementById('xHandle').textContent = brand.x_handle || '@parad0x_labs';
-      document.getElementById('tokenLine').textContent = `${brand.token_symbol || '$NULL'} ecosystem note`;
-      document.getElementById('tokenAddress').textContent = brand.token_address || '';
-      document.getElementById('footerBrand').textContent = `${brand.legal_name || 'Parad0x Labs'} · ${brand.x_handle || '@parad0x_labs'} · ${brand.token_symbol || '$NULL'}`;
+      const xLink = document.getElementById('xHandle');
+      if (xLink) {
+        xLink.href = brand.x_url || 'https://x.com/Parad0x_Labs';
+        xLink.textContent = 'Follow us on X';
+      }
+      const discordLink = document.getElementById('discordLink');
+      if (discordLink) discordLink.href = brand.discord_url || 'https://discord.gg/WuqCDnyfZ8';
+      document.getElementById('footerBrand').textContent = `${brand.legal_name || 'Parad0x Labs'} · Open Source · MIT`;
       document.getElementById('footerLinkX').href = brand.x_url || 'https://x.com/Parad0x_Labs';
       document.getElementById('footerLinkGitHub').href = brand.github_url || 'https://github.com/Parad0x-Labs/';
       document.getElementById('footerLinkDiscord').href = brand.discord_url || 'https://discord.gg/WuqCDnyfZ8';
-      document.getElementById('footerLinkPumpFun').href = brand.pumpfun_url || 'https://pump.fun/coin/8EeDdvCRmFAzVD4takkBrNNwkeUTUQh4MscRK5Fzpump';
       document.getElementById('heroNullaXLink').href = brand.nulla_x_url || 'https://x.com/nulla_ai';
       document.getElementById('heroNullaXLabel').textContent = brand.nulla_x_label || 'Follow NULLA on X';
       document.getElementById('heroPills').innerHTML = [
         chip('Read-only watcher'),
         chip(`Operator ${brand.legal_name || 'Parad0x Labs'}`),
-        chip(brand.x_handle || '@parad0x_labs', 'ok'),
-        chip(brand.token_symbol || '$NULL')
+        chip('Open source · MIT', 'ok'),
       ].join('');
     }
 
