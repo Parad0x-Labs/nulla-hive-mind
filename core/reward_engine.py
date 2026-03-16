@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from core import audit_logger, fraud_engine, policy_engine, scoreboard_engine
 from core.contribution_proof import append_contribution_proof_receipt
+from core.credit_ledger import get_escrow_for_task, release_escrow_to_helper
 from storage.db import get_connection
 from storage.migrations import run_migrations
 
@@ -437,36 +438,40 @@ def release_mature_pending_rewards(limit: int = 100) -> int:
                 conn.rollback()
                 continue
             pending_amount = int(current["wnull_pending"] or 0)
-            credit_amount = max(0.0, float(current["compute_credits_pending"] or 0.0))
+            score_amount = max(0.0, float(current["compute_credits_pending"] or 0.0))
             finality_target = max(1, int(current["finality_target"] or _finality_target_depth()))
             next_finality_state = "finalized" if finality_target <= 1 else "confirmed"
             next_finality_depth = finality_target if next_finality_state == "finalized" else 1
             reward_receipt_id = _reward_credit_receipt_id(entry_id)
-            if credit_amount > 0.0:
-                existing_credit = conn.execute(
-                    """
-                    SELECT 1
-                    FROM compute_credit_ledger
-                    WHERE receipt_id = ?
-                    LIMIT 1
-                    """,
-                    (reward_receipt_id,),
-                ).fetchone()
-                if not existing_credit:
-                    conn.execute(
-                        """
-                        INSERT INTO compute_credit_ledger (
-                            peer_id, amount, reason, receipt_id, settlement_mode, timestamp
-                        ) VALUES (?, ?, ?, ?, 'simulated', ?)
-                        """,
-                        (
-                            str(current["helper_peer_id"] or ""),
-                            credit_amount,
-                            f"confirmed_contribution:{current['task_id'] or ''!s}",
-                            reward_receipt_id,
-                            _utcnow(),
-                        ),
-                    )
+            task_id_str = str(current["task_id"] or "")
+            helper_peer = str(current["helper_peer_id"] or "")
+
+            escrow = get_escrow_for_task(task_id_str)
+            if escrow and escrow["remaining"] > 0 and score_amount > 0:
+                payout = round(score_amount * escrow["total_escrowed"], 4)
+                credit_amount = min(payout, escrow["remaining"])
+                release_escrow_to_helper(
+                    task_id_str,
+                    helper_peer,
+                    credit_amount,
+                    receipt_id=reward_receipt_id,
+                )
+            else:
+                credit_amount = score_amount
+                if credit_amount > 0.0:
+                    existing_credit = conn.execute(
+                        "SELECT 1 FROM compute_credit_ledger WHERE receipt_id = ? LIMIT 1",
+                        (reward_receipt_id,),
+                    ).fetchone()
+                    if not existing_credit:
+                        conn.execute(
+                            """
+                            INSERT INTO compute_credit_ledger (
+                                peer_id, amount, reason, receipt_id, settlement_mode, timestamp
+                            ) VALUES (?, ?, ?, ?, 'simulated', ?)
+                            """,
+                            (helper_peer, credit_amount, f"confirmed_contribution:{task_id_str}", reward_receipt_id, _utcnow()),
+                        )
             conn.execute(
                 """
                 UPDATE contribution_ledger

@@ -1233,6 +1233,22 @@ def run_migrations(db_path=None) -> None:
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_learning_shards_session_scope ON learning_shards(origin_session_id, share_scope, updated_at DESC)")
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS dispatch_credit_escrow (
+                escrow_id TEXT PRIMARY KEY,
+                parent_task_id TEXT NOT NULL,
+                poster_peer_id TEXT NOT NULL,
+                total_escrowed REAL NOT NULL,
+                total_released REAL NOT NULL DEFAULT 0,
+                total_refunded REAL NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_escrow_task ON dispatch_credit_escrow(parent_task_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_escrow_poster ON dispatch_credit_escrow(poster_peer_id, status)")
+
         exists = conn.execute(
             "SELECT 1 FROM persona_profiles WHERE persona_id = ? LIMIT 1",
             ("default",),

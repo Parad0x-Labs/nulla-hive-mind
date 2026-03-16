@@ -18,6 +18,11 @@ from core import audit_logger, feedback_engine, policy_engine
 from core.autonomous_topic_research import pick_autonomous_research_signal, research_topic_from_signal
 from core.candidate_knowledge_lane import get_candidate_by_id
 from core.channel_actions import dispatch_outbound_post_intent, parse_channel_post_intent
+from core.credit_ledger import (
+    escrow_credits_for_task,
+    get_credit_balance,
+    transfer_credits,
+)
 from core.curiosity_roamer import AdaptiveResearchResult, CuriosityRoamer
 from core.hive_activity_tracker import (
     HiveActivityTracker,
@@ -355,6 +360,10 @@ class NullaAgent:
                 source_context=source_context,
                 reason="memory_command",
             )
+
+        credit_result = self._maybe_handle_credit_command(effective_input, source_context=source_context)
+        if credit_result is not None:
+            return credit_result
 
         ui_command = self._ui_command_fast_path(normalized_input, source_surface=source_surface)
         if ui_command:
@@ -1118,6 +1127,71 @@ class NullaAgent:
             "I couldn't get a usable model response in this run, so I'm not going to recycle cached or remembered "
             "text as if it were fresh."
         )
+
+    _CREDIT_SEND_RE = re.compile(
+        r"(?:send|transfer|give)\s+(\d+(?:\.\d+)?)\s+credits?\s+(?:to\s+)?(\S+)",
+        re.IGNORECASE,
+    )
+    _CREDIT_SPEND_RE = re.compile(
+        r"spend\s+(\d+(?:\.\d+)?)\s+credits?\s+(?:to\s+)?(?:prioriti[sz]e|boost|fund)",
+        re.IGNORECASE,
+    )
+
+    def _maybe_handle_credit_command(
+        self,
+        user_input: str,
+        *,
+        source_context: dict[str, object] | None = None,
+    ) -> dict | None:
+        from network.signer import get_local_peer_id
+
+        send_match = self._CREDIT_SEND_RE.search(user_input)
+        if send_match:
+            amount = float(send_match.group(1))
+            target_peer = send_match.group(2).strip()
+            peer_id = get_local_peer_id()
+            ok = transfer_credits(peer_id, target_peer, amount, reason="chat_transfer")
+            if ok:
+                response = f"Sent {amount:.2f} credits to {target_peer}. Your new balance: {get_credit_balance(peer_id):.2f}."
+            else:
+                balance = get_credit_balance(peer_id)
+                response = f"Transfer failed. Your balance is {balance:.2f} credits (need {amount:.2f})."
+            session_id = runtime_session_id(device=self.device, persona_id=self.persona_id)
+            return {
+                "task_id": str(uuid.uuid4()),
+                "response": response,
+                "response_class": "task_status",
+                "confidence": 0.95,
+                "mode": "fast_path",
+                "model_execution": {"used_model": False, "source": "credit_ledger"},
+                "session_id": session_id,
+                "source_context": source_context or {},
+            }
+
+        spend_match = self._CREDIT_SPEND_RE.search(user_input)
+        if spend_match:
+            amount = float(spend_match.group(1))
+            peer_id = get_local_peer_id()
+            task_id = str(uuid.uuid4())
+            ok = escrow_credits_for_task(peer_id, task_id, amount)
+            if ok:
+                response = f"Reserved {amount:.2f} credits to prioritize your Hive task. Remaining balance: {get_credit_balance(peer_id):.2f}."
+            else:
+                balance = get_credit_balance(peer_id)
+                response = f"Could not reserve credits. Your balance is {balance:.2f} (need {amount:.2f})."
+            session_id = runtime_session_id(device=self.device, persona_id=self.persona_id)
+            return {
+                "task_id": task_id,
+                "response": response,
+                "response_class": "task_status",
+                "confidence": 0.95,
+                "mode": "fast_path",
+                "model_execution": {"used_model": False, "source": "credit_ledger"},
+                "session_id": session_id,
+                "source_context": source_context or {},
+            }
+
+        return None
 
     def _fast_path_result(
         self,

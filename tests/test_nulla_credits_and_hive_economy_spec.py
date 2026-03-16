@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from unittest import mock
 
-import pytest
-
 from core.credit_ledger import award_credits, get_credit_balance
 from core.memory_first_router import ModelExecutionDecision
 from network.signer import get_local_peer_id
@@ -65,11 +63,10 @@ def test_credit_status_explains_current_reward_contract(make_agent):
     assert "rewarded assist tasks and accepted results" in lowered
 
 
-@pytest.mark.xfail(strict=False, reason="Chat-level credit transfer and task-priority spending are not wired into the runtime contract yet.")
-def test_future_chat_can_spend_credits_to_prioritize_hive_task(make_agent):
+def test_chat_can_spend_credits_to_prioritize_hive_task(make_agent):
     agent = make_agent()
     peer_id = get_local_peer_id()
-    award_credits(peer_id, 50.0, "future_priority_seed", receipt_id="future-priority-seed")
+    award_credits(peer_id, 50.0, "priority_seed", receipt_id="priority-seed")
 
     result = agent.run_once(
         "spend 10 credits to prioritize the current Hive task",
@@ -80,9 +77,11 @@ def test_future_chat_can_spend_credits_to_prioritize_hive_task(make_agent):
     assert "reserved 10.00 credits" in result["response"].lower()
 
 
-@pytest.mark.xfail(strict=False, reason="The runtime has ledger/economics primitives, but end-user chat transfer policy is not implemented.")
-def test_future_chat_can_transfer_credits_to_another_peer(make_agent):
+def test_chat_can_transfer_credits_to_another_peer(make_agent):
     agent = make_agent()
+    peer_id = get_local_peer_id()
+    award_credits(peer_id, 20.0, "transfer_seed", receipt_id="transfer-seed")
+
     result = agent.run_once(
         "send 5 credits to peer-remote-1 for helping on this task",
         source_context={"surface": "openclaw", "platform": "openclaw"},
@@ -90,3 +89,78 @@ def test_future_chat_can_transfer_credits_to_another_peer(make_agent):
 
     assert result["response_class"] == "task_status"
     assert "sent 5.00 credits" in result["response"].lower()
+
+
+def test_escrow_lifecycle_poster_to_helper():
+    """Poster escrows credits, helper earns from escrow, remainder refunds."""
+    import uuid
+
+    from storage.migrations import run_migrations
+
+    run_migrations()
+
+    from core.credit_ledger import (
+        escrow_credits_for_task,
+        get_escrow_for_task,
+        refund_escrow_remainder,
+        release_escrow_to_helper,
+    )
+
+    tag = uuid.uuid4().hex[:6]
+    poster, helper = f"poster-{tag}", f"helper-{tag}"
+    task_id = f"task-escrow-{tag}"
+
+    award_credits(poster, 100.0, "seed", receipt_id=f"escrow-seed-{tag}")
+    assert get_credit_balance(poster) == 100.0
+
+    ok = escrow_credits_for_task(poster, task_id, 30.0)
+    assert ok
+    assert get_credit_balance(poster) == 70.0
+
+    escrow = get_escrow_for_task(task_id)
+    assert escrow is not None
+    assert escrow["total_escrowed"] == 30.0
+    assert escrow["remaining"] == 30.0
+
+    release_escrow_to_helper(task_id, helper, 20.0)
+    assert get_credit_balance(helper) == 20.0
+    escrow = get_escrow_for_task(task_id)
+    assert escrow["remaining"] == 10.0
+
+    refunded = refund_escrow_remainder(task_id)
+    assert refunded == 10.0
+    assert get_credit_balance(poster) == 80.0
+    escrow = get_escrow_for_task(task_id)
+    assert escrow["status"] == "settled"
+
+
+def test_transfer_credits_between_peers():
+    import uuid
+
+    from storage.migrations import run_migrations
+
+    run_migrations()
+    from core.credit_ledger import transfer_credits
+
+    tag = uuid.uuid4().hex[:6]
+    alice, bob = f"alice-{tag}", f"bob-{tag}"
+    award_credits(alice, 50.0, "seed", receipt_id=f"xfer-seed-{tag}")
+    assert transfer_credits(alice, bob, 15.0)
+    assert get_credit_balance(alice) == 35.0
+    assert get_credit_balance(bob) == 15.0
+    assert not transfer_credits(alice, bob, 999.0)
+
+
+def test_presence_credits_awarded():
+    import uuid
+
+    from storage.migrations import run_migrations
+
+    run_migrations()
+    from core.credit_ledger import award_presence_credits
+
+    tag = uuid.uuid4().hex[:6]
+    node = f"node-{tag}"
+    assert award_presence_credits(node, 0.10, receipt_id=f"presence:{tag}:1")
+    assert get_credit_balance(node) == 0.10
+    assert not award_presence_credits(node, 0.10, receipt_id=f"presence:{tag}:1")

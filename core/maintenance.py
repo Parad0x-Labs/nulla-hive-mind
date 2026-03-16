@@ -10,6 +10,7 @@ from core.adaptation_autopilot import schedule_adaptation_autopilot_tick
 from core.bootstrap_adapters import BootstrapMirrorAdapter
 from core.bootstrap_sync import prune_expired_topic_files, publish_local_presence_snapshots, sync_from_bootstrap_topics
 from core.control_plane_workspace import sync_control_plane_workspace
+from core.credit_ledger import award_presence_credits
 from core.discovery_index import prune_stale_capabilities
 from core.hardware_challenge import initiate_random_hardware_challenge
 from core.knowledge_freshness import iso_now
@@ -143,10 +144,18 @@ class MaintenanceLoop:
                     details={"error": str(e)},
                 )
 
-        # 3.5) presence heartbeat
+        # 3.5) presence heartbeat + earn presence credits
         if self.presence_broadcast:
             try:
                 self.presence_broadcast()
+                from core import policy_engine as _pe
+                from network.signer import get_local_peer_id as _local_id
+                tick_ts = int(time.time())
+                award_presence_credits(
+                    _local_id(),
+                    amount=float(_pe.get("economics.presence_credit_per_tick", 0.10)),
+                    receipt_id=f"presence:{_local_id()}:{tick_ts // 300}",
+                )
             except Exception as e:
                 audit_logger.log(
                     "maintenance_presence_broadcast_error",
