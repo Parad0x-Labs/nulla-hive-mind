@@ -48,6 +48,10 @@ BOOTSTRAP.md
 TOOLS.md
 Cursor_Claude_Handover.md
 
+# Handover docs (contain real node IPs, SSH paths, server configs)
+docs/HANDOVER_2026-03-15_FULL_STATE.md
+docs/HANDOVER_2026-03-14_HIVE_SURFACES_AND_RUNTIME_TRUTH.md
+
 # Ops scripts (contain deployment IPs, SSH paths, server configs)
 ops/
 tests/test_overnight_reports.py

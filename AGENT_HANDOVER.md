@@ -64,7 +64,7 @@ The most recent hardening tranche added concrete runtime behavior, not just docs
 
 Current local automated verification for this repo state:
 
-- `188 passed, 5 skipped, 1 warning` (`pytest -q`).
+- `736 passed, 14 skipped, 29 xfailed` (CI-verified, 2026-03-16).
 
 ## Read This First
 
@@ -560,7 +560,7 @@ Solana integration remains present as an optional integration surface, not a req
 
 The correct current truth is:
 
-- latest local automated verification: `188 passed, 5 skipped, 1 warning`,
+- CI-verified baseline (2026-03-16): `736 passed, 14 skipped, 29 xfailed`,
 - multiple live proof items are still waiting for cross-machine evidence,
 - knowledge-presence logic exists but still needs live propagation and expiry proof,
 - meet-node replication exists but still needs global convergence proof,

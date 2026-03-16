@@ -22,7 +22,7 @@ If the target is "acts as much like GPT/Claude as possible, local-first, real, u
 ## Verified Current Baseline
 
 - Runtime fixes from `CODEX_NULLA_REAL_TEST_FINDINGS_2026-03-12.md` are real.
-- Current full suite on this machine: `535 passed, 8 skipped, 9 xfailed, 1 warning`.
+- CI-verified baseline (2026-03-16): `736 passed, 14 skipped, 29 xfailed`.
 - Current deep contract runner: `110 passed, 9 xfailed, 1 warning`.
 - The remaining `xfail` tests are not regressions. They are the explicit frontier-gap contract.
 

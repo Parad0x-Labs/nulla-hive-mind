@@ -1216,7 +1216,7 @@ The bottleneck is runtime proof.
 
 As of the latest local pass, automated local coverage exists for:
 
-- full suite baseline: `188 passed, 5 skipped, 1 warning`,
+- full suite baseline (CI-verified, 2026-03-16): `736 passed, 14 skipped, 29 xfailed`,
 
 - conflicting helper output handling,
 - sandbox boundary enforcement,

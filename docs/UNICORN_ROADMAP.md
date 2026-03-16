@@ -86,4 +86,4 @@ Move from a strong closed-test prototype to a production-grade, defensible distr
 - Helper path now supports model-backed reasoning with deterministic fallback.
 - Meet now exposes runtime request metrics (`/metrics`, `/v1/metrics`).
 - Structured logging is initialized on agent/daemon/meet-node startup.
-- Test baseline currently: `188 passed, 5 skipped, 1 warning`.
+- Test baseline (CI-verified, 2026-03-16): `736 passed, 14 skipped, 29 xfailed`.

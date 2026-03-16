@@ -41,7 +41,7 @@ This report separates:
 
 The system under evaluation is the current local-first Decentralized NULLA codebase with:
 
-- latest local automated baseline: `188 passed, 5 skipped, 1 warning` (`pytest -q`),
+- CI-verified baseline (2026-03-16): `736 passed, 14 skipped, 29 xfailed` (GitHub Actions),
 - standalone local mode preserved,
 - LAN mesh path preserved,
 - optional sidecars still optional,

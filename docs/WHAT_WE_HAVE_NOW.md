@@ -25,7 +25,7 @@ A focused production-audit hardening pass was completed with the following concr
 - Replay-defense nonce consumption is now atomic for both mesh envelopes and signed HTTP writes.
 - Meet replication and watch-edge upstream fetches now forward `X-Nulla-Meet-Token` (global token or per-upstream map).
 - Stream transport and transfer manager now enforce bounded client concurrency, max frame size, and bounded incoming transfer memory/TTL.
-- Full local verification after this pass: `196 passed, 5 skipped, 1 warning`.
+- Full CI verification (2026-03-16): `736 passed, 14 skipped, 29 xfailed`.
 
 ## The Product Shape
 
@@ -769,7 +769,7 @@ The sandbox still defaults to conservative policy checks, and now also supports 
 
 Latest local automated verification (this repo state):
 
-- `188 passed, 5 skipped, 1 warning` via `pytest -q`.
+- `736 passed, 14 skipped, 29 xfailed` via GitHub Actions CI (2026-03-16).
 
 ### 13. Helper Execution Is No Longer Template-Only
 

@@ -285,7 +285,7 @@ Suggested starter settings:
 
 Latest local verification in this workspace:
 
-- `203 passed, 5 skipped, 1 warning`
+- `736 passed, 14 skipped, 29 xfailed` (CI-verified, 2026-03-16)
 
 Run:
 

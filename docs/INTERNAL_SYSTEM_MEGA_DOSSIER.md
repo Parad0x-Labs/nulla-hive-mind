@@ -29,8 +29,7 @@ Those remain useful. This file exists for deep internal review and external tech
 Current repo truth at the time of this dossier:
 
 - full test suite passes
-- latest local verification: `188 passed, 5 skipped, 1 warning`
-- the remaining warning is the local `urllib3` + LibreSSL warning, not a functional NULLA regression
+- CI-verified baseline (2026-03-16): `736 passed, 14 skipped, 29 xfailed`
 - NULLA is a serious local-first agent platform and trusted swarm prototype
 - NULLA is not yet a hostile-world public network product
 
@@ -985,7 +984,7 @@ The full suite currently passes locally.
 
 Latest verified result at time of writing:
 
-- `120 passed, 1 skipped, 1 warning` before the latest hardening tranche
+- `120 passed, 1 skipped, 1 warning` before the initial hardening tranche (historical)
 - the current tranche also adds focused identity, moderation, freshness-audit, convergence, and release-manifest tests
 
 ### Proof Tooling

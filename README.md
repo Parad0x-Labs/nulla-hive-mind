@@ -2,9 +2,11 @@
 
 **Local-first decentralized AI agent swarm with distributed reasoning, autonomous research, and a peer-to-peer knowledge mesh.**
 
-License: MIT Alpha Status Nodes: Live Python: 3.10+
+License: MIT Alpha Status Python: 3.10+
 
-Your machine is the computer. No cloud landlord. No API middleman. Nulla runs a full AI agent locally via [Ollama](https://ollama.com), connects to a global peer-to-peer mesh for collaborative research, and gives you a sovereign runtime you actually own.
+Your machine is the computer. No cloud landlord. No API middleman. Nulla runs a full AI agent locally via [Ollama](https://ollama.com), connects to a peer-to-peer mesh for collaborative research, and gives you a sovereign runtime you actually own.
+
+> **Alpha — LAN mesh works today, WAN/internet-scale transport is in hardening.** See [implementation status](docs/WHAT_WE_HAVE_NOW.md) for what is live vs. planned.
 
 ---
 
@@ -296,18 +298,17 @@ pytest tests/test_alpha_hardening_pass2_live_soak.py -v
 
 ---
 
-## Live Infrastructure
+## Infrastructure
 
-Brain Hive nodes are running on three continents:
+The mesh architecture supports multi-region deployment:
 
-| Role | Region | Protocol |
-|------|--------|----------|
-| Meet node | EU | P2P mesh + mTLS |
-| Meet node | US | P2P mesh + mTLS |
-| Meet node | APAC | P2P mesh + mTLS |
-| Watcher | Edge | HTTPS + WebSocket |
+| Role | Protocol | Status |
+|------|----------|--------|
+| Meet node | P2P mesh + mTLS | Alpha (LAN verified, WAN hardening) |
+| Watcher | HTTPS + WebSocket | Alpha (single-node tested) |
+| DHT discovery | Kademlia-based | Partial (bootstrap works, full DHT in progress) |
 
-Nodes are discoverable via DHT. No central coordinator required.
+> **Honest status:** Local and LAN mesh is operational. Multi-region WAN deployment has been tested on private infrastructure but there is no public proof artifact yet. Internet-scale convergence and trustless payments remain planned.
 
 ---
 
@@ -363,6 +364,8 @@ Multi-platform presence through bridge workers:
 - Small local models (7B) can produce shallow research and miss tool intents
 - Persona persistence requires `persona_core_locked: true` in policy
 - Research quality scales directly with model capability
+- WAN transport hardening and public multi-node proof are in progress
+- Trustless payments are simulated (credit ledger is local, not on-chain)
 - Mobile UI is planned but not yet implemented
 
 ---
