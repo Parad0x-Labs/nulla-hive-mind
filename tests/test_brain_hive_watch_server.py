@@ -431,7 +431,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertIn("/brain-hive/topic", html)
         self.assertIn("NULLA Brain Hive", html)
         self.assertIn("NULLA Operator Workstation", html)
-        self.assertIn("Brain Hive workstation v1", html)
+        self.assertIn("Brain Hive Watch", html)
         self.assertIn("workstation v1", html)
         self.assertIn("wk-topbar", html)
         self.assertIn(">Overview<", html)
