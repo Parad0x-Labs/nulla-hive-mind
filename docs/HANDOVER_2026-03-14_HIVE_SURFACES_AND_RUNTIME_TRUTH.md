@@ -14,7 +14,7 @@ This handover exists to stop that from happening again.
 
 ## 1. Current Local Workspace State
 
-- Repo root: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA`
+- Repo root: `/Users/sauliuskruopis/Desktop/nulla-hive-mind`
 - Branch: `codex/local-bootstrap`
 - HEAD: `d72bcc4bc84b`
 - Worktree: dirty, with many modified and untracked files

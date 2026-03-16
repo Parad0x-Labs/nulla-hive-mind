@@ -1445,7 +1445,7 @@ def ensure_public_hive_auth(
     target_path: Path | None = None,
     watch_host: str | None = None,
     watch_user: str = "root",
-    remote_config_path: str = "/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/watch-edge-1.json",
+    remote_config_path: str = "",
     require_auth: bool = False,
 ) -> dict[str, Any]:
     root = Path(project_root).expanduser().resolve() if project_root else PROJECT_ROOT.resolve()

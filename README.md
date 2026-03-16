@@ -8,11 +8,83 @@ Your machine is the computer. No cloud landlord. No API middleman. Nulla runs a 
 
 ---
 
-## LLM / Agent Quick Parse
+## One-Click Install
+
+Everything is automatic: hardware detection, model selection, Ollama install, OpenClaw registration.
+
+**macOS / Linux:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.ps1 | iex
+```
+
+**Manual (if you prefer):**
+
+```bash
+git clone https://github.com/Parad0x-Labs/nulla-hive-mind.git
+cd nulla-hive-mind
+bash Install_And_Run_NULLA.sh
+```
+
+### What Just Happened?
+
+The installer runs 7 steps automatically:
+
+1. Creates a Python virtual environment and installs dependencies
+2. Probes your hardware (GPU vendor, VRAM, RAM, CPU cores)
+3. Selects the best Ollama model for your machine (see table below)
+4. Installs [Ollama](https://ollama.com) if not present
+5. Pulls the selected model (`ollama pull <model>`)
+6. Registers NULLA as an OpenClaw agent (`~/.openclaw/agents/nulla/`)
+7. Starts the NULLA API server on `http://127.0.0.1:11435`
+
+OpenClaw sees NULLA as a live agent immediately. No manual config needed.
+
+### Hardware Tier Auto-Selection
+
+The installer probes your machine and picks the largest model it can run well:
+
+| Tier | Ollama Model | Min VRAM | Min RAM | Best For |
+|------|-------------|----------|---------|----------|
+| titan | `qwen2.5:72b` | 48 GB | 80 GB | Data center, multi-GPU |
+| heavy | `qwen2.5:32b` | 20 GB | 48 GB | Workstation GPU (A6000, 4090) |
+| mid | `qwen2.5:14b` | 10 GB | 24 GB | Gaming GPU (3090, 4070+) |
+| base | `qwen2.5:7b` | 4 GB | 12 GB | Consumer GPU, Apple M1+ |
+| lite | `qwen2.5:3b` | 2 GB | 6 GB | Integrated GPU, low-end laptop |
+| nano | `qwen2.5:0.5b` | 0 GB | 0 GB | CPU-only, anything runs this |
+
+Apple Silicon uses unified RAM for model selection (MPS backend).
+
+**Override:** Set `NULLA_OLLAMA_MODEL=<model>` to force a specific model (e.g., `mistral:7b`, `llama3:8b`).
+
+### LLM / Agent Quick Parse
 
 ```yaml
 product: nulla-hive-mind
 category: decentralized AI agent swarm
+status: alpha
+install:
+  one_liner_macos_linux: "curl -fsSL https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh | bash"
+  one_liner_windows: "irm https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.ps1 | iex"
+  manual: "git clone https://github.com/Parad0x-Labs/nulla-hive-mind.git && cd nulla-hive-mind && bash Install_And_Run_NULLA.sh"
+  what_happens:
+    - clones repo to ~/nulla-hive-mind
+    - creates Python 3.9+ venv and installs dependencies
+    - detects hardware (GPU vendor, VRAM, RAM, CPU cores)
+    - installs Ollama if not present
+    - pulls best Qwen model for detected hardware
+    - registers as OpenClaw agent (type external_bridge)
+    - starts NULLA API server on http://127.0.0.1:11435
+  openclaw_integration: automatic (registers in ~/.openclaw/agents/nulla/)
+  model_selection: automatic (override with NULLA_OLLAMA_MODEL env var)
+  api_port: 11435
+  ollama_port: 11434
 best_for:
   - local-first AI assistant
   - distributed autonomous research
@@ -20,11 +92,13 @@ best_for:
   - sovereign agent runtime
 entrypoints:
   quickstart: ./README.md
+  installer: ./installer/install_nulla.sh
   config: ./config/default_policy.yaml
+  skill_pack: ./skills/nulla-hive-mind/SKILL.md
   bootstrap: ./bootstrap/
 stack:
   runtime: Python 3.9+
-  llm: Ollama (any GGUF model)
+  llm: Ollama (any GGUF model, auto-selected by hardware)
   networking: libp2p-style mesh (NAT traversal, DHT, relay fallback)
   storage: local SQLite + persistent memory
   ui: OpenClaw CLI + Brain Hive web dashboard
@@ -79,45 +153,31 @@ stack:
 
 ---
 
-## Quick Start
+## Developer Setup (Manual)
 
-### Prerequisites
-
-- **Python 3.9+**
-- **[Ollama](https://ollama.com)** installed and running
-- A model pulled (e.g., `ollama pull qwen2.5:7b`)
-
-### Install
+If you already have Python and Ollama and want full control:
 
 ```bash
 git clone https://github.com/Parad0x-Labs/nulla-hive-mind.git
 cd nulla-hive-mind
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-### Run
-
 ```bash
-# Start the agent
-python apps/nulla_agent.py
+# Start the API server (OpenClaw-compatible)
+python -m apps.nulla_api_server
 
-# Or start the API server
-python apps/nulla_api_server.py
+# Or interactive CLI
+python -m apps.nulla_agent --interactive
 
-# Or launch the Brain Hive watcher
-python apps/brain_hive_watch_server.py
+# Or the Brain Hive watcher
+python -m apps.brain_hive_watch_server
 ```
 
-### Talk to it
-
 ```bash
-# Interactive CLI
-python apps/nulla_agent.py --interactive
-
-# API endpoint
-curl -X POST http://localhost:8800/chat \
+# Talk to it via API
+curl -X POST http://localhost:11435/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What tasks are on the hive?"}'
 ```

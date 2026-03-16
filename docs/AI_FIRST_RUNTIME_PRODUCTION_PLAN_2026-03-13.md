@@ -27,10 +27,10 @@ Common turns are intercepted in `run_once()` before the model path:
 
 Evidence:
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:300`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:311`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:320`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:331`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:300`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:311`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:320`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:331`
 
 This means first-impression prompts never reach the model.
 
@@ -40,9 +40,9 @@ Smalltalk and evaluative responses are not just routing shortcuts. They are lite
 
 Evidence:
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:1139`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:1149`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:1171`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:1139`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:1149`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:1171`
 
 That is textbook bot behavior.
 
@@ -52,8 +52,8 @@ Weather/news/fresh lookups use real web notes, then print a fixed label + bullet
 
 Evidence:
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:1292`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:1528`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:1292`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:1528`
 
 So the data is real, but the response still sounds like a scraper wrapper.
 
@@ -63,7 +63,7 @@ The execution profile maps most classes to `summary_block` or `action_plan`, not
 
 Evidence:
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/task_router.py:405`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/task_router.py:405`
 
 So instead of "think and answer", the model is asked to produce "summary + bullets" or "summary + steps".
 
@@ -73,9 +73,9 @@ The response path does not trust the model to speak directly. It builds a `Plan`
 
 Evidence:
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/reasoning_engine.py:138`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/reasoning_engine.py:216`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/reasoning_engine.py:233`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/reasoning_engine.py:138`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/reasoning_engine.py:216`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/reasoning_engine.py:233`
 
 That makes NULLA sound like an internal planning engine talking out loud.
 
@@ -85,8 +85,8 @@ If cache hits or local memory is "good enough", the model is skipped.
 
 Evidence:
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/memory_first_router.py:89`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/memory_first_router.py:109`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/memory_first_router.py:89`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/memory_first_router.py:109`
 
 That is fine for retrieval. It is not fine if the final user-facing wording also skips the model.
 
@@ -96,11 +96,11 @@ The current tests explicitly lock in deterministic utility, canned evaluative re
 
 Evidence:
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_runtime_contracts.py:10`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_runtime_contracts.py:42`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_runtime_contracts.py:58`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_web_freshness_and_lookup.py:18`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_web_freshness_and_lookup.py:74`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_nulla_runtime_contracts.py:10`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_nulla_runtime_contracts.py:42`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_nulla_runtime_contracts.py:58`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_nulla_web_freshness_and_lookup.py:18`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_nulla_web_freshness_and_lookup.py:74`
 
 So the repo is not just incidentally bot-like. Parts of that behavior are under test as intended product behavior.
 
@@ -117,16 +117,16 @@ What is real:
 
 Evidence:
 
-- conversation log -> heuristic update: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/persistent_memory.py:405`
-- heuristic storage/update: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/persistent_memory.py:716`
-- heuristic extraction buckets: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/persistent_memory.py:764`
-- heuristic text mapping: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/persistent_memory.py:1257`
-- heuristics injected into context: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tiered_context_loader.py:146`
-- explicit preferences in bootstrap context: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/bootstrap_context.py:214`
-- preference surface: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/user_preferences.py:145`
-- session continuity store: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/dialogue_memory.py:15`
-- input interpretation/session adaptation: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/human_input_adapter.py:213`
-- one real behavior hook from heuristics into build selection: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:2073`
+- conversation log -> heuristic update: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/persistent_memory.py:405`
+- heuristic storage/update: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/persistent_memory.py:716`
+- heuristic extraction buckets: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/persistent_memory.py:764`
+- heuristic text mapping: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/persistent_memory.py:1257`
+- heuristics injected into context: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/tiered_context_loader.py:146`
+- explicit preferences in bootstrap context: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/bootstrap_context.py:214`
+- preference surface: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/user_preferences.py:145`
+- session continuity store: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/storage/dialogue_memory.py:15`
+- input interpretation/session adaptation: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/human_input_adapter.py:213`
+- one real behavior hook from heuristics into build selection: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:2073`
 
 What is not real yet:
 
@@ -137,8 +137,8 @@ What is not real yet:
 
 Evidence:
 
-- existing feedback engine is about shard/peer trust, not user taste adaptation: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/feedback_engine.py:275`
-- repo already marks long-horizon user modeling as shallow: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_future_vision_spec.py:43`
+- existing feedback engine is about shard/peer trust, not user taste adaptation: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/feedback_engine.py:275`
+- repo already marks long-horizon user modeling as shallow: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_nulla_future_vision_spec.py:43`
 
 So the honest read is:
 
@@ -179,17 +179,17 @@ These Hive operations are wired to real watcher / public-Hive data paths, not fa
 
 Evidence:
 
-- watcher/bridge task routing: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:3211`
-- start research from real queue rows: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:3823`
-- status from real packet: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:4273`
-- public research queue / packet fetch: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/public_hive_bridge.py:141`
-- real claim / progress / result writes: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/public_hive_bridge.py:358`
+- watcher/bridge task routing: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:3211`
+- start research from real queue rows: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:3823`
+- status from real packet: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:4273`
+- public research queue / packet fetch: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/public_hive_bridge.py:141`
+- real claim / progress / result writes: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/public_hive_bridge.py:358`
 
 Tests covering this:
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_hive_task_flow.py:8`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_openclaw_tooling_context.py:419`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_public_hive_bridge.py:510`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_nulla_hive_task_flow.py:8`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_openclaw_tooling_context.py:419`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_public_hive_bridge.py:510`
 
 ### What is better, but not fully trustworthy
 
@@ -203,9 +203,9 @@ The runtime does try to avoid obvious lies:
 
 Evidence:
 
-- watcher unavailable -> explicit fallback: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:3231`
-- watcher task read path: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py:96`
-- duplicate visible tasks collapsed: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py:317`
+- watcher unavailable -> explicit fallback: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:3231`
+- watcher task read path: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/hive_activity_tracker.py:96`
+- duplicate visible tasks collapsed: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/hive_activity_tracker.py:317`
 
 But this is still weaker than task truth because:
 
@@ -259,10 +259,10 @@ Current tool classes include:
 
 Evidence:
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py:152`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/runtime_execution_tools.py:55`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/local_operator_actions.py:190`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/prompt_normalizer.py:224`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/tool_intent_executor.py:152`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/runtime_execution_tools.py:55`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/local_operator_actions.py:190`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/prompt_normalizer.py:224`
 
 That is not GPT/Grok/Claude universal capability. It is a bounded local agent runtime.
 
@@ -279,10 +279,10 @@ Right now it:
 
 Evidence:
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/curiosity_roamer.py:83`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/curiosity_roamer.py:262`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/curiosity_roamer.py:333`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/curiosity_roamer.py:357`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/curiosity_roamer.py:83`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/curiosity_roamer.py:262`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/curiosity_roamer.py:333`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/curiosity_roamer.py:357`
 
 So curiosity is a bounded research lane, not a frontier-level invention engine.
 
@@ -292,9 +292,9 @@ There are orchestration and swarm primitives in the repo, but the repo itself ma
 
 Evidence:
 
-- parent orchestration exists: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/parent_orchestrator.py:190`
-- normal chat still just calls orchestration opportunistically: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:527`
-- future multi-agent chat behavior is still xfail: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_future_vision_spec.py:18`
+- parent orchestration exists: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/parent_orchestrator.py:190`
+- normal chat still just calls orchestration opportunistically: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:527`
+- future multi-agent chat behavior is still xfail: `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_nulla_future_vision_spec.py:18`
 
 So "talk to other Hive agents and split into helper lanes and merge results" is **not** a production-honest promise yet.
 
@@ -308,10 +308,10 @@ The workspace build pipeline is real, but narrow:
 
 Evidence:
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:1944`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:2111`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py:2459`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_future_vision_spec.py:6`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:1944`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:2111`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py:2459`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_nulla_future_vision_spec.py:6`
 
 ### Domain breadth vs tool breadth
 
@@ -668,29 +668,29 @@ Delete or rewrite tests that require deterministic smalltalk and fixed conversat
 
 ### Routing and answer-path changes
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/task_router.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/memory_first_router.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/reasoning_engine.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/prompt_normalizer.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/apps/nulla_agent.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/task_router.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/memory_first_router.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/reasoning_engine.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/prompt_normalizer.py`
 
 ### User-modeling changes
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/persistent_memory.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tiered_context_loader.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/bootstrap_context.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/user_preferences.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/human_input_adapter.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/dialogue_memory.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/persistent_memory.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/tiered_context_loader.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/bootstrap_context.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/user_preferences.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/core/human_input_adapter.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/storage/dialogue_memory.py`
 - new bounded store/module for assistant-answer outcome feedback
 
 ### Test rewrites
 
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_runtime_contracts.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_web_freshness_and_lookup.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_model_execution_layer.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_openclaw_tooling_context.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_future_vision_spec.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_nulla_runtime_contracts.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_nulla_web_freshness_and_lookup.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_model_execution_layer.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_openclaw_tooling_context.py`
+- `/Users/sauliuskruopis/Desktop/nulla-hive-mind/tests/test_nulla_future_vision_spec.py`
 
 ## Rollout Strategy
 

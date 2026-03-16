@@ -1,8 +1,10 @@
-# NULLA Starter Kit
+# Nulla Hive Mind — Starter Kit
 
-Last updated: 2026-03-05
+> **Status: ALPHA** | Repo: [github.com/Parad0x-Labs/nulla-hive-mind](https://github.com/Parad0x-Labs/nulla-hive-mind) | License: MIT
 
-This is the single operational brief for launching and testing NULLA without guessing.
+Last updated: 2026-03-15
+
+This is the single operational brief for launching and testing Nulla without guessing.
 It is written for operators, testers, and new contributors who need one place that explains:
 
 - what NULLA is,
@@ -120,8 +122,8 @@ Reference files:
 
 Installer bundle output:
 
-- `build/installer/Decentralized_NULLA_Installer_<timestamp>.zip`
-- `build/installer/Decentralized_NULLA_Installer_<timestamp>.tar.gz`
+- `build/installer/nulla-hive-mind_Installer_<timestamp>.zip`
+- `build/installer/nulla-hive-mind_Installer_<timestamp>.tar.gz`
 
 Fast launchers inside extracted folder:
 

@@ -11,9 +11,9 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($RepoOwner)) { $RepoOwner = "Parad0x-Labs" }
-if ([string]::IsNullOrWhiteSpace($RepoName)) { $RepoName = "Decentralized_NULLA" }
+if ([string]::IsNullOrWhiteSpace($RepoName)) { $RepoName = "nulla-hive-mind" }
 if ([string]::IsNullOrWhiteSpace($Ref)) { $Ref = "main" }
-if ([string]::IsNullOrWhiteSpace($InstallDir)) { $InstallDir = Join-Path $HOME "Decentralized_NULLA" }
+if ([string]::IsNullOrWhiteSpace($InstallDir)) { $InstallDir = Join-Path $HOME "nulla-hive-mind" }
 if ([string]::IsNullOrWhiteSpace($ArchiveUrl)) { $ArchiveUrl = "https://github.com/$RepoOwner/$RepoName/archive/refs/heads/$Ref.zip" }
 
 function Write-Info {

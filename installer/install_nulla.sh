@@ -342,11 +342,14 @@ EOF
 write_launcher() {
   local target_path="$1"
   local runtime_home="$2"
-  cat >"${target_path}" <<EOF
+  cat >"${target_path}" <<'LAUNCHER_HEAD'
 #!/usr/bin/env bash
 set -euo pipefail
-PROJECT_ROOT="${PROJECT_ROOT}"
-VENV_PY="${VENV_DIR}/bin/python"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${SCRIPT_DIR}"
+VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
+LAUNCHER_HEAD
+  cat >>"${target_path}" <<EOF
 export PYTHONPATH="\${PROJECT_ROOT}"
 export NULLA_HOME="${runtime_home}"
 $(web_runtime_exports)
@@ -361,11 +364,14 @@ EOF
 write_chat_launcher() {
   local target_path="$1"
   local runtime_home="$2"
-  cat >"${target_path}" <<EOF
+  cat >"${target_path}" <<'LAUNCHER_HEAD'
 #!/usr/bin/env bash
 set -euo pipefail
-PROJECT_ROOT="${PROJECT_ROOT}"
-VENV_PY="${VENV_DIR}/bin/python"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${SCRIPT_DIR}"
+VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
+LAUNCHER_HEAD
+  cat >>"${target_path}" <<EOF
 export PYTHONPATH="\${PROJECT_ROOT}"
 export NULLA_HOME="${runtime_home}"
 $(web_runtime_exports)
@@ -379,11 +385,14 @@ write_openclaw_launcher() {
   local target_path="$1"
   local runtime_home="$2"
   local model_tag="$3"
-  cat >"${target_path}" <<EOF
+  cat >"${target_path}" <<'LAUNCHER_HEAD'
 #!/usr/bin/env bash
 set -euo pipefail
-PROJECT_ROOT="${PROJECT_ROOT}"
-VENV_PY="${VENV_DIR}/bin/python"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${SCRIPT_DIR}"
+VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
+LAUNCHER_HEAD
+  cat >>"${target_path}" <<EOF
 MODEL_TAG="${model_tag}"
 export PYTHONPATH="\${PROJECT_ROOT}"
 export NULLA_HOME="${runtime_home}"
@@ -412,8 +421,7 @@ if ! curl -sf --max-time 2 http://127.0.0.1:18789 >/dev/null 2>&1; then
   fi
 fi
 
-GW_TOKEN="\$("\${VENV_PY}" -c "import json; from pathlib import Path; p=Path.home()/'.openclaw'/'openclaw.json'; token=''; \
-import sys; sys.path.insert(0, '${PROJECT_ROOT}'); \
+GW_TOKEN="\$("\${VENV_PY}" -c "import sys; sys.path.insert(0, '\${PROJECT_ROOT}'); \
 from core.openclaw_locator import load_gateway_token; \
 print(load_gateway_token())" 2>/dev/null || true)"
 OPENCLAW_URL="http://127.0.0.1:18789"

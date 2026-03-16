@@ -151,9 +151,9 @@ Reference: `core/compute_mode.py`
 
 Installer bundle output:
 
-- `build/installer/Decentralized_NULLA_Installer_<timestamp>.zip`
-- `build/installer/Decentralized_NULLA_Installer_<timestamp>.tar.gz`
-- `build/installer/Decentralized_NULLA_Installer_<timestamp>_SHA256SUMS.txt`
+- `build/installer/nulla-hive-mind_Installer_<timestamp>.zip`
+- `build/installer/nulla-hive-mind_Installer_<timestamp>.tar.gz`
+- `build/installer/nulla-hive-mind_Installer_<timestamp>_SHA256SUMS.txt`
 
 Bundle builder options:
 
@@ -173,11 +173,11 @@ Fast launchers inside extracted folder:
 Direct terminal bootstrap (GitHub/public path):
 
 - macOS/Linux:
-  - `curl -fsSL https://raw.githubusercontent.com/Parad0x-Labs/Decentralized_NULLA/main/installer/bootstrap_nulla.sh | bash`
+  - `curl -fsSL https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh | bash`
 - Windows PowerShell:
-  - `powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Parad0x-Labs/Decentralized_NULLA/main/installer/bootstrap_nulla.ps1 | iex"`
+  - `powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.ps1 | iex"`
 
-These commands fetch NULLA into `~/Decentralized_NULLA` by default and then run the same fast install path with OpenClaw registration enabled.
+These commands fetch NULLA into `~/nulla-hive-mind` by default and then run the same fast install path with OpenClaw registration enabled.
 
 Guided installer launchers:
 

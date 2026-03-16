@@ -203,7 +203,7 @@ def test_sync_public_hive_auth_from_ssh_writes_runtime_bootstrap() -> None:
             "https://seed-eu.example.test:8766",
             "https://seed-us.example.test:8766",
         ],
-        "tls_ca_file": "/opt/Decentralized_NULLA/config/tls/cluster-ca.pem",
+        "tls_ca_file": "/opt/nulla-hive-mind/config/tls/cluster-ca.pem",
         "tls_insecure_skip_verify": False,
     }
 
@@ -248,7 +248,7 @@ def test_ensure_public_hive_auth_rewrites_tls_ca_file_to_local_project_path() ->
                 {
                     "meet_seed_urls": ["https://seed-eu.example.test:8766"],
                     "auth_token": "bundle-token",
-                    "tls_ca_file": "/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/tls/cluster-ca.pem",
+                    "tls_ca_file": "/opt/nulla-hive-mind/config/meet_clusters/do_ip_first_4node/tls/cluster-ca.pem",
                 }
             ),
             encoding="utf-8",
@@ -276,7 +276,7 @@ def test_write_public_hive_agent_bootstrap_stores_project_relative_tls_ca_file()
             target_path=target_path,
             meet_seed_urls=["https://seed-eu.example.test:8766"],
             auth_token="bundle-token",
-            tls_ca_file="/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/tls/cluster-ca.pem",
+            tls_ca_file="/opt/nulla-hive-mind/config/meet_clusters/do_ip_first_4node/tls/cluster-ca.pem",
         )
         payload = json.loads(target_path.read_text(encoding="utf-8"))
 

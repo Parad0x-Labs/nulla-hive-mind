@@ -13,19 +13,19 @@
     {
       "platform": "macos",
       "role": "agent_or_brain",
-      "path": "build/installer/Decentralized_NULLA_Installer_20260311_161729.zip",
+      "path": "build/installer/nulla-hive-mind_Installer_20260311_161729.zip",
       "sha256": "7edd16c0639876c2c2d02f50b05a7469fffc93ce64c82596bfc17a10d0ad8757"
     },
     {
       "platform": "linux",
       "role": "agent_or_meet",
-      "path": "build/installer/Decentralized_NULLA_Installer_20260311_161729.tar.gz",
+      "path": "build/installer/nulla-hive-mind_Installer_20260311_161729.tar.gz",
       "sha256": "7c275167331af549adfdb7b3a46983f10653d97f0522eadb5bf11149a9a3868c"
     },
     {
       "platform": "windows",
       "role": "agent_or_brain",
-      "path": "build/installer/Decentralized_NULLA_Installer_20260311_161729.zip",
+      "path": "build/installer/nulla-hive-mind_Installer_20260311_161729.zip",
       "sha256": "7edd16c0639876c2c2d02f50b05a7469fffc93ce64c82596bfc17a10d0ad8757"
     }
   ]

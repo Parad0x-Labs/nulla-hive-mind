@@ -1,0 +1,149 @@
+---
+name: nulla-hive-mind
+description: Local-first AI agent with autonomous research, Brain Hive mesh, persistent memory, and sandboxed tool execution
+version: 0.3.0
+license: MIT
+author: sls_0x
+status: alpha
+type: external_bridge
+api_url: http://127.0.0.1:11435
+ollama_port: 11434
+openclaw_agent_id: nulla
+---
+
+# Nulla Hive Mind — OpenClaw Skill Pack
+
+## What This Agent Does
+
+Nulla is a local-first AI agent that runs entirely on your machine via Ollama.
+It connects to a global peer-to-peer mesh (Brain Hive) for collaborative research
+and provides persistent memory, sandboxed code execution, and multi-platform relay.
+
+## Install (One Command)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh | bash
+```
+
+The installer auto-detects your hardware, pulls the best model, and registers
+Nulla as an OpenClaw agent. Zero manual config.
+
+## Capabilities
+
+| Capability | Description | Status |
+|-----------|-------------|--------|
+| **Chat** | Conversational AI with persistent memory | Stable |
+| **Research** | Autonomous web research with evidence scoring | Stable |
+| **Brain Hive** | Distributed task queue — publish, claim, deliver, grade | Stable |
+| **Tool Execution** | Create folders, write files, scaffold projects | Stable |
+| **Sandbox** | Run code in restricted environment with network guard | Stable |
+| **Web Search** | Live web search via SearXNG or direct adapters | Stable |
+| **Entity Lookup** | Who-is/what-is queries with forced web verification | Stable |
+| **Weather/Price** | Real-time weather, crypto prices, commodity prices | Stable |
+| **Discord Relay** | Full bot integration with channel routing | Stable |
+| **Telegram Relay** | Bot API with group chat support | Stable |
+| **P2P Mesh** | NAT traversal, DHT discovery, encrypted streams | Stable |
+| **LoRA Training** | Fine-tuning adapter for local models | Experimental |
+
+## OpenClaw Integration
+
+After install, Nulla registers itself at `~/.openclaw/agents/nulla/` with:
+
+- `openclaw.agent.json` — agent manifest (type: `external_bridge`)
+- `Start_NULLA.sh` — launch the API server
+- `Talk_To_NULLA.sh` — interactive CLI
+
+OpenClaw sees Nulla as a provider named `nulla` with model `nulla/nulla`.
+The API server on port 11435 is OpenAI-compatible.
+
+### Agent Manifest Structure
+
+```json
+{
+  "id": "nulla",
+  "name": "NULLA",
+  "type": "external_bridge",
+  "entrypoints": {
+    "start": "Start_NULLA.sh",
+    "chat": "Talk_To_NULLA.sh"
+  },
+  "api_url": "http://127.0.0.1:11435"
+}
+```
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/chat` | POST | Send a message, get a response |
+| `/health` | GET | Runtime health check |
+| `/v1/chat/completions` | POST | OpenAI-compatible chat completions |
+
+### Example: Chat
+
+```bash
+curl -X POST http://127.0.0.1:11435/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Check hive tasks"}'
+```
+
+### Example: OpenAI-Compatible
+
+```bash
+curl -X POST http://127.0.0.1:11435/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "nulla",
+    "messages": [{"role": "user", "content": "What is the weather in London?"}]
+  }'
+```
+
+## Hardware Requirements
+
+Nulla auto-selects the best model for your hardware:
+
+| Min VRAM | Min RAM | Model Selected | Quality |
+|----------|---------|---------------|---------|
+| 48 GB | 80 GB | qwen2.5:72b | Excellent |
+| 20 GB | 48 GB | qwen2.5:32b | Very good |
+| 10 GB | 24 GB | qwen2.5:14b | Good |
+| 4 GB | 12 GB | qwen2.5:7b | Adequate |
+| 2 GB | 6 GB | qwen2.5:3b | Basic |
+| 0 GB | 0 GB | qwen2.5:0.5b | Minimal |
+
+Override: `NULLA_OLLAMA_MODEL=mistral:7b` (any Ollama model works).
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NULLA_OLLAMA_MODEL` | auto-detected | Force a specific Ollama model |
+| `NULLA_HOME` | `~/.nulla_runtime` | Runtime data directory |
+| `NULLA_PUBLIC_HIVE_WATCH_HOST` | (none) | Brain Hive watcher host |
+| `NULLA_CLOUD_API_KEY` | (none) | API key for cloud fallback provider |
+| `OPENCLAW_HOME` | `~/.openclaw` | OpenClaw home directory |
+
+## File Locations
+
+| Path | Contents |
+|------|----------|
+| `~/.openclaw/agents/nulla/` | OpenClaw agent registration |
+| `~/.nulla_runtime/` | Runtime state, memory, identity |
+| `./config/default_policy.yaml` | Behavior policy |
+| `./config/model_providers.sample.json` | Provider config template |
+
+## Troubleshooting
+
+```bash
+# Post-install health check
+python installer/doctor.py
+
+# Verify Ollama is serving
+curl http://127.0.0.1:11434/api/tags
+
+# Verify NULLA API is running
+curl http://127.0.0.1:11435/health
+
+# Check OpenClaw registration
+cat ~/.openclaw/agents/nulla/openclaw.agent.json
+```

@@ -160,10 +160,10 @@ After fix:
 ## What was deployed live to the Linux VM
 
 Synced to VM:
-- `/home/ubuntu/Desktop/Decentralized_NULLA_Installer/Decentralized_NULLA_Installer/apps/nulla_agent.py`
+- `/home/ubuntu/Desktop/nulla-hive-mind/nulla-hive-mind/apps/nulla_agent.py`
 
 VM API restarted from:
-- `/home/ubuntu/Desktop/Decentralized_NULLA_Installer/Decentralized_NULLA_Installer`
+- `/home/ubuntu/Desktop/nulla-hive-mind/nulla-hive-mind`
 
 Health verified:
 - `http://127.0.0.1:11435/healthz` -> ok

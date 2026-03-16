@@ -61,13 +61,13 @@ Future public GitHub one-command path:
 Linux/macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Parad0x-Labs/Decentralized_NULLA/main/installer/bootstrap_nulla.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Parad0x-Labs/Decentralized_NULLA/main/installer/bootstrap_nulla.ps1 | iex"
+powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.ps1 | iex"
 ```
 
 ## Local "Baby NULLA" Worker Pool (Single Machine)
@@ -99,7 +99,7 @@ If the machine is too small for your override, NULLA still starts but prints a c
 
 1. Create a folder like `NULLA`.
 2. Extract the installer archive into that folder.
-3. Open extracted `Decentralized_NULLA_Installer`.
+3. Open extracted `nulla-hive-mind_Installer`.
 4. Run:
    - macOS double-click: `Install_NULLA.command`
    - terminal: `bash Install_NULLA.sh`
@@ -125,7 +125,7 @@ If the machine is too small for your override, NULLA still starts but prints a c
 
 1. Create a folder like `NULLA`.
 2. Extract the installer archive.
-3. Open extracted `Decentralized_NULLA_Installer`.
+3. Open extracted `nulla-hive-mind_Installer`.
 4. Double-click `Install_NULLA.bat`.
 5. Accept defaults:
    - runtime folder,
