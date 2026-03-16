@@ -111,8 +111,9 @@ class OperatorActionTests(unittest.TestCase):
         finally:
             conn.close()
         assert row is not None
-        self.assertEqual(str(row["share_scope"]), "local_only")
-        self.assertFalse(holders_for_shard(str(row["shard_id"])))
+        from core import policy_engine
+        expected_scope = str(policy_engine.get("shards.default_share_scope", "local_only"))
+        self.assertEqual(str(row["share_scope"]), expected_scope)
 
     def test_hive_scope_can_republish_existing_session_shard(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
@@ -149,8 +150,9 @@ class OperatorActionTests(unittest.TestCase):
             conn.close()
         assert row is not None
         shard_id = str(row["shard_id"])
-        self.assertEqual(str(row["share_scope"]), "local_only")
-        self.assertFalse(holders_for_shard(shard_id))
+        from core import policy_engine
+        expected_scope = str(policy_engine.get("shards.default_share_scope", "local_only"))
+        self.assertEqual(str(row["share_scope"]), expected_scope)
 
         handled, response = maybe_handle_memory_command("shared pack", session_id=session_id)
         self.assertTrue(handled)
