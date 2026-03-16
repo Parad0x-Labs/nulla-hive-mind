@@ -1,8 +1,27 @@
 from __future__ import annotations
 
+from core.nulla_workstation_ui import (
+    render_workstation_header,
+    render_workstation_script,
+    render_workstation_styles,
+)
+
 
 def render_runtime_task_rail_html() -> str:
-    return _TASK_RAIL_HTML
+    return (
+        _TASK_RAIL_HTML
+        .replace("__WORKSTATION_STYLES__", render_workstation_styles())
+        .replace(
+            "__WORKSTATION_HEADER__",
+            render_workstation_header(
+                title="NULLA Operator Workstation",
+                subtitle="Trace turns runtime causality, retries, stop reasons, and artifacts into one inspectable execution lane.",
+                default_mode="trace",
+                surface="trace-rail",
+            ),
+        )
+        .replace("__WORKSTATION_SCRIPT__", render_workstation_script())
+    )
 
 
 _TASK_RAIL_HTML = """<!DOCTYPE html>
@@ -12,43 +31,30 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
   <title>NULLA Trace Rail</title>
   <style>
+    __WORKSTATION_STYLES__
     :root {
-      --bg: #07111f;
-      --bg-2: #040913;
-      --panel: rgba(10, 16, 31, 0.9);
-      --panel-2: rgba(16, 26, 49, 0.92);
-      --line: rgba(154, 171, 212, 0.16);
-      --line-strong: rgba(154, 171, 212, 0.24);
-      --text: #edf2ff;
-      --muted: #9ba9c7;
-      --accent: #6ee7ff;
-      --accent-2: #ff9466;
-      --good: #5ef0a8;
-      --warn: #ffd166;
-      --bad: #ff6b7a;
-      --shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
-      --radius: 18px;
-      --font-ui: \"Avenir Next\", \"Segoe UI\", sans-serif;
-      --font-mono: \"SFMono-Regular\", \"Cascadia Code\", \"JetBrains Mono\", monospace;
+      --bg: var(--wk-bg);
+      --bg-2: var(--wk-bg-alt);
+      --panel: var(--wk-panel);
+      --panel-2: var(--wk-panel-strong);
+      --line: var(--wk-line);
+      --line-strong: var(--wk-line-strong);
+      --text: var(--wk-text);
+      --muted: var(--wk-muted);
+      --accent: var(--wk-accent);
+      --accent-2: var(--wk-warn);
+      --good: var(--wk-good);
+      --warn: var(--wk-warn);
+      --bad: var(--wk-bad);
+      --shadow: var(--wk-shadow);
+      --radius: var(--wk-radius);
+      --font-ui: var(--wk-font-ui);
+      --font-mono: var(--wk-font-mono);
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0;
-      min-height: 100vh;
       font-family: var(--font-ui);
       color: var(--text);
-      background:
-        radial-gradient(circle at top left, rgba(110, 231, 255, 0.16), transparent 24%),
-        radial-gradient(circle at top right, rgba(255, 148, 102, 0.14), transparent 22%),
-        linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
-    }
-    .shell {
-      max-width: 1640px;
-      margin: 0 auto;
-      padding: 28px;
-      display: grid;
-      grid-template-columns: 360px minmax(0, 1fr);
-      gap: 18px;
     }
     .panel {
       background: linear-gradient(180deg, rgba(18, 29, 54, 0.96), rgba(9, 14, 27, 0.98));
@@ -158,6 +164,37 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
       color: var(--muted);
       font-size: 12px;
     }
+    .trace-stage-head {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent);
+    }
+    .trace-stage-head h2 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: -0.04em;
+      line-height: 1.05;
+    }
+    .trace-stage-copy {
+      margin: 8px 0 0;
+      color: var(--muted);
+      line-height: 1.55;
+      max-width: 72ch;
+      font-size: 14px;
+    }
+    .trace-stage-proof {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .trace-stage-proof .wk-proof-chip {
+      white-space: nowrap;
+    }
     .rail-body {
       min-height: calc(100vh - 56px);
       display: grid;
@@ -180,7 +217,7 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
     }
     .summary-grid {
       display: grid;
-      grid-template-columns: repeat(6, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
       margin-top: 16px;
     }
@@ -212,12 +249,12 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
     }
     .trace-strip {
       display: grid;
-      grid-template-columns: repeat(6, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
     }
     .ops-grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
     }
     .ops-card {
@@ -439,35 +476,117 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
       font-size: 12px;
       color: var(--muted);
     }
+    .trace-workbench {
+      display: grid;
+      grid-template-columns: minmax(280px, 320px) minmax(0, 1.45fr) minmax(300px, 360px);
+      gap: 16px;
+      align-items: start;
+    }
+    .trace-rail-shell,
+    .trace-summary-shell {
+      position: sticky;
+      top: 18px;
+      align-self: start;
+      min-height: calc(100vh - 36px);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.01)),
+        var(--panel-2);
+    }
+    .trace-center-shell {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01)),
+        rgba(9, 15, 28, 0.96);
+    }
+    .trace-rail-shell,
+    .trace-summary-shell {
+      padding: 16px;
+    }
+    .trace-rail-stack,
+    .trace-summary-stack {
+      display: grid;
+      gap: 14px;
+    }
+    .trace-rail-section,
+    .trace-summary-section {
+      display: grid;
+      gap: 10px;
+    }
+    .trace-selected-step {
+      display: grid;
+      gap: 10px;
+    }
+    .trace-selected-step h3 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+    .trace-selected-step p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .trace-selected-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .trace-feed-grid {
+      display: block;
+      min-height: 0;
+    }
+    .trace-feed-grid .event-feed {
+      min-height: 0;
+    }
+    .event-card {
+      cursor: pointer;
+      transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+    }
+    .event-card:hover,
+    .event-card.is-active {
+      transform: translateY(-1px);
+      border-color: rgba(110, 231, 255, 0.34);
+      background:
+        linear-gradient(135deg, rgba(97, 218, 251, 0.06), transparent 55%),
+        rgba(255,255,255,0.03);
+    }
+    .trace-raw-panel {
+      display: none;
+      padding: 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(0, 0, 0, 0.24);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow: auto;
+      max-height: 42vh;
+    }
+    body[data-view-mode="raw"] .trace-raw-panel {
+      display: block;
+    }
+    body[data-view-mode="raw"] .trace-human,
+    body[data-view-mode="raw"] .trace-agent {
+      display: none;
+    }
+    body[data-view-mode="agent"] .trace-human[data-human-optional="1"] {
+      display: none;
+    }
+    body[data-view-mode="human"] .trace-agent[data-agent-optional="1"] {
+      display: none;
+    }
     @media (max-width: 1200px) {
-      .summary-grid,
-      .trace-strip,
-      .ops-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
-      .feed-grid {
+      .trace-workbench {
         grid-template-columns: 1fr;
-      }
-      .inspector {
-        border-left: 0;
-        border-top: 1px solid var(--line);
       }
     }
     @media (max-width: 980px) {
-      .shell {
-        grid-template-columns: 1fr;
-        padding: 16px;
-      }
       .session-list {
         max-height: 320px;
       }
       .rail-body {
         min-height: unset;
-      }
-      .summary-grid,
-      .trace-strip,
-      .ops-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
     @media (max-width: 640px) {
@@ -480,74 +599,117 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <div class=\"shell\">
-    <aside class=\"panel\">
-      <div class=\"panel-header\">
-        <div class=\"eyebrow\">OpenClaw Companion</div>
-        <div class=\"title-row\">
-          <div class=\"title\">NULLA Task Rail</div>
-          <div class=\"status-pill\" id=\"pollStatus\">polling</div>
+  <div class=\"wk-app-shell\">
+    __WORKSTATION_HEADER__
+    <div class=\"trace-workbench\">
+      <aside class=\"panel trace-rail-shell\">
+        <div class=\"trace-rail-stack\">
+          <section class=\"trace-rail-section\">
+            <div class=\"panel-header\">
+              <div class=\"eyebrow\">Session rail</div>
+              <div class=\"title-row\">
+                <div class=\"title\">NULLA Task Rail</div>
+                <div class=\"status-pill\" id=\"pollStatus\">polling</div>
+              </div>
+              <div class=\"subtitle\">
+                Runtime causality rail for sessions, claims, retries, artifacts, and stop reasons.
+              </div>
+              <div class=\"link-line\">Live URL: <code>http://127.0.0.1:11435/trace</code></div>
+            </div>
+            <div class=\"session-list\" id=\"sessionList\">
+              <div class=\"empty-state\">Waiting for recent sessions...</div>
+            </div>
+          </section>
+          <section class=\"trace-rail-section\">
+            <div class=\"wk-panel-eyebrow\">Execution rail</div>
+            <div class=\"trace-strip\" id=\"traceStrip\">
+              <div class=\"empty-state\">No process rail yet.</div>
+            </div>
+          </section>
         </div>
-        <div class=\"subtitle\">
-          Hive-aware runtime trace for OpenClaw sessions. This rail shows the real ladder: claim, bounded queries, packed artifacts, and final result state.
-        </div>
-        <div class=\"link-line\">Live URL: <code>http://127.0.0.1:11435/trace</code></div>
-      </div>
-      <div class=\"session-list\" id=\"sessionList\">
-        <div class=\"empty-state\">Waiting for recent sessions...</div>
-      </div>
-    </aside>
+      </aside>
 
-    <main class=\"panel rail-body\">
-      <section class=\"detail-block detail-main\" id=\"sessionDetail\">
-        <h2>No session selected</h2>
-        <p>Run a task through OpenClaw. Recent sessions will appear on the left and the live trace will fill here.</p>
-      </section>
-      <section class=\"detail-block\" id=\"summaryBlock\">
-        <div class=\"summary-grid\" id=\"summaryGrid\">
-          <div class=\"empty-state\">No session summary yet.</div>
-        </div>
-      </section>
-      <section class=\"detail-block\" id=\"opsBlock\">
-        <div class=\"ops-grid\" id=\"opsGrid\">
-          <div class=\"empty-state\">Loading adaptation and budget status...</div>
-        </div>
-      </section>
-      <section class=\"detail-block\" id=\"traceBlock\">
-        <div class=\"trace-strip\" id=\"traceStrip\">
-          <div class=\"empty-state\">No process rail yet.</div>
-        </div>
-        <div class=\"meta-row\" id=\"metaRow\"></div>
-      </section>
-      <section class=\"feed-grid\">
-        <section class=\"event-feed\" id=\"eventFeed\">
-          <div class=\"empty-state\">No runtime events yet.</div>
+      <main class=\"panel rail-body trace-center-shell\">
+        <section class=\"trace-stage-head\">
+          <div>
+            <div class=\"wk-panel-eyebrow\">Selected-step center</div>
+            <h2>Trace workstation v1</h2>
+            <p class=\"trace-stage-copy\">What happened, why it happened, what changed, what failed, how often it retried, and why it stopped now live in one central execution view.</p>
+          </div>
+          <div class=\"trace-stage-proof\">
+            <span class=\"wk-proof-chip wk-proof-chip--primary\">workstation v1</span>
+            <span class=\"wk-proof-chip\">session rail</span>
+            <span class=\"wk-proof-chip\">selected-step center</span>
+            <span class=\"wk-proof-chip\">session summary</span>
+          </div>
         </section>
-        <aside class=\"inspector\" id=\"inspector\">
-          <div class=\"inspector-card\">
-            <h3>Trace Focus</h3>
-            <div class=\"inspector-list\" id=\"focusList\">
-              <div class=\"inspector-item\">No topic or claim selected yet.</div>
+        <section class=\"detail-block detail-main\" id=\"sessionDetail\">
+          <h2>No session selected</h2>
+          <p>Run a task through OpenClaw. Recent sessions and their causal rails will appear here.</p>
+        </section>
+        <section class=\"detail-block trace-selected-step\">
+          <div class=\"wk-panel-eyebrow\">Selected step</div>
+          <h3 id=\"selectedStepTitle\">No step selected</h3>
+          <p id=\"selectedStepBody\">Pick a runtime event or let the latest step stay in focus.</p>
+          <div class=\"trace-selected-meta\" id=\"selectedStepMeta\"></div>
+        </section>
+        <section class=\"feed-grid trace-feed-grid\">
+          <section class=\"event-feed\" id=\"eventFeed\">
+            <div class=\"empty-state\">No runtime events yet.</div>
+          </section>
+        </section>
+      </main>
+
+      <aside class=\"panel trace-summary-shell\">
+        <div class=\"trace-summary-stack\">
+          <section class=\"trace-summary-section trace-human\">
+            <div class=\"wk-panel-eyebrow\">Session summary</div>
+            <div class=\"summary-grid\" id=\"summaryGrid\">
+              <div class=\"empty-state\">No session summary yet.</div>
             </div>
-          </div>
-          <div class=\"inspector-card\">
-            <h3>Artifacts</h3>
-            <div class=\"inspector-list\" id=\"artifactList\">
-              <div class=\"inspector-item\">No packed artifacts yet.</div>
+          </section>
+          <section class=\"trace-summary-section trace-human\" data-human-optional=\"1\">
+            <div class=\"wk-panel-eyebrow\">Why / stop</div>
+            <div class=\"ops-grid\" id=\"opsGrid\">
+              <div class=\"empty-state\">No stop, failure, or retry state yet.</div>
             </div>
-          </div>
-          <div class=\"inspector-card\">
-            <h3>Bounded Queries</h3>
-            <div class=\"inspector-list\" id=\"queryList\">
-              <div class=\"inspector-item\">No query runs yet.</div>
+          </section>
+          <section class=\"trace-summary-section trace-agent\" data-agent-optional=\"1\">
+            <div class=\"wk-panel-eyebrow\">Agent pack</div>
+            <div class=\"meta-row\" id=\"metaRow\"></div>
+          </section>
+          <section class=\"trace-summary-section\">
+            <div class=\"inspector-card\">
+              <h3>Focus</h3>
+              <div class=\"inspector-list\" id=\"focusList\">
+                <div class=\"inspector-item\">No topic or claim selected yet.</div>
+              </div>
             </div>
-          </div>
-        </aside>
-      </section>
-    </main>
+          </section>
+          <section class=\"trace-summary-section\">
+            <div class=\"inspector-card\">
+              <h3>Artifacts</h3>
+              <div class=\"inspector-list\" id=\"artifactList\">
+                <div class=\"inspector-item\">No packed artifacts yet.</div>
+              </div>
+            </div>
+          </section>
+          <section class=\"trace-summary-section\">
+            <div class=\"inspector-card\">
+              <h3>Retries / Queries</h3>
+              <div class=\"inspector-list\" id=\"queryList\">
+                <div class=\"inspector-item\">No query runs yet.</div>
+              </div>
+            </div>
+          </section>
+          <pre class=\"trace-raw-panel\" id=\"traceRawPanel\"></pre>
+        </div>
+      </aside>
+    </div>
   </div>
 
   <script>
+    __WORKSTATION_SCRIPT__
     const sessionListEl = document.getElementById('sessionList');
     const sessionDetailEl = document.getElementById('sessionDetail');
     const summaryGridEl = document.getElementById('summaryGrid');
@@ -559,13 +721,16 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
     const focusListEl = document.getElementById('focusList');
     const artifactListEl = document.getElementById('artifactList');
     const queryListEl = document.getElementById('queryList');
+    const selectedStepTitleEl = document.getElementById('selectedStepTitle');
+    const selectedStepBodyEl = document.getElementById('selectedStepBody');
+    const selectedStepMetaEl = document.getElementById('selectedStepMeta');
+    const traceRawPanelEl = document.getElementById('traceRawPanel');
     const query = new URLSearchParams(window.location.search);
     let selectedSessionId = query.get('session') || '';
+    let selectedEventSeq = 0;
     let lastSeq = 0;
     let knownEvents = [];
     let sessions = [];
-    let opsStatus = null;
-    let lastOpsFetchAt = 0;
 
     const statusClass = (value) => {
       const raw = String(value || 'running').toLowerCase();
@@ -585,16 +750,6 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
       const num = Number(value || 0);
       if (!Number.isFinite(num)) return '0';
       return Math.abs(num) >= 100 ? String(Math.round(num)) : num.toFixed(1).replace(/\\.0$/, '');
-    };
-
-    const toneForRemaining = (remaining, total) => {
-      const safeTotal = Number(total || 0);
-      const safeRemaining = Number(remaining || 0);
-      if (!safeTotal) return '';
-      const ratio = safeRemaining / safeTotal;
-      if (ratio <= 0.1) return 'bad';
-      if (ratio <= 0.3) return 'warn';
-      return 'good';
     };
 
     const escapeHtml = (value) => String(value || '')
@@ -638,6 +793,12 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
       let queryCount = 0;
       let artifactCount = 0;
       let candidateCount = 0;
+      let stopReason = '';
+      const changedPaths = [];
+      const failureItems = [];
+      const artifactRows = [];
+      const retryHistory = [];
+      const toolAttempts = new Map();
       const stages = {
         received: false,
         claimed: false,
@@ -656,11 +817,20 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
         if (event.tool_name) latestTool = String(event.tool_name);
         if (event.message) lastMessage = String(event.message);
         if (event.status) activeStatus = String(event.status);
+        if (!stopReason && event.stop_reason) stopReason = String(event.stop_reason);
+        if (!stopReason && event.loop_stop_reason) stopReason = String(event.loop_stop_reason);
+        if (!stopReason && event.final_stop_reason) stopReason = String(event.final_stop_reason);
 
         if (event.event_type === 'task_received') stages.received = true;
         if (event.claim_id || event.tool_name === 'hive.claim_task') stages.claimed = true;
         if (event.artifact_id) {
           artifactIds.add(String(event.artifact_id));
+          artifactRows.push({
+            artifactId: String(event.artifact_id),
+            role: String(event.artifact_role || event.artifact_kind || 'artifact'),
+            path: String(event.path || event.file_path || event.target_path || ''),
+            toolName: String(event.tool_name || ''),
+          });
           if (String(event.artifact_role || '') === 'packet' || String(event.tool_name || '') === 'liquefy.pack_research_packet') {
             packetArtifactIds.add(String(event.artifact_id));
           }
@@ -675,6 +845,27 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
         if (event.candidate_count != null) candidateCount = Math.max(candidateCount, Number(event.candidate_count) || 0);
         if (event.query_count != null) queryCount = Math.max(queryCount, Number(event.query_count) || 0);
         if (event.artifact_count != null) artifactCount = Math.max(artifactCount, Number(event.artifact_count) || 0);
+        const changedPath = String(event.path || event.file_path || event.target_path || '').trim();
+        if (changedPath && !changedPaths.includes(changedPath)) changedPaths.push(changedPath);
+        const eventStatus = String(event.status || '').toLowerCase();
+        const eventType = String(event.event_type || '').toLowerCase();
+        if (eventType.includes('failed') || eventStatus === 'failed' || String(event.result_status || '').toLowerCase() === 'failed') {
+          failureItems.push({
+            type: String(event.event_type || 'failed'),
+            tool: String(event.tool_name || ''),
+            message: String(event.message || ''),
+          });
+        }
+        if (event.retry_count != null) {
+          retryHistory.push({
+            tool: String(event.tool_name || 'runtime.step'),
+            retryCount: Number(event.retry_count) || 0,
+            reason: String(event.retry_reason || event.message || ''),
+          });
+        }
+        if (event.tool_name) {
+          toolAttempts.set(event.tool_name, Number(toolAttempts.get(event.tool_name) || 0) + 1);
+        }
 
         if (event.tool_name === 'curiosity.run_external_topic') {
           const qIndex = Number(event.query_index || 0);
@@ -699,6 +890,15 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
       if (queryStartedCount > 0 || queryCompletedCount > 0) stages.queries = true;
       artifactCount = Math.max(artifactCount, artifactIds.size);
       candidateCount = Math.max(candidateCount, candidateIds.size);
+      for (const [toolName, attempts] of toolAttempts.entries()) {
+        if (attempts > 1 && !retryHistory.some((item) => item.tool === toolName)) {
+          retryHistory.push({
+            tool: toolName,
+            retryCount: attempts - 1,
+            reason: 'repeated execution in the same session',
+          });
+        }
+      }
 
       const title = topicTitle || session?.request_preview || session?.session_id || 'Recent runtime session';
       const requestStatus = String(session?.status || activeStatus || 'running').toLowerCase();
@@ -731,6 +931,11 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
         packetArtifactIds: Array.from(packetArtifactIds),
         bundleArtifactIds: Array.from(bundleArtifactIds),
         candidateIds: Array.from(candidateIds),
+        artifactRows,
+        changedPaths,
+        failureItems,
+        retryHistory,
+        stopReason: stopReason || (requestStatus === 'completed' ? 'bounded loop finished' : ''),
         queryRuns,
         queryStartedCount,
         queryCompletedCount,
@@ -770,6 +975,7 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
           const sessionId = node.getAttribute('data-session-id') || '';
           if (!sessionId || sessionId === selectedSessionId) return;
           selectedSessionId = sessionId;
+          selectedEventSeq = 0;
           lastSeq = 0;
           knownEvents = [];
           setQuerySession(sessionId);
@@ -801,6 +1007,64 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
       `;
     }
 
+    function selectedEvent() {
+      if (!knownEvents.length) return null;
+      if (!selectedEventSeq) return knownEvents[knownEvents.length - 1] || null;
+      return knownEvents.find((event) => Number(event.seq || 0) === Number(selectedEventSeq || 0)) || knownEvents[knownEvents.length - 1] || null;
+    }
+
+    function renderSelectedStep() {
+      const session = sessions.find((row) => row.session_id === selectedSessionId);
+      const event = selectedEvent();
+      if (!session || !event) {
+        selectedStepTitleEl.textContent = 'No step selected';
+        selectedStepBodyEl.textContent = 'Pick a runtime event or let the latest step stay in focus.';
+        selectedStepMetaEl.innerHTML = '';
+        traceRawPanelEl.textContent = '';
+        return;
+      }
+      const summary = buildSummary(session, knownEvents);
+      const title = String(event.tool_name || event.event_type || 'runtime_step');
+      const body = String(
+        event.message
+        || event.retry_reason
+        || event.stop_reason
+        || event.final_stop_reason
+        || event.query
+        || 'No step detail captured.',
+      );
+      const meta = [];
+      meta.push(`<span class="meta-chip">seq ${escapeHtml(String(event.seq || '?'))}</span>`);
+      meta.push(`<span class="meta-chip">type ${escapeHtml(String(event.event_type || 'status'))}</span>`);
+      if (event.tool_name) meta.push(`<span class="meta-chip">tool ${escapeHtml(String(event.tool_name))}</span>`);
+      if (event.status) meta.push(`<span class="meta-chip">status ${escapeHtml(String(event.status))}</span>`);
+      if (event.path || event.file_path || event.target_path) {
+        meta.push(`<span class="meta-chip">changed ${escapeHtml(String(event.path || event.file_path || event.target_path))}</span>`);
+      }
+      if (event.artifact_id) meta.push(`<span class="meta-chip">artifact ${escapeHtml(String(event.artifact_id))}</span>`);
+      if (event.stop_reason || event.final_stop_reason || summary.stopReason) {
+        meta.push(`<span class="meta-chip">stop ${escapeHtml(String(event.stop_reason || event.final_stop_reason || summary.stopReason))}</span>`);
+      }
+      if (event.retry_count != null) meta.push(`<span class="meta-chip">retry ${escapeHtml(String(event.retry_count))}</span>`);
+      selectedStepTitleEl.textContent = title;
+      selectedStepBodyEl.textContent = body;
+      selectedStepMetaEl.innerHTML = meta.join('');
+      traceRawPanelEl.textContent = JSON.stringify(
+        {
+          session: {
+            session_id: session.session_id,
+            request_preview: session.request_preview,
+            status: session.status,
+            task_class: session.task_class,
+          },
+          summary,
+          selected_event: event,
+        },
+        null,
+        2,
+      );
+    }
+
     function renderSummary() {
       const session = sessions.find((row) => row.session_id === selectedSessionId);
       if (!session) {
@@ -810,6 +1074,8 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
         focusListEl.innerHTML = '<div class="inspector-item">No topic or claim selected yet.</div>';
         artifactListEl.innerHTML = '<div class="inspector-item">No packed artifacts yet.</div>';
         queryListEl.innerHTML = '<div class="inspector-item">No query runs yet.</div>';
+        opsGridEl.innerHTML = '<div class="empty-state">No stop, failure, or retry state yet.</div>';
+        traceRawPanelEl.textContent = '';
         return;
       }
       const summary = buildSummary(session, knownEvents);
@@ -861,6 +1127,7 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
       meta.push(`<span class="meta-chip">updated ${escapeHtml(shortTime(session.updated_at))}</span>`);
       if (summary.latestTool) meta.push(`<span class="meta-chip">tool ${escapeHtml(summary.latestTool)}</span>`);
       if (summary.topicId) meta.push(`<span class="meta-chip">topic ${escapeHtml(summary.topicId)}</span>`);
+      if (summary.stopReason) meta.push(`<span class="meta-chip">stop ${escapeHtml(summary.stopReason)}</span>`);
       metaRowEl.innerHTML = meta.join('');
 
       const focusItems = [];
@@ -868,78 +1135,69 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
       if (summary.claimId) focusItems.push(`<div class="inspector-item">Claim <code>${escapeHtml(summary.claimId)}</code></div>`);
       focusItems.push(`<div class="inspector-item">Request state: <code>${escapeHtml(summary.requestStatus || 'running')}</code></div>`);
       focusItems.push(`<div class="inspector-item">Topic state: <code>${escapeHtml(summary.resultStatus || summary.status || 'running')}</code></div>`);
+      if (summary.stopReason) focusItems.push(`<div class="inspector-item">Stop reason: <code>${escapeHtml(summary.stopReason)}</code></div>`);
+      if (summary.changedPaths.length) {
+        summary.changedPaths.slice(0, 6).forEach((path) => {
+          focusItems.push(`<div class="inspector-item">Changed <code>${escapeHtml(path)}</code></div>`);
+        });
+      }
       if (summary.postId) focusItems.push(`<div class="inspector-item">Last result post <code>${escapeHtml(summary.postId)}</code></div>`);
       if (!focusItems.length) focusItems.push('<div class="inspector-item">No topic or claim selected yet.</div>');
       focusListEl.innerHTML = focusItems.join('');
 
-      const artifactItems = summary.artifactIds.map((artifactId) => {
-        const role = summary.packetArtifactIds.includes(artifactId) ? 'packet' : summary.bundleArtifactIds.includes(artifactId) ? 'bundle' : 'artifact';
-        return `<div class="inspector-item">${escapeHtml(role)} <code>${escapeHtml(artifactId)}</code></div>`;
+      const artifactItems = summary.artifactRows.map((item) => {
+        const role = summary.packetArtifactIds.includes(item.artifactId) ? 'packet' : summary.bundleArtifactIds.includes(item.artifactId) ? 'bundle' : item.role || 'artifact';
+        const tail = item.path ? ` · <code>${escapeHtml(item.path)}</code>` : item.toolName ? ` · ${escapeHtml(item.toolName)}` : '';
+        return `<div class="inspector-item">${escapeHtml(role)} <code>${escapeHtml(item.artifactId)}</code>${tail}</div>`;
       });
       artifactListEl.innerHTML = artifactItems.length ? artifactItems.join('') : '<div class="inspector-item">No packed artifacts yet.</div>';
 
-      const queryItems = summary.queryRuns.map((item) => {
+      const queryItems = [];
+      summary.retryHistory.forEach((item) => {
+        queryItems.push(`<div class="inspector-item">retry <code>${escapeHtml(item.tool)}</code> × ${escapeHtml(String(item.retryCount || 0))}${item.reason ? ` · ${escapeHtml(item.reason)}` : ''}</div>`);
+      });
+      summary.queryRuns.forEach((item) => {
         const prefix = item.total ? `${item.index}/${item.total}` : 'query';
-        return `<div class="inspector-item"><code>${escapeHtml(prefix)}</code> ${escapeHtml(item.label)}</div>`;
+        queryItems.push(`<div class="inspector-item"><code>${escapeHtml(prefix)}</code> ${escapeHtml(item.label)}</div>`);
       });
       queryListEl.innerHTML = queryItems.length ? queryItems.join('') : '<div class="inspector-item">No query runs yet.</div>';
-    }
 
-    function renderOpsStatus() {
-      if (!opsStatus) {
-        opsGridEl.innerHTML = '<div class="empty-state">Loading adaptation and budget status...</div>';
-        return;
-      }
-      const adaptation = opsStatus.adaptation || {};
-      const loop = adaptation.loop_state || {};
-      const useful = opsStatus.useful_outputs || adaptation.useful_outputs || {};
-      const hive = opsStatus.public_hive_budget_today || {};
-      const swarm = opsStatus.swarm_dispatch_budget_today || {};
-      const adaptationTone = String(loop.status || '').toLowerCase() === 'failed' || String(loop.last_decision || '').toLowerCase() === 'rejected'
-        ? 'warn'
-        : String(loop.status || '').toLowerCase() === 'promoted'
-          ? 'good'
-          : '';
-      const hiveTone = toneForRemaining(hive.remaining_estimated, hive.estimated_daily_quota);
-      const swarmTone = toneForRemaining(swarm.remaining_estimated, swarm.free_tier_daily_swarm_points);
-      const baseName = String(loop.base_model_name || loop.base_provider_name || loop.base_model_ref || 'not staged');
-      const activeModel = String(loop.active_model_name || 'none');
-      const routeCosts = hive.route_costs || {};
-      const routeSummary = Object.entries(routeCosts).slice(0, 3).map(([name, cost]) => `${name}:${formatNumber(cost)}`).join(' | ');
-      const blocker = String(loop.last_reason || 'none');
-      const cards = [
+      const failureCount = summary.failureItems.length;
+      const retryCount = summary.retryHistory.reduce((total, item) => total + Number(item.retryCount || 0), 0);
+      const changedCount = summary.changedPaths.length;
+      const opsCards = [
         {
-          tone: adaptationTone,
-          label: 'Adaptation Loop',
-          value: String(loop.status || 'idle'),
-          detail: `decision ${String(loop.last_decision || 'none')} | blocker ${blocker} | quality ${formatNumber(loop.last_quality_score)} | examples ${formatNumber(loop.last_example_count)}`,
+          tone: summary.stopReason ? 'good' : '',
+          label: 'Stop reason',
+          value: summary.stopReason || 'still running',
+          detail: 'Bounded execution stops explicitly instead of pretending work is still in flight.',
         },
         {
-          tone: '',
-          label: 'Trainable Base',
-          value: baseName,
-          detail: `active adapted model ${activeModel} | staged bases ${Array.isArray(adaptation.staged_bases) ? adaptation.staged_bases.length : 0}`,
+          tone: failureCount ? 'bad' : 'good',
+          label: 'Failures',
+          value: String(failureCount),
+          detail: failureCount
+            ? summary.failureItems.slice(0, 2).map((item) => item.message || item.type).join(' | ')
+            : 'No failed runtime steps in this session.',
         },
         {
-          tone: useful.training_eligible_count > 0 ? 'good' : 'warn',
-          label: 'Useful Outputs',
-          value: `${formatNumber(useful.training_eligible_count)} ready / ${formatNumber(useful.total_count)}`,
-          detail: `structured ${formatNumber(useful.structured_total)} | high signal ${formatNumber(useful.high_signal_count)} | archive ${formatNumber(useful.archive_candidate_count)}`,
+          tone: retryCount ? 'warn' : '',
+          label: 'Retries',
+          value: String(retryCount),
+          detail: retryCount
+            ? summary.retryHistory.slice(0, 2).map((item) => `${item.tool} x${item.retryCount}`).join(' | ')
+            : 'No repeated runtime retries.',
         },
         {
-          tone: hiveTone,
-          label: 'Hive Budget',
-          value: `${formatNumber(hive.used_total)} / ${formatNumber(hive.estimated_daily_quota)}`,
-          detail: `tier ${String(hive.trust_tier || 'low')} | active claims ${formatNumber(hive.active_claim_count)} | remaining ${formatNumber(hive.remaining_estimated)}`,
-        },
-        {
-          tone: swarmTone,
-          label: 'Swarm Budget',
-          value: `${formatNumber(swarm.used_total)} / ${formatNumber(swarm.free_tier_daily_swarm_points)}`,
-          detail: `remaining ${formatNumber(swarm.remaining_estimated)} | approvals ${formatNumber(opsStatus.pending_approval_count)}${routeSummary ? ` | costs ${routeSummary}` : ''}`,
+          tone: changedCount ? 'good' : '',
+          label: 'Changed',
+          value: String(changedCount),
+          detail: changedCount
+            ? summary.changedPaths.slice(0, 2).join(' | ')
+            : 'No file or target path changes recorded.',
         },
       ];
-      opsGridEl.innerHTML = cards.map((item) => `
+      opsGridEl.innerHTML = opsCards.map((item) => `
         <article class="ops-card ${escapeHtml(item.tone)}">
           <span>${escapeHtml(item.label)}</span>
           <strong>${escapeHtml(item.value)}</strong>
@@ -953,6 +1211,7 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
         eventFeedEl.innerHTML = '<div class="empty-state">No runtime events for this session yet.</div>';
         return;
       }
+      const activeSeq = Number((selectedEvent() || {}).seq || 0);
       eventFeedEl.innerHTML = knownEvents.map((event) => {
         const chips = [];
         if (event.seq != null) chips.push(`<span class="meta-chip">seq ${escapeHtml(String(event.seq))}</span>`);
@@ -964,8 +1223,11 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
         if (event.result_status) chips.push(`<span class="meta-chip">result ${escapeHtml(String(event.result_status))}</span>`);
         if (event.tool_name) chips.push(`<span class="meta-chip">tool ${escapeHtml(String(event.tool_name))}</span>`);
         if (event.status) chips.push(`<span class="meta-chip">status ${escapeHtml(String(event.status))}</span>`);
+        if (event.stop_reason) chips.push(`<span class="meta-chip">stop ${escapeHtml(String(event.stop_reason))}</span>`);
+        if (event.retry_count != null) chips.push(`<span class="meta-chip">retry ${escapeHtml(String(event.retry_count))}</span>`);
+        const activeClass = Number(event.seq || 0) === activeSeq ? 'is-active' : '';
         return `
-          <article class="event-card ${escapeHtml(String(event.event_type || 'status'))}">
+          <article class="event-card ${escapeHtml(String(event.event_type || 'status'))} ${activeClass}" data-event-seq="${escapeHtml(String(event.seq || '0'))}">
             <div class="event-head">
               <div class="event-type">${escapeHtml(event.event_type || 'status')}</div>
               <div class="event-time">${escapeHtml(shortTime(event.created_at))}</div>
@@ -975,6 +1237,13 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
           </article>
         `;
       }).join('');
+      eventFeedEl.querySelectorAll('[data-event-seq]').forEach((node) => {
+        node.addEventListener('click', () => {
+          selectedEventSeq = Number(node.getAttribute('data-event-seq') || '0') || 0;
+          renderEvents();
+          renderSelectedStep();
+        });
+      });
     }
 
     async function fetchSessions() {
@@ -1025,6 +1294,14 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
       } else if (incoming.length) {
         knownEvents = knownEvents.concat(incoming);
       }
+      if (knownEvents.length) {
+        const selectedStillExists = knownEvents.some((event) => Number(event.seq || 0) === Number(selectedEventSeq || 0));
+        if (!selectedStillExists) {
+          selectedEventSeq = Number(knownEvents[knownEvents.length - 1].seq || 0) || 0;
+        }
+      } else {
+        selectedEventSeq = 0;
+      }
       if (payload.next_after != null) {
         lastSeq = Number(payload.next_after) || lastSeq;
       } else if (knownEvents.length) {
@@ -1033,22 +1310,12 @@ _TASK_RAIL_HTML = """<!DOCTYPE html>
       renderSessionDetail();
       renderSummary();
       renderEvents();
+      renderSelectedStep();
       pollStatusEl.textContent = 'live';
-    }
-
-    async function fetchOpsStatus(force = false) {
-      const now = Date.now();
-      if (!force && (now - lastOpsFetchAt) < 5000) return;
-      const response = await fetch('/api/runtime/control-plane/status');
-      if (!response.ok) return;
-      opsStatus = await response.json();
-      lastOpsFetchAt = now;
-      renderOpsStatus();
     }
 
     async function tick() {
       try {
-        await fetchOpsStatus();
         await fetchSessions();
         await fetchEvents();
       } catch (err) {

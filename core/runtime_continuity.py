@@ -15,6 +15,7 @@ _DB_PATH_OVERRIDE: str | Path | None = None
 _LOCK = threading.RLock()
 _RESUMABLE_STATUSES = {"running", "interrupted", "pending_approval"}
 _MUTATING_TOOL_INTENTS = {
+    "workspace.ensure_directory",
     "workspace.write_file",
     "workspace.replace_in_file",
     "sandbox.run_command",

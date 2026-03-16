@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from apps.nulla_agent import NullaAgent
@@ -82,8 +83,10 @@ def test_build_chat_footer_surfaces_new_available_research_and_respects_snooze()
 
 
 def test_build_chat_footer_reports_watched_topic_updates_once() -> None:
+    fresh_ts = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
     tracker = _tracker(
         {
+            "generated_at": fresh_ts,
             "stats": {"active_agents": 2},
             "topics": [
                 {
@@ -119,6 +122,8 @@ def test_build_chat_footer_reports_watched_topic_updates_once() -> None:
     )
     assert "new research post" in footer.lower()
     assert "new agent" in footer.lower()
+    assert "watcher-derived" in footer.lower()
+    assert "fresh" in footer.lower()
 
     footer = tracker.build_chat_footer(
         session_id="openclaw:watch",
@@ -526,8 +531,10 @@ def test_affirmative_hive_followup_lists_tasks_when_prompt_is_pending() -> None:
 
 
 def test_hive_overview_request_reports_online_agents_and_real_tasks() -> None:
+    fresh_ts = (datetime.now(timezone.utc) - timedelta(seconds=25)).isoformat()
     tracker = _tracker(
         {
+            "generated_at": fresh_ts,
             "stats": {"active_agents": 2},
             "agents": [
                 {
@@ -564,6 +571,70 @@ def test_hive_overview_request_reports_online_agents_and_real_tasks() -> None:
     assert "online now: 2 agent(s)" in response.lower()
     assert "available hive tasks" in response.lower()
     assert "openclaw integration audit" in response.lower()
+    assert "watcher-derived" in response.lower()
+    assert "fresh" in response.lower()
+
+
+def test_pull_the_tasks_uses_local_only_label_when_watcher_is_unreachable_but_session_state_exists() -> None:
+    tracker = HiveActivityTracker(
+        HiveActivityTrackerConfig(
+            enabled=True,
+            watcher_api_url="http://watch.example.test/api/dashboard",
+            timeout_seconds=2,
+        ),
+        fetch_json=lambda url, timeout_seconds, context: (_ for _ in ()).throw(RuntimeError("watcher offline")),  # noqa: ARG005
+    )
+    update_session_hive_state(
+        "openclaw:local-fallback",
+        watched_topic_ids=[],
+        seen_post_ids=[],
+        pending_topic_ids=["topic-1"],
+        seen_curiosity_topic_ids=[],
+        seen_curiosity_run_ids=[],
+        seen_agent_ids=[],
+        last_active_agents=0,
+        interaction_mode="hive_task_selection_pending",
+        interaction_payload={
+            "shown_topic_ids": ["topic-1"],
+            "shown_titles": ["OpenClaw integration audit"],
+        },
+    )
+
+    handled, response = tracker.maybe_handle_command("pull the tasks", session_id="openclaw:local-fallback")
+
+    assert handled is True
+    assert "local-only" in response.lower()
+    assert "live presence unavailable" in response.lower()
+    assert "openclaw integration audit" in response.lower()
+
+
+def test_hive_footer_labels_stale_watcher_presence() -> None:
+    stale_ts = (datetime.now(timezone.utc) - timedelta(minutes=9)).isoformat()
+    tracker = _tracker(
+        {
+            "generated_at": stale_ts,
+            "stats": {"active_agents": 1},
+            "topics": [],
+            "agents": [
+                {
+                    "agent_id": "peer-stale-1",
+                    "display_name": "Watcher Scout",
+                    "status": "online",
+                    "online": True,
+                }
+            ],
+            "recent_posts": [],
+        }
+    )
+
+    footer = tracker.build_chat_footer(
+        session_id="openclaw:stale-footer",
+        hive_followups_enabled=True,
+        idle_research_assist=False,
+    )
+
+    assert "watcher-derived" in footer.lower()
+    assert "stale" in footer.lower()
 
 
 def test_agent_does_not_append_hive_footer_to_generic_research_chat_response() -> None:
@@ -579,14 +650,27 @@ def test_agent_does_not_append_hive_footer_to_generic_research_chat_response() -
     assert "Hive:\nI see 2 Hive research request(s) available." not in result["response"]
 
 
-def test_fast_path_reply_can_append_hive_footer() -> None:
+def test_help_chat_response_does_not_append_hive_footer() -> None:
     agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
     agent.start()
     with mock.patch.object(agent.hive_activity_tracker, "build_chat_footer", return_value="Research follow-up: 1 new local research result landed."), mock.patch.object(
         agent, "_sync_public_presence", return_value=None
+    ), mock.patch.object(
+        agent.memory_router,
+        "resolve",
+        return_value=mock.Mock(
+            source="provider",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text="I can help with coding, research, and grounded runtime tasks.",
+            confidence=0.84,
+            trust_score=0.84,
+            cache_hit=False,
+            validation_state="not_run",
+        ),
     ):
         result = agent.run_once(
             "help",
             source_context={"surface": "openclaw", "platform": "openclaw"},
         )
-    assert "Hive:\nResearch follow-up: 1 new local research result landed." in result["response"]
+    assert "Hive:\nResearch follow-up: 1 new local research result landed." not in result["response"]

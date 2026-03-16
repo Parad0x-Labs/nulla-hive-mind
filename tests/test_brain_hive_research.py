@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
+from core.brain_hive_artifacts import store_artifact_manifest
 from core.brain_hive_research import build_research_queue_entry, build_topic_research_packet
 from storage.db import get_connection
 from storage.migrations import run_migrations
@@ -52,7 +56,8 @@ class BrainHiveResearchPacketTests(unittest.TestCase):
         self.assertEqual(packet["execution_state"]["active_claim_count"], 1)
         self.assertTrue(packet["trading_feature_export"]["hidden_edges"])
         self.assertTrue(packet["trading_feature_export"]["flow_reason_counts"])
-        self.assertTrue(any("Best way to research topic" in item for item in packet["derived_research_questions"]))
+        self.assertTrue(any("Trading Learning Desk" in item for item in packet["derived_research_questions"]))
+        self.assertLessEqual(len(packet["derived_research_questions"]), 6)
 
     def test_build_research_queue_entry_computes_priority(self) -> None:
         row = build_research_queue_entry(
@@ -116,6 +121,265 @@ class BrainHiveResearchPacketTests(unittest.TestCase):
         self.assertGreater(boosted["research_priority"], base["research_priority"])
         self.assertGreater(boosted["commons_signal_strength"], 0.0)
         self.assertIn("commons_review_pressure", boosted["steering_reasons"])
+
+    def test_build_topic_research_packet_surfaces_missing_artifact_refs_instead_of_empty_silence(self) -> None:
+        packet = build_topic_research_packet(
+            topic={
+                "topic_id": "topic-missing-artifact",
+                "title": "Agent commons watcher UX",
+                "summary": "Audit artifact surfacing.",
+                "status": "researching",
+                "visibility": "read_public",
+                "evidence_mode": "candidate_only",
+                "topic_tags": ["agent_commons", "design"],
+                "created_at": "2026-03-14T00:00:00+00:00",
+                "updated_at": "2026-03-14T00:05:00+00:00",
+            },
+            claims=[],
+            posts=[
+                {
+                    "post_id": "post-artifact-missing",
+                    "post_kind": "summary",
+                    "stance": "summarize",
+                    "body": "Artifact reference should surface even if this node cannot resolve it.",
+                    "created_at": "2026-03-14T00:02:00+00:00",
+                    "evidence_refs": [
+                        {
+                            "kind": "research_bundle_artifact",
+                            "artifact_id": "artifact-missing-surface",
+                            "file_path": "/tmp/definitely-missing-artifact.zst",
+                        }
+                    ],
+                }
+            ],
+        )
+
+        self.assertEqual(packet["artifacts"], [])
+        self.assertEqual(packet["artifact_resolution_status"], "missing")
+        self.assertEqual(packet["research_quality_status"], "artifact_missing")
+        self.assertEqual(packet["artifact_refs"][0]["artifact_id"], "artifact-missing-surface")
+        self.assertFalse(packet["artifact_refs"][0]["exists_public_index"])
+        self.assertEqual(
+            packet["artifact_refs"][0]["failure_reason"],
+            "artifact_not_indexed_on_this_node",
+        )
+
+    def test_build_topic_research_packet_reads_latest_bundle_quality_and_domains(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir, patch("core.liquefy_bridge._NULLA_VAULT", Path(tmp_dir)):
+            store_artifact_manifest(
+                source_kind="research_bundle",
+                title="Autonomous research bundle: watcher UX",
+                summary="Research bundle for watcher UX.",
+                payload={
+                    "topic_id": "topic-grounded",
+                    "title": "Agent commons watcher UX",
+                    "query_results": [
+                        {
+                            "query": "watcher ux evidence",
+                            "summary": "Focused watcher UX findings from primary docs.",
+                            "snippet_count": 2,
+                            "source_domains": ["developer.apple.com", "developer.chrome.com"],
+                        },
+                        {
+                            "query": "task flow heuristics",
+                            "summary": "Concrete task-flow findings with implementation guidance.",
+                            "snippet_count": 1,
+                            "source_domains": ["material.io"],
+                        },
+                    ],
+                    "promotion_decisions": [
+                        {
+                            "candidate_id": "cand-1",
+                            "label": "Watcher drill-down card",
+                            "gate": {"can_promote": True},
+                        }
+                    ],
+                    "mined_features": {
+                        "feature_rows": [{"metric": "watcher_card_latency"}],
+                        "heuristic_candidates": [],
+                        "script_ideas": [],
+                    },
+                },
+                topic_id="topic-grounded",
+                tags=["agent_commons", "design"],
+            )
+
+            packet = build_topic_research_packet(
+                topic={
+                    "topic_id": "topic-grounded",
+                    "title": "Agent commons watcher UX",
+                    "summary": "Improve watcher drill-down and task flow UX.",
+                    "status": "researching",
+                    "visibility": "read_public",
+                    "evidence_mode": "candidate_only",
+                    "topic_tags": ["agent_commons", "design"],
+                    "created_at": "2026-03-14T00:00:00+00:00",
+                    "updated_at": "2026-03-14T00:05:00+00:00",
+                },
+                claims=[],
+                posts=[],
+            )
+
+        self.assertEqual(packet["nonempty_query_count"], 2)
+        self.assertEqual(packet["dead_query_count"], 0)
+        self.assertEqual(packet["promoted_finding_count"], 1)
+        self.assertEqual(packet["mined_feature_count"], 1)
+        self.assertEqual(packet["research_quality_status"], "grounded")
+        self.assertEqual(packet["artifact_resolution_status"], "none")
+        self.assertGreaterEqual(packet["counts"]["source_domain_count"], 3)
+        self.assertTrue(any(item["domain"] == "developer.apple.com" for item in packet["source_domains"]))
+        self.assertTrue(any(item["domain"] == "material.io" for item in packet["source_domains"]))
+
+    def test_build_topic_research_packet_surfaces_local_only_artifact_and_latest_synthesis_card(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            artifact_path = Path(tmp_dir) / "bundle.json"
+            artifact_path.write_text("{}", encoding="utf-8")
+            packet = build_topic_research_packet(
+                topic={
+                    "topic_id": "topic-local-artifact",
+                    "title": "Agent commons watcher UX",
+                    "summary": "Show public truth even when only local artifact storage exists.",
+                    "status": "researching",
+                    "visibility": "read_public",
+                    "evidence_mode": "candidate_only",
+                    "topic_tags": ["agent_commons", "design"],
+                    "created_at": "2026-03-14T00:00:00+00:00",
+                    "updated_at": "2026-03-14T00:05:00+00:00",
+                },
+                claims=[],
+                posts=[
+                    {
+                        "post_id": "post-local-artifact",
+                        "post_kind": "summary",
+                        "stance": "summarize",
+                        "body": "One synthesis card should surface the current truth.",
+                        "created_at": "2026-03-14T00:03:00+00:00",
+                        "evidence_refs": [
+                            {
+                                "kind": "research_bundle_artifact",
+                                "artifact_id": "artifact-local-only",
+                                "file_path": str(artifact_path),
+                            },
+                            {
+                                "kind": "research_synthesis_card",
+                                "question": "Agent commons watcher UX",
+                                "searched": ["watcher ux task flow implementation docs"],
+                                "found": ["Watcher state changes should stay visible in the flow."],
+                                "source_domains": ["developer.apple.com"],
+                                "artifacts": [{"label": "bundle artifact-local-only", "state": "missing"}],
+                                "promoted_findings": ["Watcher state changes should stay visible in the flow."],
+                                "confidence": "partial",
+                                "blockers": ["Artifact indexed only locally."],
+                                "state_token": "state-local-1",
+                            },
+                        ],
+                    }
+                ],
+            )
+
+        self.assertEqual(packet["artifact_resolution_status"], "missing")
+        self.assertTrue(packet["artifact_refs"][0]["exists_local"])
+        self.assertFalse(packet["artifact_refs"][0]["exists_public_index"])
+        self.assertEqual(packet["artifact_refs"][0]["failure_reason"], "artifact_not_indexed_on_this_node")
+        self.assertEqual(packet["latest_synthesis_card"]["question"], "Agent commons watcher UX")
+        self.assertEqual(packet["latest_synthesis_card"]["confidence"], "partial")
+        self.assertEqual(packet["synthesis_card_count"], 1)
+
+    def test_build_topic_research_packet_marks_off_topic_bundle_as_off_topic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir, patch("core.liquefy_bridge._NULLA_VAULT", Path(tmp_dir)):
+            store_artifact_manifest(
+                source_kind="research_bundle",
+                title="Autonomous research bundle: watcher UX",
+                summary="Off-topic bundle for watcher UX.",
+                payload={
+                    "topic_id": "topic-off-topic",
+                    "title": "Agent commons watcher UX",
+                    "query_results": [
+                        {
+                            "query": "watcher ux task flow implementation docs",
+                            "summary": "Skip navigation documentation for Wear OS components and Android for Cars.",
+                            "snippet_count": 1,
+                            "source_domains": ["developer.android.com"],
+                        },
+                        {
+                            "query": "watcher ux concrete examples constraints",
+                            "summary": "Documentation platforms components get started Wear OS.",
+                            "snippet_count": 1,
+                            "source_domains": ["developer.android.com"],
+                        },
+                    ],
+                    "promotion_decisions": [],
+                    "mined_features": {"feature_rows": [], "heuristic_candidates": [], "script_ideas": []},
+                },
+                topic_id="topic-off-topic",
+                tags=["agent_commons", "design"],
+            )
+            packet = build_topic_research_packet(
+                topic={
+                    "topic_id": "topic-off-topic",
+                    "title": "Agent commons watcher UX",
+                    "summary": "Improve watcher drill-down and task flow UX.",
+                    "status": "researching",
+                    "visibility": "read_public",
+                    "evidence_mode": "candidate_only",
+                    "topic_tags": ["agent_commons", "design"],
+                    "created_at": "2026-03-14T00:00:00+00:00",
+                    "updated_at": "2026-03-14T00:05:00+00:00",
+                },
+                claims=[],
+                posts=[],
+            )
+
+        self.assertEqual(packet["research_quality_status"], "off_topic")
+        self.assertTrue(any("off-topic" in item.lower() for item in packet["research_quality_reasons"]))
+
+    def test_build_topic_research_packet_marks_grounded_without_promoted_findings_as_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir, patch("core.liquefy_bridge._NULLA_VAULT", Path(tmp_dir)):
+            store_artifact_manifest(
+                source_kind="research_bundle",
+                title="Autonomous research bundle: watcher UX",
+                summary="Research bundle for watcher UX without promoted findings.",
+                payload={
+                    "topic_id": "topic-partial",
+                    "title": "Agent commons watcher UX",
+                    "query_results": [
+                        {
+                            "query": "watcher ux task flow implementation docs",
+                            "summary": "Focused watcher UX findings from Apple docs.",
+                            "snippet_count": 2,
+                            "source_domains": ["developer.apple.com"],
+                        },
+                        {
+                            "query": "watcher ux concrete examples constraints",
+                            "summary": "Task-flow evidence from Material guidance.",
+                            "snippet_count": 2,
+                            "source_domains": ["material.io"],
+                        },
+                    ],
+                    "promotion_decisions": [],
+                    "mined_features": {"feature_rows": [], "heuristic_candidates": [], "script_ideas": []},
+                },
+                topic_id="topic-partial",
+                tags=["agent_commons", "design"],
+            )
+            packet = build_topic_research_packet(
+                topic={
+                    "topic_id": "topic-partial",
+                    "title": "Agent commons watcher UX",
+                    "summary": "Improve watcher drill-down and task flow UX.",
+                    "status": "researching",
+                    "visibility": "read_public",
+                    "evidence_mode": "candidate_only",
+                    "topic_tags": ["agent_commons", "design"],
+                    "created_at": "2026-03-14T00:00:00+00:00",
+                    "updated_at": "2026-03-14T00:05:00+00:00",
+                },
+                claims=[],
+                posts=[],
+            )
+
+        self.assertEqual(packet["research_quality_status"], "partial")
+        self.assertTrue(any("No promoted findings" in item for item in packet["research_quality_reasons"]))
 
 
 if __name__ == "__main__":

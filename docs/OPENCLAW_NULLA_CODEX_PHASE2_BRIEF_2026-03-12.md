@@ -3,24 +3,24 @@
 Use this brief for the next Codex pass.
 
 Related context docs:
-- [/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_PHASE2_STATUS_2026-03-12.md](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_PHASE2_STATUS_2026-03-12.md)
-- [/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_HELP_REQUEST_2026-03-12.md](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_HELP_REQUEST_2026-03-12.md)
-- [/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_RUNTIME_HELP_NEEDED_2026-03-11.md](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_RUNTIME_HELP_NEEDED_2026-03-11.md)
-- [/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_RUNTIME_FAILURE_FLOW_2026-03-11.md](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_RUNTIME_FAILURE_FLOW_2026-03-11.md)
+- [/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_PHASE2_STATUS_2026-03-12.md](/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_PHASE2_STATUS_2026-03-12.md)
+- [/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_HELP_REQUEST_2026-03-12.md](/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_HELP_REQUEST_2026-03-12.md)
+- [/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_RUNTIME_HELP_NEEDED_2026-03-11.md](/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_RUNTIME_HELP_NEEDED_2026-03-11.md)
+- [/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_RUNTIME_FAILURE_FLOW_2026-03-11.md](/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_RUNTIME_FAILURE_FLOW_2026-03-11.md)
 
 ## Mission
 Patch the current NULLA/OpenClaw Phase 2 runtime.
 
 Primary target:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`
+- `/path/to/nulla-hive-mind/apps/nulla_agent.py`
 
 Secondary targets only if clearly required:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/autonomous_topic_research.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_openclaw_tooling_context.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_hive_activity_tracker.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_api_server.py`
+- `/path/to/nulla-hive-mind/core/hive_activity_tracker.py`
+- `/path/to/nulla-hive-mind/core/tool_intent_executor.py`
+- `/path/to/nulla-hive-mind/core/autonomous_topic_research.py`
+- `/path/to/nulla-hive-mind/tests/test_openclaw_tooling_context.py`
+- `/path/to/nulla-hive-mind/tests/test_hive_activity_tracker.py`
+- `/path/to/nulla-hive-mind/tests/test_nulla_api_server.py`
 
 Important rule:
 - Prefer the current code state over older docs if they conflict.
@@ -183,15 +183,15 @@ Need assertions for:
 - avoid broad refactors outside `apps/nulla_agent.py` unless there is a clear blocker
 
 ## Known Hot Spots
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`
+- `/path/to/nulla-hive-mind/apps/nulla_agent.py`
   - `run_once()`
   - `_decorate_chat_response(...)`
   - `_should_attach_hive_footer(...)`
   - `_action_response_class(...)`
   - `_grounded_response_class(...)`
   - `_apply_interaction_transition(...)`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py`
+- `/path/to/nulla-hive-mind/core/hive_activity_tracker.py`
+- `/path/to/nulla-hive-mind/core/tool_intent_executor.py`
 
 ## Acceptance Criteria
 - routing order is visible and strict

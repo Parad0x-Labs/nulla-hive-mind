@@ -19,13 +19,21 @@ _DEFAULT_REMINDER_MINUTES = 60
 _INTERACTION_SELECTION_TTL_MINUTES = 45
 _INTERACTION_ACTIVE_TTL_HOURS = 12
 _HIVE_PULL_PATTERNS = (
+    re.compile(r"\b(?:check|show|list|see)\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)(?:\s+(?:pls|please))?\b"),
     re.compile(r"\bpull\s+(?:available\s+)?(?:the\s+)?(?:hive|hive mind|brain hive|public hive)?\s*(?:tasks?|research|researches)\b"),
     re.compile(r"\bpull\s+(?:the\s+)?tasks?\b.*\b(?:select|choose|work on|available|hive|brain hive|public hive)\b"),
     re.compile(r"\b(?:show|list|check)\s+(?:the\s+)?(?:available\s+)?(?:hive|hive mind|brain hive|public hive)\s+(?:tasks|research|researches)\b"),
+    re.compile(r"\bshow\s+me\s+(?:the\s+)?(?:(?:open|available)\s+)?(?:hive|hive mind|brain hive|public hive)\s+(?:tasks?|research|researches)\b"),
     re.compile(r"\bwhat\s+(?:hive|hive mind|brain hive|public hive)\s+(?:tasks|research|researches).*(?:available|open)\b"),
+    re.compile(r"\bwhat(?:'s| is)\s+on\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)\s+(?:tasks?|queue|work|research|researches)\b"),
+    re.compile(r"\bwhat(?:'s| is)\s+on\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)\b"),
+    re.compile(r"\bwhat(?:'s| is)\s+in\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)\b"),
+    re.compile(r"\banything\s+on\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)\b"),
     re.compile(r"\bwhat\s+are\s+(?:the\s+)?(?:available\s+)?(?:tasks?|queue|work)\b.*\b(?:hive|hive mind|brain hive|public hive)\b"),
     re.compile(r"\bwhat(?:'s| is)\s+(?:available\s+)?in\s+(?:hive|hive mind|brain hive|public hive)\b.*\b(?:help|work|tasks?|queue|available|open)\b"),
     re.compile(r"\b(?:show|list|check|what(?:'s| is))\s+(?:the\s+)?(?:available\s+)?(?:tasks?|queue|work)\b.*\b(?:hive|brain hive|public hive)\b"),
+    re.compile(r"\bshow\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)\s+work\b"),
+    re.compile(r"\bwhat\s+(?:online\s+)?tasks?\s+(?:do\s+)?we\s+have\b"),
     re.compile(r"\b(?:check|show)\s+(?:the\s+)?hive mind tasks\b"),
 )
 _CONTEXTUAL_HIVE_PULL_PATTERNS = (
@@ -87,21 +95,58 @@ class HiveActivityTracker:
         self._fetch_json = fetch_json or self._http_get_json
 
     def maybe_handle_command(self, user_text: str, *, session_id: str) -> tuple[bool, str]:
+        handled, details = self.maybe_handle_command_details(user_text, session_id=session_id)
+        return handled, str((details or {}).get("response_text") or "")
+
+    def maybe_handle_command_details(self, user_text: str, *, session_id: str) -> tuple[bool, dict[str, Any]]:
         text = str(user_text or "").strip().lower()
         if not text or not session_id:
-            return False, ""
+            return False, {}
 
         state = session_hive_state(session_id)
         if _looks_like_hive_overview_request(text):
             if not self.config.enabled or not self.config.watcher_api_url:
-                return True, "Hive watcher is not configured on this runtime, so I can't report real live Hive state."
+                truth = _future_unsupported_hive_truth_details(
+                    note="live watcher is not configured on this runtime",
+                    status="not_configured",
+                )
+                message = "Hive watcher is not configured on this runtime, so I can't report real live Hive state. Hive truth: future/unsupported."
+                return True, {
+                    "command_kind": "watcher_unavailable",
+                    "watcher_status": "not_configured",
+                    "response_text": message,
+                    "topics": [],
+                    "online_agents": [],
+                    **truth,
+                }
             try:
                 dashboard = self.fetch_dashboard()
             except Exception:
-                return True, "I couldn't reach the Hive watcher right now."
+                truth = _watcher_unavailable_hive_truth_details(note="watcher unreachable in this run")
+                message = "I couldn't reach the Hive watcher right now. Hive truth: watcher-derived unavailable; presence freshness unknown."
+                return True, {
+                    "command_kind": "watcher_unavailable",
+                    "watcher_status": "unreachable",
+                    "response_text": message,
+                    "topics": [],
+                    "online_agents": [],
+                    **truth,
+                }
             topics = self._available_topics(dashboard)
             online_agents = self._online_agents(dashboard)
-            return True, self._render_hive_overview(online_agents=online_agents, topics=topics)
+            truth = _watcher_hive_truth_details(dashboard=dashboard, online_agents=online_agents)
+            return True, {
+                "command_kind": "overview",
+                "watcher_status": "ok",
+                "response_text": self._render_hive_overview(
+                    online_agents=online_agents,
+                    topics=topics,
+                    truth=truth,
+                ),
+                "topics": topics,
+                "online_agents": online_agents,
+                **truth,
+            }
 
         if _looks_like_hive_pull_request(text) or (
             bool(state.get("pending_topic_ids")) and _looks_like_contextual_hive_pull_request(text)
@@ -109,20 +154,71 @@ class HiveActivityTracker:
             bool(state.get("pending_topic_ids")) and text in _AFFIRMATIVE_HIVE_FOLLOWUPS
         ):
             if not self.config.enabled or not self.config.watcher_api_url:
-                return True, "Hive watcher is not configured on this runtime, so I can't report real live Hive tasks."
+                truth = _future_unsupported_hive_truth_details(
+                    note="live watcher is not configured on this runtime",
+                    status="not_configured",
+                )
+                message = "Hive watcher is not configured on this runtime, so I can't report real live Hive tasks. Hive truth: future/unsupported."
+                return True, {
+                    "command_kind": "watcher_unavailable",
+                    "watcher_status": "not_configured",
+                    "response_text": message,
+                    "topics": [],
+                    "online_agents": [],
+                    **truth,
+                }
             try:
                 dashboard = self.fetch_dashboard()
             except Exception:
                 fallback_topics = _topics_from_session_state(state)
                 if fallback_topics:
-                    return True, self._render_hive_task_list_with_lead(
-                        fallback_topics,
-                        lead="I couldn't reach the live Hive watcher just now, but these are the real Hive tasks I already had in session:",
+                    truth = _local_only_hive_truth_details(
+                        note="this reply is using local session task memory only",
+                        status="session_fallback",
                     )
-                return True, "I couldn't reach the Hive watcher right now."
+                    lead = (
+                        "I couldn't reach the live Hive watcher just now, but these are the real Hive tasks I already had in session "
+                        "(local-only; live presence unavailable):"
+                    )
+                    response_text = self._render_hive_task_list_with_lead(
+                        fallback_topics,
+                        lead=lead,
+                    )
+                    return True, {
+                        "command_kind": "task_list_session_fallback",
+                        "watcher_status": "unreachable",
+                        "lead": lead,
+                        "response_text": response_text,
+                        "topics": fallback_topics,
+                        "online_agents": [],
+                        **truth,
+                    }
+                truth = _watcher_unavailable_hive_truth_details(note="watcher unreachable in this run")
+                message = "I couldn't reach the Hive watcher right now. Hive truth: watcher-derived unavailable; presence freshness unknown."
+                return True, {
+                    "command_kind": "watcher_unavailable",
+                    "watcher_status": "unreachable",
+                    "response_text": message,
+                    "topics": [],
+                    "online_agents": [],
+                    **truth,
+                }
             topics = self._available_topics(dashboard)
+            online_agents = self._online_agents(dashboard)
+            truth = _watcher_hive_truth_details(dashboard=dashboard, online_agents=online_agents)
             if not topics:
-                return True, "No open Hive tasks are visible right now."
+                message = (
+                    "No open Hive tasks are visible right now. "
+                    f"Hive truth: watcher-derived. {_presence_truth_sentence(truth)}"
+                )
+                return True, {
+                    "command_kind": "task_list_empty",
+                    "watcher_status": "ok",
+                    "response_text": message,
+                    "topics": [],
+                    "online_agents": online_agents,
+                    **truth,
+                }
             _remember_pending_topics(session_id, [str(topic.get("topic_id") or "") for topic in topics])
             set_hive_interaction_state(
                 session_id,
@@ -132,17 +228,36 @@ class HiveActivityTracker:
                     "shown_titles": [str(topic.get("title") or "").strip() for topic in topics if str(topic.get("title") or "").strip()],
                 },
             )
-            return True, self._render_hive_task_list(topics)
+            return True, {
+                "command_kind": "task_list",
+                "watcher_status": "ok",
+                "response_text": self._render_hive_task_list(topics, truth=truth),
+                "topics": topics,
+                "online_agents": online_agents,
+                **truth,
+            }
 
         reminder_minutes = _extract_reminder_minutes(text)
         if "ignore" in text and "remind" in text:
             minutes = reminder_minutes or _DEFAULT_REMINDER_MINUTES
             snooze_hive_prompts(session_id, minutes=minutes)
-            return True, f"Okay. I’ll quiet Hive task nudges for {minutes} minutes and remind you later."
+            return True, {
+                "command_kind": "prompt_control",
+                "watcher_status": "",
+                "response_text": f"Okay. I’ll quiet Hive task nudges for {minutes} minutes and remind you later.",
+                "topics": [],
+                "online_agents": [],
+            }
         if "ignore hive" in text or "ignore it for now" in text:
             snooze_hive_prompts(session_id, minutes=_DEFAULT_REMINDER_MINUTES)
-            return True, "Okay. I’ll ignore Hive task nudges for now and remind you in about 1 hour."
-        return False, ""
+            return True, {
+                "command_kind": "prompt_control",
+                "watcher_status": "",
+                "response_text": "Okay. I’ll ignore Hive task nudges for now and remind you in about 1 hour.",
+                "topics": [],
+                "online_agents": [],
+            }
+        return False, {}
 
     def build_chat_footer(
         self,
@@ -192,6 +307,7 @@ class HiveActivityTracker:
             if bool(agent.get("online"))
             or str(agent.get("status") or "").strip().lower() in {"online", "idle", "busy", "limited"}
         ]
+        watcher_truth = _watcher_hive_truth_details(dashboard=dashboard, online_agents=online_agents)
         new_online_agents = [
             agent
             for agent in online_agents
@@ -213,20 +329,20 @@ class HiveActivityTracker:
                 labels.append(f"{post_kind} on {topic_title}")
             if labels:
                 lines.append(
-                    f"Hive update: {len(watched_posts)} new research post(s) landed on watched threads ({', '.join(labels)})."
+                    f"Hive update (watcher-derived): {len(watched_posts)} new research post(s) landed on watched threads ({', '.join(labels)})."
                 )
             else:
-                lines.append(f"Hive update: {len(watched_posts)} new research post(s) landed on watched threads.")
+                lines.append("Hive update (watcher-derived): new research post(s) landed on watched threads.")
         if new_local_topics:
             labels = [str(item.get("topic") or "local research").strip() for item in new_local_topics[:2]]
             lines.append(
-                f"Research follow-up: {len(new_local_topics)} new local research thread(s) were queued"
+                f"Research follow-up (local-only): {len(new_local_topics)} new local research thread(s) were queued"
                 f"{_format_examples(labels)}."
             )
         if new_local_runs:
             labels = [str(item.get("query_text") or item.get("topic") or "research result").strip() for item in new_local_runs[:2]]
             lines.append(
-                f"Research result: {len(new_local_runs)} new local research result(s) landed"
+                f"Research result (local-only): {len(new_local_runs)} new local research result(s) landed"
                 f"{_format_examples(labels)}."
             )
         if new_online_agents:
@@ -235,20 +351,22 @@ class HiveActivityTracker:
                 for agent in new_online_agents[:2]
             ]
             lines.append(
-                f"Hive heartbeat: {len(new_online_agents)} new agent(s) showed up online"
+                f"Hive heartbeat (watcher-derived, {_presence_freshness_phrase(watcher_truth)}): {len(new_online_agents)} new agent(s) showed up online"
                 f"{_format_examples(labels)}."
             )
         if watched_topic_ids and active_agents > int(state.get("last_active_agents") or 0):
             delta = active_agents - int(state.get("last_active_agents") or 0)
             if not new_online_agents:
-                lines.append(f"Hive heartbeat: {delta} additional agent(s) are active now.")
+                lines.append(
+                    f"Hive heartbeat (watcher-derived, {_presence_freshness_phrase(watcher_truth)}): {delta} additional agent(s) are active now."
+                )
 
         interaction_mode = str(state.get("interaction_mode") or "")
         interaction_payload = dict(state.get("interaction_payload") or {})
         if idle_research_assist and pending_topic_ids and _should_prompt_now(state, new_topics_present=bool(new_available_ids)):
             count = len(pending_topic_ids)
             lines.append(
-                f"I see {count} Hive task(s) open. Want me to list them? "
+                f"I see {count} watcher-derived Hive task(s) open ({_presence_freshness_phrase(watcher_truth)}). Want me to list them? "
                 f"You can also say \"ignore Hive for 1h\" to snooze the nudge."
             )
             interaction_mode = "hive_nudge_shown"
@@ -337,10 +455,10 @@ class HiveActivityTracker:
             or str(agent.get("status") or "").strip().lower() in {"online", "idle", "busy", "limited"}
         ]
 
-    def _render_hive_task_list(self, topics: list[dict[str, Any]]) -> str:
+    def _render_hive_task_list(self, topics: list[dict[str, Any]], *, truth: dict[str, Any] | None = None, include_presence: bool = True) -> str:
         return self._render_hive_task_list_with_lead(
             topics,
-            lead=f"Available Hive tasks right now ({len(topics)} total):",
+            lead=_hive_task_list_lead(len(topics), truth=truth, include_presence=include_presence),
         )
 
     def _render_hive_task_list_with_lead(self, topics: list[dict[str, Any]], *, lead: str) -> str:
@@ -359,20 +477,28 @@ class HiveActivityTracker:
             lines.append("If you want, I can start one. Just point at the task name or short `#id`.")
         return "\n".join(lines)
 
-    def _render_hive_overview(self, *, online_agents: list[dict[str, Any]], topics: list[dict[str, Any]]) -> str:
+    def _render_hive_overview(
+        self,
+        *,
+        online_agents: list[dict[str, Any]],
+        topics: list[dict[str, Any]],
+        truth: dict[str, Any] | None = None,
+    ) -> str:
         lines: list[str] = []
         if online_agents:
             labels = [
                 str(agent.get("display_name") or agent.get("claim_label") or agent.get("agent_id") or "agent").strip()
                 for agent in online_agents[:3]
             ]
-            lines.append(f"Online now: {len(online_agents)} agent(s){_format_examples(labels)}.")
+            lines.append(
+                f"Online now: {len(online_agents)} agent(s){_format_examples(labels)}. {_presence_truth_sentence(truth)}"
+            )
         else:
-            lines.append("Online now: no active agents are visible.")
+            lines.append(f"Online now: no active agents are visible. {_presence_truth_sentence(truth)}")
         if topics:
-            lines.append(self._render_hive_task_list(topics))
+            lines.append(self._render_hive_task_list(topics, truth=truth, include_presence=False))
         else:
-            lines.append("Open Hive tasks: none are visible right now.")
+            lines.append("Open Hive tasks: none are visible right now. Hive truth: watcher-derived.")
         return "\n".join(line for line in lines if line.strip())
 
     def _http_get_json(self, url: str, timeout_seconds: int, context: ssl.SSLContext | None) -> dict[str, Any]:
@@ -1036,3 +1162,152 @@ def _format_examples(labels: list[str]) -> str:
     if not cleaned:
         return ""
     return f" ({', '.join(cleaned[:2])})"
+
+
+def _watcher_hive_truth_details(*, dashboard: dict[str, Any], online_agents: list[dict[str, Any]]) -> dict[str, Any]:
+    age_seconds = _watcher_presence_age_seconds(dashboard, online_agents=online_agents)
+    return {
+        "truth_source": "watcher",
+        "truth_label": "watcher-derived",
+        "truth_status": "ok",
+        "presence_claim_state": "visible",
+        "presence_source": "watcher",
+        "presence_truth_label": "watcher-derived",
+        "presence_freshness_label": _presence_freshness_label(age_seconds),
+        "presence_age_seconds": age_seconds,
+        "presence_note": _presence_freshness_phrase({"presence_age_seconds": age_seconds, "presence_freshness_label": _presence_freshness_label(age_seconds)}),
+    }
+
+
+def _watcher_unavailable_hive_truth_details(*, note: str) -> dict[str, Any]:
+    return {
+        "truth_source": "watcher",
+        "truth_label": "watcher-derived",
+        "truth_status": "unreachable",
+        "presence_claim_state": "unavailable",
+        "presence_source": "watcher",
+        "presence_truth_label": "watcher-derived",
+        "presence_freshness_label": "unknown",
+        "presence_age_seconds": None,
+        "presence_note": str(note or "watcher presence unavailable in this run").strip(),
+    }
+
+
+def _local_only_hive_truth_details(*, note: str, status: str) -> dict[str, Any]:
+    return {
+        "truth_source": "local_only",
+        "truth_label": "local-only",
+        "truth_status": str(status or "local_only").strip(),
+        "presence_claim_state": "unavailable",
+        "presence_source": "local_only",
+        "presence_truth_label": "local-only",
+        "presence_freshness_label": "unavailable",
+        "presence_age_seconds": None,
+        "presence_note": str(note or "live watcher presence unavailable in local-only fallback").strip(),
+    }
+
+
+def _future_unsupported_hive_truth_details(*, note: str, status: str) -> dict[str, Any]:
+    return {
+        "truth_source": "future_or_unsupported",
+        "truth_label": "future/unsupported",
+        "truth_status": str(status or "unsupported").strip(),
+        "presence_claim_state": "unsupported",
+        "presence_source": "future_or_unsupported",
+        "presence_truth_label": "future/unsupported",
+        "presence_freshness_label": "unsupported",
+        "presence_age_seconds": None,
+        "presence_note": str(note or "live Hive watcher support is not configured here").strip(),
+    }
+
+
+def _watcher_presence_age_seconds(dashboard: dict[str, Any], *, online_agents: list[dict[str, Any]]) -> int | None:
+    candidate_timestamps: list[datetime] = []
+    for raw in (
+        dashboard.get("generated_at"),
+        dashboard.get("updated_at"),
+        dict(dashboard.get("stats") or {}).get("generated_at"),
+        dict(dashboard.get("stats") or {}).get("updated_at"),
+    ):
+        parsed = _parse_ts(str(raw or ""))
+        if parsed is not None:
+            candidate_timestamps.append(parsed)
+    for agent in list(online_agents or []):
+        for raw in (
+            agent.get("last_seen_at"),
+            agent.get("last_heartbeat_at"),
+            agent.get("updated_at"),
+        ):
+            parsed = _parse_ts(str(raw or ""))
+            if parsed is not None:
+                candidate_timestamps.append(parsed)
+    if not candidate_timestamps:
+        return None
+    most_recent = max(candidate_timestamps)
+    age = int((datetime.now(timezone.utc) - most_recent).total_seconds())
+    return max(0, age)
+
+
+def _presence_freshness_label(age_seconds: int | None) -> str:
+    if age_seconds is None:
+        return "unknown"
+    if age_seconds <= 120:
+        return "fresh"
+    return "stale"
+
+
+def _human_age(age_seconds: int | None) -> str:
+    if age_seconds is None:
+        return ""
+    if age_seconds < 60:
+        return f"{age_seconds}s"
+    if age_seconds < 3600:
+        return f"{max(1, round(age_seconds / 60))}m"
+    return f"{max(1, round(age_seconds / 3600))}h"
+
+
+def _presence_freshness_phrase(truth: dict[str, Any] | None) -> str:
+    payload = dict(truth or {})
+    label = str(payload.get("presence_freshness_label") or "").strip().lower()
+    age_seconds = payload.get("presence_age_seconds")
+    if label == "fresh":
+        return f"fresh ({_human_age(age_seconds)} old)"
+    if label == "stale":
+        return f"stale ({_human_age(age_seconds)} old)"
+    if label == "unsupported":
+        return "unsupported"
+    if label == "unavailable":
+        return "unavailable"
+    return "freshness unknown"
+
+
+def _presence_truth_sentence(truth: dict[str, Any] | None) -> str:
+    payload = dict(truth or {})
+    claim_state = str(payload.get("presence_claim_state") or "").strip().lower()
+    if claim_state == "visible":
+        return (
+            f"Presence truth: {str(payload.get('presence_truth_label') or 'watcher-derived').strip()}, "
+            f"{_presence_freshness_phrase(payload)}."
+        )
+    note = str(payload.get("presence_note") or "").strip()
+    if note:
+        return f"Presence truth: {note}."
+    label = str(payload.get("presence_truth_label") or payload.get("truth_label") or "unknown").strip()
+    return f"Presence truth: {label}."
+
+
+def _hive_task_list_lead(
+    topic_count: int,
+    *,
+    truth: dict[str, Any] | None = None,
+    include_presence: bool = True,
+) -> str:
+    payload = dict(truth or {})
+    qualifiers: list[str] = []
+    truth_label = str(payload.get("truth_label") or "").strip()
+    if truth_label:
+        qualifiers.append(truth_label)
+    if include_presence and str(payload.get("presence_claim_state") or "").strip().lower() == "visible":
+        qualifiers.append(f"presence {_presence_freshness_phrase(payload)}")
+    qualifier = f"{'; '.join(qualifiers)}; " if qualifiers else ""
+    return f"Available Hive tasks right now ({qualifier}{int(topic_count)} total):"

@@ -73,10 +73,15 @@ def select_qwen_tier(probe: Optional[MachineProbe] = None) -> QwenTier:
     if probe is None:
         probe = probe_machine()
 
+    # Apple Silicon reports unified memory, not dedicated VRAM. Treating the
+    # full RAM pool like discrete GPU VRAM over-selects models and can stall
+    # startup on 24 GB hosts by choosing 32B when 14B is the realistic tier.
+    use_vram_thresholds = str(probe.accelerator or "").strip().lower() != "mps"
+
     for tier in TIERS:
-        if probe.vram_gb is not None and probe.vram_gb >= tier.min_vram_gb:
+        if use_vram_thresholds and probe.vram_gb is not None and probe.vram_gb >= tier.min_vram_gb:
             return tier
-        if probe.vram_gb is None and probe.ram_gb >= tier.min_ram_gb:
+        if probe.ram_gb >= tier.min_ram_gb:
             return tier
     return TIERS[-1]
 

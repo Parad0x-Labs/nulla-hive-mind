@@ -15,6 +15,7 @@ from core.privacy_guard import (
     tokenize_restricted_terms,
 )
 from core.runtime_paths import data_path, project_path
+from storage.dialogue_memory import record_dialogue_turn
 from storage.db import get_connection
 
 
@@ -386,13 +387,14 @@ def append_conversation_event(
     ensure_memory_files()
     history = _normalized_history((source_context or {}).get("conversation_history"))
     policy = session_memory_policy(session_id)
+    assistant_text = str(assistant_output or "").strip()
     payload = {
         "ts": _utcnow(),
         "session_id": session_id,
         "surface": str((source_context or {}).get("surface", "")),
         "platform": str((source_context or {}).get("platform", "")),
         "user": str(user_input or "")[:4000],
-        "assistant": str(assistant_output or "")[:8000],
+        "assistant": assistant_text[:8000],
         "history_message_count": len(history),
         "share_scope": policy["share_scope"],
         "realm_label": policy.get("realm_label") or share_scope_label(policy["share_scope"]),
@@ -402,8 +404,17 @@ def append_conversation_event(
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     _trim_jsonl_file(path, max_bytes=_MAX_CONVERSATION_LOG_BYTES)
+    _record_assistant_dialogue_turn(
+        session_id=session_id,
+        assistant_output=assistant_text,
+    )
     _auto_capture_memory(session_id=session_id, user_input=user_input)
     _update_user_heuristics(session_id=session_id, user_input=user_input)
+    _detect_implicit_feedback(
+        session_id=session_id,
+        user_input=user_input,
+        assistant_output=assistant_output,
+    )
     _update_session_summary(
         session_id=session_id,
         user_input=user_input,
@@ -691,9 +702,37 @@ def _normalized_history(history: Any) -> list[dict[str, str]]:
     return normalized
 
 
+def _record_assistant_dialogue_turn(*, session_id: str, assistant_output: str) -> str | None:
+    clean = str(assistant_output or "").strip()
+    if not clean:
+        return None
+    normalized = " ".join(clean.split()).strip()
+    return record_dialogue_turn(
+        session_id,
+        raw_input=clean,
+        normalized_input=normalized,
+        reconstructed_input=clean,
+        speaker_role="assistant",
+        topic_hints=[],
+        reference_targets=[],
+        understanding_confidence=1.0,
+        quality_flags=[],
+    )
+
+
+_SHORTHAND_PATTERNS = [
+    re.compile(r"\bwhen i say\s+[\"']?(.+?)[\"']?\s*,?\s*(?:i mean|it means|that means)\s+[\"']?(.+?)[\"']?\s*$", re.IGNORECASE),
+    re.compile(r"[\"'](.+?)[\"']\s+means\s+[\"'](.+?)[\"']", re.IGNORECASE),
+    re.compile(r"\bby\s+[\"'](.+?)[\"']\s+i mean\s+[\"']?(.+?)[\"']?\s*$", re.IGNORECASE),
+]
+
+
 def _auto_capture_memory(*, session_id: str, user_input: str) -> None:
     if not _should_auto_extract(user_input):
         return
+
+    _auto_learn_shorthand(session_id=session_id, user_input=user_input)
+
     seen: set[str] = set()
     for candidate in _extract_memory_candidates(user_input):
         text = _sanitize_fact(str(candidate.get("text") or ""))
@@ -713,8 +752,33 @@ def _auto_capture_memory(*, session_id: str, user_input: str) -> None:
         )
 
 
+def _auto_learn_shorthand(*, session_id: str, user_input: str) -> None:
+    """Auto-detect and learn user shorthands from natural language."""
+    text = str(user_input or "").strip()
+    if not text or len(text) < 10:
+        return
+    for pattern in _SHORTHAND_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            term = match.group(1).strip()
+            canonical = match.group(2).strip()
+            if term and canonical and len(term) <= 40 and len(canonical) <= 80:
+                from core.human_input_adapter import learn_user_shorthand
+                learn_user_shorthand(term, canonical, session_id=session_id)
+                add_memory_fact(
+                    f'Shorthand: "{term}" means "{canonical}".',
+                    category="shorthand",
+                    session_id=session_id,
+                    source="auto_dialogue",
+                    confidence=0.90,
+                    keywords=_keyword_tokens(f"{term} {canonical}"),
+                )
+                break
+
+
 def _update_user_heuristics(*, session_id: str, user_input: str) -> None:
     candidates = _extract_user_heuristic_candidates(user_input)
+    _apply_feedback_to_heuristics(session_id=session_id)
     if not candidates:
         return
     existing = {
@@ -759,6 +823,82 @@ def _update_user_heuristics(*, session_id: str, user_input: str) -> None:
     )
     _rewrite_jsonl(user_heuristics_path(), rows[:64])
     _trim_jsonl_file(user_heuristics_path(), max_bytes=_MAX_USER_HEURISTICS_BYTES)
+
+
+def _apply_feedback_to_heuristics(*, session_id: str) -> None:
+    """Adjust heuristic confidence based on accumulated feedback."""
+    try:
+        from storage.dialogue_memory import feedback_stats
+        stats = feedback_stats(lookback_days=7)
+        if stats["total"] < 3:
+            return
+        rejection_rate = 0.0
+        by_type = stats.get("by_type") or {}
+        rejections = by_type.get("implicit_rejection") or {}
+        approvals = by_type.get("implicit_approval") or {}
+        total_feedback = int(rejections.get("count") or 0) + int(approvals.get("count") or 0)
+        if total_feedback > 0:
+            rejection_rate = int(rejections.get("count") or 0) / total_feedback
+
+        if rejection_rate > 0.6:
+            rows = _load_jsonl(user_heuristics_path())
+            for row in rows:
+                if str(row.get("category") or "") == "response_style":
+                    old_conf = float(row.get("confidence") or 0.5)
+                    row["confidence"] = round(max(0.3, old_conf - 0.05), 4)
+            _rewrite_jsonl(user_heuristics_path(), rows[:64])
+    except Exception:
+        pass
+
+
+_NEGATIVE_FEEDBACK_PATTERNS = [
+    re.compile(r"\bno,?\s+(?:that'?s?\s+)?(?:not|wrong|incorrect)\b", re.IGNORECASE),
+    re.compile(r"\bthat'?s?\s+(?:not|wrong|incorrect|bad|off)\b", re.IGNORECASE),
+    re.compile(r"\byou'?re\s+(?:wrong|incorrect|off|mistaken)\b", re.IGNORECASE),
+    re.compile(r"\bi\s+(?:said|meant|asked|wanted)\b", re.IGNORECASE),
+    re.compile(r"\bnot\s+what\s+i\s+(?:asked|meant|wanted)\b", re.IGNORECASE),
+    re.compile(r"\btry\s+again\b", re.IGNORECASE),
+    re.compile(r"\bwrong\s+(?:answer|response)\b", re.IGNORECASE),
+]
+_POSITIVE_FEEDBACK_PATTERNS = [
+    re.compile(r"\b(?:perfect|exactly|correct|right|great|thanks|nice|good job|well done)\b", re.IGNORECASE),
+    re.compile(r"\bthat'?s?\s+(?:it|right|correct|perfect|exactly)\b", re.IGNORECASE),
+    re.compile(r"\byou'?re\s+right\b", re.IGNORECASE),
+]
+
+
+def _detect_implicit_feedback(
+    *,
+    session_id: str,
+    user_input: str,
+    assistant_output: str,
+) -> None:
+    """Detect implicit approval/rejection in user responses and record as feedback."""
+    text = str(user_input or "").strip()
+    if not text or len(text) < 3:
+        return
+
+    from storage.dialogue_memory import record_response_feedback
+
+    lowered = text.lower()
+    is_negative = any(p.search(lowered) for p in _NEGATIVE_FEEDBACK_PATTERNS)
+    is_positive = any(p.search(lowered) for p in _POSITIVE_FEEDBACK_PATTERNS)
+
+    if is_negative:
+        record_response_feedback(
+            session_id,
+            feedback_type="implicit_rejection",
+            feedback_value=-0.6,
+            user_correction=text[:500] if len(text) > 20 else None,
+            context_snapshot=(assistant_output or "")[:300],
+        )
+    elif is_positive and len(text) < 80:
+        record_response_feedback(
+            session_id,
+            feedback_type="implicit_approval",
+            feedback_value=0.6,
+            context_snapshot=(assistant_output or "")[:300],
+        )
 
 
 def _extract_user_heuristic_candidates(user_input: str) -> list[dict[str, Any]]:
@@ -1167,8 +1307,35 @@ def _looks_like_hive_task_query(lowered: str) -> bool:
 def _replace_name_memory(new_name_fact: str) -> None:
     ensure_memory_files()
     path = memory_path()
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    text = path.read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
     kept = [line for line in lines if "operator name is " not in line.lower()]
+
+    extracted_name = ""
+    name_match = re.search(r"operator name is\s+(.+?)\.?$", new_name_fact, re.IGNORECASE)
+    if name_match:
+        extracted_name = name_match.group(1).strip()
+
+    if extracted_name:
+        updated: list[str] = []
+        identity_updated = False
+        for line in kept:
+            if line.strip().startswith("- **Owner's name**:"):
+                updated.append(f"- **Owner's name**: {extracted_name}")
+                identity_updated = True
+            elif line.strip().startswith("- **My name**:"):
+                updated.append(f"- **My name**: {extracted_name}")
+                identity_updated = True
+            else:
+                updated.append(line)
+        if not identity_updated:
+            for i, line in enumerate(updated):
+                if line.strip() == "## Identity":
+                    updated.insert(i + 1, f"- **Owner's name**: {extracted_name}")
+                    identity_updated = True
+                    break
+        kept = updated
+
     path.write_text("\n".join(kept).rstrip() + "\n", encoding="utf-8")
 
     rows = [

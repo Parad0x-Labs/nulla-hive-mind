@@ -258,6 +258,217 @@ class CuriosityRoamerTests(unittest.TestCase):
         self.assertTrue(result["candidate_id"])
         self.assertIn("Bounded curiosity notes", result["summary"])
 
+    def test_adaptive_research_broadens_when_initial_evidence_is_thin(self) -> None:
+        roamer = CuriosityRoamer()
+        with mock.patch(
+            "retrieval.web_adapter.WebAdapter.planned_search_query",
+            side_effect=[
+                [
+                    {
+                        "summary": "One thin summary",
+                        "result_title": "Thin note",
+                        "result_url": "https://example.test/thin",
+                        "origin_domain": "example.test",
+                    }
+                ],
+                [
+                    {
+                        "summary": "Open source onboarding patterns",
+                        "result_title": "Developer onboarding",
+                        "result_url": "https://docs.github.com/onboarding",
+                        "origin_domain": "docs.github.com",
+                        "source_profile_label": "Official docs",
+                    },
+                    {
+                        "summary": "Product onboarding teardown",
+                        "result_title": "Onboarding teardown",
+                        "result_url": "https://www.intercom.com/blog/onboarding",
+                        "origin_domain": "intercom.com",
+                    },
+                ],
+            ],
+        ):
+            result = roamer.adaptive_research(
+                task_id="task-broaden",
+                user_input="research developer onboarding best practices",
+                classification={"task_class": "research"},
+                interpretation=_interpretation("research developer onboarding best practices", topics=["developer onboarding"]),
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertTrue(result.enabled)
+        self.assertTrue(result.broadened)
+        self.assertIn("broaden_search", result.actions_taken)
+        self.assertGreaterEqual(len(result.queries_run), 2)
+        self.assertIn(result.evidence_strength, {"moderate", "strong"})
+        self.assertFalse(result.admitted_uncertainty)
+
+    def test_adaptive_research_narrows_specific_error_then_admits_uncertainty(self) -> None:
+        roamer = CuriosityRoamer()
+        with mock.patch(
+            "retrieval.web_adapter.WebAdapter.planned_search_query",
+            side_effect=[[], [], []],
+        ):
+            result = roamer.adaptive_research(
+                task_id="task-narrow",
+                user_input="traceback TypeError in telegram bot startup after python 3.12 upgrade",
+                classification={"task_class": "debugging"},
+                interpretation=_interpretation(
+                    "traceback TypeError in telegram bot startup after python 3.12 upgrade",
+                    topics=["telegram bot", "TypeError"],
+                ),
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertTrue(result.enabled)
+        self.assertTrue(result.narrowed)
+        self.assertIn("narrow_search", result.actions_taken)
+        self.assertTrue(result.admitted_uncertainty)
+        self.assertTrue(result.uncertainty_reason)
+
+    def test_adaptive_research_compares_sources_for_tradeoff_queries(self) -> None:
+        roamer = CuriosityRoamer()
+        with mock.patch(
+            "retrieval.web_adapter.WebAdapter.planned_search_query",
+            side_effect=[
+                [
+                    {
+                        "summary": "Supabase is fast to start with managed Postgres.",
+                        "result_title": "Supabase overview",
+                        "result_url": "https://supabase.com/docs",
+                        "origin_domain": "supabase.com",
+                        "source_profile_label": "Official docs",
+                    }
+                ],
+                [
+                    {
+                        "summary": "Firebase has tighter managed mobile integrations.",
+                        "result_title": "Firebase overview",
+                        "result_url": "https://firebase.google.com/docs",
+                        "origin_domain": "firebase.google.com",
+                        "source_profile_label": "Official docs",
+                    }
+                ],
+            ],
+        ):
+            result = roamer.adaptive_research(
+                task_id="task-compare",
+                user_input="compare supabase vs firebase for a telegram bot backend",
+                classification={"task_class": "system_design"},
+                interpretation=_interpretation(
+                    "compare supabase vs firebase for a telegram bot backend",
+                    topics=["supabase", "firebase", "telegram bot"],
+                ),
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertTrue(result.enabled)
+        self.assertIn("compare_sources", result.actions_taken)
+        self.assertTrue(result.compared_sources)
+        self.assertGreaterEqual(len(result.source_domains), 2)
+        self.assertFalse(result.admitted_uncertainty)
+
+    def test_adaptive_research_verifies_claims_with_authoritative_sources(self) -> None:
+        roamer = CuriosityRoamer()
+        with mock.patch(
+            "retrieval.web_adapter.WebAdapter.planned_search_query",
+            side_effect=[
+                [
+                    {
+                        "summary": "A community thread claims the setting is deprecated.",
+                        "result_title": "Community thread",
+                        "result_url": "https://example.test/thread",
+                        "origin_domain": "example.test",
+                    }
+                ],
+                [
+                    {
+                        "summary": "Official docs show the setting is still supported.",
+                        "result_title": "Official docs",
+                        "result_url": "https://docs.python.org/3/library/asyncio.html",
+                        "origin_domain": "docs.python.org",
+                        "source_profile_label": "Official docs",
+                    }
+                ],
+            ],
+        ):
+            result = roamer.adaptive_research(
+                task_id="task-verify",
+                user_input="verify whether asyncio.run is still supported in python 3.12",
+                classification={"task_class": "research"},
+                interpretation=_interpretation(
+                    "verify whether asyncio.run is still supported in python 3.12",
+                    topics=["asyncio.run", "python 3.12"],
+                ),
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertTrue(result.enabled)
+        self.assertIn("verify_claim", result.actions_taken)
+        self.assertTrue(result.verified_claim)
+        self.assertEqual(result.stop_reason, "verification_ready")
+
+    def test_adaptive_research_retries_fuzzy_public_entity_lookup(self) -> None:
+        roamer = CuriosityRoamer()
+        with mock.patch(
+            "retrieval.web_adapter.WebAdapter.planned_search_query",
+            side_effect=[
+                [],
+                [
+                    {
+                        "summary": "Anatoly Yakovenko, often called Toly, co-founded Solana.",
+                        "result_title": "Solana leadership",
+                        "result_url": "https://solana.com/team",
+                        "origin_domain": "solana.com",
+                        "source_profile_label": "Official docs",
+                    },
+                    {
+                        "summary": "Toly is Anatoly Yakovenko on X.",
+                        "result_title": "toly on X",
+                        "result_url": "https://x.com/aeyakovenko",
+                        "origin_domain": "x.com",
+                    },
+                ],
+            ],
+        ):
+            result = roamer.adaptive_research(
+                task_id="task-entity-fuzzy",
+                user_input="Tolly on X in Solana who is he",
+                classification={"task_class": "unknown"},
+                interpretation=_interpretation(
+                    "Tolly on X in Solana who is he",
+                    topics=["solana"],
+                ),
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertTrue(result.enabled)
+        self.assertEqual(result.strategy, "entity_lookup")
+        self.assertEqual(result.queries_run[:2], ["tolly x solana", "toly x solana"])
+        self.assertTrue(result.narrowed)
+        self.assertFalse(result.admitted_uncertainty)
+
+    def test_adaptive_research_admits_uncertainty_for_unknown_public_entity(self) -> None:
+        roamer = CuriosityRoamer()
+        with mock.patch(
+            "retrieval.web_adapter.WebAdapter.planned_search_query",
+            side_effect=[[], [], []],
+        ):
+            result = roamer.adaptive_research(
+                task_id="task-entity-uncertain",
+                user_input="check Tolyy on X in Solana",
+                classification={"task_class": "unknown"},
+                interpretation=_interpretation(
+                    "check Tolyy on X in Solana",
+                    topics=["solana"],
+                ),
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertTrue(result.enabled)
+        self.assertTrue(result.admitted_uncertainty)
+        self.assertIn("public figure", result.uncertainty_reason.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

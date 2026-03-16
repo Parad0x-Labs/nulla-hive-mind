@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
+import threading
 import unittest
 from unittest.mock import patch
+from urllib import request
 
 from apps.brain_hive_watch_server import (
     BrainHiveWatchServerConfig,
@@ -19,6 +22,7 @@ from core.brain_hive_dashboard import (
     render_dashboard_html,
     render_topic_detail_html,
 )
+from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
 
 
 class BrainHiveWatchServerTests(unittest.TestCase):
@@ -99,6 +103,63 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         )
 
         self.assertEqual(result["source_meet_url"], "https://seed-us.example.nulla")
+
+    def test_fetch_dashboard_collapses_duplicate_visible_agents_but_keeps_raw_presence_counts(self) -> None:
+        def fake_fetch(url: str, token: str | None) -> dict:  # noqa: ARG001
+            return {
+                "ok": True,
+                "result": {
+                    "generated_at": "2026-03-14T00:01:31+00:00",
+                    "stats": {
+                        "active_agents": 3,
+                        "presence_agents": 3,
+                        "region_stats": [{"region": "eu", "online_agents": 3}],
+                    },
+                    "agents": [
+                        {
+                            "agent_id": "agent-channel",
+                            "display_name": "NULLA",
+                            "online": True,
+                            "status": "busy",
+                            "home_region": "eu",
+                            "current_region": "eu",
+                            "transport_mode": "nulla_agent",
+                            "capabilities": ["research", "tool_router"],
+                        },
+                        {
+                            "agent_id": "agent-bg-1",
+                            "display_name": "NULLA",
+                            "online": True,
+                            "status": "idle",
+                            "home_region": "eu",
+                            "current_region": "eu",
+                            "transport_mode": "background_openclaw",
+                            "capabilities": ["research", "tool_router"],
+                        },
+                        {
+                            "agent_id": "agent-bg-2",
+                            "display_name": "NULLA",
+                            "online": True,
+                            "status": "idle",
+                            "home_region": "eu",
+                            "current_region": "eu",
+                            "transport_mode": "background_openclaw",
+                            "capabilities": ["research", "tool_router"],
+                        },
+                    ],
+                },
+            }
+
+        result = fetch_dashboard_from_upstreams(("https://seed-eu.example.nulla",), fetch_json=fake_fetch)
+
+        self.assertEqual(result["stats"]["presence_agents"], 3)
+        self.assertEqual(result["stats"]["raw_online_agents"], 3)
+        self.assertEqual(result["stats"]["raw_visible_agents"], 3)
+        self.assertEqual(result["stats"]["active_agents"], 1)
+        self.assertEqual(result["stats"]["visible_agents"], 1)
+        self.assertEqual(result["stats"]["duplicate_visible_agents"], 2)
+        self.assertEqual(result["stats"]["region_stats"][0]["online_agents"], 1)
+        self.assertEqual(len(result["agents"]), 1)
 
     def test_dashboard_snapshot_uses_topic_posts_for_trading_learning(self) -> None:
         class FakeRecord:
@@ -270,11 +331,118 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertEqual(snapshot["stats"]["visible_agents"], 2)
         self.assertEqual(len(snapshot["agents"]), 2)
 
+    def test_dashboard_snapshot_collapses_duplicate_visible_agents_but_keeps_raw_presence_counts(self) -> None:
+        class FakeRecord:
+            def __init__(self, data: dict) -> None:
+                self._data = data
+
+            def model_dump(self, mode: str = "json") -> dict:  # noqa: ARG002
+                return dict(self._data)
+
+        class FakeHive:
+            def get_stats(self) -> FakeRecord:
+                return FakeRecord({"active_agents": 3, "task_stats": {}, "region_stats": [], "total_topics": 0, "total_posts": 0})
+
+            def list_topics(self, *, limit: int = 100, include_flagged: bool = False, status: str | None = None):  # noqa: ARG002
+                return []
+
+            def list_agent_profiles(self, *, limit: int = 100):  # noqa: ARG002
+                return [
+                    FakeRecord({
+                        "agent_id": "agent-live",
+                        "display_name": "NULLA",
+                        "online": True,
+                        "status": "busy",
+                        "home_region": "eu",
+                        "transport_mode": "nulla_agent",
+                        "capabilities": ["research", "tool_router"],
+                    }),
+                    FakeRecord({
+                        "agent_id": "agent-bg-1",
+                        "display_name": "NULLA",
+                        "online": True,
+                        "status": "idle",
+                        "home_region": "eu",
+                        "transport_mode": "background_openclaw",
+                        "capabilities": ["research", "tool_router"],
+                    }),
+                    FakeRecord({
+                        "agent_id": "agent-bg-2",
+                        "display_name": "NULLA",
+                        "online": True,
+                        "status": "idle",
+                        "home_region": "eu",
+                        "transport_mode": "background_openclaw",
+                        "capabilities": ["research", "tool_router"],
+                    }),
+                ][:limit]
+
+            def list_recent_posts_feed(self, *, limit: int = 50):  # noqa: ARG002
+                return []
+
+        summary_stub = {
+            "mesh_index": {"knowledge_manifests": 0, "own_indexed_shards": 0, "remote_indexed_shards": 0},
+            "learning": {
+                "total_learning_shards": 0,
+                "local_generated_shards": 0,
+                "peer_received_shards": 0,
+                "web_derived_shards": 0,
+                "recent_learning": [],
+                "top_problem_classes": [],
+                "top_topic_tags": [],
+            },
+            "knowledge_lanes": {
+                "private_store_shards": 0,
+                "shareable_store_shards": 0,
+                "legacy_unscoped_store_shards": 0,
+                "candidate_rows": 0,
+                "artifact_manifests": 0,
+                "mesh_manifests": 0,
+                "own_mesh_manifests": 0,
+                "remote_mesh_manifests": 0,
+                "share_scope_supported": True,
+                "artifact_lane_supported": True,
+            },
+            "memory": {
+                "local_task_count": 0,
+                "finalized_response_count": 0,
+                "mesh_learning_rows": 0,
+                "recent_tasks": [],
+                "recent_final_responses": [],
+            },
+        }
+
+        with patch("core.brain_hive_dashboard.build_user_summary", return_value=summary_stub), patch(
+            "core.brain_hive_dashboard.count_artifact_manifests", return_value=0
+        ):
+            snapshot = build_dashboard_snapshot(hive=FakeHive(), topic_limit=12, post_limit=24, agent_limit=24)
+
+        self.assertEqual(snapshot["stats"]["presence_agents"], 3)
+        self.assertEqual(snapshot["stats"]["raw_online_agents"], 3)
+        self.assertEqual(snapshot["stats"]["raw_visible_agents"], 3)
+        self.assertEqual(snapshot["stats"]["active_agents"], 1)
+        self.assertEqual(snapshot["stats"]["visible_agents"], 1)
+        self.assertEqual(snapshot["stats"]["duplicate_visible_agents"], 2)
+        self.assertEqual(len(snapshot["agents"]), 1)
+
     def test_dashboard_html_uses_custom_api_endpoint(self) -> None:
         html = render_dashboard_html(api_endpoint="/api/dashboard", topic_base_path="/brain-hive/topic")
         self.assertIn("/api/dashboard", html)
         self.assertIn("/brain-hive/topic", html)
         self.assertIn("NULLA Brain Hive", html)
+        self.assertIn("NULLA Operator Workstation", html)
+        self.assertIn("Brain Hive workstation v1", html)
+        self.assertIn("workstation v1", html)
+        self.assertIn("wk-topbar", html)
+        self.assertIn(">Overview<", html)
+        self.assertIn(">Hive<", html)
+        self.assertIn(">Trace unavailable here<", html)
+        self.assertIn('data-workstation-trace-state="not-live"', html)
+        self.assertIn(">Human<", html)
+        self.assertIn(">Agent<", html)
+        self.assertIn(">Raw<", html)
+        self.assertIn(NULLA_WORKSTATION_DEPLOYMENT_VERSION, html)
+        self.assertIn('data-workstation-surface="brain-hive"', html)
         self.assertIn("https://x.com/Parad0x_Labs", html)
         self.assertIn("https://x.com/nulla_ai", html)
         self.assertIn("https://github.com/Parad0x-Labs/", html)
@@ -288,9 +456,30 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertIn("fold-card", html)
         self.assertIn("buildTradingEvidenceSummary", html)
         self.assertIn("split(/\\n+/)", html)
-        self.assertIn("Task Event Stream", html)
         self.assertIn("renderTaskEventFold", html)
-        self.assertIn("Older task events", html)
+        self.assertIn("workstationHomeBoard", html)
+        self.assertIn("dashboard-stage", html)
+        self.assertIn("dashboard-overview-grid", html)
+        self.assertIn("claimStreamList", html)
+        self.assertIn("recentChangeList", html)
+        self.assertIn("Raw presence rows", html)
+        self.assertIn("Collapsed duplicates", html)
+        self.assertIn("Distinct peers online", html)
+        self.assertIn("Active tasks now", html)
+        self.assertIn("Recent task events", html)
+        self.assertIn("Completion data", html)
+        self.assertIn("Failure data", html)
+        self.assertIn("Stale peer/source rows", html)
+        self.assertIn("Truth / debug", html)
+        self.assertIn("Old raw peer counts were misleading here because", html)
+        self.assertIn("No live completion data yet from watcher/public Hive payloads.", html)
+        self.assertIn("No live failure data yet from watcher/public Hive payloads.", html)
+        self.assertIn("objectModelRail", html)
+        self.assertIn("brainInspectorTitle", html)
+        self.assertIn("brainInspectorTruth", html)
+        self.assertIn("brainInspectorTruthNote", html)
+        self.assertIn("tab-hive", html)
+        self.assertIn("renderWorkstationChrome", html)
         self.assertIn("function tradingPresenceState(", html)
         self.assertIn("const presenceState = tradingPresenceState(trading, data.generated_at, data.agents || []);", html)
         self.assertIn("const uiState = { openDetails: Object.create(null) };", html)
@@ -553,9 +742,68 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         )
         self.assertIn("/api/topic/topic-123", html)
         self.assertIn("/api/topic/topic-123/posts", html)
+        self.assertIn("NULLA Operator Workstation", html)
+        self.assertIn("wk-topbar", html)
+        self.assertIn("workstation v1", html)
+        self.assertIn("Back to Hive", html)
+        self.assertIn(">Hive<", html)
+        self.assertIn(">Trace unavailable here<", html)
+        self.assertIn(">Human<", html)
+        self.assertIn(">Agent<", html)
+        self.assertIn(">Raw<", html)
+        self.assertIn(NULLA_WORKSTATION_DEPLOYMENT_VERSION, html)
+        self.assertIn('data-workstation-surface="brain-hive-topic"', html)
         self.assertIn("Showing latest", html)
         self.assertIn("buildLineStructuredSummary", html)
         self.assertIn("split(/\\n+/)", html)
+
+    @unittest.skipUnless(os.environ.get("NULLA_LIVE_ROUTE_PROOF") == "1", "live route proof only")
+    def test_watch_server_live_brain_hive_route_carries_workstation_proof_headers(self) -> None:
+        server = build_server(
+            BrainHiveWatchServerConfig(
+                host="127.0.0.1",
+                port=0,
+                upstream_base_urls=("http://127.0.0.1:8766",),
+            )
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = int(server.server_address[1])
+            with request.urlopen(f"http://127.0.0.1:{port}/brain-hive", timeout=5) as response:
+                body = response.read().decode("utf-8")
+                self.assertEqual(response.headers.get("X-Nulla-Workstation-Version"), NULLA_WORKSTATION_DEPLOYMENT_VERSION)
+                self.assertEqual(response.headers.get("X-Nulla-Workstation-Surface"), "brain-hive")
+                self.assertIn(NULLA_WORKSTATION_DEPLOYMENT_VERSION, body)
+                self.assertIn('data-workstation-surface="brain-hive"', body)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+
+    @unittest.skipUnless(os.environ.get("NULLA_LIVE_ROUTE_PROOF") == "1", "live route proof only")
+    def test_watch_server_live_topic_route_carries_workstation_proof_headers(self) -> None:
+        server = build_server(
+            BrainHiveWatchServerConfig(
+                host="127.0.0.1",
+                port=0,
+                upstream_base_urls=("http://127.0.0.1:8766",),
+            )
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = int(server.server_address[1])
+            with request.urlopen(f"http://127.0.0.1:{port}/brain-hive/topic/topic-123", timeout=5) as response:
+                body = response.read().decode("utf-8")
+                self.assertEqual(response.headers.get("X-Nulla-Workstation-Version"), NULLA_WORKSTATION_DEPLOYMENT_VERSION)
+                self.assertEqual(response.headers.get("X-Nulla-Workstation-Surface"), "brain-hive-topic")
+                self.assertIn(NULLA_WORKSTATION_DEPLOYMENT_VERSION, body)
+                self.assertIn('data-workstation-surface="brain-hive-topic"', body)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
 
     def test_build_server_rejects_partial_tls_config(self) -> None:
         with self.assertRaises(ValueError):

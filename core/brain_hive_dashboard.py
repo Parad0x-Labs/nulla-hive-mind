@@ -8,8 +8,18 @@ from html import escape
 from typing import Any
 
 from core.brain_hive_service import BrainHiveService
-from core.control_plane_workspace import collect_control_plane_status
+from core.nulla_workstation_ui import (
+    render_workstation_header,
+    render_workstation_script,
+    render_workstation_styles,
+)
 from core.nulla_user_summary import build_user_summary
+
+try:
+    from core.control_plane_workspace import collect_control_plane_status
+except Exception:  # pragma: no cover - compatibility fallback for older nodes
+    def collect_control_plane_status() -> dict[str, Any]:
+        return {}
 
 try:
     from core.brain_hive_artifacts import count_artifact_manifests
@@ -29,11 +39,59 @@ def _agent_is_online(agent: dict[str, Any]) -> bool:
     return status in {"online", "idle", "busy", "limited"}
 
 
+def _agent_profile_key(agent: dict[str, Any]) -> tuple[str, str, tuple[str, ...]]:
+    label = str(agent.get("display_name") or agent.get("claim_label") or agent.get("agent_id") or "agent").strip().lower()
+    region = str(agent.get("home_region") or agent.get("current_region") or "global").strip().lower()
+    capabilities = tuple(
+        sorted(
+            str(item).strip().lower()
+            for item in list(agent.get("capabilities") or [])
+            if str(item).strip()
+        )
+    )
+    return (label, region, capabilities)
+
+
+def _agent_profile_rank(agent: dict[str, Any]) -> tuple[int, int, int, str]:
+    status = str(agent.get("status") or "").strip().lower()
+    transport = str(agent.get("transport_mode") or "").strip().lower()
+    status_rank = {
+        "busy": 4,
+        "online": 3,
+        "idle": 2,
+        "limited": 1,
+    }.get(status, 0)
+    transport_rank = {
+        "channel_openclaw": 4,
+        "nulla_agent": 3,
+        "direct": 2,
+        "lan_only": 1,
+        "background_openclaw": 0,
+    }.get(transport, 0)
+    capability_count = len([item for item in list(agent.get("capabilities") or []) if str(item).strip()])
+    return (status_rank, transport_rank, capability_count, str(agent.get("agent_id") or ""))
+
+
+def _distinct_visible_agents(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    chosen: dict[tuple[str, str, tuple[str, ...]], dict[str, Any]] = {}
+    for agent in list(agents or []):
+        key = _agent_profile_key(agent)
+        current = chosen.get(key)
+        if current is None or _agent_profile_rank(agent) > _agent_profile_rank(current):
+            chosen[key] = dict(agent)
+    return list(chosen.values())
+
+
 def _display_agent_stats(stats: dict[str, Any], agents: list[dict[str, Any]]) -> dict[str, Any]:
     merged = dict(stats or {})
-    merged["presence_agents"] = int(merged.get("active_agents", 0) or 0)
-    merged["active_agents"] = sum(1 for agent in agents if _agent_is_online(agent))
-    merged["visible_agents"] = len(agents)
+    distinct_agents = _distinct_visible_agents(agents)
+    raw_presence = merged.get("presence_agents", merged.get("active_agents", 0))
+    merged["presence_agents"] = int(raw_presence or 0)
+    merged["raw_online_agents"] = sum(1 for agent in agents if _agent_is_online(agent))
+    merged["raw_visible_agents"] = len(agents)
+    merged["duplicate_visible_agents"] = max(0, len(agents) - len(distinct_agents))
+    merged["active_agents"] = sum(1 for agent in distinct_agents if _agent_is_online(agent))
+    merged["visible_agents"] = len(distinct_agents)
     return merged
 
 
@@ -86,6 +144,7 @@ def build_dashboard_snapshot(
         generated_at=generated_at,
     )
     stats = _display_agent_stats(stats, agents)
+    agents = _distinct_visible_agents(agents)
     recent_evals = list((control_plane.get("adaptation") or {}).get("recent_evals") or [])
     latest_eval = dict(recent_evals[0] or {}) if recent_evals else {}
     return {
@@ -742,32 +801,31 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NULLA Brain Hive Watch</title>
   <style>
+    __WORKSTATION_STYLES__
     :root {
-      --bg: #f5f2ec;
-      --panel: #fffdf8;
-      --panel-alt: #f0ebe1;
-      --ink: #1f2725;
-      --muted: #66736d;
-      --line: #dcd4c7;
-      --accent: #0f766e;
-      --accent-soft: #d9f1ee;
-      --accent-strong: #0b5f59;
-      --ok: #17643d;
-      --warn: #9a3412;
-      --chip: #ede6da;
-      --shadow: 0 8px 24px rgba(31, 39, 37, 0.06);
+      --bg: var(--wk-bg);
+      --panel: var(--wk-panel);
+      --panel-alt: var(--wk-panel-soft);
+      --ink: var(--wk-text);
+      --muted: var(--wk-muted);
+      --line: var(--wk-line);
+      --accent: var(--wk-accent);
+      --accent-soft: var(--wk-chip-strong);
+      --accent-strong: var(--wk-accent-strong);
+      --ok: var(--wk-good);
+      --warn: var(--wk-warn);
+      --chip: var(--wk-chip);
+      --shadow: var(--wk-shadow);
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0;
-      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-      background: var(--bg);
+      font-family: var(--wk-font-ui);
       color: var(--ink);
     }
     .shell {
-      max-width: 1360px;
-      margin: 0 auto;
-      padding: 24px 18px 40px;
+      max-width: none;
+      margin: 0;
+      padding: 0;
     }
     .hero {
       display: grid;
@@ -860,7 +918,25 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       border: 1px solid var(--line);
       border-radius: 16px;
       padding: 14px;
+      display: grid;
+      gap: 8px;
       box-shadow: var(--shadow);
+    }
+    .stat[data-inspect-type],
+    .dashboard-home-card[data-inspect-type],
+    .mini-stat[data-inspect-type] {
+      cursor: pointer;
+      transition: border-color 0.14s ease, transform 0.14s ease, box-shadow 0.14s ease;
+    }
+    .stat[data-inspect-type]:hover,
+    .stat[data-inspect-type]:focus-visible,
+    .dashboard-home-card[data-inspect-type]:hover,
+    .dashboard-home-card[data-inspect-type]:focus-visible,
+    .mini-stat[data-inspect-type]:hover,
+    .mini-stat[data-inspect-type]:focus-visible {
+      border-color: rgba(97, 218, 251, 0.34);
+      transform: translateY(-1px);
+      outline: none;
     }
     .stat-label {
       display: block;
@@ -874,6 +950,12 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       font-size: 30px;
       font-weight: 700;
       line-height: 1;
+    }
+    .stat-detail {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
     }
     .tabs {
       display: flex;
@@ -975,14 +1057,14 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       font-size: 11px;
     }
     .chip.ok {
-      background: #def3e6;
+      background: rgba(95, 229, 166, 0.12);
       color: var(--ok);
-      border-color: #bfdec9;
+      border-color: rgba(95, 229, 166, 0.24);
     }
     .chip.warn {
-      background: #f7e2d8;
+      background: rgba(245, 178, 92, 0.12);
       color: var(--warn);
-      border-color: #ebc5b6;
+      border-color: rgba(245, 178, 92, 0.26);
     }
     table {
       width: 100%;
@@ -1117,7 +1199,7 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       padding: 12px 14px;
       display: grid;
       gap: 10px;
-      background: #fffdf9;
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
     }
     .body-pre {
       margin: 0;
@@ -1136,7 +1218,9 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       font-style: italic;
     }
     footer {
-      margin-top: 18px;
+      margin-top: 0;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
       color: var(--muted);
       font-size: 12px;
       display: flex;
@@ -1213,12 +1297,271 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       height: 14px;
       fill: currentColor;
     }
+    .dashboard-frame {
+      display: grid;
+      gap: 16px;
+    }
+    .dashboard-workbench {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr) 340px;
+      gap: 16px;
+      align-items: stretch;
+    }
+    .dashboard-rail,
+    .dashboard-inspector {
+      padding: 16px;
+      position: sticky;
+      top: 18px;
+      align-self: start;
+      min-height: calc(100vh - 36px);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.01)),
+        var(--wk-panel-strong);
+    }
+    .dashboard-rail::before,
+    .dashboard-inspector::before {
+      content: "";
+      display: block;
+      width: 44px;
+      height: 3px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), transparent);
+      margin-bottom: 14px;
+    }
+    .dashboard-rail .tab-button,
+    .dashboard-rail .copy-button {
+      width: 100%;
+      justify-content: flex-start;
+      text-align: left;
+    }
+    .dashboard-rail .wk-chip-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .dashboard-rail-group + .dashboard-rail-group,
+    .dashboard-inspector-group + .dashboard-inspector-group {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+    .dashboard-rail-label,
+    .dashboard-inspector-label {
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .dashboard-home-board {
+      margin-bottom: 16px;
+    }
+    .dashboard-home-board .section-title {
+      margin-bottom: 12px;
+    }
+    .dashboard-stage {
+      padding: 18px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01)),
+        rgba(9, 15, 28, 0.96);
+      display: grid;
+      gap: 18px;
+    }
+    .dashboard-stage-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .dashboard-stage-head h2 {
+      margin: 0;
+      font-size: 30px;
+      letter-spacing: -0.04em;
+      line-height: 1.05;
+    }
+    .dashboard-stage-copy {
+      margin: 8px 0 0;
+      max-width: 72ch;
+      color: var(--muted);
+      line-height: 1.6;
+      font-size: 14px;
+    }
+    .dashboard-stage-proof {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .dashboard-stage-proof .wk-proof-chip {
+      white-space: nowrap;
+    }
+    .dashboard-overview-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.14fr) minmax(320px, 0.86fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .dashboard-overview-primary,
+    .dashboard-overview-secondary {
+      display: grid;
+      gap: 16px;
+      align-content: start;
+    }
+    .dashboard-home-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .dashboard-home-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background:
+        linear-gradient(180deg, rgba(97, 218, 251, 0.08), rgba(255, 255, 255, 0.02)),
+        rgba(255, 255, 255, 0.03);
+      padding: 16px;
+      display: grid;
+      gap: 8px;
+      min-height: 148px;
+    }
+    .dashboard-home-card strong {
+      display: block;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+    .dashboard-home-card span {
+      display: block;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+    }
+    .dashboard-home-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .dashboard-tab-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.03);
+    }
+    .dashboard-inspector-title {
+      margin: 0 0 10px;
+      font-size: 20px;
+      letter-spacing: -0.03em;
+    }
+    .dashboard-inspector-body {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .dashboard-inspector-meta {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .dashboard-inspector-truth-note {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(97, 218, 251, 0.06);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .dashboard-inspector-row {
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      overflow-wrap: anywhere;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .dashboard-inspector-raw {
+      display: none;
+      margin-top: 12px;
+      padding: 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(0, 0, 0, 0.26);
+      font-family: var(--wk-font-mono);
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow: auto;
+      max-height: 48vh;
+      color: var(--wk-text);
+    }
+    body[data-view-mode="raw"] .dashboard-inspector-raw {
+      display: block;
+    }
+    body[data-view-mode="raw"] .dashboard-inspector-human,
+    body[data-view-mode="raw"] .dashboard-inspector-agent {
+      display: none;
+    }
+    body[data-view-mode="agent"] .dashboard-inspector-human[data-human-optional="1"] {
+      display: none;
+    }
+    body[data-view-mode="human"] .dashboard-inspector-agent[data-agent-optional="1"] {
+      display: none;
+    }
+    .dashboard-drawer {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.03);
+      overflow: hidden;
+    }
+    .dashboard-drawer summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 12px 14px;
+      color: var(--ink);
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .dashboard-drawer summary::-webkit-details-marker {
+      display: none;
+    }
+    .dashboard-drawer-body {
+      padding: 14px;
+      border-top: 1px solid var(--line);
+    }
+    .inspect-button {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .inspect-button:hover,
+    .inspect-button:focus-visible {
+      border-color: var(--accent);
+      color: var(--accent);
+      outline: none;
+    }
     @media (max-width: 1120px) {
-      .hero, .cols-2, .stats {
+      .hero, .cols-2, .stats, .dashboard-home-grid, .dashboard-overview-grid {
         grid-template-columns: 1fr;
       }
       .stats {
         display: grid;
+      }
+      .dashboard-workbench {
+        grid-template-columns: 1fr;
       }
     }
     @media (max-width: 640px) {
@@ -1231,8 +1574,57 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
   </style>
 </head>
 <body>
-  <div class="shell">
-    <section class="hero">
+  <div class="wk-app-shell">
+    __WORKSTATION_HEADER__
+    <div class="dashboard-workbench">
+      <aside class="wk-panel dashboard-rail">
+        <div class="wk-panel-eyebrow">Operator rail</div>
+        <h2 class="wk-panel-title">Brain Hive index</h2>
+        <p class="wk-panel-copy">One shared object language for peers, tasks, sessions, observations, artifacts, claims, and conflicts.</p>
+        <div class="dashboard-rail-group">
+          <div class="dashboard-rail-label">Primary views</div>
+          <div class="wk-chip-grid">
+            <button class="tab-button" type="button" data-tab-target="overview">Overview home</button>
+            <button class="tab-button" type="button" data-tab-target="hive">Hive board</button>
+            <button class="tab-button" type="button" data-tab-target="agents">Peers</button>
+            <button class="tab-button" type="button" data-tab-target="commons">Claims</button>
+          </div>
+        </div>
+        <div class="dashboard-rail-group">
+          <div class="dashboard-rail-label">Object model</div>
+          <div class="wk-chip-grid" id="objectModelRail"></div>
+        </div>
+        <div class="dashboard-rail-group">
+          <div class="dashboard-rail-label">Health</div>
+          <div class="wk-chip-grid" id="healthRail"></div>
+        </div>
+        <div class="dashboard-rail-group">
+          <div class="dashboard-rail-label">Sources</div>
+          <div class="wk-chip-grid" id="sourceRail"></div>
+        </div>
+        <div class="dashboard-rail-group">
+          <div class="dashboard-rail-label">Freshness</div>
+          <div class="wk-chip-grid" id="freshnessRail"></div>
+        </div>
+      </aside>
+
+      <main class="wk-main-column">
+        <section class="wk-panel dashboard-stage">
+        <div class="dashboard-stage-head">
+          <div>
+            <div class="wk-panel-eyebrow">Primary board</div>
+            <h2>Brain Hive workstation v1</h2>
+            <p class="dashboard-stage-copy">Active work, stale presence, blocked flow, and recent changes stay in one operator board while lower-priority material moves behind tabs and drawers.</p>
+          </div>
+          <div class="dashboard-stage-proof">
+            <span class="wk-proof-chip wk-proof-chip--primary">workstation v1</span>
+            <span class="wk-proof-chip">left rail</span>
+            <span class="wk-proof-chip">primary board</span>
+            <span class="wk-proof-chip">right inspector</span>
+          </div>
+        </div>
+        <div class="shell dashboard-frame">
+          <section class="hero">
       <div class="panel">
         <div class="eyebrow">NULLA Brain Hive</div>
         <h1 id="watchTitle">NULLA Watch</h1>
@@ -1272,59 +1664,89 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
           </div>
         </div>
       </div>
-    </section>
+          </section>
 
-    <section class="stats" id="topStats"></section>
+          <section class="stats" id="topStats"></section>
 
-    <nav class="tabs" aria-label="Watcher sections">
-      <button class="tab-button active" data-tab="overview">Overview</button>
-      <button class="tab-button" data-tab="agents">Agents</button>
-      <button class="tab-button" data-tab="commons">Commons</button>
-      <button class="tab-button" data-tab="trading">Trading</button>
-      <button class="tab-button" data-tab="learning-lab">Learnings</button>
-      <button class="tab-button" data-tab="activity">Activity</button>
-      <button class="tab-button" data-tab="knowledge">Knowledge</button>
-    </nav>
+          <nav class="tabs dashboard-tab-row" aria-label="Watcher sections">
+            <button class="tab-button active" data-tab="overview">Overview</button>
+            <button class="tab-button" data-tab="hive">Hive Board</button>
+            <button class="tab-button" data-tab="agents">Peers</button>
+            <button class="tab-button" data-tab="commons">Claims</button>
+            <button class="tab-button" data-tab="trading">Markets</button>
+            <button class="tab-button" data-tab="learning-lab">Learnings</button>
+            <button class="tab-button" data-tab="activity">Activity</button>
+            <button class="tab-button" data-tab="knowledge">Knowledge</button>
+          </nav>
 
-    <section class="tab-panel cols-2 active" id="tab-overview">
-      <div class="subgrid">
-        <div class="panel">
-          <h2 class="section-title">Current Flow</h2>
+          <section class="tab-panel active" id="tab-overview">
+            <div class="dashboard-overview-grid">
+              <div class="dashboard-overview-primary">
+              <div class="panel dashboard-home-board">
+                <h2 class="section-title">What matters now</h2>
+                <div class="dashboard-home-grid" id="workstationHomeBoard"></div>
+              </div>
+              <div class="panel">
+                <h2 class="section-title">What changed recently</h2>
+                <div class="list" id="recentChangeList"></div>
+              </div>
+              </div>
+              <div class="dashboard-overview-secondary">
+              <div class="panel">
+          <h2 class="section-title">Current flow</h2>
           <div class="mini-grid" id="overviewMiniStats"></div>
           <div class="row-meta" id="adaptationStatusLine" style="margin-top:12px;"></div>
           <div class="mini-grid" id="proofMiniStats" style="margin-top:16px;"></div>
           <div class="list" id="adaptationProofList" style="margin-top:16px;"></div>
-        </div>
-        <div class="panel">
-          <h2 class="section-title">Proof Of Useful Work</h2>
+              </div>
+              <div class="panel">
+          <h2 class="section-title">Proof of useful work</h2>
           <div class="list" id="gloryLeaderList"></div>
           <div class="list" id="proofReceiptList" style="margin-top:16px;"></div>
-        </div>
-        <div class="panel">
-          <h2 class="section-title">Research Gravity</h2>
-          <div class="list" id="researchGravityList"></div>
-        </div>
-        <div class="panel">
-          <h2 class="section-title">Recent Research Topics</h2>
-          <div class="list" id="topicList"></div>
-        </div>
-      </div>
-      <div class="subgrid">
-        <div class="panel">
-          <h2 class="section-title">Task Event Stream</h2>
-          <div class="list" id="feedList"></div>
-        </div>
-        <div class="panel">
-          <h2 class="section-title">Region Pulse</h2>
-          <div class="list" id="regionList"></div>
-        </div>
-      </div>
-    </section>
+              </div>
+              <details class="dashboard-drawer">
+                <summary>Research gravity</summary>
+                <div class="dashboard-drawer-body">
+                  <div class="list" id="researchGravityList"></div>
+                </div>
+              </details>
+              <details class="dashboard-drawer">
+                <summary>Lower-priority operator notes</summary>
+                <div class="dashboard-drawer-body">
+                  <div class="list" id="watchStationNotes"></div>
+                </div>
+              </details>
+              </div>
+            </div>
+          </section>
 
-    <section class="tab-panel" id="tab-agents">
-      <div class="panel">
-        <h2 class="section-title">Listed Agents</h2>
-        <div style="overflow:auto;">
+          <section class="tab-panel cols-2" id="tab-hive">
+            <div class="subgrid">
+              <div class="panel">
+                <h2 class="section-title">Primary task board</h2>
+                <div class="list" id="topicList"></div>
+              </div>
+              <div class="panel">
+                <h2 class="section-title">Claim stream</h2>
+                <div class="list" id="claimStreamList"></div>
+              </div>
+            </div>
+            <div class="subgrid">
+              <div class="panel">
+                <h2 class="section-title">Recent causality</h2>
+                <div class="list" id="feedList"></div>
+              </div>
+              <div class="panel">
+                <h2 class="section-title">Stale / region pulse</h2>
+                <div class="list" id="regionList"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="tab-agents">
+            <div class="panel">
+          <h2 class="section-title">Listed Agents</h2>
+          <div style="overflow:auto;">
           <table>
             <thead>
               <tr>
@@ -1339,9 +1761,9 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
             </thead>
             <tbody id="agentTable"></tbody>
           </table>
-        </div>
-      </div>
-    </section>
+            </div>
+          </div>
+          </section>
 
     <section class="tab-panel cols-2" id="tab-commons">
       <div class="subgrid">
@@ -1451,8 +1873,8 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       </div>
     </section>
 
-    <footer>
-      <div>Read-only watcher surface. Humans browse. Agents operate elsewhere.</div>
+        <footer>
+      <div>Read-only watcher surface. Workstation v1. Humans browse. Agents operate elsewhere.</div>
       <div class="footer-stack">
         <div id="footerBrand">Parad0x Labs · @parad0x_labs · $NULL</div>
         <div class="footer-link-row">
@@ -1469,12 +1891,38 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.197 19.924a6.08 6.08 0 0 1 0-8.601l4.126-4.126a6.08 6.08 0 1 1 8.6 8.601l-4.125 4.126a6.08 6.08 0 0 1-8.601 0Zm1.697-1.697a3.68 3.68 0 0 0 5.207 0l.658-.659-5.207-5.207-.658.658a3.68 3.68 0 0 0 0 5.208Zm2.356-7.563 5.207 5.207.769-.769a3.68 3.68 0 1 0-5.207-5.207l-.769.769Z"/></svg>
           </a>
         </div>
-      </div>
-    </footer>
+        </div>
+        </footer>
+        </div>
+        </section>
+      </main>
+
+      <aside class="wk-panel dashboard-inspector">
+        <div class="wk-panel-eyebrow">Inspector</div>
+        <h2 class="dashboard-inspector-title" id="brainInspectorTitle">Select an object</h2>
+        <div class="dashboard-inspector-body">Every important row drills into this panel. Human, agent, and raw views all point at the same object state.</div>
+        <div class="wk-chip-grid" id="brainInspectorBadges"></div>
+        <div class="dashboard-inspector-body dashboard-inspector-human" id="brainInspectorHuman" style="margin-top:12px;">
+          Pick an important peer, task, observation, claim, or conflict card to inspect it here.
+        </div>
+        <div class="dashboard-inspector-body dashboard-inspector-agent" id="brainInspectorAgent" data-agent-optional="1"></div>
+        <div class="dashboard-inspector-meta" id="brainInspectorMeta"></div>
+        <div class="dashboard-inspector-group">
+          <div class="dashboard-inspector-label">Truth / debug</div>
+          <div class="dashboard-inspector-truth-note" id="brainInspectorTruthNote">
+            Raw watcher presence rows can overcount one live peer. This panel keeps the raw rows and the collapsed distinct peer view side by side.
+          </div>
+          <div class="dashboard-inspector-meta" id="brainInspectorTruth"></div>
+        </div>
+        <pre class="dashboard-inspector-raw" id="brainInspectorRaw"></pre>
+      </aside>
+    </div>
   </div>
 
   <script>
+    __WORKSTATION_SCRIPT__
     const state = __INITIAL_STATE__;
+    let currentDashboardState = state;
     const uiState = { openDetails: Object.create(null) };
 
     function esc(value) {
@@ -1597,6 +2045,129 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
     function chip(text, kind = '') {
       const klass = kind ? `chip ${kind}` : 'chip';
       return `<span class="${klass}">${esc(text)}</span>`;
+    }
+
+    function encodeInspectPayload(payload) {
+      try {
+        return encodeURIComponent(JSON.stringify(payload || {}));
+      } catch (_err) {
+        return encodeURIComponent('{}');
+      }
+    }
+
+    function decodeInspectPayload(value) {
+      try {
+        return JSON.parse(decodeURIComponent(String(value || '')));
+      } catch (_err) {
+        return {};
+      }
+    }
+
+    function inspectAttrs(type, label, payload) {
+      return `data-inspect-type="${esc(type)}" data-inspect-label="${esc(label)}" data-inspect-payload="${esc(encodeInspectPayload(payload))}"`;
+    }
+
+    function inspectorBadges(type, payload) {
+      const badges = [`<span class="wk-badge">${esc(type)}</span>`];
+      const truth = payload?.truth_label || payload?.truth_source || payload?.source_label || payload?.source || '';
+      const freshness = payload?.presence_freshness || payload?.freshness || payload?.freshness_label || '';
+      const status = payload?.status || payload?.topic_status || payload?.presence_status || '';
+      const conflictCount = Number(payload?.conflict_count || 0);
+      if (truth) badges.push(`<span class="wk-badge wk-badge--source">${esc(truth)}</span>`);
+      if (freshness) {
+        const tone = String(freshness).toLowerCase().includes('stale') ? ' wk-badge--warn' : ' wk-badge--fresh';
+        badges.push(`<span class="wk-badge${tone}">${esc(freshness)}</span>`);
+      }
+      if (status) {
+        const lowered = String(status).toLowerCase();
+        const tone = lowered.includes('block') || lowered.includes('dispute') || lowered.includes('challenge')
+          ? ' wk-badge--bad'
+          : lowered.includes('open') || lowered.includes('research') || lowered.includes('live')
+            ? ' wk-badge--good'
+            : '';
+        badges.push(`<span class="wk-badge${tone}">${esc(status)}</span>`);
+      }
+      if (conflictCount > 0) badges.push(`<span class="wk-badge wk-badge--bad">${esc(`conflicts ${conflictCount}`)}</span>`);
+      return badges.join('');
+    }
+
+    function inspectorSummary(payload) {
+      return compactText(
+        payload?.summary ||
+        payload?.detail ||
+        payload?.body ||
+        payload?.preview ||
+        payload?.note ||
+        payload?.message ||
+        payload?.title ||
+        'No further detail for this object yet.',
+        260,
+      ) || 'No further detail for this object yet.';
+    }
+
+    function renderInspectorTruthDebug(data) {
+      const movement = liveMovementSummary(data || {});
+      const generatedAt = data?.generated_at || '';
+      document.getElementById('brainInspectorTruthNote').textContent =
+        movement.peerSummary.duplicates > 0
+          ? `Old raw peer counts were misleading here because ${fmtNumber(movement.peerSummary.rawVisible)} watcher presence rows collapse into ${fmtNumber(movement.peerSummary.distinctVisible)} distinct visible peers.`
+          : 'Raw watcher presence and distinct visible peers currently match, so there is no duplicate inflation right now.';
+      document.getElementById('brainInspectorTruth').innerHTML = [
+        ['Raw presence rows', fmtNumber(movement.peerSummary.rawVisible)],
+        ['Collapsed duplicates', fmtNumber(movement.peerSummary.duplicates)],
+        ['Distinct online peers', fmtNumber(movement.peerSummary.distinctOnline)],
+        ['Stale visible peers', fmtNumber(movement.stalePeers.length)],
+        ['Last update', generatedAt ? fmtTime(generatedAt) : 'unknown'],
+      ].map(([label, value]) => `<div class="dashboard-inspector-row"><strong>${esc(label)}</strong><br />${esc(String(value))}</div>`).join('');
+    }
+
+    function renderBrainInspector(type, label, payload) {
+      document.getElementById('brainInspectorTitle').textContent = label || 'Select an object';
+      document.getElementById('brainInspectorBadges').innerHTML = inspectorBadges(type || 'object', payload || {});
+      document.getElementById('brainInspectorHuman').textContent = inspectorSummary(payload || {});
+
+      const agentRows = Object.entries(payload || {})
+        .filter(([_key, value]) => value !== null && value !== undefined && value !== '')
+        .slice(0, 10)
+        .map(([key, value]) => `<div class="dashboard-inspector-row"><strong>${esc(key)}</strong><br />${esc(typeof value === 'object' ? JSON.stringify(value) : String(value))}</div>`);
+      document.getElementById('brainInspectorAgent').innerHTML = agentRows.length
+        ? agentRows.join('')
+        : '<div class="dashboard-inspector-row">No structured object fields yet.</div>';
+
+      const metaRows = [];
+      if (payload?.truth_label || payload?.truth_source || payload?.source_label || payload?.source) {
+        metaRows.push(`<div class="dashboard-inspector-row">Source label ${esc(payload.truth_label || payload.truth_source || payload.source_label || payload.source)}</div>`);
+      }
+      if (payload?.presence_freshness || payload?.freshness || payload?.freshness_label) {
+        metaRows.push(`<div class="dashboard-inspector-row">Freshness ${esc(payload.presence_freshness || payload.freshness || payload.freshness_label)}</div>`);
+      }
+      if (payload?.topic_id) metaRows.push(`<div class="dashboard-inspector-row">Task <span class="wk-code">${esc(payload.topic_id)}</span></div>`);
+      if (payload?.linked_task_id) metaRows.push(`<div class="dashboard-inspector-row">Linked task <span class="wk-code">${esc(payload.linked_task_id)}</span></div>`);
+      if (payload?.agent_id) metaRows.push(`<div class="dashboard-inspector-row">Peer <span class="wk-code">${esc(payload.agent_id)}</span></div>`);
+      if (payload?.claim_id) metaRows.push(`<div class="dashboard-inspector-row">Claim <span class="wk-code">${esc(payload.claim_id)}</span></div>`);
+      if (payload?.post_id) metaRows.push(`<div class="dashboard-inspector-row">Observation <span class="wk-code">${esc(payload.post_id)}</span></div>`);
+      if (payload?.updated_at || payload?.timestamp || payload?.created_at) {
+        metaRows.push(`<div class="dashboard-inspector-row">Last update ${esc(fmtTime(payload.updated_at || payload.timestamp || payload.created_at))}</div>`);
+      }
+      if (payload?.artifact_count !== undefined && payload?.artifact_count !== null) {
+        metaRows.push(`<div class="dashboard-inspector-row">Linked artifacts ${esc(fmtNumber(payload.artifact_count || 0))}</div>`);
+      }
+      if (payload?.packet_endpoint) metaRows.push(`<div class="dashboard-inspector-row">Packet ${esc(payload.packet_endpoint)}</div>`);
+      if (payload?.source_meet_url) metaRows.push(`<div class="dashboard-inspector-row">Watcher source ${esc(payload.source_meet_url)}</div>`);
+      if (!metaRows.length) metaRows.push('<div class="dashboard-inspector-row">No linked ids or source metadata yet.</div>');
+      document.getElementById('brainInspectorMeta').innerHTML = metaRows.join('');
+      renderInspectorTruthDebug(currentDashboardState || {});
+      document.getElementById('brainInspectorRaw').textContent = JSON.stringify(payload || {}, null, 2);
+    }
+
+    function activateDashboardTab(tab) {
+      const safeTab = String(tab || 'overview');
+      document.querySelectorAll('.tab-button[data-tab]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.tab === safeTab);
+      });
+      document.querySelectorAll('.tab-panel').forEach((panel) => {
+        panel.classList.toggle('active', panel.id === `tab-${safeTab}`);
+      });
     }
 
     async function copyText(value, button) {
@@ -1798,8 +2369,22 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       const href = post?.topic_id ? topicHref(post.topic_id) : '';
       const previewLen = Number(options.previewLen || 180);
       const detailKey = openKey('post', post?.post_id || '', post?.topic_id || '', createdAt, structured?.title || postHeadline(post));
+      const inspectPayload = {
+        post_id: post?.post_id || '',
+        topic_id: post?.topic_id || '',
+        title: structured?.title || postHeadline(post),
+        summary: structured?.preview || postPreview(post, previewLen),
+        body,
+        source_label: 'watcher-derived',
+        freshness: 'current',
+        status: post?.post_kind || post?.kind || 'update',
+        topic_title: topic,
+        author,
+        created_at: createdAt,
+        evidence_kinds: evidenceKinds,
+      };
       return `
-        <details class="fold-card" data-open-key="${esc(detailKey)}"${options.defaultOpen ? ' open' : ''}>
+        <details class="fold-card" data-open-key="${esc(detailKey)}" ${inspectAttrs('Observation', structured?.title || postHeadline(post), inspectPayload)}${options.defaultOpen ? ' open' : ''}>
           <summary>
             <div class="fold-title-row">
               <div class="fold-title">${esc(structured?.title || postHeadline(post))}</div>
@@ -1824,6 +2409,7 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
               ${commonsMeta?.challenge_weight ? chip(`challenge ${Number(commonsMeta.challenge_weight || 0).toFixed(1)}`, 'warn') : ''}
               ${promotion ? chip(`score ${Number(promotion.score || 0).toFixed(2)}`) : ''}
               ${promotion?.review_state ? chip(`review ${promotion.review_state}`) : ''}
+              <button class="inspect-button" type="button" ${inspectAttrs('Observation', structured?.title || postHeadline(post), inspectPayload)}>Inspect</button>
               ${href && options.topicLink !== false ? `<a class="copy-button" href="${href}">Open topic</a>` : ''}
             </div>
           </div>
@@ -1885,25 +2471,195 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
     }
 
     function renderTopStats(data) {
-      const stats = data.stats || {};
-      const mesh = data.mesh_overview || {};
-      const knowledge = data.knowledge_overview || {};
-      const proof = data.proof_of_useful_work || {};
-      const task = stats.task_stats || {};
+      const movement = liveMovementSummary(data);
+      const latestEvent = movement.events[0] || null;
+      const latestActive = movement.activeTopics[0] || null;
+      const latestCompletion = movement.completions[0] || null;
+      const latestFailure = movement.failures[0] || null;
+      const latestStale = movement.stalePeers[0] || null;
       const items = [
-        ['Online Agents', stats.active_agents || 0],
-        ['Listed Agents', stats.visible_agents || (Array.isArray(data.agents) ? data.agents.length : 0)],
-        ['Mesh manifests', knowledge.mesh_manifests || mesh.knowledge_manifests || 0],
-        ['Finalized work', proof.finalized_count || 0],
-        ['Rejected/slashed', Number(proof.rejected_count || 0) + Number(proof.slashed_count || 0)],
-        ['Solved', task.solved_topics || 0],
-        ['Completed', task.completed_results || 0],
-        ['Topics', stats.total_topics || 0]
+        {
+          label: 'Distinct peers online',
+          value: fmtNumber(movement.peerSummary.distinctOnline),
+          detail: movement.peerSummary.duplicates > 0
+            ? `${fmtNumber(movement.peerSummary.rawVisible)} raw watcher rows collapsed into ${fmtNumber(movement.peerSummary.distinctVisible)} distinct peers.`
+            : `${fmtNumber(movement.peerSummary.distinctVisible)} distinct peer records are visible right now.`,
+          tone: movement.peerSummary.distinctOnline > 0 ? 'ok' : '',
+          payload: {
+            title: 'Distinct peer presence',
+            summary: movement.peerSummary.duplicates > 0
+              ? `The watcher is reporting ${fmtNumber(movement.peerSummary.rawVisible)} raw presence rows, but only ${fmtNumber(movement.peerSummary.distinctVisible)} distinct peers after collapsing duplicate NULLA leases.`
+              : `${fmtNumber(movement.peerSummary.distinctVisible)} distinct peers are visible right now.`,
+            truth_label: 'watcher-derived',
+            freshness: movement.stalePeers.length ? 'mixed' : 'current',
+            status: movement.peerSummary.distinctOnline > 0 ? 'active' : 'quiet',
+            source_meet_url: data.source_meet_url || '',
+            raw_presence_rows: movement.peerSummary.rawVisible,
+            raw_online_rows: movement.peerSummary.rawOnline,
+            duplicate_visible_agents: movement.peerSummary.duplicates,
+            visible_agents: movement.peerSummary.distinctVisible,
+            active_agents: movement.peerSummary.distinctOnline,
+          },
+        },
+        {
+          label: 'Active tasks now',
+          value: fmtNumber(movement.activeTopics.length),
+          detail: latestActive
+            ? compactText(`${latestActive.title || 'Active task'} · ${latestActive.summary || ''}`, 104)
+            : 'No active task is visible right now.',
+          tone: movement.activeTopics.length > 0 ? 'ok' : '',
+          payload: latestActive
+            ? {
+                topic_id: latestActive.topic_id || '',
+                linked_task_id: latestActive.linked_task_id || '',
+                title: latestActive.title || 'Active task',
+                summary: latestActive.summary || '',
+                truth_label: latestActive.truth_label || 'watcher-derived',
+                freshness: latestActive.freshness || 'current',
+                status: latestActive.status || 'researching',
+                updated_at: latestActive.updated_at || '',
+                source_meet_url: data.source_meet_url || '',
+                artifact_count: Number(latestActive.artifact_count || 0),
+                packet_endpoint: latestActive.packet_endpoint || '',
+              }
+            : {
+                title: 'No active task visible',
+                summary: 'The watcher is live, but there is no currently active task in the visible topic set.',
+                truth_label: 'watcher-derived',
+                freshness: 'current',
+                status: 'idle',
+                source_meet_url: data.source_meet_url || '',
+              },
+        },
+        {
+          label: 'Recent task events',
+          value: fmtNumber(movement.events.length),
+          detail: latestEvent
+            ? compactText(taskEventPreview(latestEvent), 104)
+            : 'No recent task-event signal is visible yet.',
+          tone: movement.events.length > 0 ? 'ok' : '',
+          payload: latestEvent
+            ? {
+                topic_id: latestEvent.topic_id || '',
+                claim_id: latestEvent.claim_id || '',
+                title: latestEvent.topic_title || 'Recent change',
+                summary: taskEventPreview(latestEvent),
+                detail: latestEvent.detail || '',
+                truth_label: latestEvent.truth_label || latestEvent.source_label || 'watcher-derived',
+                freshness: latestEvent.presence_freshness || 'current',
+                status: latestEvent.status || latestEvent.event_type || 'changed',
+                timestamp: latestEvent.timestamp || '',
+                source_meet_url: data.source_meet_url || '',
+              }
+            : {
+                title: 'No recent change signal',
+                summary: 'The watcher payload does not currently include a visible recent change event.',
+                truth_label: 'watcher-derived',
+                freshness: 'current',
+                status: 'quiet',
+                source_meet_url: data.source_meet_url || '',
+              },
+        },
+        {
+          label: latestCompletion ? 'Recent completion' : 'Completion data',
+          value: latestCompletion ? fmtNumber(movement.completions.length) : 'not live yet',
+          detail: latestCompletion
+            ? compactText(taskEventPreview(latestCompletion), 104)
+            : 'No live completion data yet from watcher/public Hive payloads.',
+          tone: latestCompletion ? 'ok' : '',
+          payload: latestCompletion
+            ? {
+                topic_id: latestCompletion.topic_id || '',
+                claim_id: latestCompletion.claim_id || '',
+                title: latestCompletion.topic_title || 'Recent completion',
+                summary: taskEventPreview(latestCompletion),
+                detail: latestCompletion.detail || '',
+                truth_label: latestCompletion.truth_label || latestCompletion.source_label || 'watcher-derived',
+                freshness: latestCompletion.presence_freshness || 'current',
+                status: latestCompletion.status || 'completed',
+                timestamp: latestCompletion.timestamp || '',
+                source_meet_url: data.source_meet_url || '',
+                artifact_count: Number(latestCompletion.artifact_count || 0),
+              }
+            : {
+                title: 'No live completion data yet',
+                summary: 'The live watcher/public bridge payload does not currently expose a recent completed result.',
+                truth_label: 'watcher-derived',
+                freshness: 'current',
+                status: 'no live data yet',
+                source_meet_url: data.source_meet_url || '',
+              },
+        },
+        {
+          label: latestFailure ? 'Recent failure' : 'Failure data',
+          value: latestFailure ? fmtNumber(movement.failures.length) : 'not live yet',
+          detail: latestFailure
+            ? compactText(taskEventPreview(latestFailure), 104)
+            : 'No live failure data yet from watcher/public Hive payloads.',
+          tone: latestFailure ? 'warn' : '',
+          payload: latestFailure
+            ? {
+                topic_id: latestFailure.topic_id || '',
+                claim_id: latestFailure.claim_id || '',
+                title: latestFailure.topic_title || 'Recent failure',
+                summary: taskEventPreview(latestFailure),
+                detail: latestFailure.detail || '',
+                truth_label: latestFailure.truth_label || latestFailure.source_label || 'watcher-derived',
+                freshness: latestFailure.presence_freshness || 'current',
+                status: latestFailure.status || 'blocked',
+                timestamp: latestFailure.timestamp || '',
+                source_meet_url: data.source_meet_url || '',
+                artifact_count: Number(latestFailure.artifact_count || 0),
+                conflict_count: 1,
+              }
+            : {
+                title: 'No live failure data yet',
+                summary: 'The live watcher/public bridge payload does not currently expose a blocked, failed, or challenged task result.',
+                truth_label: 'watcher-derived',
+                freshness: 'current',
+                status: 'no live data yet',
+                source_meet_url: data.source_meet_url || '',
+              },
+        },
+        {
+          label: 'Stale peer/source rows',
+          value: fmtNumber(movement.stalePeers.length),
+          detail: latestStale
+            ? compactText(`${latestStale.display_name || latestStale.claim_label || latestStale.agent_id || 'stale peer'} in ${latestStale.current_region || latestStale.home_region || 'unknown region'}`, 104)
+            : 'No stale peer or source row is visible right now.',
+          tone: movement.stalePeers.length > 0 ? 'warn' : 'ok',
+          payload: latestStale
+            ? {
+                agent_id: latestStale.agent_id || '',
+                title: latestStale.display_name || latestStale.claim_label || latestStale.agent_id || 'Stale source',
+                summary: 'A stale watcher-derived presence row is still visible and should not be treated as a live operator.',
+                truth_label: 'watcher-derived',
+                freshness: 'stale',
+                status: latestStale.status || 'stale',
+                source_meet_url: data.source_meet_url || '',
+                transport_mode: latestStale.transport_mode || '',
+                current_region: latestStale.current_region || '',
+                home_region: latestStale.home_region || '',
+              }
+            : {
+                title: 'No stale source rows',
+                summary: 'No stale peer or source row is currently visible in the watcher payload.',
+                truth_label: 'watcher-derived',
+                freshness: 'current',
+                status: 'clear',
+                source_meet_url: data.source_meet_url || '',
+              },
+        },
       ];
-      document.getElementById('topStats').innerHTML = items.map(([label, value]) => `
-        <article class="stat">
-          <span class="stat-label">${esc(label)}</span>
-          <div class="stat-value">${fmtNumber(value)}</div>
+      document.getElementById('topStats').innerHTML = items.map((item) => `
+        <article class="stat" ${inspectAttrs('Observation', item.label, item.payload)}>
+          <span class="stat-label">${esc(item.label)}</span>
+          <div class="stat-value">${esc(String(item.value))}</div>
+          <p class="stat-detail">${esc(item.detail)}</p>
+          <div class="row-meta">
+            ${chip(item.payload?.truth_label || item.payload?.source_label || 'watcher-derived')}
+            ${item.tone ? chip(item.payload?.status || item.label, item.tone) : ''}
+          </div>
         </article>
       `).join('');
     }
@@ -1941,8 +2697,23 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
 
     function renderTaskEventFold(event) {
       const detailKey = openKey('task-event', event.topic_id || event.topic_title || '', event.timestamp || '', event.event_type || '', event.claim_id || event.agent_label || '');
+      const inspectPayload = {
+        topic_id: event.topic_id || '',
+        title: event.topic_title || 'Hive task event',
+        summary: taskEventPreview(event),
+        detail: event.detail || '',
+        truth_label: 'watcher-derived',
+        freshness: event.presence_freshness || 'current',
+        status: event.status || event.event_type || '',
+        claim_id: event.claim_id || '',
+        agent_label: event.agent_label || '',
+        timestamp: event.timestamp || '',
+        tags: event.tags || [],
+        capability_tags: event.capability_tags || [],
+        conflict_count: event.event_type === 'challenge_raised' || event.event_type === 'task_blocked' ? 1 : 0,
+      };
       return `
-        <details class="fold-card" data-open-key="${esc(detailKey)}">
+        <details class="fold-card" data-open-key="${esc(detailKey)}" ${inspectAttrs('Observation', event.topic_title || 'Hive task event', inspectPayload)}>
           <summary>
             <div class="fold-title-row">
               <h3 class="fold-title">${esc(event.topic_title || 'Hive task event')}</h3>
@@ -1962,6 +2733,7 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
               ${event.claim_id ? `<span class="mono">${esc(shortId(event.claim_id, 16))}</span>` : ''}
               ${(event.tags || []).slice(0, 4).map((tag) => chip(tag)).join('')}
               ${(event.capability_tags || []).slice(0, 4).map((tag) => chip(tag)).join('')}
+              <button class="inspect-button" type="button" ${inspectAttrs('Observation', event.topic_title || 'Hive task event', inspectPayload)}>Inspect</button>
             </div>
             ${event.topic_id ? `<div class="row-meta"><a class="copy-button" href="${topicHref(event.topic_id)}">Open topic</a></div>` : ''}
           </div>
@@ -1994,29 +2766,194 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       `;
     }
 
+    function isActiveTopic(topic) {
+      return ['open', 'researching', 'disputed'].includes(String(topic?.status || '').toLowerCase());
+    }
+
+    function distinctPeerSummary(data) {
+      const stats = data?.stats || {};
+      const agents = Array.isArray(data?.agents) ? data.agents : [];
+      const distinctVisible = Number(stats.visible_agents || agents.length || 0);
+      const distinctOnline = Number(stats.active_agents || agents.filter((agent) => agent?.online).length || 0);
+      const rawVisible = Number(stats.raw_visible_agents || agents.length || 0);
+      const rawOnline = Number(stats.raw_online_agents || stats.presence_agents || distinctOnline || 0);
+      const rawPresence = Number(stats.presence_agents || rawOnline || 0);
+      const duplicates = Number(stats.duplicate_visible_agents || Math.max(0, rawVisible - distinctVisible));
+      return { distinctVisible, distinctOnline, rawVisible, rawOnline, rawPresence, duplicates };
+    }
+
+    function recentCompletionSignals(data) {
+      const events = Array.isArray(data?.task_event_stream) ? data.task_event_stream : [];
+      const completedEvents = events.filter((event) => {
+        const type = String(event?.event_type || '').toLowerCase();
+        const status = String(event?.status || event?.progress_state || '').toLowerCase();
+        return ['task_completed', 'result_submitted'].includes(type) || ['completed', 'solved'].includes(status);
+      });
+      if (completedEvents.length) return completedEvents;
+      const claims = Array.isArray(data?.recent_topic_claims) ? data.recent_topic_claims : [];
+      return claims
+        .filter((claim) => ['completed', 'solved'].includes(String(claim?.status || '').toLowerCase()))
+        .map((claim) => ({
+          event_type: 'claim_completed',
+          topic_id: claim?.topic_id || '',
+          topic_title: claim?.topic_title || 'Completed claim',
+          detail: claim?.note || 'A claim completed successfully.',
+          status: claim?.status || 'completed',
+          claim_id: claim?.claim_id || '',
+          agent_label: claim?.agent_claim_label || claim?.agent_display_name || claim?.agent_id || '',
+          timestamp: claim?.updated_at || claim?.created_at || '',
+          artifact_count: Number(claim?.artifact_count || 0),
+          source_label: claim?.truth_label || claim?.source_label || 'watcher-derived',
+        }));
+    }
+
+    function recentFailureSignals(data) {
+      const events = Array.isArray(data?.task_event_stream) ? data.task_event_stream : [];
+      const failedEvents = events.filter((event) => {
+        const type = String(event?.event_type || '').toLowerCase();
+        const status = String(event?.status || event?.progress_state || '').toLowerCase();
+        return ['task_blocked', 'challenge_raised'].includes(type) || ['blocked', 'failed', 'rejected', 'disputed'].includes(status);
+      });
+      if (failedEvents.length) return failedEvents;
+      const claims = Array.isArray(data?.recent_topic_claims) ? data.recent_topic_claims : [];
+      return claims
+        .filter((claim) => ['blocked', 'failed', 'rejected', 'disputed'].includes(String(claim?.status || '').toLowerCase()))
+        .map((claim) => ({
+          event_type: 'claim_failed',
+          topic_id: claim?.topic_id || '',
+          topic_title: claim?.topic_title || 'Failed claim',
+          detail: claim?.note || 'A blocked or failed claim is visible.',
+          status: claim?.status || 'blocked',
+          claim_id: claim?.claim_id || '',
+          agent_label: claim?.agent_claim_label || claim?.agent_display_name || claim?.agent_id || '',
+          timestamp: claim?.updated_at || claim?.created_at || '',
+          artifact_count: Number(claim?.artifact_count || 0),
+          source_label: claim?.truth_label || claim?.source_label || 'watcher-derived',
+        }));
+    }
+
+    function liveMovementSummary(data) {
+      const topics = Array.isArray(data?.topics) ? data.topics : [];
+      const claims = Array.isArray(data?.recent_topic_claims) ? data.recent_topic_claims : [];
+      const agents = Array.isArray(data?.agents) ? data.agents : [];
+      const events = Array.isArray(data?.task_event_stream) ? data.task_event_stream : [];
+      const activeTopics = topics.filter(isActiveTopic);
+      const stalePeers = agents.filter((agent) => String(agent?.status || '').toLowerCase() === 'stale' || agent?.online === false);
+      const activeClaims = claims.filter((claim) => ['active', 'researching', 'claimed', 'running'].includes(String(claim?.status || '').toLowerCase()));
+      const completions = recentCompletionSignals(data);
+      const failures = recentFailureSignals(data);
+      return {
+        topics,
+        claims,
+        agents,
+        events,
+        activeTopics,
+        stalePeers,
+        activeClaims,
+        completions,
+        failures,
+        peerSummary: distinctPeerSummary(data),
+      };
+    }
+
     function renderOverview(data) {
       const stats = data.stats || {};
-      const mesh = data.mesh_overview || {};
-      const learning = data.learning_overview || {};
-      const memory = data.memory_overview || {};
       const adaptation = data.adaptation_overview || {};
       const adaptationProof = data.adaptation_proof || {};
       const proof = data.proof_of_useful_work || {};
       const latestEval = adaptation.latest_eval || {};
+      const movement = liveMovementSummary(data);
       document.getElementById('overviewMiniStats').innerHTML = [
-        ['Open topics', stats.task_stats?.open_topics || 0],
-        ['Researching', stats.task_stats?.researching_topics || 0],
-        ['Remote shards', mesh.remote_indexed_shards || 0],
-        ['Local tasks', memory.local_task_count || 0],
-        ['Responses', memory.finalized_response_count || 0],
-        ['Useful outputs', memory.useful_output_count || 0],
-        ['Training ready', memory.training_eligible_output_count || 0],
-        ['Archive candidates', memory.archive_candidate_count || 0],
-        ['Learned shards', learning.total_learning_shards || 0]
-      ].map(([label, value]) => `
-        <div class="mini-stat">
-          <strong>${fmtNumber(value)}</strong>
-          <div>${esc(label)}</div>
+        {
+          label: 'Distinct peers',
+          value: movement.peerSummary.distinctVisible,
+          payload: {
+            title: 'Distinct visible peers',
+            summary: `${fmtNumber(movement.peerSummary.distinctVisible)} distinct peers remain after collapsing duplicate watcher leases.`,
+            truth_label: 'watcher-derived',
+            freshness: movement.stalePeers.length ? 'mixed' : 'current',
+            status: movement.peerSummary.distinctOnline > 0 ? 'active' : 'quiet',
+            source_meet_url: data.source_meet_url || '',
+            visible_agents: movement.peerSummary.distinctVisible,
+            raw_visible_agents: movement.peerSummary.rawVisible,
+            duplicate_visible_agents: movement.peerSummary.duplicates,
+          },
+        },
+        {
+          label: 'Raw presence rows',
+          value: movement.peerSummary.rawVisible,
+          payload: {
+            title: 'Raw watcher presence rows',
+            summary: `${fmtNumber(movement.peerSummary.rawVisible)} raw watcher rows are currently visible.`,
+            truth_label: 'watcher-derived',
+            freshness: 'current',
+            status: movement.peerSummary.duplicates > 0 ? 'deduped' : 'clean',
+            source_meet_url: data.source_meet_url || '',
+            raw_visible_agents: movement.peerSummary.rawVisible,
+            raw_online_agents: movement.peerSummary.rawOnline,
+          },
+        },
+        {
+          label: 'Collapsed duplicates',
+          value: movement.peerSummary.duplicates,
+          payload: {
+            title: 'Duplicate watcher leases',
+            summary: movement.peerSummary.duplicates
+              ? `${fmtNumber(movement.peerSummary.duplicates)} duplicate watcher presence rows were collapsed out of the visible peer count.`
+              : 'No duplicate watcher leases are visible right now.',
+            truth_label: 'watcher-derived',
+            freshness: 'current',
+            status: movement.peerSummary.duplicates ? 'deduped' : 'clear',
+            source_meet_url: data.source_meet_url || '',
+            duplicate_visible_agents: movement.peerSummary.duplicates,
+          },
+        },
+        {
+          label: 'Active claims',
+          value: movement.activeClaims.length,
+          payload: {
+            title: 'Active claims',
+            summary: movement.activeClaims.length
+              ? `${fmtNumber(movement.activeClaims.length)} claims are still active in the current watcher/public Hive view.`
+              : 'No active claims are visible right now.',
+            truth_label: 'watcher-derived',
+            freshness: 'current',
+            status: movement.activeClaims.length ? 'active' : 'quiet',
+            source_meet_url: data.source_meet_url || '',
+          },
+        },
+        {
+          label: 'Recent events',
+          value: movement.events.length,
+          payload: {
+            title: 'Recent task events',
+            summary: movement.events.length
+              ? `${fmtNumber(movement.events.length)} recent watcher-derived task events are visible.`
+              : 'No recent task events are visible right now.',
+            truth_label: 'watcher-derived',
+            freshness: 'current',
+            status: movement.events.length ? 'moving' : 'quiet',
+            source_meet_url: data.source_meet_url || '',
+          },
+        },
+        {
+          label: 'Recent observations',
+          value: Array.isArray(data.recent_posts) ? data.recent_posts.length : 0,
+          payload: {
+            title: 'Recent observations',
+            summary: Array.isArray(data.recent_posts) && data.recent_posts.length
+              ? `${fmtNumber(data.recent_posts.length)} recent watcher observations are visible.`
+              : 'No recent watcher observations are visible right now.',
+            truth_label: 'watcher-derived',
+            freshness: 'current',
+            status: Array.isArray(data.recent_posts) && data.recent_posts.length ? 'moving' : 'quiet',
+            source_meet_url: data.source_meet_url || '',
+          },
+        },
+      ].map((item) => `
+        <div class="mini-stat" ${inspectAttrs('Observation', item.label, item.payload)}>
+          <strong>${fmtNumber(item.value)}</strong>
+          <div>${esc(item.label)}</div>
         </div>
       `).join('');
       const adaptationChips = [
@@ -2033,19 +2970,51 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
         adaptationChips.push(chip(`candidate ${Number(latestEval.candidate_score || 0).toFixed(2)}`));
       }
       document.getElementById('adaptationStatusLine').innerHTML = adaptationChips.join('');
-      document.getElementById('proofMiniStats').innerHTML = [
-        ['Pending', proof.pending_count || 0],
-        ['Confirmed', proof.confirmed_count || 0],
-        ['Finalized', proof.finalized_count || 0],
-        ['Rejected', proof.rejected_count || 0],
-        ['Slashed', proof.slashed_count || 0],
-        ['Finalized credits', Number(proof.finalized_compute_credits || 0).toFixed(2)],
-      ].map(([label, value]) => `
-        <div class="mini-stat">
-          <strong>${esc(String(value))}</strong>
-          <div>${esc(label)}</div>
-        </div>
-      `).join('');
+      const proofCounters = [
+        Number(proof.pending_count || 0),
+        Number(proof.confirmed_count || 0),
+        Number(proof.finalized_count || 0),
+        Number(proof.rejected_count || 0),
+        Number(proof.slashed_count || 0),
+        Number(proof.finalized_compute_credits || 0),
+      ];
+      const proofHasLiveData = proofCounters.some((value) => value > 0);
+      document.getElementById('proofMiniStats').innerHTML = proofHasLiveData
+        ? [
+            ['Pending', proof.pending_count || 0],
+            ['Confirmed', proof.confirmed_count || 0],
+            ['Finalized', proof.finalized_count || 0],
+            ['Rejected', proof.rejected_count || 0],
+            ['Slashed', proof.slashed_count || 0],
+            ['Finalized credits', Number(proof.finalized_compute_credits || 0).toFixed(2)],
+          ].map(([label, value]) => `
+            <div class="mini-stat">
+              <strong>${esc(String(value))}</strong>
+              <div>${esc(label)}</div>
+            </div>
+          `).join('')
+        : [
+            {
+              label: 'Proof counters',
+              summary: 'No live finalized/rejected/slashed proof counters are present in the current watcher payload yet.',
+            },
+            {
+              label: 'Receipts',
+              summary: 'No live proof receipts are visible yet, so the dashboard says that explicitly instead of showing dead zero theater.',
+            },
+          ].map((item) => `
+            <article class="card" ${inspectAttrs('Observation', item.label, {
+              title: item.label,
+              summary: item.summary,
+              truth_label: 'watcher-derived',
+              freshness: 'current',
+              status: 'no live data yet',
+              source_meet_url: data.source_meet_url || '',
+            })}>
+              <h3>${esc(item.label)}</h3>
+              <p>${esc(item.summary)}</p>
+            </article>
+          `).join('');
 
       const leaders = Array.isArray(proof.leaders) ? proof.leaders : [];
       document.getElementById('gloryLeaderList').innerHTML = leaders.length ? leaders.slice(0, 5).map((row) => `
@@ -2075,6 +3044,155 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
         </article>
       `).join('') : '<div class="empty">No proof receipts yet.</div>';
 
+      const topics = movement.topics;
+      const events = movement.events;
+      const claims = movement.claims;
+      const activeTopics = movement.activeTopics;
+      const stalePeers = movement.stalePeers;
+      const blockedEvents = movement.failures;
+      const recentChangePreview = events.slice(0, 4).map((event) => event.topic_title || event.detail || event.event_type || 'event').join(' · ');
+      const firstCompletion = movement.completions[0] || null;
+      const firstFailure = movement.failures[0] || null;
+      document.getElementById('workstationHomeBoard').innerHTML = [
+        {
+          label: 'Active tasks',
+          value: fmtNumber(activeTopics.length),
+          detail: activeTopics.length ? compactText(activeTopics[0].title || activeTopics[0].summary || 'Live task flow present.', 96) : 'No live tasks are visible right now.',
+          payload: activeTopics.length
+            ? {
+                topic_id: activeTopics[0].topic_id || '',
+                linked_task_id: activeTopics[0].linked_task_id || '',
+                title: activeTopics[0].title || 'Active task',
+                summary: activeTopics[0].summary || '',
+                truth_label: 'watcher-derived',
+                freshness: 'current',
+                status: activeTopics[0].status || 'researching',
+                updated_at: activeTopics[0].updated_at || '',
+                source_meet_url: data.source_meet_url || '',
+                artifact_count: Number(activeTopics[0].artifact_count || 0),
+                packet_endpoint: activeTopics[0].packet_endpoint || '',
+              }
+            : {
+                title: 'No active task visible',
+                summary: 'No active task flow is visible in the current watcher payload.',
+                truth_label: 'watcher-derived',
+                freshness: 'current',
+                status: 'quiet',
+                source_meet_url: data.source_meet_url || '',
+              },
+        },
+        {
+          label: 'Stale peer/source rows',
+          value: fmtNumber(stalePeers.length),
+          detail: stalePeers.length ? compactText(stalePeers[0].claim_label || stalePeers[0].display_name || stalePeers[0].agent_id || 'Stale presence detected.', 96) : 'No stale peer presence is visible.',
+          payload: stalePeers.length
+            ? {
+                agent_id: stalePeers[0].agent_id || '',
+                title: stalePeers[0].claim_label || stalePeers[0].display_name || stalePeers[0].agent_id || 'Stale source',
+                summary: 'This peer/source row is stale and should not be read as live movement.',
+                truth_label: 'watcher-derived',
+                freshness: 'stale',
+                status: stalePeers[0].status || 'stale',
+                updated_at: stalePeers[0].updated_at || '',
+                source_meet_url: data.source_meet_url || '',
+                transport_mode: stalePeers[0].transport_mode || '',
+              }
+            : {
+                title: 'No stale sources',
+                summary: 'No stale peer/source rows are visible right now.',
+                truth_label: 'watcher-derived',
+                freshness: 'current',
+                status: 'clear',
+                source_meet_url: data.source_meet_url || '',
+              },
+        },
+        {
+          label: firstCompletion ? 'Recent completion' : 'Completion data',
+          value: firstCompletion ? fmtNumber(movement.completions.length) : 'not live yet',
+          detail: firstCompletion ? compactText(taskEventPreview(firstCompletion), 96) : 'No live completion data yet from watcher/public Hive payloads.',
+          payload: firstCompletion
+            ? {
+                topic_id: firstCompletion.topic_id || '',
+                claim_id: firstCompletion.claim_id || '',
+                title: firstCompletion.topic_title || 'Recent completion',
+                summary: taskEventPreview(firstCompletion),
+                detail: firstCompletion.detail || '',
+                truth_label: firstCompletion.truth_label || firstCompletion.source_label || 'watcher-derived',
+                freshness: firstCompletion.presence_freshness || 'current',
+                status: firstCompletion.status || 'completed',
+                timestamp: firstCompletion.timestamp || '',
+                source_meet_url: data.source_meet_url || '',
+                artifact_count: Number(firstCompletion.artifact_count || 0),
+              }
+            : {
+                title: 'No live completion data yet',
+                summary: 'The current watcher/public bridge payload does not expose a recent completion.',
+                truth_label: 'watcher-derived',
+                freshness: 'current',
+                status: 'no live data yet',
+                source_meet_url: data.source_meet_url || '',
+              },
+        },
+        {
+          label: firstFailure ? 'Recent failure' : 'Failure data',
+          value: firstFailure ? fmtNumber(blockedEvents.length) : 'not live yet',
+          detail: firstFailure ? compactText(taskEventPreview(firstFailure), 96) : 'No live failure data yet from watcher/public Hive payloads.',
+          payload: firstFailure
+            ? {
+                topic_id: firstFailure.topic_id || '',
+                claim_id: firstFailure.claim_id || '',
+                title: firstFailure.topic_title || 'Recent failure',
+                summary: taskEventPreview(firstFailure),
+                detail: firstFailure.detail || '',
+                truth_label: firstFailure.truth_label || firstFailure.source_label || 'watcher-derived',
+                freshness: firstFailure.presence_freshness || 'current',
+                status: firstFailure.status || 'blocked',
+                timestamp: firstFailure.timestamp || '',
+                source_meet_url: data.source_meet_url || '',
+                conflict_count: 1,
+              }
+            : {
+                title: 'No live failure data yet',
+                summary: 'The current watcher/public bridge payload does not expose a recent blocked or failed task.',
+                truth_label: 'watcher-derived',
+                freshness: 'current',
+                status: 'no live data yet',
+                source_meet_url: data.source_meet_url || '',
+              },
+        },
+        {
+          label: 'Recent task events',
+          value: fmtNumber(events.length),
+          detail: recentChangePreview || 'No recent event change yet.',
+          payload: events.length
+            ? {
+                topic_id: events[0].topic_id || '',
+                title: events[0].topic_title || 'Recent change',
+                summary: taskEventPreview(events[0]),
+                detail: events[0].detail || '',
+                truth_label: events[0].truth_label || events[0].source_label || 'watcher-derived',
+                freshness: events[0].presence_freshness || 'current',
+                status: events[0].status || events[0].event_type || 'changed',
+                timestamp: events[0].timestamp || '',
+                source_meet_url: data.source_meet_url || '',
+              }
+            : {
+                title: 'No recent change',
+                summary: 'No recent change event is visible in the watcher payload.',
+                truth_label: 'watcher-derived',
+                freshness: 'current',
+                status: 'quiet',
+                source_meet_url: data.source_meet_url || '',
+              },
+        },
+      ].map((item) => `
+        <article class="dashboard-home-card" ${inspectAttrs('Observation', item.label, item.payload)}>
+          <span>${esc(item.label)}</span>
+          <strong>${esc(item.value)}</strong>
+          <p>${esc(item.detail)}</p>
+        </article>
+      `).join('');
+
       const promotionHistory = Array.isArray(adaptationProof.promotion_history) ? adaptationProof.promotion_history : [];
       document.getElementById('adaptationProofList').innerHTML = [
         `<article class="card"><h3>Model Proof</h3><p>${esc(`State ${adaptationProof.proof_state || 'no_recent_eval'} · mean delta ${Number(adaptationProof.mean_delta || 0).toFixed(3)}`)}</p><div class="row-meta">${chip(`evals ${fmtNumber(adaptationProof.recent_eval_count || 0)}`)}${chip(`positive ${fmtNumber(adaptationProof.positive_eval_count || 0)}`, (adaptationProof.positive_eval_count || 0) > 0 ? 'ok' : '')}${chip(`rollbacks ${fmtNumber(adaptationProof.rolled_back_job_count || 0)}`, (adaptationProof.rolled_back_job_count || 0) > 0 ? 'warn' : '')}</div></article>`,
@@ -2094,7 +3212,18 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       const researchQueue = Array.isArray(data.research_queue) ? data.research_queue : [];
       document.getElementById('researchGravityList').innerHTML = researchQueue.length ? researchQueue.slice(0, 6).map((row) => `
         <a class="card-link" href="${topicHref(row.topic_id)}">
-          <article class="card">
+          <article class="card" ${inspectAttrs('Task', row.title || 'Research topic', {
+            topic_id: row.topic_id || '',
+            title: row.title || 'Research topic',
+            summary: row.summary || '',
+            truth_label: 'watcher-derived',
+            freshness: 'current',
+            status: row.status || 'open',
+            research_priority: row.research_priority || 0,
+            active_claim_count: row.active_claim_count || 0,
+            evidence_count: row.evidence_count || 0,
+            steering_reasons: row.steering_reasons || [],
+          })}>
             <h3>${esc(row.title || 'Research topic')}</h3>
             <p>${esc(compactText(row.summary || '', 200) || 'No summary yet.')}</p>
             <div class="row-meta">
@@ -2102,6 +3231,18 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
               ${Number(row.commons_signal_strength || 0) > 0 ? chip(`commons ${Number(row.commons_signal_strength || 0).toFixed(2)}`, 'ok') : ''}
               ${chip(`claims ${fmtNumber(row.active_claim_count || 0)}`)}
               ${chip(`evidence ${fmtNumber(row.evidence_count || 0)}`)}
+              <button class="inspect-button" type="button" ${inspectAttrs('Task', row.title || 'Research topic', {
+                topic_id: row.topic_id || '',
+                title: row.title || 'Research topic',
+                summary: row.summary || '',
+                truth_label: 'watcher-derived',
+                freshness: 'current',
+                status: row.status || 'open',
+                research_priority: row.research_priority || 0,
+                active_claim_count: row.active_claim_count || 0,
+                evidence_count: row.evidence_count || 0,
+                steering_reasons: row.steering_reasons || [],
+              })}>Inspect</button>
             </div>
             <div class="row-meta">
               ${Array.isArray(row.steering_reasons) ? row.steering_reasons.slice(0, 4).map((reason) => chip(String(reason || '').replace(/_/g, ' '))).join('') : ''}
@@ -2110,10 +3251,19 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
         </a>
       `).join('') : '<div class="empty">No research pressure is visible yet.</div>';
 
-      const topics = data.topics || [];
       document.getElementById('topicList').innerHTML = topics.length ? topics.slice(0, 8).map((topic) => `
         <a class="card-link" href="${topicHref(topic.topic_id)}">
-          <article class="card">
+          <article class="card" ${inspectAttrs('Task', topic.title || 'Hive task', {
+            topic_id: topic.topic_id || '',
+            title: topic.title || 'Hive task',
+            summary: topic.summary || '',
+            truth_label: 'watcher-derived',
+            freshness: 'current',
+            status: topic.status || 'open',
+            moderation_state: topic.moderation_state || '',
+            creator_label: topic.creator_claim_label || topic.creator_display_name || shortId(topic.created_by_agent_id),
+            updated_at: topic.updated_at || '',
+          })}>
             <h3>${esc(topic.title)}</h3>
             <p>${esc(topic.summary)}</p>
             <div class="row-meta">
@@ -2121,13 +3271,59 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
               ${chip(topic.moderation_state, topic.moderation_state === 'approved' ? 'ok' : 'warn')}
               <span>${esc(topic.creator_claim_label || topic.creator_display_name || shortId(topic.created_by_agent_id))}</span>
               <span>${fmtTime(topic.updated_at)}</span>
+              <button class="inspect-button" type="button" ${inspectAttrs('Task', topic.title || 'Hive task', {
+                topic_id: topic.topic_id || '',
+                title: topic.title || 'Hive task',
+                summary: topic.summary || '',
+                truth_label: 'watcher-derived',
+                freshness: 'current',
+                status: topic.status || 'open',
+                moderation_state: topic.moderation_state || '',
+                creator_label: topic.creator_claim_label || topic.creator_display_name || shortId(topic.created_by_agent_id),
+                updated_at: topic.updated_at || '',
+              })}>Inspect</button>
             </div>
           </article>
         </a>
       `).join('') : '<div class="empty">No visible topics yet.</div>';
 
-      const events = data.task_event_stream || [];
       renderInto('feedList', renderTaskEvents(events, 5, 'No visible task events yet.'), {preserveDetails: true});
+      renderInto('recentChangeList', renderTaskEvents(events.slice(0, 4), 4, 'No recent changes yet.'), {preserveDetails: true});
+
+      document.getElementById('claimStreamList').innerHTML = claims.length ? claims.slice(0, 8).map((claim) => `
+        <article class="card" ${inspectAttrs('Claim', claim.topic_title || claim.claim_id || 'Hive claim', {
+          claim_id: claim.claim_id || '',
+          topic_id: claim.topic_id || '',
+          title: claim.topic_title || 'Hive claim',
+          summary: claim.note || '',
+          truth_label: 'watcher-derived',
+          freshness: 'current',
+          status: claim.status || 'active',
+          agent_label: claim.agent_claim_label || claim.agent_display_name || claim.agent_id || '',
+          capability_tags: claim.capability_tags || [],
+          updated_at: claim.updated_at || claim.created_at || '',
+        })}>
+          <h3>${esc(claim.topic_title || 'Hive claim')}</h3>
+          <p>${esc(compactText(claim.note || '', 180) || 'No claim note yet.')}</p>
+          <div class="row-meta">
+            ${chip(claim.status || 'active', claim.status === 'completed' ? 'ok' : claim.status === 'blocked' ? 'warn' : '')}
+            <span>${esc(claim.agent_claim_label || claim.agent_display_name || claim.agent_id || 'unknown')}</span>
+            <span>${fmtTime(claim.updated_at || claim.created_at)}</span>
+            <button class="inspect-button" type="button" ${inspectAttrs('Claim', claim.topic_title || claim.claim_id || 'Hive claim', {
+              claim_id: claim.claim_id || '',
+              topic_id: claim.topic_id || '',
+              title: claim.topic_title || 'Hive claim',
+              summary: claim.note || '',
+              truth_label: 'watcher-derived',
+              freshness: 'current',
+              status: claim.status || 'active',
+              agent_label: claim.agent_claim_label || claim.agent_display_name || claim.agent_id || '',
+              capability_tags: claim.capability_tags || [],
+              updated_at: claim.updated_at || claim.created_at || '',
+            })}>Inspect</button>
+          </div>
+        </article>
+      `).join('') : '<div class="empty">No live claims yet.</div>';
 
       const regions = stats.region_stats || [];
       document.getElementById('regionList').innerHTML = regions.length ? regions.map((row) => `
@@ -2140,12 +3336,30 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
           </div>
         </article>
       `).join('') : '<div class="empty">No regional activity yet.</div>';
+
+      document.getElementById('watchStationNotes').innerHTML = [
+        `<article class="card"><h3>Active</h3><p>${esc(activeTopics.length ? `${activeTopics.length} tasks are live, with ${fmtNumber(stats.active_agents || 0)} distinct peers active now.` : 'No active task flow is visible.')}</p></article>`,
+        `<article class="card"><h3>Stale</h3><p>${esc(stalePeers.length ? `${stalePeers.length} peer rows look stale and should be treated as stale watcher evidence, not live operators.` : 'No stale peer rows are visible right now.')}</p></article>`,
+        `<article class="card"><h3>Failed</h3><p>${esc(blockedEvents.length ? `${blockedEvents.length} blocked or challenged task events need operator review.` : 'No blocked or challenged task is visible right now.')}</p></article>`,
+        `<article class="card"><h3>Changed</h3><p>${esc(recentChangePreview || 'No fresh change signals are visible yet.')}</p></article>`,
+      ].join('');
     }
 
     function renderAgents(data) {
       const agents = data.agents || [];
       document.getElementById('agentTable').innerHTML = agents.length ? agents.map((agent) => `
-        <tr>
+        <tr ${inspectAttrs('Peer', agent.claim_label || agent.display_name || shortId(agent.agent_id, 18), {
+          agent_id: agent.agent_id || '',
+          title: agent.claim_label || agent.display_name || shortId(agent.agent_id, 18),
+          summary: `${agent.home_region || 'unknown'} → ${agent.current_region || 'unknown'}`,
+          source_label: 'watcher-derived',
+          freshness: String(agent.status || '').toLowerCase() === 'stale' ? 'stale' : 'current',
+          status: agent.status || (agent.online ? 'online' : 'offline'),
+          trust_score: agent.trust_score || 0,
+          glory_score: agent.glory_score || 0,
+          finality_ratio: agent.finality_ratio || 0,
+          capabilities: agent.capabilities || [],
+        })}>
           <td>
             <strong>${esc(agent.claim_label || agent.display_name)}</strong><br />
             <span class="small mono">${esc(shortId(agent.agent_id, 18))}</span>
@@ -2161,7 +3375,21 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
             <strong>F ${fmtNumber(agent.finalized_work_count || 0)} / C ${fmtNumber(agent.confirmed_work_count || 0)} / P ${fmtNumber(agent.pending_work_count || 0)}</strong><br />
             <span class="small">ratio ${(Number(agent.finality_ratio || 0) * 100).toFixed(0)}% · X ${fmtNumber(Number(agent.rejected_work_count || 0) + Number(agent.slashed_work_count || 0))}</span>
           </td>
-          <td>${(agent.capabilities || []).slice(0, 4).map((cap) => chip(cap)).join('') || '<span class="small">none</span>'}</td>
+          <td>
+            ${(agent.capabilities || []).slice(0, 4).map((cap) => chip(cap)).join('') || '<span class="small">none</span>'}
+            <div class="row-meta"><button class="inspect-button" type="button" ${inspectAttrs('Peer', agent.claim_label || agent.display_name || shortId(agent.agent_id, 18), {
+              agent_id: agent.agent_id || '',
+              title: agent.claim_label || agent.display_name || shortId(agent.agent_id, 18),
+              summary: `${agent.home_region || 'unknown'} → ${agent.current_region || 'unknown'}`,
+              source_label: 'watcher-derived',
+              freshness: String(agent.status || '').toLowerCase() === 'stale' ? 'stale' : 'current',
+              status: agent.status || (agent.online ? 'online' : 'offline'),
+              trust_score: agent.trust_score || 0,
+              glory_score: agent.glory_score || 0,
+              finality_ratio: agent.finality_ratio || 0,
+              capabilities: agent.capabilities || [],
+            })}>Inspect</button></div>
+          </td>
         </tr>
       `).join('') : '<tr><td colspan="7" class="empty">No visible agents yet.</td></tr>';
     }
@@ -2906,7 +4134,76 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       document.getElementById('sourceMeet').textContent = `Upstream: ${esc(data.source_meet_url || 'local meet node')}`;
     }
 
+    function renderWorkstationChrome(data) {
+      const topics = Array.isArray(data?.topics) ? data.topics : [];
+      const claims = Array.isArray(data?.recent_topic_claims) ? data.recent_topic_claims : [];
+      const agents = Array.isArray(data?.agents) ? data.agents : [];
+      const events = Array.isArray(data?.task_event_stream) ? data.task_event_stream : [];
+      const learningTopics = Array.isArray(data?.learning_lab?.active_topics) ? data.learning_lab.active_topics : [];
+      const artifactCount = learningTopics.reduce((total, topic) => total + Number(topic?.artifact_count || 0), 0);
+      const conflictCount = topics.filter((topic) => String(topic?.status || '').toLowerCase() === 'disputed').length
+        + events.filter((event) => ['task_blocked', 'challenge_raised'].includes(String(event?.event_type || '').toLowerCase())).length;
+      document.getElementById('objectModelRail').innerHTML = [
+        ['Peer', agents.length],
+        ['Task', topics.length],
+        ['Session', data?.research_queue?.length || 0],
+        ['Observation', events.length + (data?.recent_posts?.length || 0)],
+        ['Artifact', artifactCount],
+        ['Claim', claims.length],
+        ['Conflict', conflictCount],
+      ].map(([label, value]) => `<span class="wk-chip">${esc(label)} ${fmtNumber(value)}</span>`).join('');
+
+      const stalePeers = agents.filter((agent) => String(agent?.status || '').toLowerCase() === 'stale' || agent?.online === false).length;
+      const blocked = events.filter((event) => ['task_blocked', 'challenge_raised'].includes(String(event?.event_type || '').toLowerCase())).length;
+      document.getElementById('healthRail').innerHTML = [
+        ['active tasks', topics.filter((topic) => ['open', 'researching'].includes(String(topic?.status || '').toLowerCase())).length, 'wk-badge--good'],
+        ['stale peers', stalePeers, stalePeers ? 'wk-badge--warn' : ''],
+        ['blocked tasks', blocked, blocked ? 'wk-badge--bad' : ''],
+        ['changed events', events.length, ''],
+      ].map(([label, value, tone]) => `<span class="wk-badge ${tone}">${esc(label)} ${fmtNumber(value)}</span>`).join('');
+
+      document.getElementById('sourceRail').innerHTML = [
+        ['watcher-derived', topics.length + agents.length + events.length],
+        ['local-only', (data?.recent_activity?.tasks?.length || 0) + (data?.recent_activity?.responses?.length || 0)],
+        ['external', data?.trading_learning?.calls?.length || 0],
+      ].map(([label, value]) => `<span class="wk-badge wk-badge--source">${esc(label)} ${fmtNumber(value)}</span>`).join('');
+
+      const presence = tradingPresenceState(data?.trading_learning || {}, data?.generated_at, agents);
+      document.getElementById('freshnessRail').innerHTML = [
+        `<span class="wk-badge wk-badge--source">watcher current</span>`,
+        `<span class="wk-badge ${presence.kind === 'warn' ? 'wk-badge--warn' : 'wk-badge--good'}">trading ${esc(presence.label.toLowerCase())}</span>`,
+        `<span class="wk-badge ${stalePeers ? 'wk-badge--warn' : 'wk-badge--good'}">peer stale ${fmtNumber(stalePeers)}</span>`,
+      ].join('');
+
+      const defaultTopic = topics[0];
+      if (defaultTopic) {
+        renderBrainInspector('Task', defaultTopic.title || 'Hive task', {
+          topic_id: defaultTopic.topic_id || '',
+          linked_task_id: defaultTopic.linked_task_id || '',
+          title: defaultTopic.title || 'Hive task',
+          summary: defaultTopic.summary || '',
+          truth_label: 'watcher-derived',
+          freshness: 'current',
+          status: defaultTopic.status || 'open',
+          moderation_state: defaultTopic.moderation_state || '',
+          creator_label: defaultTopic.creator_claim_label || defaultTopic.creator_display_name || shortId(defaultTopic.created_by_agent_id),
+          updated_at: defaultTopic.updated_at || '',
+          artifact_count: Number(defaultTopic.artifact_count || 0),
+          packet_endpoint: defaultTopic.packet_endpoint || '',
+          source_meet_url: data.source_meet_url || '',
+        });
+      } else {
+        renderBrainInspector('Overview', 'Operator summary', {
+          summary: 'No Hive task is selected yet. The inspector will show the currently selected peer, task, claim, or observation.',
+          source_label: 'watcher-derived',
+          freshness: 'current',
+          source_meet_url: data.source_meet_url || '',
+        });
+      }
+    }
+
     function renderAll(data) {
+      currentDashboardState = data || {};
       renderBranding(data);
       renderMeta(data);
       renderTopStats(data);
@@ -2917,6 +4214,7 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       renderLearningLab(data);
       renderActivity(data);
       renderKnowledge(data);
+      renderWorkstationChrome(data);
     }
 
     async function refresh() {
@@ -2926,13 +4224,29 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       renderAll(payload.result);
     }
 
-    document.querySelectorAll('.tab-button').forEach((button) => {
-      button.addEventListener('click', () => {
-        const tab = button.dataset.tab;
-        document.querySelectorAll('.tab-button').forEach((item) => item.classList.toggle('active', item === button));
-        document.querySelectorAll('.tab-panel').forEach((panel) => panel.classList.toggle('active', panel.id === `tab-${tab}`));
-      });
+    document.addEventListener('click', (event) => {
+      const tabTarget = event.target.closest('[data-tab-target]');
+      if (tabTarget) {
+        activateDashboardTab(tabTarget.dataset.tabTarget || 'overview');
+        return;
+      }
+      const tabButton = event.target.closest('.tab-button[data-tab]');
+      if (tabButton) {
+        activateDashboardTab(tabButton.dataset.tab || 'overview');
+        return;
+      }
+      const inspectNode = event.target.closest('[data-inspect-type]');
+      if (inspectNode) {
+        renderBrainInspector(
+          inspectNode.getAttribute('data-inspect-type') || 'Object',
+          inspectNode.getAttribute('data-inspect-label') || 'Selected object',
+          decodeInspectPayload(inspectNode.getAttribute('data-inspect-payload') || ''),
+        );
+      }
     });
+    const dashboardMode = new URLSearchParams(window.location.search).get('mode');
+    if (dashboardMode === 'hive') activateDashboardTab('hive');
+    else activateDashboardTab('overview');
     renderAll(state);
     refresh().catch((error) => {
       document.getElementById('lastUpdated').textContent = `Dashboard error: ${error.message}`;
@@ -2949,6 +4263,19 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
         template.replace("__INITIAL_STATE__", initial_state)
         .replace("__API_ENDPOINT__", str(api_endpoint))
         .replace("__TOPIC_BASE_PATH__", str(topic_base_path).rstrip("/"))
+        .replace("__WORKSTATION_STYLES__", render_workstation_styles())
+        .replace(
+            "__WORKSTATION_HEADER__",
+            render_workstation_header(
+                title="NULLA Operator Workstation",
+                subtitle="Overview and Hive share one dark shell, one object model, and one inspector language.",
+                default_mode="overview",
+                surface="brain-hive",
+                trace_enabled=False,
+                trace_label="Trace unavailable here",
+            ),
+        )
+        .replace("__WORKSTATION_SCRIPT__", render_workstation_script())
     )
 
 
@@ -2964,29 +4291,28 @@ def render_topic_detail_html(
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NULLA Topic Flow</title>
   <style>
+    __WORKSTATION_STYLES__
     :root {
-      --bg: #09111a;
-      --panel: #0d1823;
-      --panel-alt: #101f2d;
-      --ink: #d7e3ee;
-      --muted: #8ca0b3;
-      --line: #1f3343;
-      --accent: #54d2b1;
-      --accent-soft: rgba(84, 210, 177, 0.12);
-      --warn: #ffb366;
-      --shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+      --bg: var(--wk-bg);
+      --panel: var(--wk-panel);
+      --panel-alt: var(--wk-panel-soft);
+      --ink: var(--wk-text);
+      --muted: var(--wk-muted);
+      --line: var(--wk-line);
+      --accent: var(--wk-accent);
+      --accent-soft: var(--wk-chip-strong);
+      --warn: var(--wk-warn);
+      --shadow: var(--wk-shadow);
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0;
-      background: radial-gradient(circle at top, #102132 0%, var(--bg) 48%);
       color: var(--ink);
-      font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+      font-family: var(--wk-font-ui);
     }
     .shell {
-      max-width: 1180px;
-      margin: 0 auto;
-      padding: 24px 18px 40px;
+      max-width: none;
+      margin: 0;
+      padding: 0;
     }
     .topbar {
       display: flex;
@@ -2999,9 +4325,13 @@ def render_topic_detail_html(
       color: var(--muted);
       text-decoration: none;
       border: 1px solid var(--line);
-      background: var(--panel);
+      background: rgba(255, 255, 255, 0.03);
       border-radius: 999px;
       padding: 8px 12px;
+    }
+    .topic-frame {
+      display: grid;
+      gap: 16px;
     }
     .hero, .terminal, .sidebar {
       background: var(--panel);
@@ -3155,19 +4485,21 @@ def render_topic_detail_html(
   </style>
 </head>
 <body>
-  <div class="shell">
-    <div class="topbar">
-      <a class="back" href="/brain-hive">Back to watcher</a>
-      <div id="lastUpdated" class="chip">Waiting for topic refresh</div>
-    </div>
-    <section class="hero">
+  <div class="wk-app-shell">
+    __WORKSTATION_HEADER__
+    <div class="shell topic-frame">
+      <div class="topbar">
+        <a class="back" href="/brain-hive?mode=hive">Back to Hive</a>
+        <div id="lastUpdated" class="chip">Waiting for topic refresh</div>
+      </div>
+      <section class="hero">
       <div class="chip">Topic flow</div>
       <h1 id="topicTitle">Loading topic...</h1>
       <div class="summary" id="topicSummary">Pulling topic state from the watcher.</div>
       <div class="meta" id="topicMeta"></div>
       <div class="chips" id="topicTags"></div>
-    </section>
-    <section class="layout">
+      </section>
+      <section class="layout">
       <section class="terminal">
         <div class="terminal-head">Agent work flow</div>
         <div class="log" id="topicLog"></div>
@@ -3186,9 +4518,11 @@ def render_topic_detail_html(
           <div id="statusLine" class="empty">unknown</div>
         </div>
       </aside>
-    </section>
+      </section>
+    </div>
   </div>
   <script>
+    __WORKSTATION_SCRIPT__
     function esc(value) {
       return String(value ?? '').replace(/[&<>\"']/g, (ch) => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -3373,6 +4707,19 @@ def render_topic_detail_html(
     return (
         template.replace("__TOPIC_API_ENDPOINT__", str(topic_api_endpoint))
         .replace("__POSTS_API_ENDPOINT__", str(posts_api_endpoint))
+        .replace("__WORKSTATION_STYLES__", render_workstation_styles())
+        .replace(
+            "__WORKSTATION_HEADER__",
+            render_workstation_header(
+                title="NULLA Operator Workstation",
+                subtitle="Hive detail shares the same shell, object language, and dark workstation rules as Overview and Trace.",
+                default_mode="hive",
+                surface="brain-hive-topic",
+                trace_enabled=False,
+                trace_label="Trace unavailable here",
+            ),
+        )
+        .replace("__WORKSTATION_SCRIPT__", render_workstation_script())
     )
 
 

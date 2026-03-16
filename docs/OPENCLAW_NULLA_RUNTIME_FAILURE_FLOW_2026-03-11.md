@@ -1,6 +1,6 @@
 # NULLA / OpenClaw Runtime Failure Analysis
 Date: 2026-03-11
-Repo: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA`
+Repo: `/path/to/nulla-hive-mind`
 
 ## Purpose
 This document explains, in technical detail, why NULLA currently behaves like a weak bot in OpenClaw instead of a normal conversational AI, even when some of the infrastructure is already in place.
@@ -82,9 +82,9 @@ not like an AI assistant.
 
 ## 3. High-level runtime flow
 The relevant request flow currently lives mainly in:
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py`](/path/to/nulla-hive-mind/apps/nulla_agent.py)
+- [`/path/to/nulla-hive-mind/core/hive_activity_tracker.py`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py)
+- [`/path/to/nulla-hive-mind/core/tool_intent_executor.py`](/path/to/nulla-hive-mind/core/tool_intent_executor.py)
 
 ### Simplified flow
 
@@ -122,10 +122,10 @@ That is the worst possible place for natural but slightly messy human language.
 
 ## 4. The exact fast paths that currently exist
 Relevant code references:
-- fast-path order: [`apps/nulla_agent.py:202-273`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L202)
-- smalltalk: [`apps/nulla_agent.py:1005`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L1005)
-- date/time: [`apps/nulla_agent.py:1040`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L1040)
-- Hive command tracker: [`core/hive_activity_tracker.py:80`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py#L80)
+- fast-path order: [`apps/nulla_agent.py:202-273`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L202)
+- smalltalk: [`apps/nulla_agent.py:1005`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L1005)
+- date/time: [`apps/nulla_agent.py:1040`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L1040)
+- Hive command tracker: [`core/hive_activity_tracker.py:80`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py#L80)
 
 ### Current fast-path ordering
 At the top of the request pipeline, the agent checks, roughly in this order:
@@ -149,7 +149,7 @@ The problem is that the recognizers are still too brittle.
 ## 5. Why greetings feel bot-like
 ### Current implementation
 Smalltalk is handled deterministically in:
-- [`apps/nulla_agent.py:1005`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L1005)
+- [`apps/nulla_agent.py:1005`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L1005)
 
 It contains logic like:
 
@@ -202,7 +202,7 @@ But smalltalk should either:
 ## 6. Why Hive task questions fail so badly
 ### Current Hive command surface
 The top-level Hive command handler is:
-- [`core/hive_activity_tracker.py:80`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py#L80)
+- [`core/hive_activity_tracker.py:80`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py#L80)
 
 It handles three families:
 1. overview questions
@@ -285,8 +285,8 @@ This is worse than a weak model. It is a type error at the product layer.
 
 ## 8. Why internal tool errors are reaching the user
 ### Relevant code
-- tool loop: [`apps/nulla_agent.py:1234`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L1234)
-- tool executor: [`core/tool_intent_executor.py:332`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py#L332)
+- tool loop: [`apps/nulla_agent.py:1234`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L1234)
+- tool executor: [`core/tool_intent_executor.py:332`](/path/to/nulla-hive-mind/core/tool_intent_executor.py#L332)
 
 ### Current failure text path
 If the tool payload has no intent, `execute_tool_intent()` returns:
@@ -337,7 +337,7 @@ On trace/debug surfaces:
 ### Existing session-state pieces
 Hive session watch state exists in:
 - `session_hive_watch_state`
-- accessed through `session_hive_state()` in [`core/hive_activity_tracker.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py)
+- accessed through `session_hive_state()` in [`core/hive_activity_tracker.py`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py)
 
 It tracks things like:
 - watched topic ids
@@ -465,8 +465,8 @@ Concrete examples:
 - `pull the hive task and lets do one?` can fail
 
 Repo area:
-- [`core/hive_activity_tracker.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py)
-- [`apps/nulla_agent.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py)
+- [`core/hive_activity_tracker.py`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py)
+- [`apps/nulla_agent.py`](/path/to/nulla-hive-mind/apps/nulla_agent.py)
 
 ### 12.2 Poor fallbacks
 Current meaning:
@@ -475,15 +475,15 @@ Current meaning:
 - or weak model chatter
 
 Repo area:
-- grounded-response path in [`apps/nulla_agent.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py)
+- grounded-response path in [`apps/nulla_agent.py`](/path/to/nulla-hive-mind/apps/nulla_agent.py)
 
 ### 12.3 Poor error containment
 Current meaning:
 - internal tool/runtime errors leak into user chat
 
 Repo area:
-- [`apps/nulla_agent.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L1234)
-- [`core/tool_intent_executor.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py#L332)
+- [`apps/nulla_agent.py`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L1234)
+- [`core/tool_intent_executor.py`](/path/to/nulla-hive-mind/core/tool_intent_executor.py#L332)
 
 ### 12.4 Weak session-state handling
 Current meaning:
@@ -491,8 +491,8 @@ Current meaning:
 - follow-ups are too best-effort
 
 Repo area:
-- [`core/hive_activity_tracker.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py)
-- [`apps/nulla_agent.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L2174)
+- [`core/hive_activity_tracker.py`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py)
+- [`apps/nulla_agent.py`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L2174)
 
 ### 12.5 Weak model on top of that
 Current meaning:
@@ -682,26 +682,26 @@ Once the wrapper is sane:
 If you are asking another AI or engineer for help, point them here first:
 
 ### Request entry and fast-path ordering
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L202`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L202)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py#L202`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L202)
 
 ### Smalltalk and date/time deterministic responses
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L1005`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L1005)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L1040`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L1040)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py#L1005`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L1005)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py#L1040`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L1040)
 
 ### Tool-intent loop and user-visible error leak
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L1234`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L1234)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py#L332`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py#L332)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py#L1234`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L1234)
+- [`/path/to/nulla-hive-mind/core/tool_intent_executor.py#L332`](/path/to/nulla-hive-mind/core/tool_intent_executor.py#L332)
 
 ### Hive command matching / footer / overview / task rendering
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py#L80`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py#L80)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py#L124`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py#L124)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py#L311`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py#L311)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py#L419`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py#L419)
+- [`/path/to/nulla-hive-mind/core/hive_activity_tracker.py#L80`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py#L80)
+- [`/path/to/nulla-hive-mind/core/hive_activity_tracker.py#L124`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py#L124)
+- [`/path/to/nulla-hive-mind/core/hive_activity_tracker.py#L311`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py#L311)
+- [`/path/to/nulla-hive-mind/core/hive_activity_tracker.py#L419`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py#L419)
 
 ### Hive follow-up resolution / ambiguity logic
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L2174`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L2174)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L2594`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L2594)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L2864`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py#L2864)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py#L2174`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L2174)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py#L2594`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L2594)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py#L2864`](/path/to/nulla-hive-mind/apps/nulla_agent.py#L2864)
 
 ---
 

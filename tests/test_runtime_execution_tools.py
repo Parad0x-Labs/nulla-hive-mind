@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from core.runtime_execution_tools import execute_runtime_tool
+from core.runtime_execution_tools import execute_runtime_tool, extract_observation_followup_hints
 
 
 class RuntimeExecutionToolsTests(unittest.TestCase):
@@ -26,6 +26,8 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             self.assertTrue(listed.ok)
             self.assertIn("notes.txt", listed.response_text)
             self.assertNotIn(".hidden.txt", listed.response_text)
+            self.assertEqual(listed.details["observation"]["tool_surface"], "workspace")
+            self.assertIn("notes.txt", listed.details["observation"]["paths"])
 
             read = execute_runtime_tool(
                 "workspace.read_file",
@@ -35,6 +37,9 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             assert read is not None
             self.assertTrue(read.ok)
             self.assertIn("2: beta", read.response_text)
+            self.assertEqual(read.details["observation"]["intent"], "workspace.read_file")
+            self.assertEqual(read.details["observation"]["lines"][0]["line_number"], 2)
+            self.assertEqual(read.details["observation"]["lines"][0]["text"], "beta")
 
     def test_workspace_write_replace_and_search_flow(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -46,6 +51,7 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             assert written is not None
             self.assertTrue(written.ok)
             self.assertIn("Created file `docs/plan.md`", written.response_text)
+            self.assertEqual(written.details["observation"]["action"], "created")
 
             replaced = execute_runtime_tool(
                 "workspace.replace_in_file",
@@ -55,6 +61,7 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             assert replaced is not None
             self.assertTrue(replaced.ok)
             self.assertIn("Applied 1 replacement", replaced.response_text)
+            self.assertEqual(replaced.details["observation"]["replacements"], 1)
 
             searched = execute_runtime_tool(
                 "workspace.search_text",
@@ -64,6 +71,85 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             assert searched is not None
             self.assertTrue(searched.ok)
             self.assertIn("docs/plan.md:1", searched.response_text)
+            self.assertEqual(searched.details["observation"]["matches"][0]["path"], "docs/plan.md")
+            self.assertEqual(searched.details["observation"]["matches"][0]["line"], 1)
+
+    def test_workspace_ensure_directory_creates_requested_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            created = execute_runtime_tool(
+                "workspace.ensure_directory",
+                {"path": "tools/helpers"},
+                source_context={"workspace": tmpdir},
+            )
+            assert created is not None
+            self.assertTrue(created.ok)
+            self.assertIn("Created directory `tools/helpers`", created.response_text)
+            self.assertEqual(created.details["observation"]["intent"], "workspace.ensure_directory")
+            self.assertFalse(created.details["observation"]["already_present"])
+            self.assertTrue((Path(tmpdir) / "tools" / "helpers").is_dir())
+
+    def test_workspace_bootstrap_honors_nonexistent_workspace_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir) / "fresh-project"
+
+            created = execute_runtime_tool(
+                "workspace.ensure_directory",
+                {"path": "src/api"},
+                source_context={"workspace": str(project_root)},
+            )
+            assert created is not None
+            self.assertTrue(created.ok)
+            self.assertTrue((project_root / "src" / "api").is_dir())
+
+            written = execute_runtime_tool(
+                "workspace.write_file",
+                {"path": "src/api/main.py", "content": "print('ok')\n"},
+                source_context={"workspace": str(project_root)},
+            )
+            assert written is not None
+            self.assertTrue(written.ok)
+            self.assertTrue((project_root / "src" / "api" / "main.py").is_file())
+            self.assertIn("Created file `src/api/main.py`", written.response_text)
+
+    def test_workspace_write_followup_hints_preserve_path_and_line_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            written = execute_runtime_tool(
+                "workspace.write_file",
+                {"path": "generated/app.py", "content": "print('ok')\n"},
+                source_context={"workspace": tmpdir},
+            )
+            assert written is not None
+            hints = extract_observation_followup_hints(written.details["observation"])
+
+            self.assertEqual(hints["intent"], "workspace.write_file")
+            self.assertEqual(hints["path"], "generated/app.py")
+            self.assertEqual(hints["action"], "created")
+            self.assertEqual(hints["line_count"], 1)
+
+    def test_workspace_write_and_replace_store_diff_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            created = execute_runtime_tool(
+                "workspace.write_file",
+                {"path": "app.py", "content": "print('hello')\n"},
+                source_context={"workspace": tmpdir},
+            )
+            assert created is not None
+            created_artifact = created.details["artifacts"][0]
+            self.assertEqual(created_artifact["artifact_type"], "file_diff")
+            self.assertEqual(created_artifact["path"], "app.py")
+            self.assertIn("+++ b/app.py", created_artifact["diff_preview"])
+
+            replaced = execute_runtime_tool(
+                "workspace.replace_in_file",
+                {"path": "app.py", "old_text": "hello", "new_text": "goodbye"},
+                source_context={"workspace": tmpdir},
+            )
+            assert replaced is not None
+            replaced_artifact = replaced.details["artifacts"][0]
+            self.assertEqual(replaced_artifact["artifact_type"], "file_diff")
+            self.assertEqual(replaced_artifact["action"], "replaced")
+            self.assertIn("-print('hello')", replaced_artifact["diff_preview"])
+            self.assertIn("+print('goodbye')", replaced_artifact["diff_preview"])
 
     def test_sandbox_run_command_executes_local_bounded_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -77,6 +163,30 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             self.assertTrue(result.ok)
             self.assertIn("Command executed in `.`", result.response_text)
             self.assertIn(tmpdir, result.response_text)
+            self.assertEqual(result.details["observation"]["tool_surface"], "sandbox")
+            self.assertEqual(result.details["observation"]["command"], "pwd")
+            self.assertEqual(result.details["observation"]["cwd"], ".")
+            self.assertEqual(result.details["artifacts"][0]["artifact_type"], "command_output")
+
+    def test_sandbox_run_command_preserves_failure_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            (workspace / "fail.py").write_text(
+                "import sys\nprint('FAILED test_example', file=sys.stderr)\nsys.exit(1)\n",
+                encoding="utf-8",
+            )
+            result = execute_runtime_tool(
+                "sandbox.run_command",
+                {"command": "python3 fail.py"},
+                source_context={"workspace": tmpdir},
+            )
+            assert result is not None
+            self.assertTrue(result.handled)
+            artifacts = list(result.details["artifacts"])
+            self.assertEqual(artifacts[0]["artifact_type"], "command_output")
+            self.assertEqual(artifacts[1]["artifact_type"], "failure")
+            self.assertIn("FAILED test_example", artifacts[1]["summary"])
+            self.assertIn("FAILED test_example", result.details["observation"]["failure_summary"])
 
     def test_sandbox_run_command_blocks_network_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir, mock.patch(
@@ -93,6 +203,8 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             self.assertFalse(result.ok)
             self.assertEqual(result.status, "blocked_by_policy")
             self.assertIn("Network egress is disabled", result.response_text)
+            self.assertEqual(result.details["observation"]["tool_surface"], "sandbox")
+            self.assertEqual(result.details["observation"]["status"], "blocked_by_policy")
 
 
 if __name__ == "__main__":

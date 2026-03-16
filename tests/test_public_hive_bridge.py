@@ -690,6 +690,9 @@ def test_public_hive_bridge_falls_back_when_research_queue_route_is_missing() ->
     assert queue[0]["topic_id"] == "topic-1"
     assert queue[0]["compat_fallback"] is True
     assert queue[0]["packet_schema"] == "brain_hive.research_packet.v1"
+    assert queue[0]["truth_source"] == "public_bridge"
+    assert queue[0]["truth_label"] == "public-bridge-derived"
+    assert queue[0]["truth_transport"] == "compat_fallback"
 
 
 def test_public_hive_bridge_falls_back_when_research_packet_route_is_missing() -> None:
@@ -747,6 +750,149 @@ def test_public_hive_bridge_falls_back_when_research_packet_route_is_missing() -
     assert packet["topic"]["topic_id"] == "topic-1"
     assert packet["execution_state"]["active_claim_count"] == 1
     assert packet["compat_fallback"] is True
+    assert packet["truth_source"] == "public_bridge"
+    assert packet["truth_label"] == "public-bridge-derived"
+    assert packet["truth_transport"] == "compat_fallback"
+
+
+def test_public_hive_bridge_overlays_truth_fields_when_direct_research_packet_is_stale() -> None:
+    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+        del timeout, context
+        method = req.get_method()
+        if method == "GET" and req.full_url.endswith("/v1/hive/topics/topic-1/research-packet"):
+            return _FakeResponse(
+                {
+                    "ok": True,
+                    "result": {
+                        "topic": {
+                            "topic_id": "topic-1",
+                            "title": "Research queue topic",
+                            "summary": "Need a credible first research pass.",
+                            "status": "researching",
+                            "topic_tags": ["agent_commons", "watcher"],
+                            "created_at": "2026-03-09T20:00:00+00:00",
+                            "updated_at": "2026-03-09T20:10:00+00:00",
+                        }
+                    },
+                    "error": None,
+                }
+            )
+        if method == "GET" and req.full_url.endswith("/v1/hive/topics/topic-1"):
+            return _FakeResponse(
+                {
+                    "ok": True,
+                    "result": {
+                        "topic_id": "topic-1",
+                        "title": "Research queue topic",
+                        "summary": "Need a credible first research pass.",
+                        "status": "researching",
+                        "topic_tags": ["agent_commons", "watcher"],
+                        "created_at": "2026-03-09T20:00:00+00:00",
+                        "updated_at": "2026-03-09T20:10:00+00:00",
+                    },
+                    "error": None,
+                }
+            )
+        if method == "GET" and req.full_url.endswith("/v1/hive/topics/topic-1/posts?limit=400"):
+            return _FakeResponse(
+                {
+                    "ok": True,
+                    "result": [
+                        {
+                            "post_id": "post-1",
+                            "post_kind": "summary",
+                            "body": "Research synthesis card",
+                            "created_at": "2026-03-09T20:11:00+00:00",
+                            "evidence_refs": [
+                                {
+                                    "kind": "research_synthesis_card",
+                                    "question": "Research queue topic",
+                                    "searched": ["research queue topic implementation docs"],
+                                    "found": ["Credible evidence should stay visible."],
+                                    "source_domains": ["developer.apple.com"],
+                                    "artifacts": [{"label": "bundle artifact-1", "state": "resolved"}],
+                                    "promoted_findings": ["Credible evidence should stay visible."],
+                                    "confidence": "grounded",
+                                    "blockers": [],
+                                    "state_token": "state-1",
+                                }
+                            ],
+                        }
+                    ],
+                    "error": None,
+                }
+            )
+        if method == "GET" and req.full_url.endswith("/v1/hive/topics/topic-1/claims?limit=200"):
+            return _FakeResponse({"ok": True, "result": [], "error": None})
+        raise AssertionError(f"Unexpected request: {method} {req.full_url}")
+
+    bridge = PublicHiveBridge(
+        PublicHiveBridgeConfig(
+            enabled=True,
+            meet_seed_urls=("http://seed-eu.example.test:8766",),
+            topic_target_url="http://seed-eu.example.test:8766",
+            home_region="eu",
+        ),
+        urlopen=fake_urlopen,
+    )
+
+    packet = bridge.get_public_research_packet("topic-1")
+
+    assert packet["truth_transport"] == "direct_overlay"
+    assert packet["latest_synthesis_card"]["question"] == "Research queue topic"
+    assert "research_quality_status" in packet
+
+
+def test_public_hive_bridge_overlays_truth_fields_when_direct_research_queue_is_stale() -> None:
+    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+        del timeout, context
+        method = req.get_method()
+        if method == "GET" and req.full_url.endswith("/v1/hive/research-queue?limit=5"):
+            return _FakeResponse(
+                {
+                    "ok": True,
+                    "result": [{"topic_id": "topic-1", "title": "Research queue topic", "updated_at": "2026-03-09T20:10:00+00:00"}],
+                    "error": None,
+                }
+            )
+        if method == "GET" and req.full_url.endswith("/v1/hive/topics?limit=32"):
+            return _FakeResponse(
+                {
+                    "ok": True,
+                    "result": [
+                        {
+                            "topic_id": "topic-1",
+                            "title": "Research queue topic",
+                            "summary": "Need a credible first research pass.",
+                            "status": "researching",
+                            "topic_tags": ["agent_commons", "watcher"],
+                            "created_at": "2026-03-09T20:00:00+00:00",
+                            "updated_at": "2026-03-09T20:10:00+00:00",
+                        }
+                    ],
+                    "error": None,
+                }
+            )
+        if method == "GET" and req.full_url.endswith("/v1/hive/topics/topic-1/posts?limit=120"):
+            return _FakeResponse({"ok": True, "result": [{"post_id": "post-1", "body": "First note"}], "error": None})
+        if method == "GET" and req.full_url.endswith("/v1/hive/topics/topic-1/claims?limit=48"):
+            return _FakeResponse({"ok": True, "result": [], "error": None})
+        raise AssertionError(f"Unexpected request: {method} {req.full_url}")
+
+    bridge = PublicHiveBridge(
+        PublicHiveBridgeConfig(
+            enabled=True,
+            meet_seed_urls=("http://seed-eu.example.test:8766",),
+            topic_target_url="http://seed-eu.example.test:8766",
+            home_region="eu",
+        ),
+        urlopen=fake_urlopen,
+    )
+
+    queue = bridge.list_public_research_queue(limit=5)
+
+    assert queue[0]["truth_transport"] == "direct_overlay"
+    assert "research_quality_status" in queue[0]
 
 
 def test_agent_start_uses_limited_presence_when_hive_task_intake_is_disabled() -> None:

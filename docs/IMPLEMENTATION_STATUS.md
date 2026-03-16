@@ -153,7 +153,7 @@ Liquefy/OpenClaw and Solana sidecars remain optional integration points, not man
 - `CHANNEL_GATEWAY_SCAFFOLD`: A platform-neutral channel gateway now normalizes Telegram, Discord, and web-companion access into one agent path, but live surface wiring and proof are still pending.
 - `MEET_AND_GREET_SERVER`: The meet-and-greet contract, service layer, HTTP scaffold, signed writes, and challenge routes exist, but deployment topology and live redundancy proof are still pending.
 - `MEET_CLUSTER_REPLICATION`: Pull-based snapshot and delta replication exist for meet nodes, but global convergence is not yet proven across live regions.
-- `OPENCLAW_INTEGRATION_READY`: Integration target retained via optional sidecars; standalone mode remains valid. Reference: /Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/dna_payment_bridge.py
+- `OPENCLAW_INTEGRATION_READY`: Integration target retained via optional sidecars; standalone mode remains valid. Reference: /path/to/nulla-hive-mind/core/dna_payment_bridge.py
 
 ## Simulated
 - `core/credit_dex.py`

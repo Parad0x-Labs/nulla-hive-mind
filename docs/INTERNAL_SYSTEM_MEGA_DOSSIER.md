@@ -253,7 +253,7 @@ This contains:
 
 ## 4. Runtime State And Path Rules
 
-Runtime state is intentionally separated from the workspace source tree through [core/runtime_paths.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/runtime_paths.py).
+Runtime state is intentionally separated from the workspace source tree through [core/runtime_paths.py](/path/to/nulla-hive-mind/core/runtime_paths.py).
 
 ### Runtime Home
 
@@ -363,12 +363,12 @@ This flow enforces:
 
 #### Main Files
 
-- [apps/nulla_agent.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py)
-- [core/human_input_adapter.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/human_input_adapter.py)
-- [core/task_router.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/task_router.py)
-- [core/tiered_context_loader.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tiered_context_loader.py)
-- [core/memory_first_router.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/memory_first_router.py)
-- [core/reasoning_engine.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/reasoning_engine.py)
+- [apps/nulla_agent.py](/path/to/nulla-hive-mind/apps/nulla_agent.py)
+- [core/human_input_adapter.py](/path/to/nulla-hive-mind/core/human_input_adapter.py)
+- [core/task_router.py](/path/to/nulla-hive-mind/core/task_router.py)
+- [core/tiered_context_loader.py](/path/to/nulla-hive-mind/core/tiered_context_loader.py)
+- [core/memory_first_router.py](/path/to/nulla-hive-mind/core/memory_first_router.py)
+- [core/reasoning_engine.py](/path/to/nulla-hive-mind/core/reasoning_engine.py)
 
 ### 6.2 Human Input Adaptation Flow
 
@@ -383,9 +383,9 @@ Core logic:
 
 Main files:
 
-- [core/input_normalizer.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/input_normalizer.py)
-- [core/human_input_adapter.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/human_input_adapter.py)
-- [storage/dialogue_memory.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/dialogue_memory.py)
+- [core/input_normalizer.py](/path/to/nulla-hive-mind/core/input_normalizer.py)
+- [core/human_input_adapter.py](/path/to/nulla-hive-mind/core/human_input_adapter.py)
+- [storage/dialogue_memory.py](/path/to/nulla-hive-mind/storage/dialogue_memory.py)
 
 #### Why It Matters
 
@@ -411,12 +411,12 @@ flowchart TD
 
 Main files:
 
-- [core/bootstrap_context.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/bootstrap_context.py)
-- [core/context_budgeter.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/context_budgeter.py)
-- [core/context_relevance_ranker.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/context_relevance_ranker.py)
-- [core/cold_context_gate.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/cold_context_gate.py)
-- [core/prompt_assembly_report.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/prompt_assembly_report.py)
-- [storage/context_access_log.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/context_access_log.py)
+- [core/bootstrap_context.py](/path/to/nulla-hive-mind/core/bootstrap_context.py)
+- [core/context_budgeter.py](/path/to/nulla-hive-mind/core/context_budgeter.py)
+- [core/context_relevance_ranker.py](/path/to/nulla-hive-mind/core/context_relevance_ranker.py)
+- [core/cold_context_gate.py](/path/to/nulla-hive-mind/core/cold_context_gate.py)
+- [core/prompt_assembly_report.py](/path/to/nulla-hive-mind/core/prompt_assembly_report.py)
+- [storage/context_access_log.py](/path/to/nulla-hive-mind/storage/context_access_log.py)
 
 #### Bootstrap Context
 
@@ -455,17 +455,17 @@ The model execution layer exists so NULLA can use external models without becomi
 
 Main files:
 
-- [core/model_registry.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/model_registry.py)
-- [core/model_selection_policy.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/model_selection_policy.py)
-- [core/model_health.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/model_health.py)
-- [core/model_failover.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/model_failover.py)
-- [core/model_trust.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/model_trust.py)
-- [core/model_output_contracts.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/model_output_contracts.py)
-- [core/output_validator.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/output_validator.py)
-- [core/candidate_knowledge_lane.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/candidate_knowledge_lane.py)
-- [adapters/openai_compatible_adapter.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/adapters/openai_compatible_adapter.py)
-- [adapters/local_qwen_provider.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/adapters/local_qwen_provider.py)
-- [adapters/cloud_fallback_provider.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/adapters/cloud_fallback_provider.py)
+- [core/model_registry.py](/path/to/nulla-hive-mind/core/model_registry.py)
+- [core/model_selection_policy.py](/path/to/nulla-hive-mind/core/model_selection_policy.py)
+- [core/model_health.py](/path/to/nulla-hive-mind/core/model_health.py)
+- [core/model_failover.py](/path/to/nulla-hive-mind/core/model_failover.py)
+- [core/model_trust.py](/path/to/nulla-hive-mind/core/model_trust.py)
+- [core/model_output_contracts.py](/path/to/nulla-hive-mind/core/model_output_contracts.py)
+- [core/output_validator.py](/path/to/nulla-hive-mind/core/output_validator.py)
+- [core/candidate_knowledge_lane.py](/path/to/nulla-hive-mind/core/candidate_knowledge_lane.py)
+- [adapters/openai_compatible_adapter.py](/path/to/nulla-hive-mind/adapters/openai_compatible_adapter.py)
+- [adapters/local_qwen_provider.py](/path/to/nulla-hive-mind/adapters/local_qwen_provider.py)
+- [adapters/cloud_fallback_provider.py](/path/to/nulla-hive-mind/adapters/cloud_fallback_provider.py)
 
 #### Execution Order
 
@@ -489,11 +489,11 @@ NULLA can now follow high-signal threads in a bounded way.
 
 Main files:
 
-- [core/curiosity_policy.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/curiosity_policy.py)
-- [core/curiosity_roamer.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/curiosity_roamer.py)
-- [core/source_reputation.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/source_reputation.py)
-- [core/source_credibility.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/source_credibility.py)
-- [storage/curiosity_state.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/curiosity_state.py)
+- [core/curiosity_policy.py](/path/to/nulla-hive-mind/core/curiosity_policy.py)
+- [core/curiosity_roamer.py](/path/to/nulla-hive-mind/core/curiosity_roamer.py)
+- [core/source_reputation.py](/path/to/nulla-hive-mind/core/source_reputation.py)
+- [core/source_credibility.py](/path/to/nulla-hive-mind/core/source_credibility.py)
+- [storage/curiosity_state.py](/path/to/nulla-hive-mind/storage/curiosity_state.py)
 
 #### Current Behavior
 
@@ -516,11 +516,11 @@ NULLA can now examine explicit external evidence references.
 
 Main files:
 
-- [core/media_ingestion.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/media_ingestion.py)
-- [core/media_analysis_pipeline.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/media_analysis_pipeline.py)
-- [core/media_evidence_ranker.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/media_evidence_ranker.py)
-- [core/social_source_policy.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/social_source_policy.py)
-- [storage/media_evidence_log.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/media_evidence_log.py)
+- [core/media_ingestion.py](/path/to/nulla-hive-mind/core/media_ingestion.py)
+- [core/media_analysis_pipeline.py](/path/to/nulla-hive-mind/core/media_analysis_pipeline.py)
+- [core/media_evidence_ranker.py](/path/to/nulla-hive-mind/core/media_evidence_ranker.py)
+- [core/social_source_policy.py](/path/to/nulla-hive-mind/core/social_source_policy.py)
+- [storage/media_evidence_log.py](/path/to/nulla-hive-mind/storage/media_evidence_log.py)
 
 #### Current Evidence Rules
 
@@ -548,14 +548,14 @@ flowchart TD
 
 Key files:
 
-- [apps/nulla_daemon.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_daemon.py)
-- [network/assist_router.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network/assist_router.py)
-- [core/assist_coordinator.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/assist_coordinator.py)
-- [core/parent_orchestrator.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/parent_orchestrator.py)
-- [core/task_reassembler.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/task_reassembler.py)
-- [core/finalizer.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/finalizer.py)
-- [core/verdict_engine.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/verdict_engine.py)
-- [core/conflict_classifier.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/conflict_classifier.py)
+- [apps/nulla_daemon.py](/path/to/nulla-hive-mind/apps/nulla_daemon.py)
+- [network/assist_router.py](/path/to/nulla-hive-mind/network/assist_router.py)
+- [core/assist_coordinator.py](/path/to/nulla-hive-mind/core/assist_coordinator.py)
+- [core/parent_orchestrator.py](/path/to/nulla-hive-mind/core/parent_orchestrator.py)
+- [core/task_reassembler.py](/path/to/nulla-hive-mind/core/task_reassembler.py)
+- [core/finalizer.py](/path/to/nulla-hive-mind/core/finalizer.py)
+- [core/verdict_engine.py](/path/to/nulla-hive-mind/core/verdict_engine.py)
+- [core/conflict_classifier.py](/path/to/nulla-hive-mind/core/conflict_classifier.py)
 
 #### Why Parent/Helper Exists
 
@@ -578,14 +578,14 @@ This layer answers:
 
 Key files:
 
-- [core/knowledge_advertiser.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/knowledge_advertiser.py)
-- [core/knowledge_registry.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/knowledge_registry.py)
-- [core/knowledge_fetcher.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/knowledge_fetcher.py)
-- [core/knowledge_replication.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/knowledge_replication.py)
-- [core/knowledge_freshness.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/knowledge_freshness.py)
-- [storage/knowledge_index.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/knowledge_index.py)
-- [storage/knowledge_manifests.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/knowledge_manifests.py)
-- [storage/replica_table.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/replica_table.py)
+- [core/knowledge_advertiser.py](/path/to/nulla-hive-mind/core/knowledge_advertiser.py)
+- [core/knowledge_registry.py](/path/to/nulla-hive-mind/core/knowledge_registry.py)
+- [core/knowledge_fetcher.py](/path/to/nulla-hive-mind/core/knowledge_fetcher.py)
+- [core/knowledge_replication.py](/path/to/nulla-hive-mind/core/knowledge_replication.py)
+- [core/knowledge_freshness.py](/path/to/nulla-hive-mind/core/knowledge_freshness.py)
+- [storage/knowledge_index.py](/path/to/nulla-hive-mind/storage/knowledge_index.py)
+- [storage/knowledge_manifests.py](/path/to/nulla-hive-mind/storage/knowledge_manifests.py)
+- [storage/replica_table.py](/path/to/nulla-hive-mind/storage/replica_table.py)
 
 #### Core Rule
 
@@ -603,12 +603,12 @@ Meet is the hot metadata plane for node discovery and shared swarm entry.
 
 Key files:
 
-- [core/meet_and_greet_models.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/meet_and_greet_models.py)
-- [core/meet_and_greet_service.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/meet_and_greet_service.py)
-- [core/meet_and_greet_replication.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/meet_and_greet_replication.py)
-- [apps/meet_and_greet_server.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/meet_and_greet_server.py)
-- [apps/meet_and_greet_node.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/meet_and_greet_node.py)
-- [storage/meet_node_registry.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/meet_node_registry.py)
+- [core/meet_and_greet_models.py](/path/to/nulla-hive-mind/core/meet_and_greet_models.py)
+- [core/meet_and_greet_service.py](/path/to/nulla-hive-mind/core/meet_and_greet_service.py)
+- [core/meet_and_greet_replication.py](/path/to/nulla-hive-mind/core/meet_and_greet_replication.py)
+- [apps/meet_and_greet_server.py](/path/to/nulla-hive-mind/apps/meet_and_greet_server.py)
+- [apps/meet_and_greet_node.py](/path/to/nulla-hive-mind/apps/meet_and_greet_node.py)
+- [storage/meet_node_registry.py](/path/to/nulla-hive-mind/storage/meet_node_registry.py)
 
 #### Responsibilities
 
@@ -639,11 +639,11 @@ Brain Hive is the agent-only research commons.
 
 Key files:
 
-- [core/brain_hive_models.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_models.py)
-- [core/brain_hive_service.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_service.py)
-- [core/brain_hive_guard.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_guard.py)
-- [storage/brain_hive_store.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/brain_hive_store.py)
-- [apps/meet_and_greet_server.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/meet_and_greet_server.py)
+- [core/brain_hive_models.py](/path/to/nulla-hive-mind/core/brain_hive_models.py)
+- [core/brain_hive_service.py](/path/to/nulla-hive-mind/core/brain_hive_service.py)
+- [core/brain_hive_guard.py](/path/to/nulla-hive-mind/core/brain_hive_guard.py)
+- [storage/brain_hive_store.py](/path/to/nulla-hive-mind/storage/brain_hive_store.py)
+- [apps/meet_and_greet_server.py](/path/to/nulla-hive-mind/apps/meet_and_greet_server.py)
 
 #### Current Capabilities
 
@@ -679,10 +679,10 @@ It creates a place for:
 
 Key files:
 
-- [core/channel_gateway.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/channel_gateway.py)
-- [core/mobile_companion_view.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/mobile_companion_view.py)
-- [relay/bridge_workers/telegram_bridge.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/relay/bridge_workers/telegram_bridge.py)
-- [relay/bridge_workers/discord_bridge.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/relay/bridge_workers/discord_bridge.py)
+- [core/channel_gateway.py](/path/to/nulla-hive-mind/core/channel_gateway.py)
+- [core/mobile_companion_view.py](/path/to/nulla-hive-mind/core/mobile_companion_view.py)
+- [relay/bridge_workers/telegram_bridge.py](/path/to/nulla-hive-mind/relay/bridge_workers/telegram_bridge.py)
+- [relay/bridge_workers/discord_bridge.py](/path/to/nulla-hive-mind/relay/bridge_workers/discord_bridge.py)
 
 #### Design Rule
 
@@ -773,10 +773,10 @@ NULLA now clearly separates hot metadata from larger content.
 
 Main files:
 
-- [storage/cas.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/cas.py)
-- [storage/chunk_store.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/chunk_store.py)
-- [storage/blob_index.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/blob_index.py)
-- [storage/manifest_store.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/manifest_store.py)
+- [storage/cas.py](/path/to/nulla-hive-mind/storage/cas.py)
+- [storage/chunk_store.py](/path/to/nulla-hive-mind/storage/chunk_store.py)
+- [storage/blob_index.py](/path/to/nulla-hive-mind/storage/blob_index.py)
+- [storage/manifest_store.py](/path/to/nulla-hive-mind/storage/manifest_store.py)
 
 ### Liquefy Boundary
 
@@ -800,19 +800,19 @@ Small coordination traffic still uses the lightweight messaging path.
 
 Main files:
 
-- [network/stream_transport.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network/stream_transport.py)
-- [network/chunk_protocol.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network/chunk_protocol.py)
-- [network/transfer_manager.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network/transfer_manager.py)
+- [network/stream_transport.py](/path/to/nulla-hive-mind/network/stream_transport.py)
+- [network/chunk_protocol.py](/path/to/nulla-hive-mind/network/chunk_protocol.py)
+- [network/transfer_manager.py](/path/to/nulla-hive-mind/network/transfer_manager.py)
 
 ### Public Network Readiness Scaffolding
 
 Main files:
 
-- [network/stun_client.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network/stun_client.py)
-- [network/nat_probe.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network/nat_probe.py)
-- [network/hole_punch.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network/hole_punch.py)
-- [network/bootstrap_node.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network/bootstrap_node.py)
-- [network/relay_fallback.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network/relay_fallback.py)
+- [network/stun_client.py](/path/to/nulla-hive-mind/network/stun_client.py)
+- [network/nat_probe.py](/path/to/nulla-hive-mind/network/nat_probe.py)
+- [network/hole_punch.py](/path/to/nulla-hive-mind/network/hole_punch.py)
+- [network/bootstrap_node.py](/path/to/nulla-hive-mind/network/bootstrap_node.py)
+- [network/relay_fallback.py](/path/to/nulla-hive-mind/network/relay_fallback.py)
 
 ### Current Truth
 
@@ -826,8 +826,8 @@ Peer communication is signed and schema-validated.
 
 Main files:
 
-- [network/protocol.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network/protocol.py)
-- [network/signer.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network/signer.py)
+- [network/protocol.py](/path/to/nulla-hive-mind/network/protocol.py)
+- [network/signer.py](/path/to/nulla-hive-mind/network/signer.py)
 
 ### Replay Protection
 
@@ -837,10 +837,10 @@ Replay handling exists and has regression coverage.
 
 Main files:
 
-- [sandbox/job_runner.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/sandbox/job_runner.py)
-- [sandbox/resource_limits.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/sandbox/resource_limits.py)
-- [sandbox/network_guard.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/sandbox/network_guard.py)
-- [sandbox/container_adapter.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/sandbox/container_adapter.py)
+- [sandbox/job_runner.py](/path/to/nulla-hive-mind/sandbox/job_runner.py)
+- [sandbox/resource_limits.py](/path/to/nulla-hive-mind/sandbox/resource_limits.py)
+- [sandbox/network_guard.py](/path/to/nulla-hive-mind/sandbox/network_guard.py)
+- [sandbox/container_adapter.py](/path/to/nulla-hive-mind/sandbox/container_adapter.py)
 
 ### Source Credibility Boundary
 
@@ -885,11 +885,11 @@ Model output, curiosity output, and social/media-derived summaries do not automa
 
 Main files:
 
-- [core/challenge_engine.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/challenge_engine.py)
-- [core/proof_of_execution.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/proof_of_execution.py)
-- [core/dispute_engine.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/dispute_engine.py)
-- [core/appeal_queue.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/appeal_queue.py)
-- [core/review_quorum.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/review_quorum.py)
+- [core/challenge_engine.py](/path/to/nulla-hive-mind/core/challenge_engine.py)
+- [core/proof_of_execution.py](/path/to/nulla-hive-mind/core/proof_of_execution.py)
+- [core/dispute_engine.py](/path/to/nulla-hive-mind/core/dispute_engine.py)
+- [core/appeal_queue.py](/path/to/nulla-hive-mind/core/appeal_queue.py)
+- [core/review_quorum.py](/path/to/nulla-hive-mind/core/review_quorum.py)
 
 ### Current Truth
 
@@ -909,10 +909,10 @@ External models and runtimes remain under upstream licenses.
 
 Main files:
 
-- [docs/MODEL_INTEGRATION_POLICY.md](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/MODEL_INTEGRATION_POLICY.md)
-- [docs/MODEL_PROVIDER_POLICY.md](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/MODEL_PROVIDER_POLICY.md)
-- [docs/THIRD_PARTY_LICENSES.md](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/THIRD_PARTY_LICENSES.md)
-- [storage/model_provider_manifest.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/model_provider_manifest.py)
+- [docs/MODEL_INTEGRATION_POLICY.md](/path/to/nulla-hive-mind/docs/MODEL_INTEGRATION_POLICY.md)
+- [docs/MODEL_PROVIDER_POLICY.md](/path/to/nulla-hive-mind/docs/MODEL_PROVIDER_POLICY.md)
+- [docs/THIRD_PARTY_LICENSES.md](/path/to/nulla-hive-mind/docs/THIRD_PARTY_LICENSES.md)
+- [storage/model_provider_manifest.py](/path/to/nulla-hive-mind/storage/model_provider_manifest.py)
 
 ### Integration Rule
 
@@ -992,17 +992,17 @@ Latest verified result at time of writing:
 
 Main proof and runbook surfaces:
 
-- [docs/PROOF_PASS_REPORT.md](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/PROOF_PASS_REPORT.md)
-- [docs/LAN_PROOF_CHECKLIST.md](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/LAN_PROOF_CHECKLIST.md)
-- [docs/OVERNIGHT_SOAK_RUNBOOK.md](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OVERNIGHT_SOAK_RUNBOOK.md)
-- [docs/NETWORK_PROOF_PACK.md](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/NETWORK_PROOF_PACK.md)
-- [docs/IDENTITY_LIFECYCLE_POLICY.md](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/IDENTITY_LIFECYCLE_POLICY.md)
-- [docs/RELEASE_ENGINEERING.md](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/RELEASE_ENGINEERING.md)
-- [ops/adversarial_wan_proof.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/ops/adversarial_wan_proof.py)
-- [ops/cross_region_convergence_report.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/ops/cross_region_convergence_report.py)
-- [ops/release_readiness_report.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/ops/release_readiness_report.py)
-- [ops/overnight_readiness_report.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/ops/overnight_readiness_report.py)
-- [ops/morning_after_audit_report.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/ops/morning_after_audit_report.py)
+- [docs/PROOF_PASS_REPORT.md](/path/to/nulla-hive-mind/docs/PROOF_PASS_REPORT.md)
+- [docs/LAN_PROOF_CHECKLIST.md](/path/to/nulla-hive-mind/docs/LAN_PROOF_CHECKLIST.md)
+- [docs/OVERNIGHT_SOAK_RUNBOOK.md](/path/to/nulla-hive-mind/docs/OVERNIGHT_SOAK_RUNBOOK.md)
+- [docs/NETWORK_PROOF_PACK.md](/path/to/nulla-hive-mind/docs/NETWORK_PROOF_PACK.md)
+- [docs/IDENTITY_LIFECYCLE_POLICY.md](/path/to/nulla-hive-mind/docs/IDENTITY_LIFECYCLE_POLICY.md)
+- [docs/RELEASE_ENGINEERING.md](/path/to/nulla-hive-mind/docs/RELEASE_ENGINEERING.md)
+- [ops/adversarial_wan_proof.py](/path/to/nulla-hive-mind/ops/adversarial_wan_proof.py)
+- [ops/cross_region_convergence_report.py](/path/to/nulla-hive-mind/ops/cross_region_convergence_report.py)
+- [ops/release_readiness_report.py](/path/to/nulla-hive-mind/ops/release_readiness_report.py)
+- [ops/overnight_readiness_report.py](/path/to/nulla-hive-mind/ops/overnight_readiness_report.py)
+- [ops/morning_after_audit_report.py](/path/to/nulla-hive-mind/ops/morning_after_audit_report.py)
 
 ### What Has Been Proven Better Than Before
 

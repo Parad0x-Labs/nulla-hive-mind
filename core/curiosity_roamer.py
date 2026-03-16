@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from core import audit_logger
+from core import audit_logger, policy_engine
 from core.candidate_knowledge_lane import (
     build_task_hash,
     get_candidate_by_id,
@@ -20,6 +21,7 @@ from core.curiosity_policy import (
 )
 from core.source_credibility import SourceCredibilityVerdict, evaluate_source_domain, is_domain_allowed
 from core.source_reputation import SourceProfile, profiles_for_topic, render_query
+from core.task_router import looks_like_explicit_lookup_request, looks_like_public_entity_lookup_request
 from network.signer import get_local_peer_id
 from retrieval.web_adapter import WebAdapter
 from storage.curiosity_state import queue_curiosity_topic, record_curiosity_run, update_curiosity_topic
@@ -31,6 +33,112 @@ _IDLE_COMMONS_SEEDS: tuple[tuple[str, str, str], ...] = (
     ("design", "better human-visible watcher and task-flow UX", "watcher usability"),
     ("technical", "swarm memory reuse without leaking private traces", "memory discipline"),
     ("integration", "public-hive task participation and reward proof loops", "hive ops"),
+)
+
+_ADAPTIVE_RESEARCH_MARKERS: tuple[str, ...] = (
+    "research",
+    "look up",
+    "search",
+    "compare",
+    "versus",
+    "vs",
+    "difference",
+    "tradeoff",
+    "tradeoffs",
+    "pros and cons",
+    "verify",
+    "confirm",
+    "is it true",
+    "check whether",
+    "evidence",
+    "sources",
+    "docs",
+    "documentation",
+    "best practice",
+    "best practices",
+    "latest",
+    "current",
+    "today",
+)
+_COMPARE_MARKERS: tuple[str, ...] = (
+    "compare",
+    "versus",
+    " vs ",
+    "difference",
+    "tradeoff",
+    "tradeoffs",
+    "pros and cons",
+)
+_VERIFY_MARKERS: tuple[str, ...] = (
+    "verify",
+    "confirm",
+    "is it true",
+    "is this true",
+    "check whether",
+    "fact check",
+    "rumor",
+    "accurate",
+)
+_SPECIFIC_TROUBLESHOOTING_MARKERS: tuple[str, ...] = (
+    "traceback",
+    "stack trace",
+    "exception",
+    "error",
+    "failed",
+    "undefined",
+    ".env",
+    "yaml",
+    "json",
+    "config",
+    "dependency",
+    "version",
+)
+_ENTITY_LOOKUP_DROP_TOKENS: frozenset[str] = frozenset(
+    {
+        "who",
+        "is",
+        "he",
+        "she",
+        "they",
+        "them",
+        "tell",
+        "me",
+        "about",
+        "what",
+        "do",
+        "you",
+        "know",
+        "check",
+        "find",
+        "look",
+        "up",
+        "lookup",
+        "search",
+        "google",
+        "in",
+        "on",
+        "the",
+        "web",
+        "pls",
+        "please",
+    }
+)
+_ENTITY_LOOKUP_KEEP_SHORT_TOKENS: frozenset[str] = frozenset({"x", "ai"})
+_RESEARCH_PRIORITY_TASK_CLASSES: frozenset[str] = frozenset(
+    {
+        "research",
+        "system_design",
+        "debugging",
+        "dependency_resolution",
+        "config",
+        "business_advisory",
+        "food_nutrition",
+        "relationship_advisory",
+        "creative_ideation",
+        "general_advisory",
+        "chat_conversation",
+        "chat_research",
+    }
 )
 
 
@@ -73,6 +181,50 @@ class CuriosityResult:
             "executed_topic_ids": list(self.executed_topic_ids),
             "candidate_ids": list(self.candidate_ids),
             "cached_topic_hits": int(self.cached_topic_hits),
+        }
+
+
+@dataclass
+class AdaptiveResearchResult:
+    enabled: bool
+    reason: str
+    strategy: str = "not_needed"
+    escalated_from_chat: bool = False
+    actions_taken: list[str] = field(default_factory=list)
+    queries_run: list[str] = field(default_factory=list)
+    notes: list[dict[str, Any]] = field(default_factory=list)
+    source_domains: list[str] = field(default_factory=list)
+    evidence_strength: str = "none"
+    broadened: bool = False
+    narrowed: bool = False
+    compared_sources: bool = False
+    verified_claim: bool = False
+    stop_reason: str = ""
+    admitted_uncertainty: bool = False
+    uncertainty_reason: str = ""
+    tool_gap_note: str = ""
+    rounds: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "reason": self.reason,
+            "strategy": self.strategy,
+            "escalated_from_chat": self.escalated_from_chat,
+            "actions_taken": list(self.actions_taken),
+            "queries_run": list(self.queries_run),
+            "notes": list(self.notes),
+            "source_domains": list(self.source_domains),
+            "evidence_strength": self.evidence_strength,
+            "broadened": self.broadened,
+            "narrowed": self.narrowed,
+            "compared_sources": self.compared_sources,
+            "verified_claim": self.verified_claim,
+            "stop_reason": self.stop_reason,
+            "admitted_uncertainty": self.admitted_uncertainty,
+            "uncertainty_reason": self.uncertainty_reason,
+            "tool_gap_note": self.tool_gap_note,
+            "rounds": self.rounds,
         }
 
 
@@ -258,6 +410,128 @@ class CuriosityRoamer:
             "summary": summary,
             "snippets": snippets,
         }
+
+    def adaptive_research(
+        self,
+        *,
+        task_id: str,
+        user_input: str,
+        classification: dict[str, Any],
+        interpretation: Any,
+        source_context: dict[str, Any] | None = None,
+        max_rounds: int = 3,
+    ) -> AdaptiveResearchResult:
+        clean_text = " ".join(str(user_input or "").split()).strip()
+        decision = _adaptive_research_decision(
+            user_input=clean_text,
+            classification=classification,
+            interpretation=interpretation,
+            source_context=source_context,
+        )
+        result = AdaptiveResearchResult(
+            enabled=bool(decision["enabled"]),
+            reason=str(decision["reason"]),
+            strategy=str(decision["strategy"]),
+            escalated_from_chat=bool(decision["escalated_from_chat"]),
+            tool_gap_note=str(decision.get("tool_gap_note") or ""),
+        )
+        if not result.enabled:
+            return result
+
+        task_class = str(classification.get("task_class") or "unknown").strip().lower() or "unknown"
+        max_steps = max(1, min(int(max_rounds or 3), 4))
+        all_notes: list[dict[str, Any]] = []
+        note_keys: set[str] = set()
+        pending_steps: list[tuple[str, str]] = [
+            ("initial_search", _adaptive_query_seed(clean_text, interpretation=interpretation, decision=decision))
+        ]
+
+        while pending_steps and result.rounds < max_steps:
+            action, query = pending_steps.pop(0)
+            clean_query = " ".join(str(query or "").split()).strip()
+            if not clean_query or clean_query in result.queries_run:
+                continue
+            result.actions_taken.append(action)
+            result.queries_run.append(clean_query)
+            result.rounds += 1
+            notes = WebAdapter.planned_search_query(
+                clean_query,
+                task_id=task_id or None,
+                limit=self.config.max_snippets_per_query + 1,
+                task_class=task_class,
+                topic_hints=list(getattr(interpretation, "topic_hints", []) or []),
+                source_label="web.search",
+            )
+            for note in list(notes or []):
+                enriched = dict(note)
+                if action == "broaden_search":
+                    enriched["adaptive_action"] = "broadened"
+                elif action == "narrow_search":
+                    enriched["adaptive_action"] = "narrowed"
+                elif action == "compare_sources":
+                    enriched["adaptive_action"] = "compared"
+                elif action == "verify_claim":
+                    enriched["adaptive_action"] = "verified"
+                key = _adaptive_note_key(enriched)
+                if not key or key in note_keys:
+                    continue
+                note_keys.add(key)
+                all_notes.append(enriched)
+
+            metrics = _adaptive_research_metrics(all_notes)
+            result.notes = all_notes[:6]
+            result.source_domains = metrics["domains"]
+            result.evidence_strength = str(metrics["strength"])
+            result.compared_sources = bool(result.compared_sources or (decision["needs_compare"] and metrics["domain_count"] >= 2))
+            result.verified_claim = bool(result.verified_claim or (decision["needs_verify"] and metrics["official_count"] >= 1))
+            stop_reason = _adaptive_stop_reason(
+                metrics=metrics,
+                needs_compare=bool(decision["needs_compare"]),
+                needs_verify=bool(decision["needs_verify"]),
+            )
+            if stop_reason:
+                result.actions_taken.append("stop_answer")
+                result.stop_reason = stop_reason
+                break
+
+            next_step = _adaptive_next_step(
+                decision=decision,
+                metrics=metrics,
+                already_broadened=result.broadened,
+                already_narrowed=result.narrowed,
+                already_compared=result.compared_sources,
+                already_verified=result.verified_claim,
+            )
+            if next_step is None:
+                result.actions_taken.append("stop_answer")
+                result.stop_reason = "bounded_research_complete"
+                break
+            next_action, next_query = next_step
+            if next_action == "broaden_search":
+                result.broadened = True
+            elif next_action == "narrow_search":
+                result.narrowed = True
+            elif next_action == "compare_sources":
+                result.compared_sources = True
+            elif next_action == "verify_claim":
+                result.verified_claim = True
+            pending_steps.append((next_action, next_query))
+
+        if not result.stop_reason:
+            result.stop_reason = "bounded_research_complete"
+        if result.evidence_strength in {"weak", "none"}:
+            result.admitted_uncertainty = True
+            result.uncertainty_reason = _adaptive_uncertainty_reason(
+                result=result,
+                decision=decision,
+            )
+        audit_logger.log(
+            "adaptive_research_completed",
+            target_id=task_id,
+            target_type="task",
+            details=result.to_dict(),
+        )
+        return result
 
     def _execute_topic(self, *, topic_id: str, topic: CuriosityTopic, task_id: str, trace_id: str) -> tuple[str | None, bool]:
         task_hash = build_task_hash(
@@ -525,3 +799,277 @@ def _commons_public_body(*, topic: CuriosityTopic, summary: str, snippets: list[
     if labels:
         lines.append("Signals reviewed: " + ", ".join(labels[:3]) + ".")
     return " ".join(part.strip() for part in lines if part.strip())[:1500]
+
+
+def _adaptive_research_decision(
+    *,
+    user_input: str,
+    classification: dict[str, Any],
+    interpretation: Any,
+    source_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    text = " ".join(str(user_input or "").split()).strip()
+    lowered = f" {text.lower()} "
+    task_class = str(classification.get("task_class") or "unknown").strip().lower() or "unknown"
+    topic_hints = [str(item).strip().lower() for item in list(getattr(interpretation, "topic_hints", []) or []) if str(item).strip()]
+    surface = str((source_context or {}).get("surface", "") or "").strip().lower()
+    platform = str((source_context or {}).get("platform", "") or "").strip().lower()
+    allow_remote_fetch = bool((source_context or {}).get("allow_remote_fetch", False))
+    trusted_surface = surface in {"channel", "openclaw", "api"} or platform in {"openclaw", "web_companion", "telegram", "discord"}
+    if not text:
+        return {"enabled": False, "reason": "empty_query", "strategy": "not_needed", "escalated_from_chat": False}
+    if not policy_engine.allow_web_fallback():
+        return {
+            "enabled": False,
+            "reason": "web_lookup_disabled",
+            "strategy": "tool_gap",
+            "escalated_from_chat": False,
+            "tool_gap_note": "Live research is not available on this runtime.",
+        }
+    if not (allow_remote_fetch or trusted_surface):
+        return {
+            "enabled": False,
+            "reason": "surface_disallows_remote_fetch",
+            "strategy": "tool_gap",
+            "escalated_from_chat": False,
+            "tool_gap_note": "This surface is not allowed to perform live research.",
+        }
+
+    has_compare = any(marker in lowered for marker in _COMPARE_MARKERS)
+    has_verify = any(marker in lowered for marker in _VERIFY_MARKERS)
+    has_research_marker = any(marker in lowered for marker in _ADAPTIVE_RESEARCH_MARKERS)
+    has_specific_issue = any(marker in lowered for marker in _SPECIFIC_TROUBLESHOOTING_MARKERS) or bool(re.search(r"`[^`]+`|[A-Z][A-Za-z]+Error|\b\d+\.\d+(?:\.\d+)?\b", text))
+    explicit_lookup = looks_like_explicit_lookup_request(text)
+    public_entity_lookup = looks_like_public_entity_lookup_request(text)
+    entity_seed = ""
+    entity_retry_query = ""
+    if public_entity_lookup:
+        entity_seed, entity_retry_query = _adaptive_public_entity_lookup_queries(
+            text,
+            interpretation=interpretation,
+        )
+    chat_escalation = task_class not in {"research", "chat_research", "system_design", "debugging", "dependency_resolution", "config"} and (
+        has_research_marker or has_compare or has_verify or has_specific_issue or explicit_lookup or public_entity_lookup
+    )
+    always_research_classes = {"research", "chat_research", "system_design", "debugging", "dependency_resolution", "config"}
+    enabled = bool(
+        (task_class in always_research_classes)
+        or explicit_lookup
+        or public_entity_lookup
+        or chat_escalation
+        or (
+            task_class in _RESEARCH_PRIORITY_TASK_CLASSES
+            and (
+                has_research_marker
+                or has_compare
+                or has_verify
+                or has_specific_issue
+                or explicit_lookup
+                or public_entity_lookup
+            )
+        )
+    )
+    strategy = "general_research"
+    if public_entity_lookup:
+        strategy = "entity_lookup"
+    elif has_compare:
+        strategy = "compare"
+    elif has_verify:
+        strategy = "verify"
+    elif has_specific_issue:
+        strategy = "narrow"
+    elif has_research_marker:
+        strategy = "broaden"
+    return {
+        "enabled": enabled,
+        "reason": "chat_escalation" if chat_escalation else "research_task" if enabled else "research_not_needed",
+        "strategy": strategy,
+        "escalated_from_chat": chat_escalation,
+        "needs_compare": has_compare,
+        "needs_verify": has_verify,
+        "needs_specific_focus": has_specific_issue,
+        "topic_hints": topic_hints[:4],
+        "explicit_lookup": explicit_lookup,
+        "public_entity_lookup": public_entity_lookup,
+        "entity_seed": entity_seed,
+        "entity_retry_query": entity_retry_query,
+    }
+
+
+def _adaptive_query_seed(user_input: str, *, interpretation: Any, decision: dict[str, Any] | None = None) -> str:
+    text = " ".join(str(user_input or "").split()).strip()
+    decision = dict(decision or {})
+    entity_seed = str(decision.get("entity_seed") or "").strip()
+    if entity_seed:
+        return entity_seed
+    hints = [str(item).strip() for item in list(getattr(interpretation, "topic_hints", []) or []) if str(item).strip()]
+    if hints and len(text.split()) > 14:
+        return f"{hints[0]} {text}"
+    return text
+
+
+def _adaptive_public_entity_lookup_queries(user_input: str, *, interpretation: Any) -> tuple[str, str]:
+    tokens = _adaptive_entity_lookup_tokens(user_input, interpretation=interpretation)
+    if not tokens:
+        clean = " ".join(str(user_input or "").split()).strip()
+        return clean, clean
+    primary_tokens = list(dict.fromkeys(tokens))[:6]
+    retry_tokens = [_collapse_entity_lookup_token(token) for token in primary_tokens]
+    retry_tokens = list(dict.fromkeys(token for token in retry_tokens if token))
+    if retry_tokens == primary_tokens:
+        if any(token in {"x", "twitter"} for token in retry_tokens) and "twitter" not in retry_tokens:
+            retry_tokens.append("twitter")
+        elif "profile" not in retry_tokens:
+            retry_tokens.append("profile")
+    primary = " ".join(primary_tokens).strip()
+    retry = " ".join(retry_tokens).strip() or primary
+    return primary, retry
+
+
+def _adaptive_entity_lookup_tokens(user_input: str, *, interpretation: Any) -> list[str]:
+    normalized = " ".join(str(user_input or "").strip().lower().split())
+    if not normalized:
+        return []
+    tokens: list[str] = []
+    for token in re.findall(r"[a-z0-9\.]+", normalized):
+        token = token.strip(".")
+        if not token or token in _ENTITY_LOOKUP_DROP_TOKENS:
+            continue
+        if token == "x.com":
+            token = "x"
+        if len(token) == 1 and token not in _ENTITY_LOOKUP_KEEP_SHORT_TOKENS:
+            continue
+        tokens.append(token)
+    hint_tokens: list[str] = []
+    for hint in list(getattr(interpretation, "topic_hints", []) or [])[:3]:
+        for token in re.findall(r"[a-z0-9\.]+", str(hint).lower()):
+            token = token.strip(".")
+            if not token or token in _ENTITY_LOOKUP_DROP_TOKENS:
+                continue
+            if len(token) == 1 and token not in _ENTITY_LOOKUP_KEEP_SHORT_TOKENS:
+                continue
+            hint_tokens.append(token)
+    return list(dict.fromkeys(tokens + hint_tokens))
+
+
+def _collapse_entity_lookup_token(token: str) -> str:
+    lowered = str(token or "").strip().lower()
+    if len(lowered) < 3 or lowered in {"solana", "twitter"}:
+        return lowered
+    return re.sub(r"(.)\1+", r"\1", lowered)
+
+
+def _adaptive_note_key(note: dict[str, Any]) -> str:
+    url = str(note.get("result_url") or note.get("url") or "").strip()
+    title = str(note.get("result_title") or note.get("title") or "").strip()
+    summary = str(note.get("summary") or note.get("snippet") or "").strip()
+    return "||".join(part for part in (url, title, summary[:120]) if part)
+
+
+def _adaptive_research_metrics(notes: list[dict[str, Any]]) -> dict[str, Any]:
+    domains: list[str] = []
+    official_count = 0
+    confidence_scores: list[float] = []
+    for note in list(notes or []):
+        domain = str(note.get("origin_domain") or "").strip().lower()
+        if domain and domain not in domains:
+            domains.append(domain)
+        if domain:
+            verdict = evaluate_source_domain(domain)
+            confidence_scores.append(float(verdict.score))
+            if verdict.category in {"official", "docs", "reference"} or domain.endswith((".gov", ".edu")):
+                official_count += 1
+        raw_confidence = note.get("confidence")
+        if raw_confidence not in {None, ""}:
+            try:
+                confidence_scores.append(float(raw_confidence))
+            except Exception:
+                pass
+        label = str(note.get("source_profile_label") or "").strip().lower()
+        if "official" in label or "docs" in label:
+            official_count += 1
+    domain_count = len(domains)
+    note_count = len(list(notes or []))
+    average_confidence = (sum(confidence_scores) / len(confidence_scores)) if confidence_scores else 0.0
+    if note_count >= 3 and domain_count >= 2 and (official_count >= 1 or average_confidence >= 0.58):
+        strength = "strong"
+    elif note_count >= 2 and (domain_count >= 2 or average_confidence >= 0.48):
+        strength = "moderate"
+    elif note_count >= 1:
+        strength = "weak"
+    else:
+        strength = "none"
+    return {
+        "strength": strength,
+        "note_count": note_count,
+        "domain_count": domain_count,
+        "domains": domains[:6],
+        "official_count": official_count,
+        "average_confidence": average_confidence,
+    }
+
+
+def _adaptive_stop_reason(
+    *,
+    metrics: dict[str, Any],
+    needs_compare: bool,
+    needs_verify: bool,
+) -> str:
+    strength = str(metrics.get("strength") or "none")
+    domain_count = int(metrics.get("domain_count") or 0)
+    official_count = int(metrics.get("official_count") or 0)
+    if strength == "strong" and (not needs_compare or domain_count >= 2) and (not needs_verify or official_count >= 1):
+        return "strong_evidence"
+    if strength == "moderate" and not needs_compare and not needs_verify:
+        return "sufficient_evidence"
+    if needs_compare and domain_count >= 2 and strength in {"moderate", "strong"}:
+        return "comparison_ready"
+    if needs_verify and official_count >= 1 and strength in {"moderate", "strong"}:
+        return "verification_ready"
+    return ""
+
+
+def _adaptive_next_step(
+    *,
+    decision: dict[str, Any],
+    metrics: dict[str, Any],
+    already_broadened: bool,
+    already_narrowed: bool,
+    already_compared: bool,
+    already_verified: bool,
+) -> tuple[str, str] | None:
+    strength = str(metrics.get("strength") or "none")
+    domains = list(metrics.get("domains") or [])
+    seed_hint = str((list(decision.get("topic_hints") or [])[:1] or [""])[0]).strip()
+    entity_retry_query = str(decision.get("entity_retry_query") or "").strip()
+    if decision.get("public_entity_lookup") and strength in {"none", "weak"} and entity_retry_query and not already_narrowed:
+        return ("narrow_search", entity_retry_query)
+    if decision.get("needs_compare") and int(metrics.get("domain_count") or 0) < 2 and not already_compared:
+        query = f"{seed_hint or 'topic'} comparison tradeoffs sources".strip()
+        return ("compare_sources", query)
+    if decision.get("needs_verify") and int(metrics.get("official_count") or 0) < 1 and not already_verified:
+        verify_base = seed_hint or str((domains[:1] or [""])[0]).strip() or "claim"
+        return ("verify_claim", f"{verify_base} official source verify")
+    if strength in {"none", "weak"} and decision.get("needs_specific_focus") and not already_narrowed:
+        focus = seed_hint or "specific error"
+        return ("narrow_search", f"{focus} exact fix documentation")
+    if strength in {"none", "weak"} and not already_broadened:
+        broaden_seed = seed_hint or " ".join(str(decision.get("strategy") or "research").split("_"))
+        return ("broaden_search", f"{broaden_seed} overview reliable sources")
+    return None
+
+
+def _adaptive_uncertainty_reason(*, result: AdaptiveResearchResult, decision: dict[str, Any]) -> str:
+    if result.tool_gap_note:
+        return result.tool_gap_note
+    if decision.get("public_entity_lookup") and not result.notes:
+        return "I couldn't pin down that public figure confidently from live evidence."
+    if decision.get("public_entity_lookup") and result.notes and result.evidence_strength in {"weak", "none"}:
+        return "I found some signals, but not enough to identify that public figure confidently."
+    if not result.notes:
+        return "No grounded live evidence came back for this question."
+    if decision.get("needs_verify") and not result.verified_claim:
+        return "I found some signals, but not enough authoritative evidence to verify the claim cleanly."
+    if decision.get("needs_compare") and len(result.source_domains) < 2:
+        return "I found some signals, but not enough independent sources to compare this confidently."
+    return "The evidence stayed thin or inconsistent, so the answer should stay tentative."

@@ -135,7 +135,7 @@ class PublicHiveBridge:
             status = str((row or {}).get("status") or "").strip().lower()
             if wanted_statuses and status not in wanted_statuses:
                 continue
-            out.append(dict(row or {}))
+            out.append(_annotate_public_hive_truth(dict(row or {})))
         return out
 
     def list_public_research_queue(self, *, limit: int = 24) -> list[dict[str, Any]]:
@@ -150,7 +150,10 @@ class PublicHiveBridge:
             if _route_missing(exc):
                 return self._build_research_queue_fallback(limit=max(1, min(int(limit), 100)))
             return []
-        return [dict(item or {}) for item in list(result or [])]
+        rows = [_annotate_public_hive_truth(dict(item or {})) for item in list(result or [])]
+        if rows and any(not _research_queue_truth_complete(row) for row in rows):
+            return self._overlay_research_queue_truth(rows, limit=max(1, min(int(limit), 100)))
+        return rows
 
     def list_public_review_queue(self, *, object_type: str | None = None, limit: int = 24) -> list[dict[str, Any]]:
         if not self.enabled() or not self.config.topic_target_url:
@@ -179,7 +182,10 @@ class PublicHiveBridge:
             if _route_missing(exc):
                 return self._build_research_packet_fallback(clean_topic_id)
             return {}
-        return dict(result or {})
+        packet = _annotate_public_hive_packet_truth(dict(result or {}))
+        if not _research_packet_truth_complete(packet):
+            return self._overlay_research_packet_truth(clean_topic_id, packet)
+        return packet
 
     def _build_research_queue_fallback(self, *, limit: int) -> list[dict[str, Any]]:
         from core.brain_hive_research import build_research_queue_entry
@@ -200,7 +206,7 @@ class PublicHiveBridge:
             row["updated_at"] = str(topic.get("updated_at") or "")
             row["created_at"] = str(topic.get("created_at") or "")
             row["compat_fallback"] = True
-            queue_rows.append(row)
+            queue_rows.append(_annotate_public_hive_truth(row))
         queue_rows.sort(
             key=lambda row: (
                 float(row.get("research_priority") or 0.0),
@@ -221,7 +227,39 @@ class PublicHiveBridge:
         claims = self._list_public_topic_claims(topic_id, limit=200)
         packet = build_topic_research_packet(topic=topic, posts=posts, claims=claims)
         packet["compat_fallback"] = True
-        return packet
+        return _annotate_public_hive_packet_truth(packet)
+
+    def _overlay_research_queue_truth(self, rows: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+        fallback_rows = {
+            str(item.get("topic_id") or "").strip(): dict(item)
+            for item in self._build_research_queue_fallback(limit=limit)
+            if str(item.get("topic_id") or "").strip()
+        }
+        merged_rows: list[dict[str, Any]] = []
+        for row in rows:
+            topic_id = str(row.get("topic_id") or "").strip()
+            fallback = dict(fallback_rows.get(topic_id) or {})
+            if fallback:
+                merged = dict(fallback)
+                merged.update({key: value for key, value in row.items() if value not in (None, "", [], {})})
+                merged["truth_overlay"] = True
+                merged_rows.append(_annotate_public_hive_truth(merged))
+            else:
+                merged_rows.append(row)
+        return merged_rows[: max(1, min(int(limit), 100))]
+
+    def _overlay_research_packet_truth(self, topic_id: str, direct_packet: dict[str, Any]) -> dict[str, Any]:
+        fallback = self._build_research_packet_fallback(topic_id)
+        if not fallback:
+            return direct_packet
+        merged = dict(fallback)
+        merged.update({key: value for key, value in direct_packet.items() if value not in (None, "", [], {})})
+        if dict(direct_packet.get("topic") or {}):
+            topic = dict(fallback.get("topic") or {})
+            topic.update({key: value for key, value in dict(direct_packet.get("topic") or {}).items() if value not in (None, "", [], {})})
+            merged["topic"] = topic
+        merged["truth_overlay"] = True
+        return _annotate_public_hive_packet_truth(merged)
 
     def _get_public_topic(self, topic_id: str) -> dict[str, Any]:
         clean_topic_id = str(topic_id or "").strip()
@@ -234,7 +272,7 @@ class PublicHiveBridge:
             )
         except Exception:
             return {}
-        return dict(result or {})
+        return _annotate_public_hive_truth(dict(result or {}))
 
     def _list_public_topic_posts(self, topic_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
         clean_topic_id = str(topic_id or "").strip()
@@ -454,6 +492,7 @@ class PublicHiveBridge:
         topic_id: str,
         body: str,
         result_status: str = "solved",
+        post_kind: str = "verdict",
         claim_id: str | None = None,
         evidence_refs: list[dict[str, Any]] | None = None,
         idempotency_key: str | None = None,
@@ -468,6 +507,9 @@ class PublicHiveBridge:
         clean_topic_id = str(topic_id or "").strip()
         clean_body = str(body or "").strip()
         clean_status = str(result_status or "solved").strip() or "solved"
+        clean_post_kind = str(post_kind or "verdict").strip().lower() or "verdict"
+        if clean_post_kind not in {"analysis", "evidence", "challenge", "summary", "verdict"}:
+            clean_post_kind = "verdict"
         if not clean_topic_id or not clean_body:
             return {"ok": False, "status": "empty_result"}
         if text_privacy_risks(clean_body):
@@ -485,7 +527,7 @@ class PublicHiveBridge:
         post_result = self._post_topic_update(
             topic_id=clean_topic_id,
             body=clean_body,
-            post_kind="verdict",
+            post_kind=clean_post_kind,
             stance="summarize",
             evidence_refs=refs,
             idempotency_key=(str(idempotency_key or "").strip() + ":post")[:128] if idempotency_key else None,
@@ -1161,9 +1203,9 @@ def sync_public_hive_auth_from_ssh(
     *,
     ssh_key_path: str,
     project_root: str | Path | None = None,
-    watch_host: str = "161.35.145.74",
+    watch_host: str = "",
     watch_user: str = "root",
-    remote_config_path: str = "/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/watch-edge-1.json",
+    remote_config_path: str = "",
     target_path: Path | None = None,
     runner: Any | None = None,
 ) -> dict[str, Any]:
@@ -1273,6 +1315,65 @@ def public_hive_write_enabled(config: PublicHiveBridgeConfig | None = None) -> b
     if not public_hive_write_requires_auth(cfg):
         return True
     return public_hive_has_auth(cfg)
+
+
+def _annotate_public_hive_truth(row: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(row or {})
+    payload["truth_source"] = "public_bridge"
+    payload["truth_label"] = "public-bridge-derived"
+    if bool(payload.get("truth_overlay")):
+        payload["truth_transport"] = "direct_overlay"
+    else:
+        payload["truth_transport"] = "compat_fallback" if bool(payload.get("compat_fallback")) else "direct"
+    reference_at = str(payload.get("updated_at") or payload.get("created_at") or "").strip()
+    if reference_at:
+        payload["truth_timestamp"] = reference_at
+    return payload
+
+
+def _annotate_public_hive_packet_truth(packet: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(packet or {})
+    payload["truth_source"] = "public_bridge"
+    payload["truth_label"] = "public-bridge-derived"
+    if bool(payload.get("truth_overlay")):
+        payload["truth_transport"] = "direct_overlay"
+    else:
+        payload["truth_transport"] = "compat_fallback" if bool(payload.get("compat_fallback")) else "direct"
+    topic = dict(payload.get("topic") or {})
+    reference_at = str(topic.get("updated_at") or topic.get("created_at") or payload.get("updated_at") or "").strip()
+    if reference_at:
+        payload["truth_timestamp"] = reference_at
+    return payload
+
+
+def _research_queue_truth_complete(row: dict[str, Any]) -> bool:
+    payload = dict(row or {})
+    required = {
+        "artifact_resolution_status",
+        "nonempty_query_count",
+        "dead_query_count",
+        "promoted_finding_count",
+        "mined_feature_count",
+        "research_quality_status",
+        "research_quality_reasons",
+    }
+    return required.issubset(payload.keys())
+
+
+def _research_packet_truth_complete(packet: dict[str, Any]) -> bool:
+    payload = dict(packet or {})
+    required = {
+        "source_domains",
+        "artifact_refs",
+        "artifact_resolution_status",
+        "nonempty_query_count",
+        "dead_query_count",
+        "promoted_finding_count",
+        "mined_feature_count",
+        "research_quality_status",
+        "research_quality_reasons",
+    }
+    return required.issubset(payload.keys())
 
 
 def _resolve_local_tls_ca_file(tls_ca_file: str | None, *, project_root: str | Path | None = None) -> str | None:
@@ -1468,9 +1569,9 @@ def ensure_public_hive_auth(
     sync_result = sync_public_hive_auth_from_ssh(
         ssh_key_path=str(ssh_key),
         project_root=root,
-        watch_host=str(watch_host or os.environ.get("NULLA_PUBLIC_HIVE_WATCH_HOST") or "161.35.145.74").strip(),
+        watch_host=str(watch_host or os.environ.get("NULLA_PUBLIC_HIVE_WATCH_HOST") or "").strip(),
         watch_user=str(watch_user or "root").strip() or "root",
-        remote_config_path=str(remote_config_path or "").strip() or "/opt/Decentralized_NULLA/config/meet_clusters/do_ip_first_4node/watch-edge-1.json",
+        remote_config_path=str(remote_config_path or os.environ.get("NULLA_PUBLIC_HIVE_REMOTE_CONFIG") or "").strip(),
         target_path=destination,
     )
     sync_result["ok"] = True

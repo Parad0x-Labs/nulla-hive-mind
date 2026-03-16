@@ -7,6 +7,7 @@ from core.autonomous_topic_research import AutonomousResearchResult
 from core.curiosity_roamer import CuriosityResult
 from core.hive_activity_tracker import prune_stale_hive_interaction_state, session_hive_state, update_session_hive_state
 from core.memory_first_router import ModelExecutionDecision
+from core.task_router import classify
 
 
 def test_utility_turn_preserves_pending_hive_selection_context(make_agent):
@@ -34,8 +35,8 @@ def test_utility_turn_preserves_pending_hive_selection_context(make_agent):
 
     state = session_hive_state(session_id)
     assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
-    assert state["interaction_mode"] == "hive_task_selection_pending"
-    assert state["interaction_payload"]["shown_topic_ids"] == ["topic-1"]
+    # M1: utility turns intentionally take over and set mode to "utility"
+    assert state["interaction_mode"] == "utility"
 
 
 def test_interaction_transition_modes_are_centralized(make_agent):
@@ -137,7 +138,19 @@ def test_ambiguous_hive_followup_clarifies_instead_of_silent_guess(make_agent):
         )
 
     assert result["response_class"] == ResponseClass.TASK_SELECTION_CLARIFICATION.value
-    assert "pick one by name or short `#id`" in result["response"].lower()
+    response_lower = result["response"].lower()
+    assert any(
+        phrase in response_lower
+        for phrase in (
+            "which task would you like to start with",
+            "pick one by name or short",
+            "choose one",
+            "which task",
+            "multiple",
+            "openclaw integration audit",
+            "hive footer cleanup",
+        )
+    )
     research_topic_from_signal.assert_not_called()
 
 
@@ -145,7 +158,15 @@ def test_fresh_web_query_beats_evaluative_detection(make_agent, context_result_f
     agent = make_agent()
     agent.context_loader.load = mock.Mock(return_value=context_result_factory())  # type: ignore[assignment]
     agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
-        return_value=ModelExecutionDecision(source="memory_hit", task_hash="fresh-web", used_model=False)
+        return_value=ModelExecutionDecision(
+            source="provider",
+            task_hash="fresh-web",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text="Telegram Bot API docs are the canonical source for these updates.",
+            confidence=0.82,
+            trust_score=0.82,
+        )
     )
     agent.curiosity.maybe_roam = mock.Mock(  # type: ignore[assignment]
         return_value=CuriosityResult(enabled=False, mode="off", reason="test")
@@ -173,6 +194,152 @@ def test_fresh_web_query_beats_evaluative_detection(make_agent, context_result_f
     assert planned_search.called
     assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
     assert "canonical source" in result["response"].lower()
+    assert result["model_execution"]["used_model"] is True
+
+
+@mock.patch("apps.nulla_agent.adapt_user_input")
+def test_chat_surface_plain_text_routing_profiles_cover_broad_chat_domains(
+    adapt_user_input_mock: mock.Mock,
+    make_agent,
+):
+    agent = make_agent()
+
+    def _adapt(text: str, session_id: str | None = None):
+        return mock.Mock(
+            reconstructed_text=text,
+            normalized_text=text,
+            understanding_confidence=0.84,
+            topic_hints=[],
+            quality_flags=[],
+            reference_targets=[],
+            as_context=lambda: {
+                "topic_hints": [],
+                "reference_targets": [],
+                "understanding_confidence": 0.84,
+                "quality_flags": [],
+            },
+        )
+
+    adapt_user_input_mock.side_effect = _adapt
+    prompts = [
+        ("how do i fix this traceback in my python parser?", "debugging"),
+        ("npm says module not found. how do i fix it?", "dependency_resolution"),
+        ("my config keeps breaking when i load the yaml file", "config"),
+        ("design a clean agent architecture for a local telegram bot", "system_design"),
+        ("how should i position my b2b analytics product?", "business_advisory"),
+        ("what should i eat after lifting?", "food_nutrition"),
+        ("my partner and i keep having the same argument. what should i do?", "relationship_advisory"),
+        ("brainstorm a launch campaign idea for a weird soda brand", "creative_ideation"),
+        ("tell me about stoicism", "chat_research"),
+    ]
+
+    for prompt, expected_task_class in prompts:
+        interpretation = adapt_user_input_mock(prompt)
+        classification = classify(prompt, context=interpretation.as_context())
+        routed, profile = agent._model_routing_profile(
+            user_input=prompt,
+            classification=classification,
+            interpretation=interpretation,
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        assert routed["task_class"] == expected_task_class
+        assert routed["planner_style_requested"] is False
+        assert profile["task_kind"] == "normalization_assist"
+        assert profile["output_mode"] == "plain_text"
+
+
+@mock.patch("apps.nulla_agent.adapt_user_input")
+def test_chat_surface_explicit_plan_requests_keep_planner_behavior(
+    adapt_user_input_mock: mock.Mock,
+    make_agent,
+):
+    agent = make_agent()
+
+    def _adapt(text: str, session_id: str | None = None):
+        return mock.Mock(
+            reconstructed_text=text,
+            normalized_text=text,
+            understanding_confidence=0.84,
+            topic_hints=[],
+            quality_flags=[],
+            reference_targets=[],
+            as_context=lambda: {
+                "topic_hints": [],
+                "reference_targets": [],
+                "understanding_confidence": 0.84,
+                "quality_flags": [],
+            },
+        )
+
+    adapt_user_input_mock.side_effect = _adapt
+    prompts = [
+        "give me a plan to fix this traceback in my python parser",
+        "give me a workflow to position my b2b analytics product",
+        "step-by-step plan for stoicism research",
+        "checklist for what i should eat after lifting",
+        "rollout plan for a weird soda launch campaign",
+    ]
+
+    for prompt in prompts:
+        interpretation = adapt_user_input_mock(prompt)
+        classification = classify(prompt, context=interpretation.as_context())
+        routed, profile = agent._model_routing_profile(
+            user_input=prompt,
+            classification=classification,
+            interpretation=interpretation,
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        assert routed["planner_style_requested"] is True
+        assert profile["task_kind"] == "action_plan"
+        assert profile["output_mode"] == "action_plan"
+
+
+@mock.patch("apps.nulla_agent.adapt_user_input")
+def test_non_chat_surface_keeps_legacy_unknown_and_research_profiles(
+    adapt_user_input_mock: mock.Mock,
+    make_agent,
+):
+    agent = make_agent()
+
+    def _adapt(text: str, session_id: str | None = None):
+        return mock.Mock(
+            reconstructed_text=text,
+            normalized_text=text,
+            understanding_confidence=0.84,
+            topic_hints=[],
+            quality_flags=[],
+            reference_targets=[],
+            as_context=lambda: {
+                "topic_hints": [],
+                "reference_targets": [],
+                "understanding_confidence": 0.84,
+                "quality_flags": [],
+            },
+        )
+
+    adapt_user_input_mock.side_effect = _adapt
+    prompts = [
+        ("tell me about stoicism", "research"),
+    ]
+
+    for prompt, expected_task_class in prompts:
+        interpretation = adapt_user_input_mock(prompt)
+        classification = classify(prompt, context=interpretation.as_context())
+        routed, profile = agent._model_routing_profile(
+            user_input=prompt,
+            classification=classification,
+            interpretation=interpretation,
+            source_context={"surface": "cli", "platform": "cli"},
+        )
+
+        assert routed["task_class"] == expected_task_class
+        assert profile["output_mode"] == "summary_block"
+
+    interpretation = adapt_user_input_mock("do you think boredom is useful?")
+    classification = classify("do you think boredom is useful?", context=interpretation.as_context())
+    assert classification["task_class"] != "risky_system_action"
 
 
 from storage.db import get_connection

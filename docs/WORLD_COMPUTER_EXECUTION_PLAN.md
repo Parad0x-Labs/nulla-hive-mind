@@ -367,12 +367,12 @@ They should not pretend to be a full token economy on day one.
 
 Priority code paths:
 
-- [core/credit_ledger.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/credit_ledger.py)
-- [core/parent_orchestrator.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/parent_orchestrator.py)
-- [core/reward_engine.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/reward_engine.py)
-- [core/reputation_economics.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/reputation_economics.py)
-- [core/credit_dex.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/credit_dex.py)
-- [core/dna_payment_bridge.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/dna_payment_bridge.py)
+- [core/credit_ledger.py](/path/to/nulla-hive-mind/core/credit_ledger.py)
+- [core/parent_orchestrator.py](/path/to/nulla-hive-mind/core/parent_orchestrator.py)
+- [core/reward_engine.py](/path/to/nulla-hive-mind/core/reward_engine.py)
+- [core/reputation_economics.py](/path/to/nulla-hive-mind/core/reputation_economics.py)
+- [core/credit_dex.py](/path/to/nulla-hive-mind/core/credit_dex.py)
+- [core/dna_payment_bridge.py](/path/to/nulla-hive-mind/core/dna_payment_bridge.py)
 
 Implementation target:
 
@@ -422,12 +422,12 @@ NULLA already has:
 
 Priority code paths:
 
-- [apps/meet_and_greet_server.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/meet_and_greet_server.py)
-- [apps/nulla_daemon.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_daemon.py)
-- [core/policy_engine.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/policy_engine.py)
-- [core/discovery_index.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/discovery_index.py)
-- [core/reputation_graph.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/reputation_graph.py)
-- [network/rate_limiter.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network/rate_limiter.py)
+- [apps/meet_and_greet_server.py](/path/to/nulla-hive-mind/apps/meet_and_greet_server.py)
+- [apps/nulla_daemon.py](/path/to/nulla-hive-mind/apps/nulla_daemon.py)
+- [core/policy_engine.py](/path/to/nulla-hive-mind/core/policy_engine.py)
+- [core/discovery_index.py](/path/to/nulla-hive-mind/core/discovery_index.py)
+- [core/reputation_graph.py](/path/to/nulla-hive-mind/core/reputation_graph.py)
+- [network/rate_limiter.py](/path/to/nulla-hive-mind/network/rate_limiter.py)
 
 ## Moderation Model
 
@@ -457,9 +457,9 @@ If the swarm moderates itself with no external check:
 
 Priority code paths:
 
-- [core/brain_hive_service.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_service.py)
-- [storage/brain_hive_moderation_store.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/brain_hive_moderation_store.py)
-- [apps/meet_and_greet_server.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/meet_and_greet_server.py)
+- [core/brain_hive_service.py](/path/to/nulla-hive-mind/core/brain_hive_service.py)
+- [storage/brain_hive_moderation_store.py](/path/to/nulla-hive-mind/storage/brain_hive_moderation_store.py)
+- [apps/meet_and_greet_server.py](/path/to/nulla-hive-mind/apps/meet_and_greet_server.py)
 
 Implementation target:
 
@@ -496,10 +496,10 @@ The orchestrator should then route by class:
 
 Priority code paths:
 
-- [core/model_registry.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/model_registry.py)
-- [core/capacity_predictor.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/capacity_predictor.py)
-- [network/assist_router.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network/assist_router.py)
-- [apps/nulla_daemon.py](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_daemon.py)
+- [core/model_registry.py](/path/to/nulla-hive-mind/core/model_registry.py)
+- [core/capacity_predictor.py](/path/to/nulla-hive-mind/core/capacity_predictor.py)
+- [network/assist_router.py](/path/to/nulla-hive-mind/network/assist_router.py)
+- [apps/nulla_daemon.py](/path/to/nulla-hive-mind/apps/nulla_daemon.py)
 
 ## Latency Strategy
 

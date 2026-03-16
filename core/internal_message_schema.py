@@ -15,7 +15,8 @@ class InternalMessage:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def as_openai_message(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {"role": "assistant" if self.role == "context" else self.role, "content": self.content}
+        provider_role = "user" if self.role == "context" else self.role
+        payload: dict[str, Any] = {"role": provider_role, "content": self.content}
         if self.name:
             payload["name"] = self.name
         return payload

@@ -21,16 +21,21 @@ class SandboxRunner:
         "rg", "grep", "find", "sed",
         "npm", "npx", "yarn", "pnpm",
         "cargo", "python", "python3", "pytest",
+        "pip", "pip3",
         "git", "node", "nodejs", "env",
+        "mkdir", "touch", "cp", "mv",
     ]
     
+    _PACKAGE_INSTALL_COMMANDS = {"pip", "pip3", "npm", "npx", "yarn", "pnpm", "cargo"}
+
     def __init__(self, gate: ExecutionGate, workspace_path: str):
         self.gate = gate
         self.workspace = workspace_path
+        self._workspace_path = Path(workspace_path).resolve()
         self.job_runner = JobRunner(
             ExecutionPolicy(
-                workspace_root=Path(workspace_path).resolve(),
-                writable_roots=(Path(workspace_path).resolve(),),
+                workspace_root=self._workspace_path,
+                writable_roots=(self._workspace_path,),
                 max_seconds=120,
                 max_output_kb=256,
                 allow_network_egress=False,
@@ -82,8 +87,19 @@ class SandboxRunner:
             
         # Step 3: Proceed with execution
         try:
+            runner = self.job_runner
+            if base_cmd in self._PACKAGE_INSTALL_COMMANDS:
+                runner = JobRunner(
+                    ExecutionPolicy(
+                        workspace_root=self._workspace_path,
+                        writable_roots=(self._workspace_path,),
+                        max_seconds=180,
+                        max_output_kb=512,
+                        allow_network_egress=True,
+                    )
+                )
             print(f"  [SANDBOX RUN] Executing: {cmd}")
-            result = self.job_runner.run(argv, cwd=target_cwd)
+            result = runner.run(argv, cwd=target_cwd)
             return {
                 "cmd": cmd,
                 "cwd": str(target_cwd),

@@ -9,18 +9,18 @@ It is grounded in the actual code and current live behavior, not in stale diagno
 This document is for engineers or other coding agents who need to help fix what is still broken.
 
 Project root:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA`
+- `/path/to/nulla-hive-mind`
 
 Primary file:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`
+- `/path/to/nulla-hive-mind/apps/nulla_agent.py`
 
 Secondary files:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/autonomous_topic_research.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_api_server.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_openclaw_tooling_context.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_hive_activity_tracker.py`
+- `/path/to/nulla-hive-mind/core/hive_activity_tracker.py`
+- `/path/to/nulla-hive-mind/core/tool_intent_executor.py`
+- `/path/to/nulla-hive-mind/core/autonomous_topic_research.py`
+- `/path/to/nulla-hive-mind/apps/nulla_api_server.py`
+- `/path/to/nulla-hive-mind/tests/test_openclaw_tooling_context.py`
+- `/path/to/nulla-hive-mind/tests/test_hive_activity_tracker.py`
 
 ---
 

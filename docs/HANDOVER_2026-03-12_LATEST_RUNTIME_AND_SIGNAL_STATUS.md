@@ -2,7 +2,7 @@
 
 This document is the latest handover snapshot for the repo at:
 
-`/Users/sauliuskruopis/Desktop/Decentralized_NULLA`
+`/path/to/nulla-hive-mind`
 
 It is written to let the next agent continue without rereading the entire chat.
 
@@ -105,8 +105,8 @@ It is the runtime contract in `apps/nulla_agent.py`.
 
 ### 4.1 Durable useful-output signal layer
 Files:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/migrations.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/useful_output_store.py`
+- `/path/to/nulla-hive-mind/storage/migrations.py`
+- `/path/to/nulla-hive-mind/storage/useful_output_store.py`
 
 What exists:
 - canonical `useful_outputs` table
@@ -131,13 +131,13 @@ Purpose:
 
 ### 4.2 Structured-first adaptation loop
 Files:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/adaptation_dataset.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/adaptation_autopilot.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/adaptation_store.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/lora_training_pipeline.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/adapters/peft_lora_adapter.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/policy_engine.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/config/default_policy.yaml`
+- `/path/to/nulla-hive-mind/core/adaptation_dataset.py`
+- `/path/to/nulla-hive-mind/core/adaptation_autopilot.py`
+- `/path/to/nulla-hive-mind/storage/adaptation_store.py`
+- `/path/to/nulla-hive-mind/core/lora_training_pipeline.py`
+- `/path/to/nulla-hive-mind/adapters/peft_lora_adapter.py`
+- `/path/to/nulla-hive-mind/core/policy_engine.py`
+- `/path/to/nulla-hive-mind/config/default_policy.yaml`
 
 What exists:
 - corpus build -> score -> train -> eval -> reject/promote
@@ -153,10 +153,10 @@ Hard truth:
 
 ### 4.3 Trace / watch / control-plane surfaces
 Files:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/runtime_task_rail.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/control_plane_workspace.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_dashboard.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_api_server.py`
+- `/path/to/nulla-hive-mind/core/runtime_task_rail.py`
+- `/path/to/nulla-hive-mind/core/control_plane_workspace.py`
+- `/path/to/nulla-hive-mind/core/brain_hive_dashboard.py`
+- `/path/to/nulla-hive-mind/apps/nulla_api_server.py`
 
 What exists:
 - task / claim / topic visibility
@@ -167,11 +167,11 @@ What exists:
 
 ### 4.4 Installer doctor and product shell groundwork
 Files:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/installer/doctor.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/installer/install_nulla.sh`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/installer/install_nulla.bat`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/installer/write_install_receipt.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/NULLA_STARTER_KIT.md`
+- `/path/to/nulla-hive-mind/installer/doctor.py`
+- `/path/to/nulla-hive-mind/installer/install_nulla.sh`
+- `/path/to/nulla-hive-mind/installer/install_nulla.bat`
+- `/path/to/nulla-hive-mind/installer/write_install_receipt.py`
+- `/path/to/nulla-hive-mind/NULLA_STARTER_KIT.md`
 
 What exists:
 - doctor report at install time
@@ -185,14 +185,14 @@ What is not done:
 
 ### 4.5 Commons / social-to-research slice
 Files touched in earlier Commons slice:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_models.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/migrations.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/brain_hive_store.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_service.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/meet_and_greet_server.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_dashboard.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/control_plane_workspace.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/useful_output_store.py`
+- `/path/to/nulla-hive-mind/core/brain_hive_models.py`
+- `/path/to/nulla-hive-mind/storage/migrations.py`
+- `/path/to/nulla-hive-mind/storage/brain_hive_store.py`
+- `/path/to/nulla-hive-mind/core/brain_hive_service.py`
+- `/path/to/nulla-hive-mind/apps/meet_and_greet_server.py`
+- `/path/to/nulla-hive-mind/core/brain_hive_dashboard.py`
+- `/path/to/nulla-hive-mind/core/control_plane_workspace.py`
+- `/path/to/nulla-hive-mind/storage/useful_output_store.py`
 
 What exists:
 - endorsement models
@@ -213,7 +213,7 @@ Hard truth:
 ## 5. Runtime Fixes Already Landed In `apps/nulla_agent.py`
 
 Current important file:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`
+- `/path/to/nulla-hive-mind/apps/nulla_agent.py`
 
 What is already there now:
 
@@ -366,23 +366,23 @@ Implication:
 ## 8. Files That Matter Most For The Next Agent
 
 ### Primary battlefields
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py`
+- `/path/to/nulla-hive-mind/apps/nulla_agent.py`
+- `/path/to/nulla-hive-mind/core/hive_activity_tracker.py`
+- `/path/to/nulla-hive-mind/core/tool_intent_executor.py`
 
 ### Tests that should be touched next
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_openclaw_tooling_context.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_hive_activity_tracker.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_api_server.py`
+- `/path/to/nulla-hive-mind/tests/test_openclaw_tooling_context.py`
+- `/path/to/nulla-hive-mind/tests/test_hive_activity_tracker.py`
+- `/path/to/nulla-hive-mind/tests/test_nulla_api_server.py`
 
 ### Supporting docs already written
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_RUNTIME_FAILURE_FLOW_2026-03-11.md`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_RUNTIME_HELP_NEEDED_2026-03-11.md`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_PHASE2_STATUS_2026-03-12.md`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_HELP_REQUEST_2026-03-12.md`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_CODEX_PHASE2_BRIEF_2026-03-12.md`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/HANDOVER_2026-03-10_SIGNAL_COMMONS_ADAPTATION.md`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/NULLA_HIGHLIGHTS_2026-03-11.md`
+- `/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_RUNTIME_FAILURE_FLOW_2026-03-11.md`
+- `/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_RUNTIME_HELP_NEEDED_2026-03-11.md`
+- `/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_PHASE2_STATUS_2026-03-12.md`
+- `/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_HELP_REQUEST_2026-03-12.md`
+- `/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_CODEX_PHASE2_BRIEF_2026-03-12.md`
+- `/path/to/nulla-hive-mind/docs/HANDOVER_2026-03-10_SIGNAL_COMMONS_ADAPTATION.md`
+- `/path/to/nulla-hive-mind/docs/NULLA_HIGHLIGHTS_2026-03-11.md`
 
 ---
 
@@ -466,7 +466,7 @@ This is the clean next-agent order.
 
 ### Step 1 - patch tracker state to support expiry
 In:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py`
+- `/path/to/nulla-hive-mind/core/hive_activity_tracker.py`
 
 Needed:
 1. include `updated_at` in `session_hive_state(...)`
@@ -478,7 +478,7 @@ Why:
 
 ### Step 2 - centralize routing precedence in `run_once()`
 In:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`
+- `/path/to/nulla-hive-mind/apps/nulla_agent.py`
 
 Needed:
 - one explicit `_route_by_precedence(...)` or equivalent
@@ -498,7 +498,7 @@ Why:
 
 ### Step 3 - make interaction state a real finite-state contract
 In:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`
+- `/path/to/nulla-hive-mind/apps/nulla_agent.py`
 
 Needed:
 - explicit modes
@@ -513,8 +513,8 @@ Important behavior:
 
 ### Step 4 - strengthen sanitization / chat-vs-trace boundary
 In:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`
-- maybe secondary in `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py`
+- `/path/to/nulla-hive-mind/apps/nulla_agent.py`
+- maybe secondary in `/path/to/nulla-hive-mind/core/tool_intent_executor.py`
 
 Needed:
 - stronger hard boundary between:
@@ -524,7 +524,7 @@ Needed:
 
 ### Step 5 - add regression tests for real conversation flow
 Main file:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_openclaw_tooling_context.py`
+- `/path/to/nulla-hive-mind/tests/test_openclaw_tooling_context.py`
 
 Needed prompts to cover:
 - `what is the date today?`

@@ -129,10 +129,6 @@ def render_with_persona(text: str, persona: Persona) -> str:
     """
     text = text.strip()
 
-    if persona.verbosity == "low":
-        parts = [p.strip() for p in text.split("\n\n") if p.strip()]
-        text = parts[0] if parts else text
-
     if persona.tone == "teacher":
         return f"{persona.display_name}: Let’s walk through it.\n\n{text}"
     if persona.tone == "calm":

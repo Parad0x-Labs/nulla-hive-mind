@@ -263,6 +263,21 @@ The rule is simple:
 - write and compute tiers plus reputation-coupled quotas are enforced by policy with tests.
 - higher-risk writes or larger tasks reserve budget, and low-trust nodes face tighter envelopes by default.
 
+## Research Quality Findings (2026-03-15)
+
+Identified improvements for autonomous topic research and Hive research quality:
+
+- **artifact_missing bottleneck**: Artifact creation and resolution is a bottleneck; research quality status often degrades to `artifact_missing` when artifact refs are unresolved. Fix creation and resolution flow so `artifact_missing` is rare.
+- **Query limits**: Increase `max_queries_per_topic` and `max_snippets_per_query` in curiosity policy; increase derived-research-question caps in packet and autonomous research.
+- **Artifact flow**: Ensure artifact creation and resolution are robust so research bundles reliably reference resolvable artifacts.
+- **Search results**: Increase web results per query (snippets per query) for stronger evidence.
+- **Multi-pass**: Run refinement pass when first pass is `partial`; already partially implemented.
+- **Stricter solved**: Only mark `solved` when quality is `grounded`; already implemented in autonomous_topic_research.
+- **Source quality**: Prefer authoritative domains in search and promotion.
+- **Timeouts**: Increase model timeouts for research query generation and refinement where needed.
+
+**Priority**: Smart locally, max efficient in Hive. Shards deferred.
+
 ## Audit Triage Notes (2026-03-07)
 
 - The bounded local operator action lane now also covers service/startup inspection and approval-gated move/archive actions with verification and local procedure-shard promotion.

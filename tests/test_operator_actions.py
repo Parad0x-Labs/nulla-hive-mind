@@ -7,7 +7,7 @@ from unittest import mock
 
 from apps.nulla_agent import NullaAgent
 from core.execution_gate import ExecutionGate
-from core.local_operator_actions import list_operator_tools
+from core.local_operator_actions import list_operator_tools, operator_capability_ledger
 from core.persistent_memory import maybe_handle_memory_command
 from core.user_preferences import maybe_handle_preference_command
 from core.runtime_paths import data_path
@@ -186,9 +186,9 @@ class OperatorActionTests(unittest.TestCase):
                 source_context={"surface": "openclaw", "platform": "openclaw"},
             )
         self.assertEqual(result["mode"], "tool_preview")
-        self.assertIn("inspect_disk_usage", result["response"])
-        self.assertIn("discord_post", result["response"])
-        self.assertIn("telegram_send", result["response"])
+        self.assertIn("operator.inspect_disk_usage", result["response"])
+        self.assertIn("operator.discord_post", result["response"])
+        self.assertIn("operator.telegram_send", result["response"])
 
     def test_inspect_processes_reports_top_rows(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
@@ -312,6 +312,40 @@ class OperatorActionTests(unittest.TestCase):
         self.assertIn("inspect_services", tool_ids)
         self.assertIn("move_path", tool_ids)
         self.assertIn("schedule_calendar_event", tool_ids)
+
+    def test_operator_capability_ledger_marks_outward_and_privacy_sensitive_actions(self) -> None:
+        ledger = {entry["capability_id"]: entry for entry in operator_capability_ledger()}
+        self.assertTrue(ledger["operator.discord_post"]["outward_facing"])
+        self.assertTrue(ledger["operator.discord_post"]["privacy_sensitive"])
+        self.assertTrue(ledger["operator.discord_post"]["requires_approval"])
+        self.assertFalse(ledger["operator.inspect_disk_usage"]["outward_facing"])
+        self.assertFalse(ledger["operator.inspect_disk_usage"]["privacy_sensitive"])
+        self.assertEqual(ledger["operator.schedule_calendar_event"]["support_level"], "partial")
+        self.assertIn("local .ics event", ledger["operator.schedule_calendar_event"]["partial_reason"].lower())
+
+    def test_execution_gate_exposes_local_action_guardrails(self) -> None:
+        cleanup = ExecutionGate.local_action_guardrails("cleanup_temp_files", destructive=True)
+        outbound = ExecutionGate.local_action_guardrails("discord_post", destructive=True)
+        inspect = ExecutionGate.local_action_guardrails("inspect_disk_usage", destructive=False)
+
+        self.assertTrue(cleanup["destructive"])
+        self.assertFalse(cleanup["outward_facing"])
+        self.assertFalse(cleanup["privacy_sensitive"])
+        self.assertTrue(outbound["destructive"])
+        self.assertTrue(outbound["outward_facing"])
+        self.assertTrue(outbound["privacy_sensitive"])
+        self.assertFalse(inspect["destructive"])
+        self.assertFalse(inspect["outward_facing"])
+        self.assertFalse(inspect["privacy_sensitive"])
+
+    def test_execution_gate_keeps_outward_privacy_actions_hard_gated(self) -> None:
+        decision = ExecutionGate.evaluate_local_action(
+            "discord_post",
+            destructive=True,
+            user_approved=False,
+        )
+        self.assertEqual(decision.mode, "blocked")
+        self.assertIn("not in the allowed local action set", decision.reason.lower())
 
 
 if __name__ == "__main__":

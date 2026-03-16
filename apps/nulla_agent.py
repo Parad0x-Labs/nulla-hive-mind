@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import threading
 import time
@@ -9,13 +10,14 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 from core import audit_logger, feedback_engine, policy_engine
 from core.autonomous_topic_research import pick_autonomous_research_signal, research_topic_from_signal
 from core.candidate_knowledge_lane import get_candidate_by_id
 from core.channel_actions import dispatch_outbound_post_intent, parse_channel_post_intent
-from core.curiosity_roamer import CuriosityRoamer
+from core.curiosity_roamer import AdaptiveResearchResult, CuriosityRoamer
 from core.human_input_adapter import adapt_user_input, runtime_session_id
 from core.hive_activity_tracker import (
     HiveActivityTracker,
@@ -26,7 +28,7 @@ from core.hive_activity_tracker import (
     set_hive_interaction_state,
     update_session_hive_state,
 )
-from core.local_operator_actions import dispatch_operator_action, list_operator_tools, parse_operator_action_intent
+from core.local_operator_actions import dispatch_operator_action, parse_operator_action_intent
 from core.onboarding import get_agent_display_name
 from core.media_analysis_pipeline import MediaAnalysisPipeline
 from core.media_ingestion import build_media_context_snippets, ingest_media_evidence
@@ -42,9 +44,16 @@ from core.persistent_memory import (
     search_user_heuristics,
     session_memory_policy,
 )
-from core.reasoning_engine import Plan, build_plan, render_response
+from core.reasoning_engine import (
+    Plan,
+    build_plan,
+    explicit_planner_style_requested,
+    inspect_user_response_shape,
+    render_response,
+    should_use_planner_renderer,
+)
 from core.parent_orchestrator import orchestrate_parent_task
-from core.runtime_execution_tools import execute_runtime_tool
+from core.runtime_execution_tools import execute_runtime_tool, looks_like_execution_request
 from core.runtime_continuity import (
     create_runtime_checkpoint,
     finalize_runtime_checkpoint,
@@ -57,8 +66,27 @@ from core.runtime_continuity import (
 )
 from core.runtime_task_events import emit_runtime_event
 from core.shard_synthesizer import build_generalized_query, from_task_result
-from core.task_router import classify, create_task_record, load_task_record
-from core.tool_intent_executor import execute_tool_intent, should_attempt_tool_intent
+from core.task_router import (
+    chat_surface_execution_task_class,
+    classify,
+    create_task_record,
+    evaluate_direct_math_request,
+    load_task_record,
+    looks_like_explicit_lookup_request,
+    looks_like_public_entity_lookup_request,
+    looks_like_semantic_hive_request,
+    model_execution_profile,
+)
+from core.tool_intent_executor import (
+    _looks_like_workspace_bootstrap_request,
+    capability_truth_for_request,
+    execute_tool_intent,
+    plan_tool_workflow,
+    render_capability_truth_response,
+    runtime_capability_ledger,
+    should_attempt_tool_intent,
+    supported_public_capability_tags,
+)
 from core.tiered_context_loader import TieredContextLoader
 from core.user_preferences import load_preferences, maybe_handle_preference_command
 from core.logging_config import setup_logging
@@ -68,9 +96,39 @@ from storage.db import get_connection
 from storage.migrations import run_migrations
 from network.signer import get_local_peer_id
 
+_log = logging.getLogger(__name__)
+
 
 _HIVE_TOPIC_FULL_ID_RE = re.compile(r"\b([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\b", re.IGNORECASE)
 _HIVE_TOPIC_SHORT_ID_RE = re.compile(r"#\s*([0-9a-f]{8,12})\b", re.IGNORECASE)
+_UTILITY_TIMEZONE_ALIASES = {
+    "vilnius": ("Europe/Vilnius", "Vilnius"),
+    "lithuania": ("Europe/Vilnius", "Vilnius"),
+    "europe/vilnius": ("Europe/Vilnius", "Vilnius"),
+}
+_CONTEXTUAL_TIME_FOLLOWUP_PATTERNS = (
+    re.compile(r"\b(?:and\s+)?(?:now\s+)?there\b"),
+    re.compile(r"\bwhat\s+about\s+there\b"),
+    re.compile(r"\b(?:what(?:'s| is)\s+)?time\s+there\b"),
+    re.compile(r"\bwhat\s+where(?:'s|s)?\s+is\s+there\b"),
+    re.compile(r"\bwhat\s+where(?:'s|s)?\s+is\s+in\b"),
+)
+_TIME_FOLLOWUP_EXCLUSION_MARKERS = (
+    "capital",
+    "country",
+    "population",
+    "weather",
+    "forecast",
+    "date",
+    "calendar",
+    "meeting",
+    "email",
+    "hive",
+    "task",
+    "tasks",
+    "queue",
+    "work",
+)
 
 
 @dataclass
@@ -109,6 +167,7 @@ class ChatTurnResult:
     response_class: ResponseClass
     workflow_summary: str = ""
     debug_origin: str | None = None
+    allow_planner_style: bool = False
 
 
 class NullaAgent:
@@ -184,7 +243,11 @@ class NullaAgent:
             return self._fast_path_result(
                 session_id=session_id,
                 user_input=user_input,
-                response="No interrupted runtime task is available to resume in this session.",
+                response=(
+                    "No interrupted runtime task is available to resume in this session. "
+                    "If you were retrying a Discord post: set DISCORD_WEBHOOK_URL or DISCORD_BOT_TOKEN+DISCORD_CHANNEL_ID. "
+                    "For Telegram: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID. Then retry your original message."
+                ),
                 confidence=0.78,
                 source_context=runtime_source_context,
                 reason="runtime_resume_missing",
@@ -234,11 +297,36 @@ class NullaAgent:
                 reason="user_preference_command",
             )
 
-        handled, response = self._maybe_handle_hive_runtime_command(
+        hive_followup = self._maybe_handle_hive_research_followup(
+            effective_input,
+            session_id=session_id,
+            source_context=source_context,
+        )
+        if hive_followup is not None:
+            return hive_followup
+
+        handled, response, model_wording_candidate, hive_command_details = self._maybe_handle_hive_runtime_command(
             effective_input,
             session_id=session_id,
         )
+        if not handled:
+            recovered_hive_input = self._recover_hive_runtime_command_input(effective_input)
+            if recovered_hive_input:
+                handled, response, model_wording_candidate, hive_command_details = self._maybe_handle_hive_runtime_command(
+                    recovered_hive_input,
+                    session_id=session_id,
+                )
         if handled:
+            if model_wording_candidate and self._is_chat_truth_surface(source_context):
+                return self._chat_surface_hive_wording_result(
+                    session_id=session_id,
+                    user_input=effective_input,
+                    source_context=source_context,
+                    response_class=self._classify_hive_text_response(response),
+                    reason="hive_activity_model_wording",
+                    observations=self._chat_surface_hive_command_observations(hive_command_details or {}),
+                    fallback_response=self._chat_surface_hive_degraded_response(hive_command_details or {}),
+                )
             return self._fast_path_result(
                 session_id=session_id,
                 user_input=effective_input,
@@ -247,14 +335,6 @@ class NullaAgent:
                 source_context=source_context,
                 reason="hive_activity_command",
             )
-
-        hive_followup = self._maybe_handle_hive_research_followup(
-            effective_input,
-            session_id=session_id,
-            source_context=source_context,
-        )
-        if hive_followup is not None:
-            return hive_followup
 
         hive_status = self._maybe_handle_hive_status_followup(
             effective_input,
@@ -288,6 +368,22 @@ class NullaAgent:
 
         credit_status = self._credit_status_fast_path(normalized_input, source_surface=source_surface)
         if credit_status:
+            if self._is_chat_truth_surface(source_context):
+                return self._chat_surface_model_wording_result(
+                    session_id=session_id,
+                    user_input=effective_input,
+                    source_context=source_context,
+                    persona=persona,
+                    interpretation=interpreted,
+                    task_class="unknown",
+                    response_class=ResponseClass.UTILITY_ANSWER,
+                    reason="credit_status_model_wording",
+                    model_input=self._chat_surface_credit_status_model_input(
+                        user_input=effective_input,
+                        credit_snapshot=credit_status,
+                    ),
+                    fallback_response=credit_status,
+                )
             return self._fast_path_result(
                 session_id=session_id,
                 user_input=effective_input,
@@ -297,8 +393,32 @@ class NullaAgent:
                 reason="credit_status_fast_path",
             )
 
-        date_time_status = self._date_time_fast_path(normalized_input, source_surface=source_surface)
+        date_time_status = self._date_time_fast_path(
+            normalized_input,
+            source_surface=source_surface,
+            session_id=session_id,
+            source_context=source_context,
+        )
         if date_time_status:
+            cleaned_date_time_input = str(normalized_input or "").strip().lower().strip(" \t\r\n?!.,")
+            requested_timezone, requested_label = self._extract_utility_timezone(cleaned_date_time_input)
+            if not requested_timezone:
+                recent_utility_context = self._recent_utility_context(
+                    session_id=session_id,
+                    source_context=source_context,
+                )
+                requested_timezone, requested_label = self._contextual_time_followup_timezone(
+                    cleaned_date_time_input,
+                    recent_utility_context=recent_utility_context,
+                )
+            utility_payload: dict[str, Any] = {}
+            if "current time" in str(date_time_status or "").lower():
+                utility_payload = {
+                    "utility_kind": "time",
+                    "timezone": requested_timezone,
+                    "label": requested_label,
+                }
+            set_hive_interaction_state(session_id, mode="utility", payload=utility_payload)
             return self._fast_path_result(
                 session_id=session_id,
                 user_input=effective_input,
@@ -307,6 +427,28 @@ class NullaAgent:
                 source_context=source_context,
                 reason="date_time_fast_path",
             )
+
+        direct_math = self._direct_math_fast_path(
+            normalized_input,
+            source_surface=source_surface,
+        )
+        if direct_math:
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=effective_input,
+                response=direct_math,
+                confidence=0.99,
+                source_context=source_context,
+                reason="direct_math_fast_path",
+            )
+
+        capability_truth = self._maybe_handle_capability_truth_request(
+            effective_input,
+            session_id=session_id,
+            source_context=source_context,
+        )
+        if capability_truth is not None:
+            return capability_truth
 
         live_info_status = self._maybe_handle_live_info_fast_path(
             effective_input,
@@ -319,6 +461,19 @@ class NullaAgent:
 
         evaluative = self._evaluative_conversation_fast_path(normalized_input, source_surface=source_surface)
         if evaluative:
+            if self._is_chat_truth_surface(source_context):
+                return self._chat_surface_model_wording_result(
+                    session_id=session_id,
+                    user_input=effective_input,
+                    source_context=source_context,
+                    persona=persona,
+                    interpretation=interpreted,
+                    task_class="unknown",
+                    response_class=ResponseClass.GENERIC_CONVERSATION,
+                    reason="evaluative_conversation_model_wording",
+                    model_input=effective_input,
+                    fallback_response="I couldn't produce a grounded conversational reply in this run.",
+                )
             return self._fast_path_result(
                 session_id=session_id,
                 user_input=effective_input,
@@ -335,6 +490,27 @@ class NullaAgent:
         )
         if smalltalk:
             smalltalk_phrase = normalized_input.lower().strip(" \t\r\n?!.,")
+            if self._is_chat_truth_surface(source_context):
+                is_help_prompt = smalltalk_phrase in {"what can you do", "help"}
+                return self._chat_surface_model_wording_result(
+                    session_id=session_id,
+                    user_input=effective_input,
+                    source_context=source_context,
+                    persona=persona,
+                    interpretation=interpreted,
+                    task_class="unknown",
+                    response_class=ResponseClass.GENERIC_CONVERSATION if is_help_prompt else ResponseClass.SMALLTALK,
+                    reason="help_model_wording" if is_help_prompt else "smalltalk_model_wording",
+                    model_input=self._chat_surface_smalltalk_model_input(
+                        user_input=effective_input,
+                        phrase=smalltalk_phrase,
+                    ),
+                    fallback_response=(
+                        "I couldn't produce a grounded help reply in this run."
+                        if is_help_prompt
+                        else "I couldn't produce a grounded conversational reply in this run."
+                    ),
+                )
             return self._fast_path_result(
                 session_id=session_id,
                 user_input=effective_input,
@@ -537,10 +713,37 @@ class NullaAgent:
                 exclude_host_group_hint_hash=None,
             )
 
-            model_execution = self.memory_router.resolve(
-                task=task,
+            routing_classification, routing_profile = self._model_routing_profile(
+                user_input=effective_input,
                 classification=classification,
                 interpretation=interpreted,
+                source_context=source_context,
+            )
+            planner_style_requested = bool(routing_classification.get("planner_style_requested"))
+            adaptive_research = self._collect_adaptive_research(
+                task_id=task.task_id,
+                query_text=effective_input,
+                classification=routing_classification,
+                interpretation=interpreted,
+                source_context=source_context,
+            )
+            model_interpretation = interpreted
+            adaptive_web_notes = [dict(note) for note in list(adaptive_research.notes or []) if isinstance(note, dict)]
+            if is_chat_surface and (
+                adaptive_research.enabled or adaptive_research.tool_gap_note or adaptive_research.admitted_uncertainty
+            ):
+                model_interpretation = adapt_user_input(
+                    self._chat_surface_adaptive_research_model_input(
+                        user_input=effective_input,
+                        task_class=str(routing_classification.get("task_class") or "unknown"),
+                        research_result=adaptive_research,
+                    ),
+                    session_id=session_id,
+                )
+            model_execution = self.memory_router.resolve(
+                task=task,
+                classification=routing_classification,
+                interpretation=model_interpretation,
                 context_result=context_result,
                 persona=persona,
                 force_model=is_chat_surface,
@@ -576,13 +779,15 @@ class NullaAgent:
                     "candidate_id": media_analysis.candidate_id,
                 }
 
-            web_notes = self._collect_live_web_notes(
-                task_id=task.task_id,
-                query_text=effective_input,
-                classification=classification,
-                interpretation=interpreted,
-                source_context=source_context,
-            )
+            web_notes = list(adaptive_web_notes)
+            if not web_notes:
+                web_notes = self._collect_live_web_notes(
+                    task_id=task.task_id,
+                    query_text=effective_input,
+                    classification=classification,
+                    interpretation=interpreted,
+                    source_context=source_context,
+                )
             web_plan_candidates = self._web_note_plan_candidates(
                 query_text=effective_input,
                 classification=classification,
@@ -637,11 +842,12 @@ class NullaAgent:
                     "reason": media_analysis.reason,
                     "evidence_count": len(media_analysis.evidence_items or media_evidence),
                 },
+                "adaptive_research": adaptive_research.to_dict(),
                 "external_media_evidence": media_analysis.evidence_items or media_evidence,
                 "web_notes": web_notes,
             }
 
-            workspace_build = self._maybe_run_workspace_build_pipeline(
+            workspace_build = self._maybe_run_builder_controller(
                 task=task,
                 effective_input=effective_input,
                 classification=classification,
@@ -664,15 +870,53 @@ class NullaAgent:
             # 6) safety-first gate (advice-only default)
             gate = self._default_gate(plan, classification)
 
-            # 7) render response from the grounded plan rather than raw model prose
-            response = render_response(
-                plan,
-                gate,
-                persona,
-                input_interpretation=interpreted,
-                prompt_assembly_report=context_result.report,
+            # 7) choose the final speaker for this turn.
+            planner_style_requested = explicit_planner_style_requested(effective_input)
+            planner_renderer_allowed = should_use_planner_renderer(
                 surface=surface,
+                output_mode=str(routing_profile.get("output_mode") or ""),
+                user_input=effective_input,
             )
+            model_final_text = (
+                self._chat_surface_model_final_text(model_execution)
+                if is_chat_surface
+                else self._model_final_response_text(model_execution)
+            )
+            model_final_answer_hit = bool(model_final_text)
+            rendered_via = "model_final_wording"
+            response_reason = "grounded_model_response"
+
+            if planner_renderer_allowed and (not is_chat_surface or bool(model_execution.used_model)):
+                response = render_response(
+                    plan,
+                    gate,
+                    persona,
+                    input_interpretation=interpreted,
+                    prompt_assembly_report=context_result.report,
+                    surface=surface,
+                    allow_planner_style=planner_style_requested,
+                )
+                rendered_via = "reasoning_engine"
+                response_reason = "grounded_plan_response"
+                model_final_answer_hit = False
+            elif model_final_answer_hit:
+                response = model_final_text
+            elif is_chat_surface:
+                response = self._chat_surface_honest_degraded_response(model_execution)
+                rendered_via = "honest_degraded_chat"
+                response_reason = "chat_model_unavailable_degraded"
+            else:
+                response = render_response(
+                    plan,
+                    gate,
+                    persona,
+                    input_interpretation=interpreted,
+                    prompt_assembly_report=context_result.report,
+                    surface=surface,
+                    allow_planner_style=planner_style_requested,
+                )
+                rendered_via = "reasoning_engine"
+                response_reason = "grounded_plan_response"
             # 8) evaluate outcome (v1: advice-only heuristic)
             execution_result = {"mode": "advice_only"}
             outcome = feedback_engine.evaluate_outcome(task, plan, gate, execution_result)
@@ -719,12 +963,33 @@ class NullaAgent:
                 self._grounded_response_class(gate=gate, classification=classification),
                 workflow_summary=workflow_summary,
                 debug_origin="grounded_plan",
+                allow_planner_style=planner_style_requested,
             )
             self._apply_interaction_transition(session_id, turn_result)
             response = self._decorate_chat_response(
                 turn_result,
                 session_id=session_id,
                 source_context=source_context,
+            )
+            self._emit_chat_truth_metrics(
+                task_id=task.task_id,
+                reason=response_reason,
+                response_text=response,
+                response_class=turn_result.response_class.value,
+                source_context=source_context,
+                rendered_via=rendered_via,
+                fast_path_hit=False,
+                model_inference_used=bool(model_execution.used_model),
+                model_final_answer_hit=model_final_answer_hit,
+                model_execution_source=str(model_execution.source or ""),
+                tool_backing_sources=[
+                    source
+                    for source in (
+                        "web_lookup" if web_notes else "",
+                        "media_analysis" if media_analysis.used_provider else "",
+                    )
+                    if source
+                ],
             )
 
             audit_logger.log(
@@ -746,6 +1011,11 @@ class NullaAgent:
                     "curiosity_mode": curiosity_result.mode,
                     "curiosity_reason": curiosity_result.reason,
                     "curiosity_candidate_count": len(curiosity_result.candidate_ids),
+                    "adaptive_research_enabled": adaptive_research.enabled,
+                    "adaptive_research_reason": adaptive_research.reason,
+                    "adaptive_research_strategy": adaptive_research.strategy,
+                    "adaptive_research_actions": list(adaptive_research.actions_taken),
+                    "adaptive_research_uncertainty": adaptive_research.admitted_uncertainty,
                     "source_surface": (source_context or {}).get("surface"),
                     "source_platform": (source_context or {}).get("platform"),
                 },
@@ -781,6 +1051,7 @@ class NullaAgent:
                 "prompt_assembly_report": context_result.report.to_dict(),
                 "model_execution": evidence["model_execution"],
                 "media_analysis": evidence["media_analysis"],
+                "research_controller": adaptive_research.to_dict(),
                 "curiosity": curiosity_result.to_dict(),
                 "backend": self.backend_name,
                 "device": self.device,
@@ -806,6 +1077,46 @@ class NullaAgent:
                 status=self._idle_public_presence_status(),
                 source_context=source_context,
             )
+
+    def _model_final_response_text(self, model_execution: Any) -> str:
+        final_text = str(getattr(model_execution, "output_text", "") or "").strip()
+        if final_text:
+            return final_text
+        structured = getattr(model_execution, "structured_output", None)
+        if isinstance(structured, dict):
+            return str(structured.get("summary") or structured.get("message") or "").strip()
+        return ""
+
+    def _chat_surface_cache_or_memory_source(self, model_execution: Any) -> bool:
+        source = str(getattr(model_execution, "source", "") or "").strip().lower()
+        return source in {"exact_cache_hit", "memory_hit"}
+
+    def _chat_surface_model_final_text(self, model_execution: Any) -> str:
+        if self._chat_surface_cache_or_memory_source(model_execution):
+            return ""
+        return self._model_final_response_text(model_execution)
+
+    def _chat_surface_honest_degraded_response(self, model_execution: Any) -> str:
+        source = str(getattr(model_execution, "source", "") or "").strip().lower()
+        if source == "exact_cache_hit":
+            return (
+                "I found a matching cached answer for this topic, but this chat path requires a live model response, "
+                "so I'm not passing cached text off as a fresh answer."
+            )
+        if source == "memory_hit":
+            return (
+                "I found relevant local memory for this topic, but this chat path requires a live model response, "
+                "so I'm not presenting remembered text as a fresh answer."
+            )
+        if source == "no_provider_available":
+            return (
+                "I couldn't get a live model response in this run, so I'm not going to recycle cached or remembered "
+                "text as if it were fresh."
+            )
+        return (
+            "I couldn't get a usable model response in this run, so I'm not going to recycle cached or remembered "
+            "text as if it were fresh."
+        )
 
     def _fast_path_result(
         self,
@@ -840,6 +1151,19 @@ class NullaAgent:
             target_id=pseudo_task_id,
             target_type="task",
             details={"reason": reason, "source_surface": (source_context or {}).get("surface")},
+        )
+        self._emit_chat_truth_metrics(
+            task_id=pseudo_task_id,
+            reason=reason,
+            response_text=decorated_response,
+            response_class=turn_result.response_class.value,
+            source_context=source_context,
+            rendered_via="fast_path",
+            fast_path_hit=True,
+            model_inference_used=False,
+            model_final_answer_hit=False,
+            model_execution_source="fast_path",
+            tool_backing_sources=self._chat_truth_fast_path_backing_sources(reason),
         )
         self._emit_runtime_event(
             source_context,
@@ -900,6 +1224,7 @@ class NullaAgent:
             ),
             workflow_summary=workflow_summary,
             debug_origin=reason,
+            allow_planner_style=explicit_planner_style_requested(user_input),
         )
         self._apply_interaction_transition(session_id, turn_result)
         decorated_response = self._decorate_chat_response(
@@ -931,6 +1256,23 @@ class NullaAgent:
                 "source_platform": (source_context or {}).get("platform"),
                 **dict(details or {}),
             },
+        )
+        self._emit_chat_truth_metrics(
+            task_id=task_id,
+            reason=reason,
+            response_text=decorated_response,
+            response_class=turn_result.response_class.value,
+            source_context=source_context,
+            rendered_via="action_fast_path",
+            fast_path_hit=True,
+            model_inference_used=False,
+            model_final_answer_hit=False,
+            model_execution_source="channel_action",
+            tool_backing_sources=self._chat_truth_action_backing_sources(
+                reason=reason,
+                success=success,
+                task_outcome=task_outcome,
+            ),
         )
         checkpoint_status = "completed" if success and (task_outcome or "success") == "success" else (
             "pending_approval" if (task_outcome or "") == "pending_approval" else "failed"
@@ -976,6 +1318,999 @@ class NullaAgent:
             "source_context": dict(source_context or {}),
             "workflow_summary": workflow_summary,
             "response_class": turn_result.response_class.value,
+        }
+
+    def _is_chat_truth_surface(self, source_context: dict[str, object] | None) -> bool:
+        surface = str((source_context or {}).get("surface", "") or "").strip().lower()
+        return surface in {"channel", "openclaw", "api"}
+
+    def _chat_truth_fast_path_backing_sources(self, reason: str) -> list[str]:
+        mapping = {
+            "live_info_fast_path": ["web_lookup"],
+            "hive_activity_command": ["hive"],
+            "hive_research_followup": ["hive"],
+            "hive_status_followup": ["hive"],
+        }
+        return list(mapping.get(str(reason or "").strip(), []))
+
+    def _chat_truth_action_backing_sources(
+        self,
+        *,
+        reason: str,
+        success: bool,
+        task_outcome: str | None,
+    ) -> list[str]:
+        if not success and str(task_outcome or "").strip().lower() != "pending_approval":
+            return []
+        normalized = str(reason or "").strip().lower()
+        sources: list[str] = []
+        if normalized.startswith("hive_topic_create_"):
+            sources.append("hive")
+        if normalized.startswith("channel_post_"):
+            sources.append("channel_action")
+        if normalized.startswith("operator_action_"):
+            sources.append("operator_action")
+        if normalized.startswith("model_tool_intent_"):
+            sources.append("tool_intent")
+        return sources or (["tool_action"] if success else [])
+
+    def _chat_truth_claim_metrics(
+        self,
+        response_text: str,
+        *,
+        tool_backing_sources: list[str],
+    ) -> dict[str, object]:
+        normalized = " ".join(str(response_text or "").split()).strip().lower()
+        claim_patterns = (
+            r"\b(i|we)\s+(checked|searched|looked up|looked|fetched|pulled|read|wrote|edited|updated|created|posted|sent|ran|executed|claimed)\b",
+            r"^started hive research on\b",
+            r"^created hive task\b",
+            r"\blive weather results\b",
+        )
+        claim_present = any(re.search(pattern, normalized) for pattern in claim_patterns)
+        claim_count = 1 if claim_present else 0
+        backed_sources = [str(item).strip() for item in list(tool_backing_sources or []) if str(item).strip()]
+        backed_claim_count = claim_count if backed_sources else 0
+        return {
+            "tool_claim_present": claim_present,
+            "tool_claim_count": claim_count,
+            "tool_backed_claim_present": bool(backed_claim_count),
+            "tool_backed_claim_count": backed_claim_count,
+            "tool_unbacked_claim_count": max(0, claim_count - backed_claim_count),
+            "tool_backing_sources": backed_sources,
+        }
+
+    def _emit_chat_truth_metrics(
+        self,
+        *,
+        task_id: str,
+        reason: str,
+        response_text: str,
+        response_class: str,
+        source_context: dict[str, object] | None,
+        rendered_via: str,
+        fast_path_hit: bool,
+        model_inference_used: bool,
+        model_final_answer_hit: bool,
+        model_execution_source: str,
+        tool_backing_sources: list[str] | None = None,
+    ) -> None:
+        if not self._is_chat_truth_surface(source_context):
+            return
+        surface = str((source_context or {}).get("surface", "") or "").strip().lower()
+        render_metrics = inspect_user_response_shape(
+            response_text,
+            surface=surface,
+            rendered_via=rendered_via,
+        )
+        claim_metrics = self._chat_truth_claim_metrics(
+            response_text,
+            tool_backing_sources=list(tool_backing_sources or []),
+        )
+        audit_logger.log(
+            "agent_chat_truth_metrics",
+            target_id=task_id,
+            target_type="task",
+            details={
+                "version": "m1-r01",
+                "reason": reason,
+                "response_class": response_class,
+                "source_surface": (source_context or {}).get("surface"),
+                "source_platform": (source_context or {}).get("platform"),
+                "rendered_via": rendered_via,
+                "fast_path_hit": bool(fast_path_hit),
+                "model_inference_used": bool(model_inference_used),
+                "model_final_answer_hit": bool(model_final_answer_hit),
+                "model_execution_source": model_execution_source,
+                "planner_leakage": bool(render_metrics["planner_leakage"]),
+                "template_renderer_hit": bool(render_metrics["template_renderer_hit"]),
+                "template_fallback_hit": bool(render_metrics["template_fallback_hit"]),
+                **claim_metrics,
+            },
+        )
+
+    def _chat_surface_smalltalk_model_input(self, *, user_input: str, phrase: str) -> str:
+        normalized_phrase = str(phrase or "").strip().lower()
+        if normalized_phrase in {"what can you do", "help"}:
+            capability_summary = self._help_capabilities_text().strip()
+            return (
+                f"{user_input}\n\n"
+                "Ground your reply in currently wired runtime capabilities only. "
+                "Do not imply unsupported abilities.\n\n"
+                f"{capability_summary}"
+            )
+        return str(user_input or "").strip()
+
+    def _chat_surface_observation_prompt(
+        self,
+        *,
+        user_input: str,
+        observations: dict[str, Any],
+    ) -> str:
+        channel = str(observations.get("channel") or "").strip()
+        mode = str(observations.get("mode") or "").strip()
+        if channel == "live_info" and mode == "fresh_lookup":
+            grounding = (
+                "IMPORTANT: Answer ONLY using the search results below. "
+                "If the search results do not contain the answer, say so honestly — "
+                "do NOT guess or fill in from general knowledge. "
+                "Cite the source domain when possible."
+            )
+        else:
+            grounding = "Grounding observations for this turn. Use them as evidence, not as a template:"
+        return (
+            f"{str(user_input or '').strip()}\n\n"
+            f"{grounding}\n"
+            f"{json.dumps(dict(observations or {}), indent=2, sort_keys=True)}"
+        ).strip()
+
+    def _chat_surface_live_info_observations(
+        self,
+        *,
+        query: str,
+        mode: str,
+        notes: list[dict[str, Any]] | None = None,
+        runtime_note: str = "",
+    ) -> dict[str, Any]:
+        sources: list[dict[str, Any]] = []
+        browser_used = False
+        for note in list(notes or [])[:4]:
+            entry = {
+                "title": str(note.get("result_title") or note.get("origin_domain") or "Source").strip(),
+                "domain": str(note.get("origin_domain") or "").strip(),
+                "summary": " ".join(str(note.get("summary") or "").split()).strip(),
+                "url": str(note.get("result_url") or "").strip(),
+            }
+            if str(note.get("source_profile_label") or "").strip():
+                entry["source_profile"] = str(note.get("source_profile_label") or "").strip()
+            if bool(note.get("used_browser")):
+                entry["used_browser"] = True
+                browser_used = True
+            sources.append(entry)
+        observations: dict[str, Any] = {
+            "channel": "live_info",
+            "mode": str(mode or "").strip(),
+            "query": str(query or "").strip(),
+            "source_count": len(sources),
+            "sources": sources,
+        }
+        if browser_used:
+            observations["browser_rendering_used"] = True
+        if str(runtime_note or "").strip():
+            observations["runtime_note"] = str(runtime_note or "").strip()
+        return observations
+
+    def _chat_surface_live_info_model_input(
+        self,
+        *,
+        user_input: str,
+        query: str,
+        mode: str,
+        notes: list[dict[str, Any]] | None = None,
+        runtime_note: str = "",
+    ) -> str:
+        runtime_message = str(runtime_note or "").strip() or (
+            "" if notes else self._live_info_failure_text(query=query, mode=mode)
+        )
+        return self._chat_surface_observation_prompt(
+            user_input=user_input,
+            observations=self._chat_surface_live_info_observations(
+                query=query,
+                mode=mode,
+                notes=notes,
+                runtime_note=runtime_message,
+            ),
+        )
+
+    def _chat_surface_adaptive_research_observations(
+        self,
+        *,
+        task_class: str,
+        research_result: AdaptiveResearchResult,
+    ) -> dict[str, Any]:
+        notes = [dict(note) for note in list(research_result.notes or []) if isinstance(note, dict)]
+        sources: list[dict[str, Any]] = []
+        for note in notes[:4]:
+            source = {
+                "title": str(note.get("result_title") or note.get("title") or note.get("result_url") or "Source").strip(),
+                "domain": str(note.get("origin_domain") or "").strip(),
+                "summary": " ".join(str(note.get("summary") or note.get("snippet") or "").split()).strip(),
+                "url": str(note.get("result_url") or note.get("url") or "").strip(),
+            }
+            if note.get("source_profile_label"):
+                source["source_profile"] = str(note.get("source_profile_label") or "").strip()
+            raw_confidence = note.get("confidence")
+            if raw_confidence not in {None, ""}:
+                try:
+                    source["confidence"] = float(raw_confidence)
+                except Exception:
+                    pass
+            sources.append(source)
+        observations: dict[str, Any] = {
+            "channel": "adaptive_research",
+            "task_class": str(task_class or "unknown").strip(),
+            "strategy": str(research_result.strategy or "general_research").strip(),
+            "actions_taken": list(research_result.actions_taken or []),
+            "queries_run": list(research_result.queries_run or []),
+            "evidence_strength": str(research_result.evidence_strength or "none").strip(),
+            "source_domains": list(research_result.source_domains or []),
+            "source_count": len(sources),
+            "sources": sources,
+        }
+        if research_result.escalated_from_chat:
+            observations["escalated_from_chat"] = True
+        if research_result.broadened:
+            observations["broadened"] = True
+        if research_result.narrowed:
+            observations["narrowed"] = True
+        if research_result.compared_sources:
+            observations["compared_sources"] = True
+        if research_result.verified_claim:
+            observations["verified_claim"] = True
+        if research_result.stop_reason:
+            observations["stop_reason"] = str(research_result.stop_reason).strip()
+        if research_result.admitted_uncertainty:
+            observations["admitted_uncertainty"] = True
+            observations["uncertainty_reason"] = str(research_result.uncertainty_reason or research_result.tool_gap_note or "").strip()
+        elif research_result.tool_gap_note:
+            observations["runtime_note"] = str(research_result.tool_gap_note).strip()
+        return observations
+
+    def _chat_surface_adaptive_research_model_input(
+        self,
+        *,
+        user_input: str,
+        task_class: str,
+        research_result: AdaptiveResearchResult,
+    ) -> str:
+        return self._chat_surface_observation_prompt(
+            user_input=user_input,
+            observations=self._chat_surface_adaptive_research_observations(
+                task_class=task_class,
+                research_result=research_result,
+            ),
+        )
+
+    def _chat_surface_credit_status_model_input(
+        self,
+        *,
+        user_input: str,
+        credit_snapshot: str,
+    ) -> str:
+        return (
+            f"{str(user_input or '').strip()}\n\n"
+            "Verified local credit, score, and wallet state for this turn:\n"
+            f"{str(credit_snapshot or '').strip()}"
+        ).strip()
+
+    def _chat_surface_hive_model_input(
+        self,
+        *,
+        user_input: str,
+        observations: dict[str, Any] | None = None,
+        runtime_note: str = "",
+    ) -> str:
+        payload = dict(observations or {})
+        if str(runtime_note or "").strip():
+            payload["runtime_note"] = str(runtime_note or "").strip()
+        if not payload:
+            payload = {"channel": "hive", "runtime_note": "Hive evidence was unavailable for this turn."}
+        payload["_system_context"] = (
+            "IMPORTANT: When the user says 'hive mind', 'hive', 'brain hive', or 'public hive', "
+            "they mean the Brain Hive task queue — a decentralized research system where tasks are "
+            "listed, claimed, researched, and resolved. Do NOT interpret 'hive mind' as the concept "
+            "of collective intelligence. Report the actual task state from the observations below. "
+            "The user can: check tasks, pick one to research, create new tasks, deliver research results."
+        )
+        return self._chat_surface_observation_prompt(
+            user_input=user_input,
+            observations=payload,
+        )
+
+    def _chat_surface_hive_queue_observations(
+        self,
+        queue_rows: list[dict[str, Any]],
+        *,
+        lead: str = "",
+        truth_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        observations = {
+            "channel": "hive",
+            "kind": "task_list",
+            "lead": str(lead or "").strip(),
+            "task_count": len(list(queue_rows or [])),
+            "topics": [
+                {
+                    "topic_id": str(row.get("topic_id") or "").strip(),
+                    "title": str(row.get("title") or "Untitled topic").strip(),
+                    "status": str(row.get("status") or "open").strip(),
+                }
+                for row in list(queue_rows or [])[:5]
+            ],
+        }
+        observations.update(self._hive_truth_observation_fields(truth_payload or self._bridge_hive_truth_from_rows(queue_rows)))
+        return observations
+
+    def _chat_surface_hive_research_result_observations(
+        self,
+        *,
+        topic_id: str,
+        title: str,
+        result: Any,
+    ) -> dict[str, Any]:
+        observations: dict[str, Any] = {
+            "channel": "hive",
+            "kind": "research_followup",
+            "topic": {
+                "topic_id": str(topic_id or "").strip(),
+                "short_id": str(topic_id or "")[:8],
+                "title": str(title or "Hive topic").strip(),
+            },
+            "dispatch_status": str(result.status or "").strip(),
+        }
+        if result.claim_id:
+            observations["claim_id"] = str(result.claim_id).strip()
+        result_status = str(result.result_status or "").strip()
+        if result_status:
+            observations["topic_status_after_dispatch"] = result_status
+        query_count = len(list((result.details or {}).get("query_results") or []))
+        if query_count:
+            observations["bounded_query_count"] = query_count
+        if result.artifact_ids:
+            observations["artifact_count"] = len(result.artifact_ids)
+        if result.candidate_ids:
+            observations["candidate_note_count"] = len(result.candidate_ids)
+        response_text = " ".join(str(result.response_text or "").split()).strip()
+        if response_text:
+            observations["research_runtime_note"] = response_text
+        details = dict(result.details or {})
+        synthesis_card = details.get("synthesis_card")
+        if isinstance(synthesis_card, dict):
+            observations["research_synthesis"] = {
+                "question": str(synthesis_card.get("question") or "").strip()[:200],
+                "searched": list(synthesis_card.get("searched") or [])[:5],
+                "found": list(synthesis_card.get("found") or [])[:5],
+                "promoted_findings": list(synthesis_card.get("promoted_findings") or [])[:5],
+                "confidence": str(synthesis_card.get("confidence") or "").strip(),
+                "blockers": list(synthesis_card.get("blockers") or [])[:6],
+            }
+        query_results = list(details.get("query_results") or [])
+        if query_results:
+            observations["query_summaries"] = [
+                {
+                    "query": str(q.get("query") or "").strip()[:120],
+                    "summary": str(q.get("summary") or q.get("snippet") or "").strip()[:400],
+                }
+                for q in query_results[:6]
+                if str(q.get("summary") or q.get("snippet") or "").strip()
+            ]
+        quality_summary = details.get("quality_summary")
+        if isinstance(quality_summary, dict):
+            observations["research_quality"] = {
+                "status": str(quality_summary.get("status") or "").strip(),
+                "evidence_count": int(quality_summary.get("evidence_count") or 0),
+                "confidence": str(quality_summary.get("confidence") or "").strip(),
+            }
+        observations.update(
+            self._hive_truth_observation_fields(
+                {
+                    "truth_source": "public_bridge",
+                    "truth_label": "public-bridge-derived",
+                    "truth_status": "write_path",
+                }
+            )
+        )
+        return observations
+
+    def _chat_surface_hive_status_observations(
+        self,
+        *,
+        topic_id: str,
+        title: str,
+        status: str,
+        execution_state: str,
+        active_claim_count: int,
+        artifact_count: int,
+        post_count: int,
+        latest_post_kind: str,
+        latest_post_body: str,
+        truth_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        observations: dict[str, Any] = {
+            "channel": "hive",
+            "kind": "status",
+            "topic": {
+                "topic_id": str(topic_id or "").strip(),
+                "short_id": str(topic_id or "")[:8],
+                "title": str(title or "Hive topic").strip(),
+            },
+        }
+        if status:
+            observations["topic_status"] = status
+        if execution_state:
+            observations["execution_state"] = execution_state
+        if active_claim_count:
+            observations["active_claim_count"] = active_claim_count
+        if post_count:
+            observations["post_count"] = post_count
+        if artifact_count:
+            observations["artifact_count"] = artifact_count
+        if latest_post_kind or latest_post_body:
+            latest = latest_post_body[:220] if latest_post_body else ""
+            observations["latest_post"] = {
+                "kind": latest_post_kind or "post",
+                "body": latest,
+            }
+        observations.update(self._hive_truth_observation_fields(truth_payload))
+        return observations
+
+    def _chat_surface_hive_command_observations(self, details: dict[str, Any]) -> dict[str, Any]:
+        observations = {
+            "channel": "hive",
+            "kind": str(details.get("command_kind") or "command").strip(),
+            "watcher_status": str(details.get("watcher_status") or "").strip(),
+            "lead": str(details.get("lead") or "").strip(),
+            "topics": [
+                {
+                    "topic_id": str(topic.get("topic_id") or "").strip(),
+                    "title": str(topic.get("title") or "Untitled topic").strip(),
+                    "status": str(topic.get("status") or "open").strip(),
+                }
+                for topic in list(details.get("topics") or [])[:5]
+            ],
+            "online_agents": [
+                {
+                    "agent_id": str(agent.get("agent_id") or "").strip(),
+                    "display_name": str(agent.get("display_name") or agent.get("claim_label") or "agent").strip(),
+                    "status": str(agent.get("status") or "").strip(),
+                    "online": bool(agent.get("online")),
+                }
+                for agent in list(details.get("online_agents") or [])[:4]
+            ],
+        }
+        observations.update(self._hive_truth_observation_fields(details))
+        return observations
+
+    def _bridge_hive_truth_from_rows(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        first = dict((list(rows or [])[:1] or [{}])[0] or {})
+        return {
+            "truth_source": str(first.get("truth_source") or "public_bridge").strip(),
+            "truth_label": str(first.get("truth_label") or "public-bridge-derived").strip(),
+            "truth_status": str(first.get("truth_transport") or "read_path").strip(),
+        }
+
+    def _hive_truth_observation_fields(self, payload: dict[str, Any] | None) -> dict[str, Any]:
+        raw = dict(payload or {})
+        observations: dict[str, Any] = {}
+        for key in ("truth_source", "truth_label", "truth_status", "truth_timestamp"):
+            value = raw.get(key)
+            if value not in {None, ""}:
+                observations[key] = value
+        presence: dict[str, Any] = {}
+        for source_key, target_key in (
+            ("presence_claim_state", "claim_state"),
+            ("presence_source", "source"),
+            ("presence_truth_label", "truth_label"),
+            ("presence_freshness_label", "freshness_label"),
+            ("presence_age_seconds", "age_seconds"),
+            ("presence_note", "note"),
+        ):
+            value = raw.get(source_key)
+            if value not in {None, ""}:
+                presence[target_key] = value
+        if presence:
+            observations["presence"] = presence
+        return observations
+
+    def _hive_truth_prefix(self, payload: dict[str, Any] | None) -> str:
+        raw = dict(payload or {})
+        presence = dict(raw.get("presence") or {})
+        truth_label = str(raw.get("truth_label") or "").strip()
+        if not truth_label:
+            return ""
+        parts = [f"Hive truth: {truth_label}."]
+        presence_claim_state = str(raw.get("presence_claim_state") or presence.get("claim_state") or "").strip().lower()
+        presence_note = str(raw.get("presence_note") or presence.get("note") or "").strip()
+        presence_truth_label = str(raw.get("presence_truth_label") or presence.get("truth_label") or truth_label).strip()
+        freshness_label = str(raw.get("presence_freshness_label") or presence.get("freshness_label") or "").strip().lower()
+        age_seconds = raw.get("presence_age_seconds")
+        if age_seconds in {None, ""}:
+            age_seconds = presence.get("age_seconds")
+        if presence_claim_state == "visible":
+            freshness_suffix = freshness_label
+            if freshness_label in {"fresh", "stale"} and age_seconds is not None:
+                freshness_suffix = f"{freshness_label} ({self._human_age(age_seconds)} old)"
+            elif freshness_label == "unknown":
+                freshness_suffix = "freshness unknown"
+            parts.append(f"Presence truth: {presence_truth_label}, {freshness_suffix}.")
+        elif presence_note:
+            parts.append(f"Presence truth: {presence_note}.")
+        return " ".join(part for part in parts if part).strip()
+
+    def _qualify_hive_response_text(
+        self,
+        response_text: str,
+        *,
+        payload: dict[str, Any] | None,
+    ) -> str:
+        clean = str(response_text or "").strip()
+        prefix = self._hive_truth_prefix(payload)
+        if not prefix:
+            return clean
+        lowered = clean.lower()
+        if "hive truth:" in lowered and ("presence truth:" in lowered or "presence" not in prefix.lower()):
+            return clean
+        if not clean:
+            return prefix
+        return f"{prefix} {clean}".strip()
+
+    def _human_age(self, age_seconds: object) -> str:
+        try:
+            value = max(0, int(age_seconds))  # type: ignore[arg-type]
+        except Exception:
+            return ""
+        if value < 60:
+            return f"{value}s"
+        if value < 3600:
+            return f"{max(1, round(value / 60))}m"
+        return f"{max(1, round(value / 3600))}h"
+
+    def _chat_surface_hive_degraded_response(self, details: dict[str, Any]) -> str:
+        topics = list(details.get("topics") or [])
+        online_agents = list(details.get("online_agents") or [])
+        watcher_status = str(details.get("watcher_status") or "").strip().lower()
+        truth_prefix = self._hive_truth_prefix(details)
+        if topics:
+            lines = [f"{truth_prefix} Hive tasks:"]
+            for topic in topics[:6]:
+                title = str(topic.get("title") or "Untitled topic").strip()
+                short_id = str(topic.get("topic_id") or "")[:8]
+                status = str(topic.get("status") or "open").strip()
+                lines.append(f"- [{status}] {title} (#{short_id})")
+            agent_count = len(online_agents)
+            if agent_count:
+                lines.append(f"{agent_count} agent(s) online.")
+            lines.append("Pick one by name or #id to start research, or say 'create task' to add a new one.")
+            return "\n".join(lines).strip()
+        if online_agents:
+            agent_count = len(online_agents)
+            return f"{truth_prefix} {agent_count} agent(s) online on Hive, but no open tasks found.".strip()
+        if watcher_status == "not_configured":
+            return f"{truth_prefix} Hive watcher is not configured on this runtime.".strip()
+        if watcher_status == "unreachable":
+            return f"{truth_prefix} Hive watcher was unreachable this turn.".strip()
+        return f"{truth_prefix} No live Hive data available this turn.".strip()
+
+    def _chat_surface_hive_wording_result(
+        self,
+        *,
+        session_id: str,
+        user_input: str,
+        source_context: dict[str, object] | None,
+        response_class: ResponseClass,
+        reason: str,
+        observations: dict[str, Any] | None = None,
+        fallback_response: str,
+    ) -> dict[str, Any]:
+        truth_payload = dict(observations or {})
+        qualified_fallback = self._qualify_hive_response_text(fallback_response, payload=truth_payload)
+        return self._chat_surface_model_wording_result(
+            session_id=session_id,
+            user_input=user_input,
+            source_context=source_context,
+            persona=load_active_persona(self.persona_id),
+            interpretation=adapt_user_input(user_input, session_id=session_id),
+            task_class="research",
+            response_class=response_class,
+            reason=reason,
+            model_input=self._chat_surface_hive_model_input(
+                user_input=user_input,
+                observations=observations,
+                runtime_note=qualified_fallback,
+            ),
+            fallback_response=qualified_fallback,
+            tool_backing_sources=["hive"],
+            response_postprocessor=lambda text: self._postprocess_hive_chat_surface_text(
+                text,
+                response_class=response_class,
+                payload=truth_payload,
+                fallback_response=qualified_fallback,
+            ),
+        )
+
+    def _postprocess_hive_chat_surface_text(
+        self,
+        text: str,
+        *,
+        response_class: ResponseClass,
+        payload: dict[str, Any],
+        fallback_response: str,
+    ) -> str:
+        clean = str(text or "").strip()
+        qualified = self._qualify_hive_response_text(clean, payload=payload)
+        lowered = qualified.lower()
+        if response_class == ResponseClass.TASK_STARTED:
+            if self._contains_generic_planner_scaffold(qualified):
+                return str(fallback_response or "").strip()
+            if not any(
+                marker in lowered
+                for marker in (
+                    "started hive research on",
+                    "started research on",
+                    "first bounded pass",
+                    "claim",
+                    "posted",
+                    "research lane is active",
+                )
+            ):
+                return str(fallback_response or "").strip()
+            return qualified
+        _HIVE_CONCEPT_HALLUCINATION_MARKERS = (
+            "concept of a",
+            "concept of collective",
+            "collective intelligence",
+            "no specific information",
+            "no information related to",
+            "hive mind is a term",
+            "hive mind refers to",
+            "swarm intelligence",
+        )
+        if any(marker in lowered for marker in _HIVE_CONCEPT_HALLUCINATION_MARKERS):
+            return str(fallback_response or "").strip()
+        if response_class != ResponseClass.TASK_LIST:
+            return qualified
+        topics = [
+            dict(item)
+            for item in list(payload.get("topics") or [])
+            if isinstance(item, dict) and str(item.get("title") or item.get("topic_id") or "").strip()
+        ]
+        if not topics:
+            return qualified
+        if self._hive_task_list_mentions_real_topics(qualified, topics=topics):
+            return qualified
+        return str(fallback_response or "").strip()
+
+    def _hive_task_list_mentions_real_topics(self, text: str, *, topics: list[dict[str, Any]]) -> bool:
+        normalized_text = self._normalize_hive_topic_text(text)
+        compact_text = re.sub(r"\s+", "", str(text or "").lower())
+        match_count = 0
+        for topic in list(topics or []):
+            title = self._normalize_hive_topic_text(str(topic.get("title") or ""))
+            short_id = str(topic.get("topic_id") or "").strip().lower()[:8]
+            if title and title in normalized_text:
+                match_count += 1
+                continue
+            if short_id and (f"#{short_id}" in compact_text or short_id in compact_text):
+                match_count += 1
+        required = 1 if len(topics) <= 1 else 2
+        return match_count >= required
+
+    def _chat_surface_builder_model_input(
+        self,
+        *,
+        user_input: str,
+        observations: dict[str, Any],
+    ) -> str:
+        return self._chat_surface_observation_prompt(
+            user_input=user_input,
+            observations=observations,
+        )
+
+    def _chat_surface_model_wording_result(
+        self,
+        *,
+        session_id: str,
+        user_input: str,
+        source_context: dict[str, object] | None,
+        persona: Any,
+        interpretation: Any,
+        task_class: str,
+        response_class: ResponseClass,
+        reason: str,
+        model_input: str,
+        fallback_response: str,
+        tool_backing_sources: list[str] | None = None,
+        response_postprocessor: Callable[[str], str] | None = None,
+    ) -> dict[str, Any]:
+        task = self._resolve_runtime_task(
+            effective_input=user_input,
+            session_id=session_id,
+            source_context=source_context,
+        )
+        self._update_runtime_checkpoint_context(
+            source_context,
+            task_id=task.task_id,
+            task_class=task_class,
+        )
+        self._update_task_class(task.task_id, task_class)
+        model_interpretation = adapt_user_input(model_input, session_id=session_id)
+        base_classification = {
+            "task_class": task_class,
+            "risk_flags": [],
+            "confidence_hint": max(
+                0.55,
+                float(getattr(model_interpretation, "understanding_confidence", 0.0) or 0.0),
+            ),
+        }
+        classification, _ = self._model_routing_profile(
+            user_input=user_input,
+            classification=base_classification,
+            interpretation=model_interpretation,
+            source_context=source_context,
+        )
+        context_result = self.context_loader.load(
+            task=task,
+            classification=classification,
+            interpretation=model_interpretation,
+            persona=persona,
+            session_id=session_id,
+        )
+        model_execution = self.memory_router.resolve(
+            task=task,
+            classification=classification,
+            interpretation=model_interpretation,
+            context_result=context_result,
+            persona=persona,
+            force_model=True,
+            surface=str((source_context or {}).get("surface", "cli") or "cli"),
+            source_context=dict(source_context or {}),
+        )
+        final_text = self._chat_surface_model_final_text(model_execution)
+        model_final_answer_hit = bool(final_text)
+        if not final_text:
+            model_source = str(getattr(model_execution, "source", "") or "")
+            used_model = bool(getattr(model_execution, "used_model", False))
+            _log.info(
+                "Chat surface model wording fallback: reason=%s model_source=%s used_model=%s",
+                reason,
+                model_source or "unknown",
+                used_model,
+            )
+            audit_logger.log(
+                "chat_surface_model_wording_fallback",
+                target_id=task.task_id,
+                target_type="task",
+                details={
+                    "reason": reason,
+                    "model_source": model_source,
+                    "used_model": used_model,
+                    "fallback_preview": str(fallback_response or "")[:120],
+                },
+            )
+            final_text = str(fallback_response or "").strip()
+        if response_postprocessor is not None:
+            final_text = str(response_postprocessor(final_text) or "").strip()
+
+        turn_result = self._turn_result(
+            final_text,
+            response_class,
+            debug_origin=reason,
+        )
+        self._apply_interaction_transition(session_id, turn_result)
+        decorated_response = self._decorate_chat_response(
+            turn_result,
+            session_id=session_id,
+            source_context=source_context,
+        )
+        append_conversation_event(
+            session_id=session_id,
+            user_input=user_input,
+            assistant_output=decorated_response,
+            source_context=source_context,
+        )
+        confidence = max(
+            0.35,
+            min(
+                0.96,
+                float(getattr(model_execution, "trust_score", 0.0) or getattr(model_execution, "confidence", 0.0) or 0.68),
+            ),
+        )
+        self._update_task_result(
+            task.task_id,
+            outcome="success" if model_final_answer_hit else "degraded",
+            confidence=confidence,
+        )
+        self._emit_chat_truth_metrics(
+            task_id=task.task_id,
+            reason=reason,
+            response_text=decorated_response,
+            response_class=turn_result.response_class.value,
+            source_context=source_context,
+            rendered_via="model_final_wording",
+            fast_path_hit=False,
+            model_inference_used=bool(getattr(model_execution, "used_model", False)),
+            model_final_answer_hit=model_final_answer_hit,
+            model_execution_source=str(getattr(model_execution, "source", "") or ""),
+            tool_backing_sources=list(tool_backing_sources or []),
+        )
+        self._emit_runtime_event(
+            source_context,
+            event_type="task_completed",
+            message=f"Model-worded response ready: {self._runtime_preview(decorated_response)}",
+            task_id=task.task_id,
+            status=reason,
+        )
+        self._finalize_runtime_checkpoint(
+            source_context,
+            status="completed",
+            final_response=decorated_response,
+        )
+        return {
+            "task_id": task.task_id,
+            "response": str(decorated_response or ""),
+            "mode": "advice_only",
+            "confidence": float(confidence),
+            "understanding_confidence": float(getattr(interpretation, "understanding_confidence", 1.0) or 1.0),
+            "interpreted_input": user_input,
+            "topic_hints": list(getattr(interpretation, "topic_hints", []) or []),
+            "prompt_assembly_report": context_result.report.to_dict(),
+            "model_execution": {
+                "source": getattr(model_execution, "source", ""),
+                "provider_id": getattr(model_execution, "provider_id", None),
+                "used_model": bool(getattr(model_execution, "used_model", False)),
+                "cache_hit": bool(getattr(model_execution, "cache_hit", False)),
+                "validation_state": getattr(model_execution, "validation_state", "not_run"),
+            },
+            "media_analysis": {"used_provider": False, "reason": "not_run"},
+            "curiosity": {"mode": "skipped", "reason": "chat_surface_model_wording"},
+            "backend": self.backend_name,
+            "device": self.device,
+            "session_id": session_id,
+            "source_context": dict(source_context or {}),
+            "workflow_summary": "",
+            "response_class": turn_result.response_class.value,
+        }
+
+    def _model_routing_profile(
+        self,
+        *,
+        user_input: str,
+        classification: dict[str, Any],
+        interpretation: Any,
+        source_context: dict[str, object] | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        routed = dict(classification or {})
+        is_chat_surface = self._is_chat_truth_surface(source_context)
+        planner_style_requested = bool(is_chat_surface and explicit_planner_style_requested(user_input))
+        if is_chat_surface:
+            routed["task_class"] = chat_surface_execution_task_class(
+                str(classification.get("task_class") or "unknown"),
+                user_input=user_input,
+                context=getattr(interpretation, "as_context", lambda: {})(),
+            )
+            routed["routing_origin_task_class"] = str(classification.get("task_class") or "unknown")
+            routed["planner_style_requested"] = planner_style_requested
+        return routed, model_execution_profile(
+            str(routed.get("task_class") or "unknown"),
+            chat_surface=is_chat_surface,
+            planner_style_requested=planner_style_requested,
+        )
+
+    def _explicit_runtime_workflow_request(
+        self,
+        *,
+        user_input: str,
+        task_class: str,
+    ) -> bool:
+        text = " ".join(str(user_input or "").split()).strip()
+        if not text:
+            return False
+        lowered = f" {text.lower()} "
+        if looks_like_execution_request(text, task_class="unknown"):
+            return True
+        if any(marker in lowered for marker in (" retry ", " rerun ", " rerun it ", " run tests ", " inspect logs ")):
+            return True
+        if any(marker in lowered for marker in (" find ", " inspect ", " trace ", " locate ", " search ", " read ", " open ")) and any(
+            marker in lowered
+            for marker in (
+                " repo ",
+                " repository ",
+                " workspace ",
+                " code ",
+                " file ",
+                " files ",
+                " wiring ",
+                " path ",
+                " line ",
+                " lines ",
+                " function ",
+                " symbol ",
+                " import ",
+            )
+        ):
+            return True
+        if ("http://" in lowered or "https://" in lowered) and any(
+            marker in lowered for marker in (" open ", " fetch ", " browse ", " render ")
+        ):
+            return True
+        if str(task_class or "").strip().lower() == "integration_orchestration" and any(
+            marker in lowered
+            for marker in (
+                " write the files ",
+                " edit the files ",
+                " patch the files ",
+                " create the files ",
+                " generate the files ",
+            )
+        ):
+            return True
+        return False
+
+    def _should_keep_ai_first_chat_lane(
+        self,
+        *,
+        user_input: str,
+        classification: dict[str, Any],
+        interpretation: Any,
+        source_context: dict[str, object] | None,
+        checkpoint_state: dict[str, Any] | None,
+    ) -> bool:
+        if not self._is_chat_truth_surface(source_context):
+            return False
+        checkpoint_state = dict(checkpoint_state or {})
+        if checkpoint_state.get("executed_steps") or checkpoint_state.get("pending_tool_payload") or checkpoint_state.get(
+            "last_tool_payload"
+        ):
+            return False
+        if self._looks_like_resume_request(user_input):
+            return False
+        if self._live_info_mode(user_input, interpretation=interpretation):
+            return True
+        task_class = str(classification.get("task_class") or "unknown")
+        routed_task_class = chat_surface_execution_task_class(
+            task_class,
+            user_input=user_input,
+            context=getattr(interpretation, "as_context", lambda: {})(),
+        )
+        if self._explicit_runtime_workflow_request(
+            user_input=user_input,
+            task_class=task_class,
+        ):
+            return False
+        lowered_input = " ".join(str(user_input or "").split()).strip().lower()
+        if looks_like_public_entity_lookup_request(lowered_input) or looks_like_explicit_lookup_request(lowered_input):
+            return False
+        if any(marker in lowered_input for marker in ("create task", "create new task", "new task for", "add task", "add to hive", "add to the hive")):
+            return False
+        if "create" in lowered_input and "task" in lowered_input and ("hive" in lowered_input or "topic" in lowered_input):
+            return False
+        if self._looks_like_builder_request(user_input.lower()):
+            return True
+        return routed_task_class in {
+            "chat_conversation",
+            "chat_research",
+            "general_advisory",
+            "business_advisory",
+            "food_nutrition",
+            "relationship_advisory",
+            "creative_ideation",
+            "debugging",
+            "dependency_resolution",
+            "config",
+            "system_design",
+            "file_inspection",
+            "shell_guidance",
+            "integration_orchestration",
         }
 
     def _prepare_runtime_checkpoint(
@@ -1100,8 +2435,9 @@ class NullaAgent:
         merged.update(secondary_dict)
         history: list[dict[str, Any]] = []
         for item in (primary_history + secondary_history)[-16:]:
-            role = str(item.get("role") or "").strip().lower()
-            content = str(item.get("content") or "").strip()
+            normalized = self._normalize_tool_history_message(item)
+            role = str(normalized.get("role") or "").strip().lower()
+            content = str(normalized.get("content") or "").strip()
             if role not in {"system", "user", "assistant"} or not content:
                 continue
             history.append({"role": role, "content": content[:4000]})
@@ -1205,13 +2541,31 @@ class NullaAgent:
         )
         return any(marker in text for marker in markers)
 
-    def _date_time_fast_path(self, normalized_input: str, *, source_surface: str) -> str | None:
+    def _date_time_fast_path(
+        self,
+        normalized_input: str,
+        *,
+        source_surface: str,
+        session_id: str = "",
+        source_context: dict[str, object] | None = None,
+    ) -> str | None:
         if source_surface not in {"channel", "openclaw", "api"}:
             return None
         phrase = str(normalized_input or "").strip().lower()
         if not phrase:
             return None
         cleaned = phrase.strip(" \t\r\n?!.,")
+        requested_timezone, requested_label = self._extract_utility_timezone(cleaned)
+        recent_utility_context = self._recent_utility_context(
+            session_id=session_id,
+            source_context=source_context,
+        )
+        contextual_timezone, contextual_label = self._contextual_time_followup_timezone(
+            cleaned,
+            recent_utility_context=recent_utility_context,
+        )
+        effective_timezone = requested_timezone or contextual_timezone
+        effective_label = requested_label or contextual_label
         asks_date = any(
             marker in cleaned
             for marker in (
@@ -1230,23 +2584,146 @@ class NullaAgent:
                 "day today",
             )
         )
-        asks_time = any(
-            marker in cleaned
-            for marker in (
-                "what time is it",
-                "what's the time",
-                "current time",
-                "time now",
+        asks_time = bool(
+            any(
+                marker in cleaned
+                for marker in (
+                    "what time is it",
+                    "what's the time",
+                    "current time",
+                    "time now",
+                    "what time is now",
+                    "what time now",
+                )
             )
+            or ("time" in cleaned and any(marker in cleaned for marker in ("what", "now", "current", "right now")))
+            or (effective_timezone and "time" in cleaned)
+            or self._looks_like_malformed_time_followup(
+                cleaned,
+                effective_timezone=effective_timezone,
+                recent_utility_context=recent_utility_context,
+            )
+            or bool(contextual_timezone)
         )
         if not asks_date and not asks_time:
             return None
-        now = datetime.now().astimezone()
+        now = self._utility_now_for_timezone(effective_timezone)
+        location_prefix = f"in {effective_label} " if effective_label else ""
         if asks_date and asks_time:
-            return now.strftime("Today is %A, %Y-%m-%d. Current time is %H:%M %Z.")
+            return now.strftime(f"Today {location_prefix}is %A, %Y-%m-%d. Current time is %H:%M %Z.")
         if asks_date:
-            return now.strftime("Today is %A, %Y-%m-%d.")
+            return now.strftime(f"Today {location_prefix}is %A, %Y-%m-%d.")
+        if effective_label:
+            return now.strftime(f"Current time in {effective_label} is %H:%M %Z.")
         return now.strftime("Current time is %H:%M %Z.")
+
+    def _direct_math_fast_path(self, normalized_input: str, *, source_surface: str) -> str | None:
+        if source_surface not in {"channel", "openclaw", "api"}:
+            return None
+        return evaluate_direct_math_request(normalized_input)
+
+    def _extract_utility_timezone(self, cleaned_input: str) -> tuple[str, str]:
+        lowered = " ".join(str(cleaned_input or "").strip().lower().split())
+        if not lowered:
+            return "", ""
+        for marker, resolved in _UTILITY_TIMEZONE_ALIASES.items():
+            if marker in lowered:
+                return resolved
+        return "", ""
+
+    def _utility_now_for_timezone(self, timezone_name: str) -> datetime:
+        if timezone_name:
+            try:
+                return datetime.now(ZoneInfo(timezone_name))
+            except Exception:
+                pass
+        return datetime.now().astimezone()
+
+    def _recent_utility_context(
+        self,
+        *,
+        session_id: str,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, str]:
+        if session_id:
+            state = session_hive_state(session_id)
+            if str(state.get("interaction_mode") or "").strip().lower() == "utility":
+                payload = dict(state.get("interaction_payload") or {})
+                utility_kind = str(payload.get("utility_kind") or "").strip().lower()
+                if utility_kind:
+                    return {
+                        "utility_kind": utility_kind,
+                        "timezone": str(payload.get("timezone") or "").strip(),
+                        "label": str(payload.get("label") or "").strip(),
+                    }
+        history = list((source_context or {}).get("conversation_history") or [])
+        for message in reversed(history[-4:]):
+            if not isinstance(message, dict):
+                continue
+            content = " ".join(str(message.get("content") or "").split()).strip().lower()
+            if not content:
+                continue
+            timezone_name, label = self._extract_utility_timezone(content)
+            if "current time" in content or "what time" in content or "time now" in content:
+                return {
+                    "utility_kind": "time",
+                    "timezone": timezone_name,
+                    "label": label,
+                }
+        return {}
+
+    def _contextual_time_followup_timezone(
+        self,
+        cleaned_input: str,
+        *,
+        recent_utility_context: dict[str, str] | None,
+    ) -> tuple[str, str]:
+        lowered = " ".join(str(cleaned_input or "").strip().lower().split())
+        if not lowered:
+            return "", ""
+        utility_kind = str((recent_utility_context or {}).get("utility_kind") or "").strip().lower()
+        timezone_name = str((recent_utility_context or {}).get("timezone") or "").strip()
+        label = str((recent_utility_context or {}).get("label") or "").strip()
+        if utility_kind != "time" or not timezone_name:
+            return "", ""
+        if any(marker in lowered for marker in _TIME_FOLLOWUP_EXCLUSION_MARKERS):
+            return "", ""
+        if any(pattern.search(lowered) for pattern in _CONTEXTUAL_TIME_FOLLOWUP_PATTERNS):
+            return timezone_name, label
+        if "time" in lowered and any(
+            marker in lowered
+            for marker in (
+                "there",
+                "same place",
+                "that place",
+                "that city",
+                "again",
+                "now",
+                "current",
+                "right now",
+            )
+        ):
+            return timezone_name, label
+        return "", ""
+
+    def _looks_like_malformed_time_followup(
+        self,
+        cleaned_input: str,
+        *,
+        effective_timezone: str,
+        recent_utility_context: dict[str, str] | None,
+    ) -> bool:
+        if not effective_timezone:
+            return False
+        utility_kind = str((recent_utility_context or {}).get("utility_kind") or "").strip().lower()
+        if utility_kind != "time":
+            return False
+        lowered = " ".join(str(cleaned_input or "").strip().lower().split())
+        if "what" not in lowered:
+            return False
+        if not any(marker in lowered for marker in ("where's", "wheres", "where is")):
+            return False
+        return not any(marker in lowered for marker in _TIME_FOLLOWUP_EXCLUSION_MARKERS)
 
     def _ui_command_fast_path(self, normalized_input: str, *, source_surface: str) -> str | None:
         phrase = str(normalized_input or "").strip().lower()
@@ -1301,10 +2778,30 @@ class NullaAgent:
         if not live_mode:
             return None
         if not policy_engine.allow_web_fallback():
+            disabled_response = "Live web lookup is disabled on this runtime, so I can't answer current weather or latest-news requests honestly."
+            if self._is_chat_truth_surface(source_context):
+                return self._chat_surface_model_wording_result(
+                    session_id=session_id,
+                    user_input=user_input,
+                    source_context=source_context,
+                    persona=load_active_persona(self.persona_id),
+                    interpretation=interpretation,
+                    task_class="research",
+                    response_class=ResponseClass.UTILITY_ANSWER,
+                    reason="live_info_model_wording",
+                    model_input=self._chat_surface_live_info_model_input(
+                        user_input=user_input,
+                        query=str(user_input or "").strip(),
+                        mode=live_mode,
+                        runtime_note=disabled_response,
+                    ),
+                    fallback_response=disabled_response,
+                    tool_backing_sources=[],
+                )
             return self._fast_path_result(
                 session_id=session_id,
                 user_input=user_input,
-                response="Live web lookup is disabled on this runtime, so I can't answer current weather or latest-news requests honestly.",
+                response=disabled_response,
                 confidence=0.82,
                 source_context=source_context,
                 reason="live_info_fast_path",
@@ -1338,6 +2835,31 @@ class NullaAgent:
             if notes
             else self._live_info_failure_text(query=query, mode=live_mode)
         )
+        structured_modes = {"weather", "news"}
+        if self._is_chat_truth_surface(source_context) and live_mode not in structured_modes:
+            return self._chat_surface_model_wording_result(
+                session_id=session_id,
+                user_input=user_input,
+                source_context=source_context,
+                persona=load_active_persona(self.persona_id),
+                interpretation=interpretation,
+                task_class="research",
+                response_class=ResponseClass.UTILITY_ANSWER,
+                reason="live_info_model_wording",
+                model_input=self._chat_surface_live_info_model_input(
+                    user_input=user_input,
+                    query=query,
+                    mode=live_mode,
+                    notes=notes,
+                    runtime_note="" if notes else response,
+                ),
+                fallback_response=(
+                    "I pulled live evidence for this turn, but I couldn't produce a clean final synthesis in this run."
+                    if notes
+                    else response
+                ),
+                tool_backing_sources=["web_lookup"] if notes else [],
+            )
         return self._fast_path_result(
             session_id=session_id,
             user_input=user_input,
@@ -1399,17 +2921,32 @@ class NullaAgent:
         ):
             return ""
         weather_markers = (
-            "weather",
-            "forecast",
-            "temperature",
-            "rain",
-            "snow",
-            "wind",
-            "humidity",
-            "humid",
-            "sunrise",
-            "sunset",
+            " weather ",
+            " weather?",
+            "weather ",
+            " forecast",
+            " temperature",
+            " rain ",
+            " rain?",
+            " raining",
+            " rainy",
+            " snow ",
+            " snow?",
+            " snowing",
+            " snowy",
+            " wind ",
+            " windy",
+            " humidity",
+            " humid ",
+            " sunrise",
+            " sunset",
+            " wheather",
+            " wheater",
+            " whether today",
+            " whether now",
+            " whether in ",
         )
+        lowered_padded = f" {lowered} "
         news_markers = (
             "latest news",
             "breaking news",
@@ -1419,10 +2956,12 @@ class NullaAgent:
             "news about",
             "what happened today",
         )
-        if any(marker in lowered for marker in weather_markers):
+        if any(marker in lowered_padded for marker in weather_markers):
             return "weather"
         if any(marker in lowered for marker in news_markers):
             return "news"
+        if looks_like_explicit_lookup_request(lowered) or looks_like_public_entity_lookup_request(lowered):
+            return "fresh_lookup"
         if any(
             marker in lowered
             for marker in (
@@ -1445,7 +2984,22 @@ class NullaAgent:
                 "status page",
                 "current price",
                 "price now",
+                "price today",
+                "price right now",
                 "exchange rate",
+                "how much is",
+                "how much does",
+                "worth right now",
+                "worth today",
+                "worth now",
+                "market price",
+                "stock price",
+                "oil price",
+                "gold price",
+                "bitcoin price",
+                "btc price",
+                "eth price",
+                "crypto price",
             )
         ):
             return "fresh_lookup"
@@ -1488,6 +3042,17 @@ class NullaAgent:
             "implement",
             "generate",
             "start working",
+            "start coding",
+            "start putting code",
+            "put code",
+            "putting code",
+            "setup folder",
+            "set up folder",
+            "setup directory",
+            "set up directory",
+            "bootstrap",
+            "initial files",
+            "starter files",
             "write the files",
             "create the files",
             "generate the code",
@@ -1516,6 +3081,96 @@ class NullaAgent:
             )
         )
 
+    def _looks_like_generic_workspace_bootstrap_request(self, lowered: str) -> bool:
+        text = " ".join(str(lowered or "").split()).strip().lower()
+        if not text:
+            return False
+        bootstrap_markers = (
+            "start coding",
+            "start putting code",
+            "start building",
+            "start creating",
+            "put code",
+            "putting code",
+            "building the code",
+            "build the code",
+            "initial files",
+            "starter files",
+            "bootstrap",
+            "set up",
+            "setup",
+            "write the files",
+            "create the files",
+            "generate the files",
+            "generate the code",
+            "start working",
+            "launch local",
+            "launch localhost",
+            "run locally",
+        )
+        target_markers = (
+            "folder",
+            "directory",
+            "dir",
+            "src/",
+            "/src",
+            "api/",
+        )
+        return bool(
+            any(marker in text for marker in bootstrap_markers)
+            and (any(marker in text for marker in target_markers) or bool(self._extract_requested_builder_root(text)))
+        )
+
+    def _extract_requested_builder_root(self, query_text: str) -> str:
+        text = " ".join(str(query_text or "").split()).strip()
+        if not text:
+            return ""
+        stop_words = {
+            "a",
+            "an",
+            "the",
+            "and",
+            "folder",
+            "directory",
+            "dir",
+            "path",
+            "workspace",
+            "repo",
+            "repository",
+            "this",
+            "that",
+            "there",
+            "here",
+            "code",
+            "files",
+        }
+        patterns = (
+            re.compile(r"\bnam(?:e|ed)\s+it\s+[`\"']?(?P<path>[A-Za-z0-9_./-]+(?:/[A-Za-z0-9_./-]+)*)", re.IGNORECASE),
+            re.compile(r"\b(?:folder|directory|dir|path)\s+(?:called|named)\s+[`\"']?(?P<path>[A-Za-z0-9_./-]+)", re.IGNORECASE),
+            re.compile(r"\b(?:called|named)\s+[`\"']?(?P<path>[A-Za-z0-9_][A-Za-z0-9_./-]*(?:/[A-Za-z0-9_./-]+)*)", re.IGNORECASE),
+            re.compile(
+                r"\b(?:create|make|setup|set up|bootstrap|mkdir)\s+(?:a|an|the)?\s*(?:folder|directory|dir|path)\s+(?:called|named)?\s*[`\"']?(?P<path>[A-Za-z0-9_./-]+(?:/[A-Za-z0-9_./-]+)*)",
+                re.IGNORECASE,
+            ),
+            re.compile(r"\b(?:in|under|inside)\s+[`\"']?(?P<path>[A-Za-z0-9_./-]+(?:/[A-Za-z0-9_./-]+)*)[`\"']?", re.IGNORECASE),
+        )
+        for pattern in patterns:
+            match = pattern.search(text)
+            if not match:
+                continue
+            candidate = str(match.group("path") or "").strip().strip("`\"'").rstrip(".,!?")
+            if not candidate:
+                continue
+            if candidate.startswith("/"):
+                candidate = candidate.lstrip("/")
+            candidate = candidate.lstrip("./")
+            if not candidate or candidate.lower() in stop_words:
+                continue
+            if ".." in candidate.split("/"):
+                continue
+            return candidate
+        return ""
+
     def _normalize_live_info_query(self, text: str, *, mode: str) -> str:
         clean = " ".join(str(text or "").split()).strip()
         lowered = clean.lower()
@@ -1526,8 +3181,9 @@ class NullaAgent:
         return clean
 
     def _render_live_info_response(self, *, query: str, notes: list[dict[str, Any]], mode: str) -> str:
+        if mode == "weather":
+            return self._render_weather_response(query=query, notes=notes)
         label = {
-            "weather": "Live weather results",
             "news": "Live news results",
             "fresh_lookup": "Live web results",
         }.get(mode, "Live web results")
@@ -1551,6 +3207,31 @@ class NullaAgent:
             lines.append("Browser rendering was used for at least one source when plain fetch was too thin.")
         return "\n".join(lines)
 
+    def _render_weather_response(self, *, query: str, notes: list[dict[str, Any]]) -> str:
+        location = re.sub(
+            r"\b(?:what\s+is\s+(?:the\s+)?|how\s+is\s+(?:the\s+)?|weather\s+(?:like\s+)?(?:in|for|at)\s+|"
+            r"weather\s+in\s+|now\??|right\s+now\??|today\??|current(?:ly)?)\b",
+            "", query, flags=re.IGNORECASE,
+        ).strip(" ?.,!") or "your location"
+        snippets = []
+        sources = []
+        for note in list(notes or [])[:3]:
+            snippet = " ".join(str(note.get("summary") or "").split()).strip()
+            domain = str(note.get("origin_domain") or "").strip()
+            url = str(note.get("result_url") or "").strip()
+            if snippet:
+                snippets.append(snippet[:300])
+            if url:
+                sources.append(f"[{domain or 'source'}]({url})")
+        if snippets:
+            combined = " | ".join(snippets)
+            lines = [f"Weather in {location}: {combined}"]
+        else:
+            lines = [f"I searched for weather in {location} but couldn't extract conditions from the results."]
+        if sources:
+            lines.append(f"Sources: {', '.join(sources[:3])}")
+        return "\n".join(lines)
+
     def _live_info_failure_text(self, *, query: str, mode: str) -> str:
         if mode == "weather":
             return f'I tried the live web lane for "{query}", but no current weather results came back.'
@@ -1558,43 +3239,63 @@ class NullaAgent:
             return f'I tried the live web lane for "{query}", but no current news results came back.'
         return f'I tried the live web lane for "{query}", but no grounded live results came back.'
 
+    def _maybe_handle_capability_truth_request(
+        self,
+        user_input: str,
+        *,
+        session_id: str,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, Any] | None:
+        report = capability_truth_for_request(
+            user_input,
+            extra_entries=self._capability_ledger_entries(),
+        )
+        if not report:
+            return None
+        return self._fast_path_result(
+            session_id=session_id,
+            user_input=user_input,
+            response=render_capability_truth_response(report),
+            confidence=0.96,
+            source_context=source_context,
+            reason="capability_truth_query",
+        )
+
     def _help_capabilities_text(self) -> str:
-        available_tools = {
-            str(tool.get("tool_id") or "").strip()
-            for tool in list_operator_tools()
-            if tool.get("available")
-        }
-        capabilities = ["local reasoning", "persistent memory", "mesh-assisted lookups"]
-        if policy_engine.allow_web_fallback():
-            capabilities.append("live web research when retrieval returns real results")
-        if policy_engine.get("filesystem.allow_read_workspace", True):
-            capabilities.append("workspace file listing, search, and reads")
-        if policy_engine.get("filesystem.allow_write_workspace", False):
-            capabilities.append("workspace file edits")
-        if policy_engine.get("execution.allow_sandbox_execution", False):
-            capabilities.append("sandboxed local commands with network blocked")
-        tool_labels: list[str] = []
-        if "schedule_calendar_event" in available_tools:
-            tool_labels.append("calendar outbox creation")
-        if "discord_post" in available_tools:
-            tool_labels.append("Discord posting")
-        if "telegram_send" in available_tools:
-            tool_labels.append("Telegram sending")
-        if "inspect_disk_usage" in available_tools:
-            tool_labels.append("disk inspection")
-        if "inspect_processes" in available_tools:
-            tool_labels.append("process inspection")
-        if "inspect_services" in available_tools:
-            tool_labels.append("service inspection")
-        if "cleanup_temp_files" in available_tools:
-            tool_labels.append("temp cleanup")
-        if "move_path" in available_tools:
-            tool_labels.append("file move/archive")
-        if tool_labels:
-            capabilities.append("wired tools: " + ", ".join(tool_labels))
-        capabilities.append("real step reporting for executed tools, approval previews, and failures")
-        capabilities.append("I will say it directly when a tool is not actually wired on this runtime")
-        return "I can handle " + ", ".join(capabilities) + "."
+        lines = [
+            "Wired on this runtime:",
+            "- plain-language reasoning, persistent memory, and rolling chat continuity",
+        ]
+        supported_entries = [entry for entry in self._capability_ledger_entries() if entry.get("supported")]
+        partial_entries = [
+            entry
+            for entry in supported_entries
+            if str(entry.get("support_level") or "").strip().lower() == "partial"
+        ]
+        full_entries = [
+            entry
+            for entry in supported_entries
+            if str(entry.get("support_level") or "").strip().lower() != "partial"
+        ]
+        unsupported_entries = [entry for entry in self._capability_ledger_entries() if not entry.get("supported")]
+        for entry in full_entries:
+            lines.append(f"- {str(entry.get('claim') or '').strip()}")
+        if partial_entries:
+            lines.append("")
+            lines.append("Partially supported on this runtime:")
+            for entry in partial_entries:
+                claim = str(entry.get("claim") or "").strip()
+                note = str(entry.get("partial_reason") or "").strip()
+                lines.append(f"- {claim}" + (f" ({note})" if note else ""))
+        lines.append("- I report real tool executions, approval previews, and failures directly instead of bluffing")
+        if unsupported_entries:
+            lines.append("")
+            lines.append("Not wired or not enabled here:")
+            for entry in unsupported_entries:
+                reason = str(entry.get("unsupported_reason") or entry.get("claim") or "").strip()
+                if reason:
+                    lines.append(f"- {reason}")
+        return "\n".join(lines)
 
     def _render_credit_status(self, normalized_input: str) -> str:
         from core.credit_ledger import reconcile_ledger
@@ -1683,6 +3384,39 @@ class NullaAgent:
                 details={"error": str(exc)},
             )
             return []
+
+    def _collect_adaptive_research(
+        self,
+        *,
+        task_id: str,
+        query_text: str,
+        classification: dict[str, Any],
+        interpretation: Any,
+        source_context: dict[str, object] | None,
+    ) -> AdaptiveResearchResult:
+        try:
+            return self.curiosity.adaptive_research(
+                task_id=task_id,
+                user_input=query_text,
+                classification=classification,
+                interpretation=interpretation,
+                source_context=dict(source_context or {}),
+            )
+        except Exception as exc:
+            audit_logger.log(
+                "adaptive_research_error",
+                target_id=task_id,
+                target_type="task",
+                details={"error": str(exc)},
+            )
+            return AdaptiveResearchResult(
+                enabled=False,
+                reason="controller_error",
+                strategy="tool_gap",
+                tool_gap_note="Adaptive research failed for this turn, so I should stay cautious about unsupported claims.",
+                admitted_uncertainty=True,
+                uncertainty_reason="Adaptive research failed for this turn.",
+            )
 
     def _should_frontload_curiosity(
         self,
@@ -1941,7 +3675,631 @@ class NullaAgent:
             }
         ]
 
-    def _maybe_run_workspace_build_pipeline(
+    def _workspace_build_observations(
+        self,
+        *,
+        target: dict[str, str],
+        write_results: list[dict[str, Any]],
+        write_failures: list[str],
+        verification: dict[str, Any] | None,
+        sources: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        return {
+            "channel": "workspace_build",
+            "target": {
+                "platform": str(target.get("platform") or "").strip(),
+                "language": str(target.get("language") or "").strip(),
+                "root_dir": str(target.get("root_dir") or "").strip(),
+            },
+            "written_file_count": len(write_results),
+            "written_files": [str(item.get("path") or "").strip() for item in write_results[:8]],
+            "write_failures": [str(item).strip() for item in write_failures[:4] if str(item).strip()],
+            "verification": {
+                "status": str((verification or {}).get("status") or "").strip(),
+                "ok": bool((verification or {}).get("ok", False)),
+                "response_text": str((verification or {}).get("response_text") or "").strip(),
+            },
+            "sources": [
+                {
+                    "title": str(item.get("title") or "").strip(),
+                    "url": str(item.get("url") or "").strip(),
+                    "label": str(item.get("label") or "").strip(),
+                }
+                for item in list(sources or [])[:4]
+            ],
+        }
+
+    def _workspace_build_degraded_response(
+        self,
+        *,
+        target: dict[str, str],
+        write_results: list[dict[str, Any]],
+        write_failures: list[str],
+        verification: dict[str, Any] | None,
+    ) -> str:
+        root_dir = str(target.get("root_dir") or "the workspace").strip()
+        if write_results:
+            status = str((verification or {}).get("status") or "").strip()
+            if status == "executed":
+                verification_line = "Verification passed." if bool((verification or {}).get("ok", False)) else (
+                    f"Verification failed: {str((verification or {}).get('response_text') or '').strip()}"
+                )
+            elif status == "skipped":
+                verification_line = "Verification was skipped for this scaffold type."
+            else:
+                verification_line = "Verification did not run."
+            failure_line = ""
+            if write_failures:
+                failure_line = f" {len(write_failures)} write operation(s) failed."
+            return (
+                f"I completed the workspace build actions under `{root_dir}`, but I couldn't produce a clean final summary. "
+                f"{verification_line}{failure_line}"
+            ).strip()
+        if write_failures:
+            return (
+                f"I attempted the workspace build actions for `{root_dir}`, but the file writes did not complete cleanly."
+            ).strip()
+        return "I couldn't complete the workspace build actions cleanly in this run."
+
+    def _builder_support_gap_report(
+        self,
+        *,
+        source_context: dict[str, object] | None,
+        reason: str,
+    ) -> dict[str, Any]:
+        workspace_available = bool(str((source_context or {}).get("workspace") or (source_context or {}).get("workspace_root") or "").strip())
+        write_enabled = bool(policy_engine.get("filesystem.allow_write_workspace", False))
+        if not workspace_available:
+            gap_reason = "I need an active workspace before I can run a real bounded builder loop."
+        elif not write_enabled:
+            gap_reason = "Workspace writes are disabled on this runtime, so I cannot run a real bounded builder loop."
+        else:
+            gap_reason = reason
+        return {
+            "requested_capability": "workspace.build_scaffold",
+            "requested_label": "builder controller",
+            "support_level": "unsupported",
+            "claim": (
+                "I can run a bounded local builder loop in the active workspace: create starter folders/files, write narrow Telegram or Discord bot scaffolds, "
+                "inspect files, apply explicit replacements, and run bounded local commands."
+            ),
+            "partial_reason": (
+                "This is still a bounded local builder loop, not a full autonomous research -> build -> debug -> test system "
+                "for arbitrary products or stacks."
+                if workspace_available and write_enabled
+                else ""
+            ),
+            "reason": gap_reason,
+            "nearby_alternatives": [
+                "Ask me to inspect the repo or read specific files in the workspace.",
+                "Ask for a starter scaffold or a Telegram or Discord bot scaffold in the active workspace.",
+                "Ask me to create a starter folder or first files in a concrete workspace path.",
+                "Give me an exact replacement to apply in a file and I can run it locally.",
+                "Give me a bounded local command or test to run in the workspace.",
+            ],
+        }
+
+    def _builder_controller_profile(
+        self,
+        *,
+        effective_input: str,
+        classification: dict[str, Any],
+        interpretation: Any,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, Any]:
+        source_context = dict(source_context or {})
+        if not self._should_run_builder_controller(
+            effective_input=effective_input,
+            classification=classification,
+            source_context=source_context,
+        ):
+            return {"should_handle": False}
+        target = self._workspace_build_target(
+            query_text=effective_input,
+            interpretation=interpretation,
+        )
+        workflow_probe = plan_tool_workflow(
+            user_text=effective_input,
+            task_class=str(classification.get("task_class") or "unknown"),
+            executed_steps=[],
+            source_context=source_context,
+        )
+        workflow_intent = str(dict(workflow_probe.next_payload or {}).get("intent") or "").strip()
+        workflow_supported_request = self._supports_bounded_builder_workflow_request(
+            effective_input=effective_input,
+            task_class=str(classification.get("task_class") or "unknown"),
+        )
+        generic_bootstrap_request = self._looks_like_generic_workspace_bootstrap_request(str(effective_input or "").lower())
+        if str(target.get("platform") or "").strip() in {"telegram", "discord"} or generic_bootstrap_request:
+            return {
+                "should_handle": True,
+                "supported": True,
+                "mode": "scaffold",
+                "target": target,
+            }
+        if workflow_supported_request and workflow_probe.handled and workflow_probe.next_payload and workflow_intent in {
+            "workspace.search_text",
+            "workspace.read_file",
+            "workspace.write_file",
+            "workspace.ensure_directory",
+            "sandbox.run_command",
+            "hive.create_topic",
+        }:
+            return {
+                "should_handle": True,
+                "supported": True,
+                "mode": "workflow",
+                "target": target,
+                "initial_payloads": [dict(workflow_probe.next_payload or {})],
+            }
+        return {
+            "should_handle": True,
+            "supported": False,
+            "mode": "unsupported",
+            "target": target,
+            "gap_report": self._builder_support_gap_report(
+                source_context=source_context,
+                reason=(
+                    "I do not have a real bounded builder path for that request on this runtime. "
+                    "I can handle bounded workspace starters, narrow bot scaffolds, or explicit inspect/edit/run flows in the active workspace."
+                ),
+            ),
+        }
+
+    def _supports_bounded_builder_workflow_request(
+        self,
+        *,
+        effective_input: str,
+        task_class: str,
+    ) -> bool:
+        if _looks_like_workspace_bootstrap_request(effective_input):
+            return True
+        if not self._explicit_runtime_workflow_request(
+            user_input=effective_input,
+            task_class=task_class,
+        ):
+            return False
+        lowered = f" {str(effective_input or '').lower()} "
+        operation_markers = (
+            " run ",
+            " rerun ",
+            " retry ",
+            " inspect ",
+            " search ",
+            " find ",
+            " read ",
+            " open ",
+            " replace ",
+            " patch ",
+            " edit ",
+            " fix ",
+            " debug ",
+            " trace ",
+            " diagnose ",
+            " test ",
+            " tests ",
+        )
+        target_markers = (
+            " workspace ",
+            " repo ",
+            " repository ",
+            " code ",
+            " file ",
+            " files ",
+            ".py",
+            ".ts",
+            ".js",
+            ".tsx",
+            ".jsx",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".md",
+            "`",
+        )
+        return any(marker in lowered for marker in operation_markers) and any(marker in lowered for marker in target_markers)
+
+    def _builder_controller_step_record(
+        self,
+        *,
+        execution: Any,
+        tool_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        tool_name = str(getattr(execution, "tool_name", "") or tool_payload.get("intent") or "unknown").strip()
+        return {
+            "tool_name": tool_name,
+            "status": str(getattr(execution, "status", "") or "executed"),
+            "mode": str(getattr(execution, "mode", "") or ""),
+            "arguments": dict(tool_payload.get("arguments") or {}),
+            "observation": dict((getattr(execution, "details", {}) or {}).get("observation") or {}),
+            "details": dict(getattr(execution, "details", {}) or {}),
+            "artifacts": [dict(item) for item in list((getattr(execution, "details", {}) or {}).get("artifacts") or []) if isinstance(item, dict)],
+            "summary": self._tool_step_summary(
+                str(getattr(execution, "response_text", "") or ""),
+                fallback=str(getattr(execution, "status", "") or "executed"),
+            ),
+        }
+
+    def _workspace_build_verification_payload(self, *, target: dict[str, str]) -> dict[str, Any] | None:
+        language = str(target.get("language") or "").strip().lower()
+        root_dir = str(target.get("root_dir") or "").strip().rstrip("/")
+        if language != "python" or not root_dir:
+            return None
+        return {
+            "intent": "sandbox.run_command",
+            "arguments": {"command": f"python3 -m compileall -q {root_dir}/src"},
+        }
+
+    def _builder_initial_payloads(
+        self,
+        *,
+        mode: str,
+        target: dict[str, str],
+        user_request: str,
+        web_notes: list[dict[str, Any]],
+        initial_payloads: list[dict[str, Any]] | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+        if mode == "workflow":
+            return [dict(item) for item in list(initial_payloads or []) if isinstance(item, dict)], []
+        sources = self._workspace_build_sources(web_notes)
+        file_map = self._workspace_build_file_map(
+            target=target,
+            user_request=user_request,
+            web_notes=web_notes,
+        )
+        payloads = [
+            {
+                "intent": "workspace.write_file",
+                "arguments": {"path": path, "content": content},
+            }
+            for path, content in file_map.items()
+        ]
+        verification_payload = self._workspace_build_verification_payload(target=target)
+        if verification_payload is not None:
+            payloads.append(verification_payload)
+        return payloads, sources
+
+    def _builder_controller_backing_sources(self, executed_steps: list[dict[str, Any]]) -> list[str]:
+        sources: list[str] = []
+        seen: set[str] = set()
+        for step in list(executed_steps or []):
+            tool_name = str(step.get("tool_name") or "").strip()
+            if tool_name.startswith("workspace."):
+                source = "workspace"
+            elif tool_name.startswith("sandbox."):
+                source = "sandbox"
+            elif tool_name.startswith("web."):
+                source = "web_lookup"
+            else:
+                continue
+            if source in seen:
+                continue
+            seen.add(source)
+            sources.append(source)
+        return sources
+
+    def _builder_controller_observations(
+        self,
+        *,
+        mode: str,
+        target: dict[str, str],
+        executed_steps: list[dict[str, Any]],
+        stop_reason: str,
+        sources: list[dict[str, str]],
+        final_status: str,
+        artifacts: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "channel": "bounded_builder",
+            "builder_mode": str(mode or "").strip(),
+            "target": {
+                "platform": str(target.get("platform") or "").strip(),
+                "language": str(target.get("language") or "").strip(),
+                "root_dir": str(target.get("root_dir") or "").strip(),
+            },
+            "step_count": len(executed_steps),
+            "stop_reason": str(stop_reason or "").strip(),
+            "final_status": str(final_status or "").strip(),
+            "artifacts": dict(artifacts or {}),
+            "sources": [
+                {
+                    "title": str(item.get("title") or "").strip(),
+                    "url": str(item.get("url") or "").strip(),
+                    "label": str(item.get("label") or "").strip(),
+                }
+                for item in list(sources or [])[:4]
+            ],
+            "executed_steps": [
+                {
+                    "tool_name": str(step.get("tool_name") or "").strip(),
+                    "status": str(step.get("status") or "").strip(),
+                    "mode": str(step.get("mode") or "").strip(),
+                    "summary": str(step.get("summary") or "").strip(),
+                    "arguments": dict(step.get("arguments") or {}),
+                    "observation": dict(step.get("observation") or {}),
+                }
+                for step in list(executed_steps or [])[:8]
+            ],
+        }
+
+    def _builder_retry_history(self, executed_steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        seen: dict[tuple[str, str], dict[str, Any]] = {}
+        retries: list[dict[str, Any]] = []
+        for index, step in enumerate(list(executed_steps or []), start=1):
+            tool_name = str(step.get("tool_name") or "").strip()
+            if tool_name != "sandbox.run_command":
+                continue
+            observation = dict(step.get("observation") or {})
+            command = str(observation.get("command") or dict(step.get("arguments") or {}).get("command") or "").strip()
+            if not command:
+                continue
+            key = (tool_name, command)
+            if key not in seen:
+                seen[key] = {
+                    "command": command,
+                    "attempts": 1,
+                    "step_indexes": [index],
+                    "returncodes": [int(observation.get("returncode") or 0)],
+                }
+                continue
+            seen[key]["attempts"] = int(seen[key].get("attempts") or 1) + 1
+            seen[key]["step_indexes"] = list(seen[key].get("step_indexes") or []) + [index]
+            seen[key]["returncodes"] = list(seen[key].get("returncodes") or []) + [int(observation.get("returncode") or 0)]
+        for entry in seen.values():
+            if int(entry.get("attempts") or 0) <= 1:
+                continue
+            retries.append(
+                {
+                    "command": str(entry.get("command") or "").strip(),
+                    "attempts": int(entry.get("attempts") or 0),
+                    "step_indexes": [int(item) for item in list(entry.get("step_indexes") or [])],
+                    "returncodes": [int(item) for item in list(entry.get("returncodes") or [])],
+                }
+            )
+        return retries
+
+    def _builder_controller_artifacts(
+        self,
+        *,
+        executed_steps: list[dict[str, Any]],
+        stop_reason: str,
+    ) -> dict[str, Any]:
+        file_diffs: list[dict[str, Any]] = []
+        command_outputs: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+        for index, step in enumerate(list(executed_steps or []), start=1):
+            for artifact in [dict(item) for item in list(step.get("artifacts") or []) if isinstance(item, dict)]:
+                artifact_type = str(artifact.get("artifact_type") or "").strip()
+                record = {"step_index": index, **artifact}
+                if artifact_type == "file_diff":
+                    file_diffs.append(record)
+                elif artifact_type == "command_output":
+                    command_outputs.append(record)
+                elif artifact_type == "failure":
+                    failures.append(record)
+        return {
+            "file_diffs": file_diffs[:8],
+            "command_outputs": command_outputs[:8],
+            "failures": failures[:6],
+            "retry_history": self._builder_retry_history(executed_steps),
+            "stop_reason": str(stop_reason or "").strip(),
+        }
+
+    def _builder_artifact_citation_block(self, artifacts: dict[str, Any]) -> str:
+        payload = dict(artifacts or {})
+        lines = ["Artifacts:"]
+        file_diffs = [dict(item) for item in list(payload.get("file_diffs") or []) if isinstance(item, dict)]
+        if file_diffs:
+            files = ", ".join(f"`{str(item.get('path') or '').strip()}`" for item in file_diffs[:4] if str(item.get("path") or "").strip())
+            if files:
+                lines.append(f"- changed files: {files}")
+            diff_preview = str(file_diffs[0].get("diff_preview") or "").strip()
+            if diff_preview:
+                lines.append(f"- diff preview: `{self._runtime_preview(diff_preview, limit=180)}`")
+        command_outputs = [dict(item) for item in list(payload.get("command_outputs") or []) if isinstance(item, dict)]
+        if command_outputs:
+            command_bits = []
+            for item in command_outputs[:3]:
+                command = str(item.get("command") or "").strip()
+                returncode = int(item.get("returncode") or 0)
+                if command:
+                    command_bits.append(f"`{command}` (exit {returncode})")
+            if command_bits:
+                lines.append(f"- commands: {', '.join(command_bits)}")
+        failures = [dict(item) for item in list(payload.get("failures") or []) if isinstance(item, dict)]
+        if failures:
+            failure_bits = []
+            for item in failures[:2]:
+                summary = str(item.get("summary") or "").strip()
+                if summary:
+                    failure_bits.append(f"`{self._runtime_preview(summary, limit=140)}`")
+            if failure_bits:
+                lines.append(f"- failures seen: {', '.join(failure_bits)}")
+        retries = [dict(item) for item in list(payload.get("retry_history") or []) if isinstance(item, dict)]
+        if retries:
+            retry_bits = []
+            for item in retries[:2]:
+                command = str(item.get("command") or "").strip()
+                attempts = int(item.get("attempts") or 0)
+                if command and attempts > 1:
+                    retry_bits.append(f"`{command}` x{attempts}")
+            if retry_bits:
+                lines.append(f"- retries: {', '.join(retry_bits)}")
+        stop_reason = str(payload.get("stop_reason") or "").strip()
+        if stop_reason:
+            lines.append(f"- stop reason: `{stop_reason}`")
+        return "\n".join(lines)
+
+    def _append_builder_artifact_citations(self, text: str, *, artifacts: dict[str, Any]) -> str:
+        message = str(text or "").strip()
+        citation_block = self._builder_artifact_citation_block(artifacts)
+        if not citation_block.strip():
+            return message
+        if not message:
+            return citation_block
+        return f"{message}\n\n{citation_block}".strip()
+
+    def _builder_controller_degraded_response(
+        self,
+        *,
+        target: dict[str, str],
+        executed_steps: list[dict[str, Any]],
+        stop_reason: str,
+        failed_execution: Any | None,
+        effective_input: str,
+        session_id: str,
+        artifacts: dict[str, Any],
+    ) -> str:
+        root_dir = str(target.get("root_dir") or "the workspace").strip()
+        if failed_execution is not None:
+            failure_text = self._tool_failure_user_message(
+                execution=failed_execution,
+                effective_input=effective_input,
+                session_id=session_id,
+            )
+            if executed_steps:
+                return (
+                    f"I completed {len(executed_steps)} bounded builder step"
+                    f"{'' if len(executed_steps) == 1 else 's'} under `{root_dir}`, "
+                    f"but the loop stopped at `{str(getattr(failed_execution, 'tool_name', '') or 'tool')}`. {failure_text}"
+                ).strip()
+            return failure_text
+        if executed_steps:
+            return (
+                f"I completed {len(executed_steps)} bounded builder step"
+                f"{'' if len(executed_steps) == 1 else 's'} under `{root_dir}` and stopped with `{stop_reason}`."
+            ).strip()
+        return f"I could not start a bounded builder loop for `{root_dir}` on this run.".strip()
+
+    def _builder_controller_workflow_summary(
+        self,
+        *,
+        mode: str,
+        executed_steps: list[dict[str, Any]],
+        stop_reason: str,
+        artifacts: dict[str, Any],
+    ) -> str:
+        lines = [
+            f"- bounded builder controller executed {len(executed_steps)} real step{'s' if len(executed_steps) != 1 else ''}",
+            f"- builder mode: `{mode}`",
+        ]
+        if executed_steps:
+            chain = " -> ".join(str(step.get("tool_name") or "tool").strip() for step in list(executed_steps or [])[:8])
+            if chain:
+                lines.append(f"- tool chain: `{chain}`")
+        if stop_reason:
+            lines.append(f"- stop reason: `{stop_reason}`")
+        file_diffs = [dict(item) for item in list((artifacts or {}).get("file_diffs") or []) if isinstance(item, dict)]
+        if file_diffs:
+            lines.append(
+                "- changed files: "
+                + ", ".join(f"`{str(item.get('path') or '').strip()}`" for item in file_diffs[:4] if str(item.get("path") or "").strip())
+            )
+        command_outputs = [dict(item) for item in list((artifacts or {}).get("command_outputs") or []) if isinstance(item, dict)]
+        if command_outputs:
+            lines.append(
+                "- commands: "
+                + ", ".join(
+                    f"`{str(item.get('command') or '').strip()}` (exit {int(item.get('returncode') or 0)})"
+                    for item in command_outputs[:3]
+                    if str(item.get("command") or "").strip()
+                )
+            )
+        failures = [dict(item) for item in list((artifacts or {}).get("failures") or []) if isinstance(item, dict)]
+        if failures:
+            lines.append(
+                "- failures seen: "
+                + ", ".join(
+                    f"`{self._runtime_preview(str(item.get('summary') or ''), limit=120)}`"
+                    for item in failures[:2]
+                    if str(item.get("summary") or "").strip()
+                )
+            )
+        retries = [dict(item) for item in list((artifacts or {}).get("retry_history") or []) if isinstance(item, dict)]
+        if retries:
+            lines.append(
+                "- retries: "
+                + ", ".join(
+                    f"`{str(item.get('command') or '').strip()}` x{int(item.get('attempts') or 0)}"
+                    for item in retries[:2]
+                    if str(item.get("command") or "").strip() and int(item.get("attempts") or 0) > 1
+                )
+            )
+        return "\n".join(lines)
+
+    def _run_bounded_builder_loop(
+        self,
+        *,
+        task: Any,
+        session_id: str,
+        effective_input: str,
+        task_class: str,
+        source_context: dict[str, object] | None,
+        initial_payloads: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any], str, Any | None]:
+        loop_source_context = self._merge_runtime_source_contexts({}, dict(source_context or {}))
+        executed_steps: list[dict[str, Any]] = []
+        pending_payloads = [dict(item) for item in list(initial_payloads or []) if isinstance(item, dict)]
+        stop_reason = ""
+        failed_execution = None
+        max_steps = 6
+
+        while len(executed_steps) < max_steps:
+            if pending_payloads:
+                tool_payload = dict(pending_payloads.pop(0))
+            else:
+                workflow_decision = plan_tool_workflow(
+                    user_text=effective_input,
+                    task_class=task_class,
+                    executed_steps=executed_steps,
+                    source_context=loop_source_context,
+                )
+                if workflow_decision.handled and workflow_decision.stop_after:
+                    stop_reason = str(workflow_decision.reason or "stop_after").strip()
+                    break
+                if not workflow_decision.handled or not workflow_decision.next_payload:
+                    stop_reason = str(workflow_decision.reason or "no_followup_plan").strip()
+                    break
+                tool_payload = dict(workflow_decision.next_payload or {})
+
+            execution = execute_tool_intent(
+                tool_payload,
+                task_id=task.task_id,
+                session_id=session_id,
+                source_context=loop_source_context,
+                hive_activity_tracker=self.hive_activity_tracker,
+                public_hive_bridge=self.public_hive_bridge,
+            )
+            if not execution.handled:
+                stop_reason = "tool_not_handled"
+                break
+
+            executed_steps.append(
+                self._builder_controller_step_record(
+                    execution=execution,
+                    tool_payload=tool_payload,
+                )
+            )
+            loop_source_context = self._append_tool_result_to_source_context(
+                loop_source_context,
+                execution=execution,
+                tool_name=str(getattr(execution, "tool_name", "") or tool_payload.get("intent") or ""),
+            )
+            if str(getattr(execution, "mode", "") or "").strip() != "tool_executed":
+                failed_execution = execution
+                stop_reason = (
+                    f"{str(getattr(execution, 'mode', '') or 'tool_failed')}:{str(getattr(execution, 'status', '') or 'failed')}"
+                )
+                break
+
+        if not stop_reason and len(executed_steps) >= max_steps:
+            stop_reason = "step_budget_exhausted"
+        if not stop_reason:
+            stop_reason = "bounded_loop_complete"
+        return executed_steps, loop_source_context, stop_reason, failed_execution
+
+    def _maybe_run_builder_controller(
         self,
         *,
         task: Any,
@@ -1953,83 +4311,152 @@ class NullaAgent:
         source_context: dict[str, object] | None,
     ) -> dict[str, Any] | None:
         source_context = dict(source_context or {})
-        if not self._should_run_workspace_build_pipeline(
+        profile = self._builder_controller_profile(
             effective_input=effective_input,
             classification=classification,
+            interpretation=interpretation,
             source_context=source_context,
-        ):
+        )
+        if not profile.get("should_handle"):
             return None
 
-        target = self._workspace_build_target(
-            query_text=effective_input,
-            interpretation=interpretation,
-        )
-        file_map = self._workspace_build_file_map(
+        if not profile.get("supported"):
+            report = dict(profile.get("gap_report") or {})
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=effective_input,
+                response=render_capability_truth_response(report),
+                confidence=0.82 if str(report.get("support_level") or "").strip() == "partial" else 0.74,
+                source_context=source_context,
+                reason="builder_capability_gap",
+            )
+
+        target = dict(profile.get("target") or {})
+        mode = str(profile.get("mode") or "workflow").strip()
+        initial_payloads, sources = self._builder_initial_payloads(
+            mode=mode,
             target=target,
             user_request=effective_input,
             web_notes=web_notes,
+            initial_payloads=list(profile.get("initial_payloads") or []),
         )
-        if not file_map:
-            return None
-
-        write_results: list[dict[str, Any]] = []
-        write_failures: list[str] = []
-        for path, content in file_map.items():
-            execution = execute_runtime_tool(
-                "workspace.write_file",
-                {"path": path, "content": content},
+        if mode == "scaffold" and not initial_payloads:
+            report = self._builder_support_gap_report(
                 source_context=source_context,
+                reason=(
+                    "That request did not resolve to a supported scaffold target. "
+                    "The real scaffold lane here is still limited to Telegram or Discord bot builds."
+                ),
             )
-            if execution is None or not execution.ok:
-                write_failures.append(str((execution.response_text if execution else f"Failed to write {path}") or "").strip())
-                continue
-            write_results.append(
-                {
-                    "path": path,
-                    "status": execution.status,
-                    "response_text": execution.response_text,
-                }
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=effective_input,
+                response=render_capability_truth_response(report),
+                confidence=0.78,
+                source_context=source_context,
+                reason="builder_capability_gap",
             )
 
-        verification = self._workspace_build_verification(
-            target=target,
+        executed_steps, loop_source_context, stop_reason, failed_execution = self._run_bounded_builder_loop(
+            task=task,
+            session_id=session_id,
+            effective_input=effective_input,
+            task_class=str(classification.get("task_class") or "unknown"),
             source_context=source_context,
+            initial_payloads=initial_payloads,
         )
-        sources = self._workspace_build_sources(web_notes)
-        response = self._workspace_build_response(
+        final_status = "failed" if failed_execution is not None else "completed"
+        artifacts = self._builder_controller_artifacts(
+            executed_steps=executed_steps,
+            stop_reason=stop_reason,
+        )
+        observations = self._builder_controller_observations(
+            mode=mode,
             target=target,
-            write_results=write_results,
-            write_failures=write_failures,
-            verification=verification,
+            executed_steps=executed_steps,
+            stop_reason=stop_reason,
             sources=sources,
+            final_status=final_status,
+            artifacts=artifacts,
         )
-        workflow_summary = (
-            f"- workspace build pipeline: {target['platform']} {target['language']} scaffold\n"
-            f"- generated under `{target['root_dir']}`\n"
-            f"- source-backed notes used: {len(sources)}\n"
-            f"- files written: {len(write_results)}"
+        degraded = self._builder_controller_degraded_response(
+            target=target,
+            executed_steps=executed_steps,
+            stop_reason=stop_reason,
+            failed_execution=failed_execution,
+            effective_input=effective_input,
+            session_id=session_id,
+            artifacts=artifacts,
         )
+        workflow_summary = self._builder_controller_workflow_summary(
+            mode=mode,
+            executed_steps=executed_steps,
+            stop_reason=stop_reason,
+            artifacts=artifacts,
+        )
+        if self._is_chat_truth_surface(loop_source_context):
+            result = self._chat_surface_model_wording_result(
+                session_id=session_id,
+                user_input=effective_input,
+                source_context=loop_source_context,
+                persona=load_active_persona(self.persona_id),
+                interpretation=interpretation,
+                task_class=str(classification.get("task_class") or "integration_orchestration"),
+                response_class=ResponseClass.GENERIC_CONVERSATION,
+                reason="builder_controller_model_wording",
+                model_input=self._chat_surface_builder_model_input(
+                    user_input=effective_input,
+                    observations=observations,
+                ),
+                fallback_response=degraded,
+                tool_backing_sources=self._builder_controller_backing_sources(executed_steps),
+                response_postprocessor=lambda text: self._append_builder_artifact_citations(text, artifacts=artifacts),
+            )
+            result["mode"] = "tool_failed" if failed_execution is not None else ("tool_executed" if executed_steps else "advice_only")
+            result["workflow_summary"] = workflow_summary
+            result["details"] = {
+                "builder_controller": {
+                    "mode": mode,
+                    "step_count": len(executed_steps),
+                    "stop_reason": stop_reason,
+                    "tool_steps": [str(step.get("tool_name") or "").strip() for step in executed_steps],
+                    "artifacts": artifacts,
+                }
+            }
+            return result
+
+        response_text = degraded
+        if executed_steps:
+            response_text = self._append_builder_artifact_citations(
+                self._render_tool_loop_response(
+                    final_message=degraded,
+                    executed_steps=executed_steps,
+                    include_step_summary=True,
+                ),
+                artifacts=artifacts,
+            )
         return self._action_fast_path_result(
             task_id=task.task_id,
             session_id=session_id,
             user_input=effective_input,
-            response=response,
-            confidence=0.88 if write_results else 0.52,
-            source_context=source_context,
-            reason="workspace_build_pipeline",
-            success=bool(write_results) and not write_failures,
+            response=response_text,
+            confidence=0.84 if executed_steps and failed_execution is None else 0.58,
+            source_context=loop_source_context,
+            reason="builder_controller_pipeline",
+            success=bool(executed_steps) and failed_execution is None,
             details={
-                "workspace_build_target": target,
-                "written_files": [item["path"] for item in write_results],
-                "verification_status": str((verification or {}).get("status") or "skipped"),
-                "verification_ok": bool((verification or {}).get("ok", False)),
+                "builder_mode": mode,
+                "step_count": len(executed_steps),
+                "stop_reason": stop_reason,
+                "tool_steps": [str(step.get("tool_name") or "").strip() for step in executed_steps],
+                "artifacts": artifacts,
             },
-            mode_override="tool_executed" if write_results else "tool_failed",
-            task_outcome="success" if write_results else "failed",
+            mode_override="tool_failed" if failed_execution is not None else ("tool_executed" if executed_steps else "advice_only"),
+            task_outcome="failed" if failed_execution is not None else ("success" if executed_steps else "advice_only"),
             workflow_summary=workflow_summary,
         )
 
-    def _should_run_workspace_build_pipeline(
+    def _should_run_builder_controller(
         self,
         *,
         effective_input: str,
@@ -2041,22 +4468,44 @@ class NullaAgent:
         if not str(source_context.get("workspace") or source_context.get("workspace_root") or "").strip():
             return False
         task_class = str(classification.get("task_class") or "unknown")
-        if task_class not in {"system_design", "integration_orchestration"}:
-            return False
         lowered = str(effective_input or "").lower()
-        if not any(marker in lowered for marker in ("build", "create", "scaffold", "implement", "generate", "start working", "write the files")):
+        generic_bootstrap_request = self._looks_like_generic_workspace_bootstrap_request(lowered)
+        if task_class not in {
+            "system_design",
+            "integration_orchestration",
+            "debugging",
+            "dependency_resolution",
+            "config",
+            "file_inspection",
+            "shell_guidance",
+            "unknown",
+        } and not generic_bootstrap_request:
             return False
-        if not any(marker in lowered for marker in ("telegram", "discord", "bot", "agent", "service")):
+        if not self._looks_like_builder_request(lowered):
             return False
         if any(marker in lowered for marker in ("don't write", "do not write", "advice only", "just plan", "no files")):
             return False
+        scaffold_request = (
+            any(marker in lowered for marker in ("build", "create", "scaffold", "implement", "generate", "start working"))
+            and any(marker in lowered for marker in ("telegram", "discord", "bot", "agent", "service"))
+            and any(marker in lowered for marker in ("workspace", "repo", "repository", "write the files", "create the files", "generate the code"))
+        )
         if not (
-            "workspace" in lowered
-            or "write the files" in lowered
+            "write the files" in lowered
             or "create the files" in lowered
             or "generate the code" in lowered
+            or "build the code" in lowered
+            or "building the code" in lowered
             or "start working" in lowered
+            or "start building" in lowered
+            or "start creating" in lowered
             or "implement it" in lowered
+            or "edit the files" in lowered
+            or "patch the files" in lowered
+            or "launch local" in lowered
+            or scaffold_request
+            or generic_bootstrap_request
+            or self._explicit_runtime_workflow_request(user_input=effective_input, task_class=task_class)
         ):
             return False
         return True
@@ -2064,6 +4513,7 @@ class NullaAgent:
     def _workspace_build_target(self, *, query_text: str, interpretation: Any) -> dict[str, str]:
         lowered = str(query_text or "").lower()
         topic_hints = {str(item).lower() for item in getattr(interpretation, "topic_hints", []) or []}
+        requested_root_dir = self._extract_requested_builder_root(query_text)
         platform = "generic"
         if "discord" in lowered or "discord bot" in topic_hints:
             platform = "discord"
@@ -2089,11 +4539,16 @@ class NullaAgent:
         else:
             language = "python"
 
-        slug = f"{platform}-bot" if platform in {"telegram", "discord"} else "build-brief"
         return {
             "platform": platform,
             "language": language,
-            "root_dir": f"generated/{slug}",
+            "root_dir": (
+                requested_root_dir.rstrip("/")
+                if requested_root_dir
+                else f"generated/{platform}-bot"
+                if platform in {"telegram", "discord"}
+                else "generated/workspace-starter"
+            ),
         }
 
     def _workspace_build_file_map(
@@ -2138,8 +4593,27 @@ class NullaAgent:
                 f"{root_dir}/.env.example": "DISCORD_BOT_TOKEN=replace-me\n",
                 f"{root_dir}/src/bot.ts": self._discord_typescript_bot_source(sources=sources),
             }
-        brief = self._generic_build_brief(user_request=user_request, root_dir=root_dir, sources=sources)
-        return {f"{root_dir}/README.md": brief}
+        if language == "typescript":
+            return {
+                f"{root_dir}/README.md": self._generic_workspace_readme(
+                    user_request=user_request,
+                    root_dir=root_dir,
+                    sources=sources,
+                    language=language,
+                ),
+                f"{root_dir}/package.json": self._generic_typescript_package_json(root_dir=root_dir),
+                f"{root_dir}/tsconfig.json": self._telegram_typescript_tsconfig(),
+                f"{root_dir}/src/index.ts": self._generic_typescript_source(user_request=user_request, sources=sources),
+            }
+        return {
+            f"{root_dir}/README.md": self._generic_workspace_readme(
+                user_request=user_request,
+                root_dir=root_dir,
+                sources=sources,
+                language=language,
+            ),
+            f"{root_dir}/src/main.py": self._generic_python_source(user_request=user_request, sources=sources),
+        }
 
     def _workspace_build_sources(self, web_notes: list[dict[str, Any]]) -> list[dict[str, str]]:
         selected: list[dict[str, str]] = []
@@ -2194,7 +4668,7 @@ class NullaAgent:
         lines = [
             f"Wrote a {target['platform']} {target['language']} scaffold under `{target['root_dir']}`."
             if target["platform"] != "generic"
-            else f"Wrote a researched build brief under `{target['root_dir']}`."
+            else f"Wrote a generic {target['language']} workspace starter under `{target['root_dir']}`."
         ]
         if write_results:
             lines.append("Files written:")
@@ -2218,6 +4692,69 @@ class NullaAgent:
         if not sources:
             return "- No live sources were captured in this run.\n"
         return "\n".join(f"- {item['title']}: {item['url']}" for item in sources[:4]) + "\n"
+
+    def _generic_workspace_readme(
+        self,
+        *,
+        user_request: str,
+        root_dir: str,
+        sources: list[dict[str, str]],
+        language: str,
+    ) -> str:
+        entrypoint = "src/index.ts" if language == "typescript" else "src/main.py"
+        return (
+            "# Workspace Starter\n\n"
+            f"Bounded local {language} starter generated to unblock real work in `{root_dir}`.\n\n"
+            "## Request\n\n"
+            f"- {user_request.strip()}\n\n"
+            "## Sources\n\n"
+            f"{self._sources_section(sources)}\n"
+            "## Files\n\n"
+            f"- `{entrypoint}`: first executable entrypoint for this workspace.\n"
+            "- `README.md`: visible grounding for what this starter is trying to do.\n"
+        )
+
+    def _generic_python_source(self, *, user_request: str, sources: list[dict[str, str]]) -> str:
+        source_lines = "\n".join(f"# - {item['title']}: {item['url']}" for item in sources[:4]) or "# - No live sources captured in this run."
+        return (
+            '"""Workspace starter entrypoint.\n\n'
+            f"Request: {user_request.strip()}\n"
+            "Source references:\n"
+            f"{source_lines}\n"
+            '"""\n\n'
+            "from __future__ import annotations\n\n"
+            "def main() -> None:\n"
+            '    print("NULLA workspace starter is ready for the next implementation step.")\n\n'
+            'if __name__ == "__main__":\n'
+            "    main()\n"
+        )
+
+    def _generic_typescript_package_json(self, *, root_dir: str) -> str:
+        package_name = re.sub(r"[^a-z0-9_-]+", "-", root_dir.strip("/").split("/")[-1].lower()).strip("-") or "nulla-workspace-starter"
+        return (
+            "{\n"
+            f'  "name": "{package_name}",\n'
+            '  "private": true,\n'
+            '  "type": "module",\n'
+            '  "scripts": {\n'
+            '    "dev": "tsx src/index.ts"\n'
+            "  },\n"
+            '  "devDependencies": {\n'
+            '    "tsx": "^4.19.2",\n'
+            '    "typescript": "^5.7.3"\n'
+            "  }\n"
+            "}\n"
+        )
+
+    def _generic_typescript_source(self, *, user_request: str, sources: list[dict[str, str]]) -> str:
+        source_lines = "\n".join(f"// - {item['title']}: {item['url']}" for item in sources[:4]) or "// - No live sources captured in this run."
+        return (
+            "// Workspace starter entrypoint.\n"
+            f"// Request: {user_request.strip()}\n"
+            "// Source references:\n"
+            f"{source_lines}\n\n"
+            'console.log("NULLA workspace starter is ready for the next implementation step.");\n'
+        )
 
     def _telegram_python_readme(self, *, user_request: str, root_dir: str, sources: list[dict[str, str]]) -> str:
         return (
@@ -2483,15 +5020,29 @@ class NullaAgent:
         source_context: dict[str, object] | None,
         surface: str,
     ) -> dict[str, Any] | None:
+        checkpoint_id = self._runtime_checkpoint_id(source_context)
+        checkpoint = get_runtime_checkpoint(checkpoint_id) if checkpoint_id else None
+        checkpoint_state = dict((checkpoint or {}).get("state") or {})
+        if self._should_keep_ai_first_chat_lane(
+            user_input=effective_input,
+            classification=classification,
+            interpretation=interpretation,
+            source_context=source_context,
+            checkpoint_state=checkpoint_state,
+        ):
+            return None
+        if self._should_run_builder_controller(
+            effective_input=effective_input,
+            classification=classification,
+            source_context=dict(source_context or {}),
+        ):
+            return None
         if not should_attempt_tool_intent(
             effective_input,
             task_class=str(classification.get("task_class", "unknown")),
             source_context=source_context,
         ):
             return None
-        checkpoint_id = self._runtime_checkpoint_id(source_context)
-        checkpoint = get_runtime_checkpoint(checkpoint_id) if checkpoint_id else None
-        checkpoint_state = dict((checkpoint or {}).get("state") or {})
         loop_source_context = self._merge_runtime_source_contexts(
             dict(checkpoint_state.get("loop_source_context") or {}),
             dict(source_context or {}),
@@ -2544,92 +5095,118 @@ class NullaAgent:
                     tool_name=tool_name or "unknown",
                 )
             else:
-                tool_decision = self.memory_router.resolve_tool_intent(
-                    task=task,
-                    classification=classification,
-                    interpretation=interpretation,
-                    context_result=context_result,
-                    persona=persona,
-                    surface=surface,
+                workflow_decision = plan_tool_workflow(
+                    user_text=effective_input,
+                    task_class=str(classification.get("task_class") or "unknown"),
+                    executed_steps=executed_steps,
                     source_context=loop_source_context,
                 )
-                last_tool_decision = tool_decision
-                direct_message = self._tool_intent_direct_message(tool_decision.structured_output)
-                if direct_message is not None:
+                if workflow_decision.handled and workflow_decision.stop_after:
                     self._emit_runtime_event(
                         loop_source_context,
-                        event_type="tool_loop_completed",
-                        message=(
-                            f"Returning grounded reply after {len(executed_steps)} real tool step"
-                            f"{'' if len(executed_steps) == 1 else 's'}."
-                        ),
+                        event_type="workflow_planner_stop",
+                        message="Workflow planner gathered enough state and stopped before another tool step.",
+                        status=workflow_decision.reason,
                         step_count=len(executed_steps),
                     )
-                    confidence = max(0.35, min(0.96, float(tool_decision.trust_score or tool_decision.confidence or 0.55)))
-                    return {
-                        "response": self._render_tool_loop_response(
-                            final_message=direct_message,
-                            executed_steps=executed_steps,
-                            include_step_summary=not self._live_runtime_stream_enabled(loop_source_context),
-                        ),
-                        "confidence": confidence,
-                        "success": True,
-                        "status": "direct_response_after_tools" if executed_steps else "direct_response",
-                        "mode": "tool_executed" if executed_steps else "advice_only",
-                        "task_outcome": "success",
-                        "details": {
-                            "tool_name": "respond.direct",
-                            "tool_provider": tool_decision.provider_id,
-                            "tool_validation": tool_decision.validation_state,
-                            "tool_steps": [step["tool_name"] for step in executed_steps],
-                        },
-                        "learned_plan": None,
-                        "workflow_summary": self._tool_intent_loop_workflow_summary(
-                            executed_steps=executed_steps,
-                            provider_id=tool_decision.provider_id,
-                            validation_state=tool_decision.validation_state,
-                        ),
-                    }
-                try:
-                    payload_signature = json.dumps(tool_decision.structured_output, sort_keys=True, ensure_ascii=True, default=str)
-                except Exception:
-                    payload_signature = str(tool_decision.structured_output)
-                if payload_signature in seen_tool_payloads:
+                    break
+                if workflow_decision.handled and workflow_decision.next_payload:
+                    tool_payload = dict(workflow_decision.next_payload)
+                    tool_name = str(tool_payload.get("intent") or "").strip()
                     self._emit_runtime_event(
                         loop_source_context,
-                        event_type="tool_repeat_blocked",
-                        message="Repeated tool request detected. Switching to grounded synthesis instead of looping.",
+                        event_type="workflow_planner_step",
+                        message=f"Workflow planner selected {tool_name}.",
+                        tool_name=tool_name or "unknown",
+                        status=workflow_decision.reason,
                     )
-                    if checkpoint_id:
-                        record_runtime_tool_progress(
-                            checkpoint_id,
-                            executed_steps=executed_steps,
-                            loop_source_context=loop_source_context,
-                            seen_tool_payloads=seen_tool_payloads,
-                            pending_tool_payload=None,
-                            last_tool_payload=checkpoint_state.get("last_tool_payload"),
-                            last_tool_response=checkpoint_state.get("last_tool_response"),
-                            last_tool_name=str((executed_steps[-1] if executed_steps else {}).get("tool_name") or ""),
-                            task_class=str(classification.get("task_class") or "unknown"),
-                            status="running",
+                else:
+                    tool_decision = self.memory_router.resolve_tool_intent(
+                        task=task,
+                        classification=classification,
+                        interpretation=interpretation,
+                        context_result=context_result,
+                        persona=persona,
+                        surface=surface,
+                        source_context=loop_source_context,
+                    )
+                    last_tool_decision = tool_decision
+                    direct_message = self._tool_intent_direct_message(tool_decision.structured_output)
+                    if direct_message is not None:
+                        self._emit_runtime_event(
+                            loop_source_context,
+                            event_type="tool_loop_completed",
+                            message=(
+                                f"Returning grounded reply after {len(executed_steps)} real tool step"
+                                f"{'' if len(executed_steps) == 1 else 's'}."
+                            ),
+                            step_count=len(executed_steps),
                         )
-                    break
-                seen_tool_payloads.add(payload_signature)
-                tool_payload = dict(tool_decision.structured_output or {})
-                tool_name = str(tool_payload.get("intent") or "").strip()
-                provider_id = tool_decision.provider_id
-                validation_state = tool_decision.validation_state
-                confidence_hint = float(tool_decision.trust_score or tool_decision.confidence or 0.55)
-                self._emit_runtime_event(
-                    loop_source_context,
-                    event_type="tool_selected" if tool_name else "tool_failed",
-                    message=(
-                        f"Running real tool {tool_name}."
-                        if tool_name
-                        else "Model returned an invalid tool payload with no intent name."
-                    ),
-                    tool_name=tool_name or "unknown",
-                )
+                        confidence = max(0.35, min(0.96, float(tool_decision.trust_score or tool_decision.confidence or 0.55)))
+                        return {
+                            "response": self._render_tool_loop_response(
+                                final_message=direct_message,
+                                executed_steps=executed_steps,
+                                include_step_summary=not self._live_runtime_stream_enabled(loop_source_context),
+                            ),
+                            "confidence": confidence,
+                            "success": True,
+                            "status": "direct_response_after_tools" if executed_steps else "direct_response",
+                            "mode": "tool_executed" if executed_steps else "advice_only",
+                            "task_outcome": "success",
+                            "details": {
+                                "tool_name": "respond.direct",
+                                "tool_provider": tool_decision.provider_id,
+                                "tool_validation": tool_decision.validation_state,
+                                "tool_steps": [step["tool_name"] for step in executed_steps],
+                            },
+                            "learned_plan": None,
+                            "workflow_summary": self._tool_intent_loop_workflow_summary(
+                                executed_steps=executed_steps,
+                                provider_id=tool_decision.provider_id,
+                                validation_state=tool_decision.validation_state,
+                            ),
+                        }
+                    try:
+                        payload_signature = json.dumps(tool_decision.structured_output, sort_keys=True, ensure_ascii=True, default=str)
+                    except Exception:
+                        payload_signature = str(tool_decision.structured_output)
+                    if payload_signature in seen_tool_payloads:
+                        self._emit_runtime_event(
+                            loop_source_context,
+                            event_type="tool_repeat_blocked",
+                            message="Repeated tool request detected. Switching to grounded synthesis instead of looping.",
+                        )
+                        if checkpoint_id:
+                            record_runtime_tool_progress(
+                                checkpoint_id,
+                                executed_steps=executed_steps,
+                                loop_source_context=loop_source_context,
+                                seen_tool_payloads=seen_tool_payloads,
+                                pending_tool_payload=None,
+                                last_tool_payload=checkpoint_state.get("last_tool_payload"),
+                                last_tool_response=checkpoint_state.get("last_tool_response"),
+                                last_tool_name=str((executed_steps[-1] if executed_steps else {}).get("tool_name") or ""),
+                                task_class=str(classification.get("task_class") or "unknown"),
+                                status="running",
+                            )
+                        break
+                    seen_tool_payloads.add(payload_signature)
+                    tool_payload = dict(tool_decision.structured_output or {})
+                    tool_name = str(tool_payload.get("intent") or "").strip()
+                    provider_id = tool_decision.provider_id
+                    validation_state = tool_decision.validation_state
+                    confidence_hint = float(tool_decision.trust_score or tool_decision.confidence or 0.55)
+                    self._emit_runtime_event(
+                        loop_source_context,
+                        event_type="tool_selected" if tool_name else "tool_failed",
+                        message=(
+                            f"Running real tool {tool_name}."
+                            if tool_name
+                            else "Model returned an invalid tool payload with no intent name."
+                        ),
+                        tool_name=tool_name or "unknown",
+                    )
 
             tool_name = str(tool_payload.get("intent") or "").strip() or "unknown"
             if checkpoint_id:
@@ -2702,6 +5279,9 @@ class NullaAgent:
                     "tool_name": execution.tool_name or tool_name,
                     "status": str(execution.status or "executed"),
                     "mode": execution.mode,
+                    "arguments": dict(tool_payload.get("arguments") or {}),
+                    "observation": dict((execution.details or {}).get("observation") or {}),
+                    "details": dict(execution.details or {}),
                     "summary": self._tool_step_summary(execution.response_text, fallback=str(execution.status or "executed")),
                 }
             )
@@ -2719,8 +5299,8 @@ class NullaAgent:
             )
             loop_source_context = self._append_tool_result_to_source_context(
                 loop_source_context,
-                tool_name=execution.tool_name or "",
-                response_text=execution.response_text,
+                execution=execution,
+                tool_name=execution.tool_name or tool_name,
             )
             checkpoint_state["last_tool_payload"] = dict(tool_payload)
             checkpoint_state["last_tool_response"] = {
@@ -2891,7 +5471,9 @@ class NullaAgent:
         )
 
     def _wants_fresh_info(self, text: str, *, interpretation: Any) -> bool:
-        lowered = (text or "").lower()
+        lowered = " ".join(str(text or "").strip().lower().split())
+        if looks_like_explicit_lookup_request(lowered) or looks_like_public_entity_lookup_request(lowered):
+            return True
         for marker in (
             "latest",
             "newest",
@@ -2913,6 +5495,11 @@ class NullaAgent:
             "check online",
             "look up",
             "browse",
+            "on x",
+            "on twitter",
+            "on the web",
+            "on web",
+            "google",
         ):
             if marker in lowered:
                 return True
@@ -2947,12 +5534,14 @@ class NullaAgent:
         *,
         workflow_summary: str = "",
         debug_origin: str | None = None,
+        allow_planner_style: bool = False,
     ) -> ChatTurnResult:
         return ChatTurnResult(
             text=str(text or "").strip(),
             response_class=response_class,
             workflow_summary=str(workflow_summary or "").strip(),
             debug_origin=debug_origin,
+            allow_planner_style=bool(allow_planner_style),
         )
 
     def _decorate_chat_response(
@@ -2988,6 +5577,7 @@ class NullaAgent:
         text = self._sanitize_user_chat_text(
             result.text,
             response_class=result.response_class,
+            allow_planner_style=result.allow_planner_style,
         )
         if result.response_class == ResponseClass.TASK_STARTED:
             text = re.sub(
@@ -3044,9 +5634,22 @@ class NullaAgent:
             source_context=source_context,
         )
 
-    def _sanitize_user_chat_text(self, text: str, *, response_class: ResponseClass) -> str:
+    def _sanitize_user_chat_text(
+        self,
+        text: str,
+        *,
+        response_class: ResponseClass,
+        allow_planner_style: bool = False,
+    ) -> str:
         base_text = str(text or "").strip()
-        sanitized = self._strip_runtime_preamble(base_text)
+        sanitized = self._strip_runtime_preamble(base_text, allow_planner_style=False)
+        sanitized = self._strip_planner_leakage(sanitized)
+        if self._contains_generic_planner_scaffold(sanitized):
+            if response_class == ResponseClass.UTILITY_ANSWER:
+                return "I couldn't answer that utility request cleanly."
+            if response_class in {ResponseClass.TASK_FAILED_USER_SAFE, ResponseClass.SYSTEM_ERROR_USER_SAFE}:
+                return "I couldn't map that cleanly to a real action."
+            return "I'm here and ready to help. What do you want to do?"
         lowered = sanitized.lower()
         forbidden = (
             "invalid tool payload",
@@ -3061,14 +5664,71 @@ class NullaAgent:
             return "I couldn't resolve that cleanly."
         return sanitized
 
-    def _strip_runtime_preamble(self, text: str) -> str:
+    def _strip_runtime_preamble(self, text: str, *, allow_planner_style: bool = False) -> str:
         clean = str(text or "").strip()
+        if allow_planner_style:
+            return clean
         if not clean.startswith("Real steps completed:"):
             return clean
         parts = clean.split("\n\n", 1)
         if len(parts) == 2 and parts[1].strip():
             return parts[1].strip()
         return "I couldn't resolve that cleanly."
+
+    def _strip_planner_leakage(self, text: str) -> str:
+        clean = str(text or "").strip()
+        if not clean:
+            return ""
+
+        clean = self._unwrap_summary_or_action_payload(clean)
+
+        lowered = clean.lower()
+        if lowered.startswith("workflow:"):
+            parts = clean.split("\n\n", 1)
+            if len(parts) == 2 and parts[1].strip():
+                clean = parts[1].strip()
+            else:
+                clean = re.sub(r"^workflow:\s*", "", clean, flags=re.IGNORECASE).strip()
+
+        clean = re.sub(r"^here(?:'|’)s what i(?:'|’)d suggest:\s*", "", clean, flags=re.IGNORECASE).strip()
+        clean = re.sub(r"^(summary_block|action_plan)\s*:\s*", "", clean, flags=re.IGNORECASE).strip()
+        return clean
+
+    def _contains_generic_planner_scaffold(self, text: str) -> bool:
+        clean = self._unwrap_summary_or_action_payload(str(text or "").strip())
+        if not clean:
+            return False
+        generic_lines = {"review problem", "choose safe next step", "validate result"}
+        normalized_lines: list[str] = []
+        for raw_line in clean.splitlines():
+            line = re.sub(r"^[\-\*\d\.\)\s]+", "", raw_line).strip().lower()
+            line = re.sub(r"[.!?]+$", "", line).strip()
+            if line:
+                normalized_lines.append(line)
+        if not normalized_lines:
+            return False
+        unique_lines = set(normalized_lines)
+        return len(unique_lines) >= 2 and unique_lines.issubset(generic_lines)
+
+    def _unwrap_summary_or_action_payload(self, text: str) -> str:
+        raw = str(text or "").strip()
+        if not (raw.startswith("{") and raw.endswith("}")):
+            return raw
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return raw
+        if not isinstance(payload, dict):
+            return raw
+
+        summary = str(payload.get("summary") or payload.get("message") or "").strip()
+        bullet_source = payload.get("bullets") or payload.get("steps") or []
+        bullets = [str(item).strip() for item in list(bullet_source) if str(item).strip()]
+        lines: list[str] = []
+        if summary:
+            lines.append(summary)
+        lines.extend(f"- {item}" for item in bullets[:6])
+        return "\n".join(line for line in lines if line.strip()) or raw
 
     def _should_attach_hive_footer(
         self,
@@ -3089,11 +5749,14 @@ class NullaAgent:
             return ResponseClass.SMALLTALK
         if reason in {
             "date_time_fast_path",
+            "direct_math_fast_path",
             "ui_command_fast_path",
             "credit_status_fast_path",
             "memory_command",
             "user_preference_command",
             "live_info_fast_path",
+            "capability_truth_query",
+            "builder_capability_gap",
         }:
             return ResponseClass.UTILITY_ANSWER
         if reason == "help_fast_path":
@@ -3121,9 +5784,16 @@ class NullaAgent:
 
     def _classify_hive_text_response(self, response: str) -> ResponseClass:
         lowered = str(response or "").strip().lower()
-        if lowered.startswith("i couldn't reach the hive watcher") or lowered.startswith("i couldn't reach hive") or lowered.startswith("public hive is not enabled"):
+        if (
+            lowered.startswith("hive watcher is not configured")
+            or lowered.startswith("i couldn't reach the hive watcher")
+            or lowered.startswith("i couldn't reach hive")
+            or lowered.startswith("public hive is not enabled")
+        ):
             return ResponseClass.TASK_FAILED_USER_SAFE
         if lowered.startswith("available hive tasks right now"):
+            return ResponseClass.TASK_LIST
+        if lowered.startswith("i couldn't reach the live hive watcher just now, but these are the real hive tasks i already had in session"):
             return ResponseClass.TASK_LIST
         if lowered.startswith("i couldn't reach the live hive watcher, but i can still pull public hive tasks"):
             return ResponseClass.TASK_LIST
@@ -3189,6 +5859,12 @@ class NullaAgent:
         if result.response_class == ResponseClass.UTILITY_ANSWER:
             if preserve_task_context:
                 return
+            if (
+                str(state.get("interaction_mode") or "").strip().lower() == "utility"
+                and str(payload.get("utility_kind") or "").strip().lower() == "time"
+                and "current time" in str(result.text or "").lower()
+            ):
+                return
             set_hive_interaction_state(session_id, mode="utility", payload={})
             return
         if result.response_class == ResponseClass.GENERIC_CONVERSATION:
@@ -3213,24 +5889,87 @@ class NullaAgent:
         user_input: str,
         *,
         session_id: str,
-    ) -> tuple[bool, str]:
-        handled, response = self.hive_activity_tracker.maybe_handle_command(user_input, session_id=session_id)
+    ) -> tuple[bool, str, bool, dict[str, Any] | None]:
+        handled, details = self.hive_activity_tracker.maybe_handle_command_details(user_input, session_id=session_id)
+        response = str((details or {}).get("response_text") or "")
+        command_kind = str((details or {}).get("command_kind") or "").strip().lower()
         if not handled:
-            return False, ""
+            return False, "", False, None
+        allow_model_wording = not self._looks_like_hive_prompt_control_command(user_input) and command_kind != "watcher_unavailable"
         if not self._hive_tracker_needs_bridge_fallback(response):
-            return True, response
-        bridge_response = self._maybe_handle_hive_bridge_fallback(
+            return True, response, allow_model_wording, details
+        bridge_details = self._maybe_handle_hive_bridge_fallback(
             user_input,
             session_id=session_id,
             tracker_response=response,
         )
-        if bridge_response is not None:
-            return True, bridge_response
-        return True, response
+        if bridge_details is not None:
+            return True, str(bridge_details.get("response_text") or ""), True, bridge_details
+        return True, response, allow_model_wording, details
+
+    def _recover_hive_runtime_command_input(self, user_input: str) -> str:
+        lowered = " ".join(str(user_input or "").strip().lower().split())
+        if not lowered:
+            return ""
+        if looks_like_semantic_hive_request(lowered):
+            return "show me the open hive tasks"
+        if not any(marker in lowered for marker in ("hive", "hive mind", "brain hive", "public hive")):
+            return ""
+        if any(
+            marker in lowered
+            for marker in (
+                "ignore hive",
+                "ignore it for now",
+                "new task",
+                "new topic",
+                "create task",
+                "create topic",
+                "status",
+                "complete",
+                "completed",
+                "finished",
+                "done",
+            )
+        ):
+            return ""
+        compact = lowered.strip(" \t\r\n?!.,")
+        if re.fullmatch(
+            r"(?:hi\s+)?(?:check|show|see)\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)(?:\s+(?:pls|please))?",
+            compact,
+        ):
+            return "show me the open hive tasks"
+        has_task_marker = any(marker in lowered for marker in ("task", "tasks", "taks", "work"))
+        has_inquiry_marker = any(
+            marker in lowered
+            for marker in (
+                "check",
+                "see",
+                "show",
+                "what",
+                "what's",
+                "whats",
+                "any",
+                "open",
+                "up",
+                "available",
+                "can we do",
+            )
+        )
+        if not (has_task_marker and has_inquiry_marker):
+            return ""
+        return "show me the open hive tasks"
 
     def _hive_tracker_needs_bridge_fallback(self, response: str) -> bool:
         lowered = str(response or "").strip().lower()
         return lowered.startswith("hive watcher is not configured") or lowered.startswith("i couldn't reach the hive watcher")
+
+    def _looks_like_hive_prompt_control_command(self, user_input: str) -> bool:
+        lowered = " ".join(str(user_input or "").strip().lower().split())
+        if not lowered:
+            return False
+        if "ignore hive" in lowered or "ignore it for now" in lowered:
+            return True
+        return "ignore" in lowered and "remind" in lowered
 
     def _maybe_handle_hive_bridge_fallback(
         self,
@@ -3238,7 +5977,7 @@ class NullaAgent:
         *,
         session_id: str,
         tracker_response: str,
-    ) -> str | None:
+    ) -> dict[str, Any] | None:
         if not self.public_hive_bridge.enabled():
             return None
         topics = self.public_hive_bridge.list_public_topics(
@@ -3250,12 +5989,28 @@ class NullaAgent:
         self._store_hive_topic_selection_state(session_id, topics)
         lowered = " ".join(str(user_input or "").strip().lower().split())
         if "online" in lowered and "task" not in lowered and "tasks" not in lowered and "work" not in lowered:
-            lead = "I couldn't read live agent presence from the watcher, but I can still pull public Hive tasks:"
+            lead = "I couldn't read live agent presence from the watcher, but I can still pull public Hive tasks (public-bridge-derived; live presence unavailable):"
         elif "not configured" in str(tracker_response or "").lower():
-            lead = "Live Hive watcher is not configured here, but I can still pull public Hive tasks:"
+            lead = "Live Hive watcher is not configured here, but I can still pull public Hive tasks (public-bridge-derived; live presence unavailable):"
         else:
-            lead = "I couldn't reach the live Hive watcher, but I can still pull public Hive tasks:"
-        return self.hive_activity_tracker._render_hive_task_list_with_lead(topics, lead=lead)
+            lead = "I couldn't reach the live Hive watcher, but I can still pull public Hive tasks (public-bridge-derived; live presence unavailable):"
+        return {
+            "command_kind": "task_list_bridge_fallback",
+            "watcher_status": "bridge_fallback",
+            "lead": lead,
+            "response_text": self.hive_activity_tracker._render_hive_task_list_with_lead(topics, lead=lead),
+            "topics": topics,
+            "online_agents": [],
+            "truth_source": "public_bridge",
+            "truth_label": "public-bridge-derived",
+            "truth_status": str((topics[0] or {}).get("truth_transport") or "bridge_fallback"),
+            "truth_timestamp": str((topics[0] or {}).get("truth_timestamp") or ""),
+            "presence_claim_state": "unavailable",
+            "presence_source": "watcher",
+            "presence_truth_label": "public-bridge-derived",
+            "presence_freshness_label": "unavailable",
+            "presence_note": "live watcher presence unavailable in public-bridge fallback",
+        }
 
     def _store_hive_topic_selection_state(
         self,
@@ -3403,22 +6158,106 @@ class NullaAgent:
         self,
         source_context: dict[str, Any] | None,
         *,
+        execution: Any,
         tool_name: str,
-        response_text: str,
     ) -> dict[str, Any]:
         updated = dict(source_context or {})
         history = list(updated.get("conversation_history") or [])
-        content = str(response_text or "").strip()
-        if len(content) > 1800:
-            content = content[:1800].rstrip() + "\n...[truncated]"
-        history.append(
-            {
-                "role": "assistant",
-                "content": f"Real tool result from `{tool_name or 'tool'}`:\n{content or 'No tool output returned.'}",
-            }
+        observation_message = self._tool_history_observation_message(
+            execution=execution,
+            tool_name=tool_name,
         )
+        if history and history[-1] == observation_message:
+            updated["conversation_history"] = history[-12:]
+            return updated
+        history.append(observation_message)
         updated["conversation_history"] = history[-12:]
         return updated
+
+    def _normalize_tool_history_message(self, item: dict[str, Any]) -> dict[str, str]:
+        role = str(item.get("role") or "").strip().lower()
+        content = str(item.get("content") or "").strip()
+        if role != "assistant" or not content.startswith("Real tool result from `"):
+            return {"role": role, "content": content}
+        match = re.match(r"^Real tool result from `([^`]+)`:\s*(.*)$", content, re.DOTALL)
+        if not match:
+            return {"role": role, "content": content}
+        tool_name = str(match.group(1) or "").strip() or "tool"
+        response_text = str(match.group(2) or "").strip()
+        observation = {
+            "schema": "tool_observation_v1",
+            "intent": tool_name,
+            "tool_surface": self._tool_surface_for_history(tool_name),
+            "ok": True,
+            "status": "executed",
+            "response_preview": response_text[:1800] if response_text else "No tool output returned.",
+        }
+        return {
+            "role": "user",
+            "content": self._tool_history_observation_prompt(observation),
+        }
+
+    def _tool_surface_for_history(self, tool_name: str) -> str:
+        lowered = str(tool_name or "").strip().lower()
+        if lowered.startswith("web.") or lowered.startswith("browser."):
+            return "web"
+        if lowered.startswith("workspace."):
+            return "workspace"
+        if lowered.startswith("sandbox."):
+            return "sandbox"
+        if lowered.startswith("operator."):
+            return "local_operator"
+        if lowered.startswith("hive."):
+            return "hive"
+        return "runtime_tool"
+
+    def _tool_history_observation_payload(
+        self,
+        *,
+        execution: Any,
+        tool_name: str,
+    ) -> dict[str, Any]:
+        details = dict(getattr(execution, "details", {}) or {})
+        observation = details.get("observation")
+        if isinstance(observation, dict) and observation:
+            payload = dict(observation)
+        else:
+            response_text = str(getattr(execution, "response_text", "") or "").strip()
+            payload = {
+                "schema": "tool_observation_v1",
+                "intent": str(tool_name or getattr(execution, "tool_name", "") or "tool").strip() or "tool",
+                "tool_surface": self._tool_surface_for_history(str(tool_name or getattr(execution, "tool_name", "") or "tool")),
+                "ok": bool(getattr(execution, "ok", False)),
+                "status": str(getattr(execution, "status", "") or "executed").strip() or "executed",
+                "response_preview": response_text[:1800] if response_text else "No tool output returned.",
+            }
+        payload.setdefault("mode", str(getattr(execution, "mode", "") or "").strip())
+        if not payload.get("response_preview"):
+            response_text = str(getattr(execution, "response_text", "") or "").strip()
+            if response_text:
+                payload["response_preview"] = response_text[:1800]
+        return payload
+
+    def _tool_history_observation_prompt(self, observation: dict[str, Any]) -> str:
+        return (
+            "Grounding observations for this turn. Use them as evidence, not as a template:\n"
+            f"{json.dumps(dict(observation or {}), indent=2, sort_keys=True, default=str)}"
+        )
+
+    def _tool_history_observation_message(
+        self,
+        *,
+        execution: Any,
+        tool_name: str,
+    ) -> dict[str, str]:
+        observation = self._tool_history_observation_payload(
+            execution=execution,
+            tool_name=tool_name,
+        )
+        return {
+            "role": "user",
+            "content": self._tool_history_observation_prompt(observation),
+        }
 
     def _tool_loop_final_message(self, synthesis: Any, executed_steps: list[dict[str, Any]]) -> str:
         structured = getattr(synthesis, "structured_output", None)
@@ -3820,6 +6659,33 @@ class NullaAgent:
             )
             return ""
 
+    _PROCEED_PATTERNS: frozenset[str] = frozenset({
+        "proceed", "carry on", "continue", "do it", "do all", "go ahead",
+        "start working", "yes", "yes proceed", "yes do it", "ok do it",
+        "ok proceed", "ok go ahead", "deliver it", "submit it", "just do it",
+        "yes pls", "yes please", "all good carry on", "proceed with next steps",
+        "proceed with that", "all good", "no proceed",
+    })
+
+    def _is_proceed_message(self, text: str) -> bool:
+        compact = " ".join(str(text or "").strip().lower().split()).strip(" \t\n\r?!.,")
+        if compact in self._PROCEED_PATTERNS:
+            return True
+        padded = f" {compact} "
+        if any(f" {p} " in padded for p in (
+            "proceed", "carry on", "continue", "do it", "do all",
+            "go ahead", "start working", "just do it",
+        )):
+            return True
+        if any(marker in compact for marker in (
+            "do research", "start research", "run research", "deliver to hive",
+            "deliver to the hive", "deliver it to hive", "deliver it to the hive",
+            "submit to hive", "submit to the hive", "post to hive",
+            "research and deliver", "research it", "do it properly",
+        )):
+            return True
+        return False
+
     def _maybe_handle_hive_research_followup(
         self,
         user_input: str,
@@ -3829,36 +6695,85 @@ class NullaAgent:
     ) -> dict[str, Any] | None:
         clean = " ".join(str(user_input or "").split()).strip()
         lowered = clean.lower()
-        topic_hint = self._extract_hive_topic_hint(clean)
         hive_state = session_hive_state(session_id)
+
+        active_resume = self._maybe_resume_active_hive_task(
+            lowered, session_id=session_id, source_context=source_context, hive_state=hive_state,
+        )
+        if active_resume is not None:
+            return active_resume
+
+        topic_hint = self._extract_hive_topic_hint(clean)
         history = list((source_context or {}).get("conversation_history") or [])
         pending_topic_ids = [
             str(item).strip()
             for item in list(hive_state.get("pending_topic_ids") or [])
             if str(item).strip()
         ]
+        shown_titles = self._interaction_shown_titles(hive_state)
         if not self._looks_like_hive_research_followup(
             lowered,
             topic_hint=topic_hint,
             has_pending_topics=bool(pending_topic_ids),
+            shown_titles=shown_titles,
             history_has_task_list=self._history_mentions_hive_task_list(history)
             or str(hive_state.get("interaction_mode") or "") == "hive_task_selection_pending",
         ):
             return None
         if not self.public_hive_bridge.enabled():
+            response = "Public Hive is not enabled on this runtime, so I can't claim a live Hive task."
+            if self._is_chat_truth_surface(source_context):
+                return self._chat_surface_hive_wording_result(
+                    session_id=session_id,
+                    user_input=clean,
+                    source_context=source_context,
+                    response_class=ResponseClass.TASK_FAILED_USER_SAFE,
+                    reason="hive_research_followup_model_wording",
+                    observations={
+                        "channel": "hive",
+                        "kind": "unsupported",
+                        "truth_source": "future_or_unsupported",
+                        "truth_label": "future/unsupported",
+                        "truth_status": "disabled",
+                        "presence_claim_state": "unsupported",
+                        "presence_truth_label": "future/unsupported",
+                        "presence_note": "public Hive is not enabled on this runtime",
+                    },
+                    fallback_response=response,
+                )
             return self._fast_path_result(
                 session_id=session_id,
                 user_input=clean,
-                response="Public Hive is not enabled on this runtime, so I can't claim a live Hive task.",
+                response=response,
                 confidence=0.9,
                 source_context=source_context,
                 reason="hive_research_followup",
             )
         if not self.public_hive_bridge.write_enabled():
+            response = "Hive task claiming is disabled here because public Hive auth is not configured for writes."
+            if self._is_chat_truth_surface(source_context):
+                return self._chat_surface_hive_wording_result(
+                    session_id=session_id,
+                    user_input=clean,
+                    source_context=source_context,
+                    response_class=ResponseClass.TASK_FAILED_USER_SAFE,
+                    reason="hive_research_followup_model_wording",
+                    observations={
+                        "channel": "hive",
+                        "kind": "unsupported",
+                        "truth_source": "future_or_unsupported",
+                        "truth_label": "future/unsupported",
+                        "truth_status": "write_disabled",
+                        "presence_claim_state": "unsupported",
+                        "presence_truth_label": "future/unsupported",
+                        "presence_note": "public Hive writes are not configured on this runtime",
+                    },
+                    fallback_response=response,
+                )
             return self._fast_path_result(
                 session_id=session_id,
                 user_input=clean,
-                response="Hive task claiming is disabled here because public Hive auth is not configured for writes.",
+                response=response,
                 confidence=0.9,
                 source_context=source_context,
                 reason="hive_research_followup",
@@ -3886,6 +6801,20 @@ class NullaAgent:
                     selection_scope,
                     lead="I still have multiple real Hive tasks open. Pick one by name or short `#id` and I’ll start there.",
                 )
+                if self._is_chat_truth_surface(source_context):
+                    return self._chat_surface_hive_wording_result(
+                        session_id=session_id,
+                        user_input=clean,
+                        source_context=source_context,
+                        response_class=ResponseClass.TASK_SELECTION_CLARIFICATION,
+                        reason="hive_research_followup_model_wording",
+                        observations=self._chat_surface_hive_queue_observations(
+                            selection_scope,
+                            lead="Multiple matching open Hive tasks are still available.",
+                            truth_payload=self._bridge_hive_truth_from_rows(selection_scope),
+                        ),
+                        fallback_response=response,
+                    )
                 return self._fast_path_result(
                     session_id=session_id,
                     user_input=clean,
@@ -3898,6 +6827,20 @@ class NullaAgent:
                 response = f"I couldn't find an open Hive task matching `#{topic_hint}`."
             else:
                 response = "I couldn't map that follow-up to a concrete open Hive task."
+            if self._is_chat_truth_surface(source_context):
+                return self._chat_surface_hive_wording_result(
+                    session_id=session_id,
+                    user_input=clean,
+                    source_context=source_context,
+                    response_class=ResponseClass.TASK_SELECTION_CLARIFICATION,
+                    reason="hive_research_followup_model_wording",
+                    observations={
+                        "channel": "hive",
+                        "kind": "selection_clarification",
+                        **self._hive_truth_observation_fields(self._bridge_hive_truth_from_rows(queue_rows)),
+                    },
+                    fallback_response=response,
+                )
             return self._fast_path_result(
                 session_id=session_id,
                 user_input=clean,
@@ -3910,6 +6853,43 @@ class NullaAgent:
         topic_id = str(signal.get("topic_id") or "").strip()
         title = str(signal.get("title") or topic_id or "Hive topic").strip()
         clear_hive_interaction_state(session_id)
+
+        wants_background = any(
+            marker in lowered
+            for marker in ("background", "in the background", "while we chat", "while i chat", "keep chatting")
+        )
+        if wants_background:
+            import threading as _threading
+
+            _signal = dict(signal)
+            _bridge = self.public_hive_bridge
+            _curiosity = self.curiosity
+            _tracker = self.hive_activity_tracker
+
+            def _bg_research() -> None:
+                try:
+                    research_topic_from_signal(
+                        _signal,
+                        public_hive_bridge=_bridge,
+                        curiosity=_curiosity,
+                        hive_activity_tracker=_tracker,
+                        session_id=session_id,
+                        auto_claim=True,
+                    )
+                except Exception:
+                    pass
+
+            _threading.Thread(target=_bg_research, name=f"bg-research-{topic_id[:12]}", daemon=True).start()
+            response = f"Started Hive research on `{title}` in the background. We can keep chatting — I'll work on it."
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=clean,
+                response=response,
+                confidence=0.92,
+                source_context=source_context,
+                reason="hive_research_background",
+            )
+
         self._sync_public_presence(status="busy", source_context=source_context)
         result = research_topic_from_signal(
             signal,
@@ -3921,6 +6901,20 @@ class NullaAgent:
         )
         if not result.ok:
             response = str(result.response_text or f"Failed to start Hive research for `{topic_id}`.").strip()
+            if self._is_chat_truth_surface(source_context):
+                return self._chat_surface_hive_wording_result(
+                    session_id=session_id,
+                    user_input=clean,
+                    source_context=source_context,
+                    response_class=ResponseClass.TASK_FAILED_USER_SAFE,
+                    reason="hive_research_followup_model_wording",
+                    observations=self._chat_surface_hive_research_result_observations(
+                        topic_id=topic_id,
+                        title=title,
+                        result=result,
+                    ),
+                    fallback_response=response,
+                )
             return self._fast_path_result(
                 session_id=session_id,
                 user_input=clean,
@@ -3963,13 +6957,112 @@ class NullaAgent:
             summary.append(
                 "Topic stays `researching` because NULLA still needs more evidence before it can honestly mark the task solved."
             )
+        response = " ".join(summary)
+        if self._is_chat_truth_surface(source_context):
+            return self._chat_surface_hive_wording_result(
+                session_id=session_id,
+                user_input=clean,
+                source_context=source_context,
+                response_class=ResponseClass.TASK_STARTED,
+                reason="hive_research_followup_model_wording",
+                observations=self._chat_surface_hive_research_result_observations(
+                    topic_id=topic_id,
+                    title=title,
+                    result=result,
+                ),
+                fallback_response=response,
+            )
         return self._fast_path_result(
             session_id=session_id,
             user_input=clean,
-            response=" ".join(summary),
+            response=response,
             confidence=0.9,
             source_context=source_context,
             reason="hive_research_followup",
+        )
+
+    def _maybe_resume_active_hive_task(
+        self,
+        lowered: str,
+        *,
+        session_id: str,
+        source_context: dict[str, object] | None,
+        hive_state: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """When interaction_mode is hive_task_active and user says proceed/carry on,
+        directly execute research on the active topic without asking the model."""
+        interaction_mode = str(hive_state.get("interaction_mode") or "").strip().lower()
+        if interaction_mode != "hive_task_active":
+            return None
+        if not self._is_proceed_message(lowered):
+            return None
+        payload = dict(hive_state.get("interaction_payload") or {})
+        topic_id = str(payload.get("active_topic_id") or "").strip()
+        title = str(payload.get("active_title") or topic_id or "Hive topic").strip()
+        if not topic_id:
+            return None
+        if not self.public_hive_bridge.enabled():
+            return None
+
+        self._sync_public_presence(status="busy", source_context=source_context)
+        result = research_topic_from_signal(
+            {"topic_id": topic_id},
+            public_hive_bridge=self.public_hive_bridge,
+            curiosity=self.curiosity,
+            hive_activity_tracker=self.hive_activity_tracker,
+            session_id=session_id,
+            auto_claim=True,
+        )
+        if not result.ok:
+            response = str(result.response_text or f"Research on `{title}` didn't complete cleanly.").strip()
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=lowered,
+                response=response,
+                confidence=0.84,
+                source_context=source_context,
+                reason="hive_research_active_resume",
+            )
+
+        set_hive_interaction_state(
+            session_id,
+            mode="hive_task_active",
+            payload={
+                "active_topic_id": topic_id,
+                "active_title": title,
+                "claim_id": str(result.claim_id or "").strip(),
+            },
+        )
+
+        quality = dict((result.details or {}).get("quality_summary") or {})
+        q_status = str(quality.get("research_quality_status") or result.result_status or "researching").strip()
+        query_count = len(list((result.details or {}).get("query_results") or []))
+        nonempty = int(quality.get("nonempty_query_count") or 0)
+        promoted = int(quality.get("promoted_finding_count") or 0)
+        domains = int(quality.get("source_domain_count") or 0)
+
+        summary_parts = [f"Research on `{title}` (#{topic_id[:8]}) completed."]
+        if result.claim_id:
+            summary_parts.append(f"Claim `{result.claim_id[:8]}` is active.")
+        summary_parts.append(f"Quality: {q_status}.")
+        if query_count:
+            summary_parts.append(f"Queries: {nonempty}/{query_count} returned evidence.")
+        if domains:
+            summary_parts.append(f"Source domains: {domains}.")
+        if promoted:
+            summary_parts.append(f"Promoted findings: {promoted}.")
+        if result.artifact_ids:
+            summary_parts.append(f"Artifacts: {len(result.artifact_ids)}.")
+        if q_status not in ("grounded", "solved"):
+            summary_parts.append("Topic stays open — more evidence needed for grounded status.")
+        response = " ".join(summary_parts)
+        return self._fast_path_result(
+            session_id=session_id,
+            user_input=lowered,
+            response=response,
+            confidence=0.92,
+            source_context=source_context,
+            reason="hive_research_active_resume",
         )
 
     def _extract_hive_topic_hint(self, text: str) -> str:
@@ -3982,6 +7075,9 @@ class NullaAgent:
         short_match = _HIVE_TOPIC_SHORT_ID_RE.search(clean)
         if short_match:
             return str(short_match.group(1) or "").strip().lower()
+        bare_short_match = re.fullmatch(r"[#\s]*([0-9a-f]{8,12})[.!?]*", clean, re.IGNORECASE)
+        if bare_short_match:
+            return str(bare_short_match.group(1) or "").strip().lower()
         return ""
 
     def _maybe_handle_hive_topic_create_request(
@@ -4001,7 +7097,7 @@ class NullaAgent:
                 task_id=task.task_id,
                 session_id=session_id,
                 user_input=user_input,
-                response="Public Hive is not enabled on this runtime, so I can't create a live Hive task.",
+                response="Public Hive is not enabled on this runtime, so I can't create a live Hive task. Hive truth: future/unsupported.",
                 confidence=0.9,
                 source_context=source_context,
                 reason="hive_topic_create_disabled",
@@ -4020,7 +7116,7 @@ class NullaAgent:
                 task_id=task.task_id,
                 session_id=session_id,
                 user_input=user_input,
-                response="Hive task creation is disabled here because public Hive auth is not configured for writes.",
+                response="Hive task creation is disabled here because public Hive auth is not configured for writes. Hive truth: future/unsupported.",
                 confidence=0.9,
                 source_context=source_context,
                 reason="hive_topic_create_missing_auth",
@@ -4138,6 +7234,23 @@ class NullaAgent:
         else:
             title = re.sub(r"^.*?\bhive\b[?!.,:;-]*\s*", "", clean, flags=re.IGNORECASE)
         title = re.sub(r"^(?:name it|title|call it|called)\b\s*[:=-]?\s*", "", title, flags=re.IGNORECASE)
+        title = re.sub(
+            r"^(?:(?:ok\s+)?(?:lets?|let'?s|can you|please|pls|now)\s+)*"
+            r"(?:create|make|start|open|add)\s+"
+            r"(?:(?:a|the|new|hive|brain hive|this)\s+)*"
+            r"(?:task|topic|thread)\s*"
+            r"(?:(?:on|in|for|to|at)\s+(?:(?:the\s+)?(?:hive|hive mind|brain hive))\s*)?",
+            "", title, flags=re.IGNORECASE,
+        ).strip().lstrip("-–—:;/.,!? ")
+        if not title:
+            for prefix in ("create task", "create new task", "create hive task", "new task", "add task"):
+                if clean.lower().startswith(prefix):
+                    title = clean[len(prefix):].strip().lstrip("-:–/")
+                    break
+        if re.match(r"^.{0,30}---+", title):
+            title = re.sub(r"^.{0,30}---+\s*", "", title).strip()
+        if " - " in title and len(title.split(" - ", 1)[1].strip()) > 15:
+            title = title.split(" - ", 1)[1].strip()
         title = self._strip_wrapping_quotes(" ".join(title.split()).strip().strip("."))
 
         summary = ""
@@ -4168,11 +7281,13 @@ class NullaAgent:
 
     def _looks_like_hive_topic_create_request(self, lowered: str) -> bool:
         text = str(lowered or "").strip().lower()
-        if not text or "hive" not in text:
+        if not text:
             return False
-        if not any(marker in text for marker in ("create", "make", "start", "new task", "new topic", "open a", "open new")):
+        has_create = any(marker in text for marker in ("create", "make", "start", "new task", "new topic", "open a", "open new"))
+        has_target = any(marker in text for marker in ("task", "topic", "thread"))
+        if not (has_create and has_target):
             return False
-        if not any(marker in text for marker in ("task", "topic", "thread")):
+        if "hive" not in text and "topic" not in text and "create" not in text:
             return False
         if any(
             marker in text
@@ -4195,37 +7310,22 @@ class NullaAgent:
 
     def _infer_hive_topic_tags(self, title: str) -> list[str]:
         stopwords = {
-            "a",
-            "an",
-            "and",
-            "best",
-            "build",
-            "building",
-            "create",
-            "fast",
-            "fastest",
-            "for",
-            "from",
-            "future",
-            "human",
-            "improving",
-            "in",
-            "into",
-            "it",
-            "lets",
-            "new",
-            "on",
-            "or",
-            "our",
-            "preserving",
-            "pure",
-            "reuse",
-            "self",
-            "task",
-            "the",
-            "to",
-            "ux",
-            "with",
+            "a", "about", "all", "also", "an", "and", "any", "are", "as", "at",
+            "be", "been", "being", "best", "better", "build", "building", "but",
+            "by", "can", "could", "create", "do", "does", "doing", "each",
+            "fast", "fastest", "find", "for", "from", "future", "get", "good",
+            "got", "had", "has", "have", "her", "here", "him", "his", "how",
+            "human", "if", "improving", "in", "into", "is", "it", "its",
+            "just", "know", "let", "lets", "like", "look", "make", "more",
+            "most", "much", "my", "need", "new", "not", "now", "of", "on",
+            "one", "only", "or", "other", "our", "out", "over", "own",
+            "preserving", "pure", "put", "really", "reuse", "self", "she",
+            "should", "so", "some", "such", "task", "than", "that", "the",
+            "their", "them", "then", "there", "these", "they", "thing",
+            "this", "those", "to", "too", "try", "up", "us", "use", "very",
+            "want", "was", "way", "we", "well", "were", "what", "when",
+            "where", "which", "while", "who", "why", "will", "with", "would",
+            "you", "your",
         }
         raw_tokens = re.findall(r"[a-z0-9]+", str(title or "").lower())
         tags: list[str] = []
@@ -4261,11 +7361,11 @@ class NullaAgent:
         if normalized == "privacy_blocked_topic":
             return "I won't create that Hive task because it looks like it contains private or secret material."
         if normalized == "missing_target":
-            return "Hive topic creation is configured incompletely on this runtime, so I can't post the task yet."
+            return "Hive topic creation is configured incompletely on this runtime, so I can't post the task yet. Hive truth: future/unsupported."
         if normalized == "disabled":
-            return "Public Hive is not enabled on this runtime, so I can't create a live Hive task."
+            return "Public Hive is not enabled on this runtime, so I can't create a live Hive task. Hive truth: future/unsupported."
         if normalized == "missing_auth":
-            return "Hive task creation is disabled here because public Hive auth is not configured for writes."
+            return "Hive task creation is disabled here because public Hive auth is not configured for writes. Hive truth: future/unsupported."
         if normalized == "empty_topic":
             return "I can create the Hive task, but I still need a concrete title and summary."
         return "I couldn't create that Hive task."
@@ -4336,10 +7436,34 @@ class NullaAgent:
             label = latest_post_kind or "post"
             if latest_post_body:
                 summary.append(f"Latest {label}: {latest_post_body[:220]}.")
+        response = " ".join(part for part in summary if part)
+        if self._is_chat_truth_surface(source_context):
+            return self._chat_surface_hive_wording_result(
+                session_id=session_id,
+                user_input=clean,
+                source_context=source_context,
+                response_class=ResponseClass.TASK_STATUS,
+                reason="hive_status_model_wording",
+                observations=self._chat_surface_hive_status_observations(
+                    topic_id=resolved_topic_id,
+                    title=title,
+                    status=status,
+                    execution_state=execution_state,
+                    active_claim_count=active_claim_count,
+                    artifact_count=artifact_count,
+                    post_count=post_count,
+                    latest_post_kind=latest_post_kind,
+                    latest_post_body=latest_post_body,
+                    truth_payload=packet,
+                ),
+                fallback_response=(
+                    f"I pulled current Hive status for `{title}` in this run, but I couldn't produce a clean final summary."
+                ),
+            )
         return self._fast_path_result(
             session_id=session_id,
             user_input=clean,
-            response=" ".join(part for part in summary if part),
+            response=response,
             confidence=0.92,
             source_context=source_context,
             reason="hive_status_followup",
@@ -4427,14 +7551,17 @@ class NullaAgent:
         *,
         topic_hint: str,
         has_pending_topics: bool,
+        shown_titles: list[str],
         history_has_task_list: bool,
     ) -> bool:
         text = str(lowered or "").strip().lower()
+        normalized_text = self._normalize_hive_topic_text(text)
         if topic_hint:
             bare_hint = f"#{topic_hint}"
-            if text.rstrip(".!?") in {topic_hint, bare_hint}:
+            compact_text = re.sub(r"\s+", "", text.rstrip(".!?"))
+            if compact_text in {topic_hint, bare_hint}:
                 return True
-            return any(
+            if any(
                 phrase in text
                 for phrase in (
                     "this one",
@@ -4455,7 +7582,42 @@ class NullaAgent:
                     "research #",
                     "do #",
                 )
-            )
+            ):
+                return True
+            if bare_hint in compact_text and any(
+                phrase in text
+                for phrase in (
+                    "full research",
+                    "research on this",
+                    "research this",
+                    "do this in full",
+                    "do all step by step",
+                    "lets do this",
+                    "let's do this",
+                    "do this",
+                    "start this",
+                    "start that",
+                    "work on this",
+                    "work on that",
+                    "deliver to hive",
+                    "deliver it to hive",
+                    "post it to hive",
+                    "submit it to hive",
+                    "pls",
+                    "please",
+                    "full",
+                )
+            ):
+                return True
+            return False
+        if (has_pending_topics or history_has_task_list) and shown_titles:
+            normalized_titles = [
+                self._normalize_hive_topic_text(str(title or ""))
+                for title in list(shown_titles or [])
+                if str(title or "").strip()
+            ]
+            if normalized_text and normalized_text in normalized_titles:
+                return True
         if (has_pending_topics or history_has_task_list) and any(
             phrase in text
             for phrase in (
@@ -4478,6 +7640,22 @@ class NullaAgent:
                 "look into it",
                 "research it",
                 "pick one",
+                "do all step by step",
+                "deliver to hive",
+                "deliver it to hive",
+                "post it to hive",
+                "submit it to hive",
+                "proceed",
+                "carry on",
+                "continue",
+                "do all",
+                "start working",
+                "all good",
+                "proceed with next steps",
+                "proceed with that",
+                "just do it",
+                "deliver it",
+                "submit it",
             )
         ):
             return True
@@ -4498,6 +7676,7 @@ class NullaAgent:
                 "check the problem",
                 "help with this",
                 "help with that",
+                "do all step by step",
             )
         ):
             return True
@@ -4553,6 +7732,11 @@ class NullaAgent:
                 "research it",
                 "look into it",
                 "take one",
+                "do all step by step",
+                "deliver to hive",
+                "deliver it to hive",
+                "post it to hive",
+                "submit it to hive",
             )
         )
 
@@ -4573,6 +7757,14 @@ class NullaAgent:
         return [
             str(item).strip()
             for item in list(payload.get("shown_topic_ids") or [])
+            if str(item).strip()
+        ]
+
+    def _interaction_shown_titles(self, hive_state: dict[str, Any]) -> list[str]:
+        payload = dict(hive_state.get("interaction_payload") or {})
+        return [
+            str(item).strip()
+            for item in list(payload.get("shown_titles") or [])
             if str(item).strip()
         ]
 
@@ -4698,20 +7890,14 @@ class NullaAgent:
         return f"{clean_response}\n\n{prefix}:\n{clean_footer}".strip()
 
     def _public_capabilities(self) -> list[str]:
-        tool_ids = [str(tool.get("tool_id") or "").strip() for tool in list_operator_tools() if tool.get("available")]
-        prefs = load_preferences()
         capabilities = [
             "persistent_memory",
             "chat_continuity",
-            "web_research",
-            "tool_router",
-            *(
-                ["agent_commons", "idle_curiosity"]
-                if bool(getattr(prefs, "social_commons", True))
-                else []
-            ),
-            *[tool_id for tool_id in tool_ids if tool_id],
+            *supported_public_capability_tags(limit=12),
         ]
+        build_entry = self._workspace_build_capability_entry()
+        if build_entry.get("supported"):
+            capabilities.append(str(build_entry.get("capability_id") or "workspace.build_scaffold"))
         seen: set[str] = set()
         out: list[str] = []
         for item in capabilities:
@@ -4722,6 +7908,38 @@ class NullaAgent:
             if len(out) >= 16:
                 break
         return out
+
+    def _capability_ledger_entries(self) -> list[dict[str, Any]]:
+        entries = [dict(entry) for entry in runtime_capability_ledger()]
+        entries.append(self._workspace_build_capability_entry())
+        return entries
+
+    def _workspace_build_capability_entry(self) -> dict[str, Any]:
+        write_enabled = bool(policy_engine.get("filesystem.allow_write_workspace", False))
+        sandbox_enabled = bool(policy_engine.get("execution.allow_sandbox_execution", False))
+        verification_note = (
+            "bounded verification can run through local commands"
+            if sandbox_enabled
+            else "verification is limited because sandbox execution is disabled"
+        )
+        return {
+            "capability_id": "workspace.build_scaffold",
+            "surface": "workspace",
+            "supported": write_enabled,
+            "support_level": "partial" if write_enabled else "unsupported",
+            "claim": (
+                "run bounded local build/edit/run/inspect loops in the active workspace, including starter folders/files and narrow Telegram or Discord bot scaffolds; "
+                f"{verification_note}"
+            ),
+            "partial_reason": (
+                "This is still a bounded local builder controller, not a full autonomous research -> build -> debug -> test loop for arbitrary software."
+                if write_enabled
+                else ""
+            ),
+            "unsupported_reason": "Workspace scaffold generation is disabled because workspace writes are not enabled on this runtime.",
+            "nearby_capability_ids": ["workspace.write", "sandbox.command"],
+            "public_tag": "workspace.build_scaffold",
+        }
 
     def _public_transport_mode(self, source_context: dict[str, object] | None) -> str:
         resolved_context = self._public_transport_source(source_context)

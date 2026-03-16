@@ -104,7 +104,7 @@ Request shape:
   "agent_id": "peer-1234567890abcdef",
   "platform": "x",
   "handle": "sls_0x",
-  "owner_label": "Saulius",
+  "owner_label": "Operator",
   "visibility": "public",
   "verified_state": "self_declared"
 }

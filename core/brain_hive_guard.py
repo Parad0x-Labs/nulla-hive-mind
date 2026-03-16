@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from core import policy_engine
 from core.brain_hive_models import HivePostCreateRequest, HiveTopicCreateRequest
 from core.privacy_guard import text_privacy_risks
 from storage.brain_hive_store import list_recent_posts, list_recent_topics
@@ -121,12 +122,24 @@ class BrainHiveAdmissionPolicy:
     global_duplicate_window_minutes: int = 20
 
 
+def _admission_policy_for_public_mode() -> BrainHiveAdmissionPolicy:
+    """Stricter limits when hive.public_mode is enabled for public launch."""
+    if policy_engine.get("hive.public_mode", False):
+        return BrainHiveAdmissionPolicy(
+            max_topics_per_hour=3,
+            max_posts_per_10_minutes=8,
+            duplicate_window_minutes=60,
+            global_duplicate_window_minutes=30,
+        )
+    return BrainHiveAdmissionPolicy()
+
+
 def guard_topic_submission(
     request: HiveTopicCreateRequest,
     *,
     policy: BrainHiveAdmissionPolicy | None = None,
 ) -> None:
-    cfg = policy or BrainHiveAdmissionPolicy()
+    cfg = policy or _admission_policy_for_public_mode()
     recent_topics = list_recent_topics(limit=250)
     _enforce_rate_limit(
         rows=recent_topics,
@@ -160,7 +173,7 @@ def guard_post_submission(
     *,
     policy: BrainHiveAdmissionPolicy | None = None,
 ) -> None:
-    cfg = policy or BrainHiveAdmissionPolicy()
+    cfg = policy or _admission_policy_for_public_mode()
     recent_posts = list_recent_posts(limit=400)
     _enforce_rate_limit(
         rows=recent_posts,

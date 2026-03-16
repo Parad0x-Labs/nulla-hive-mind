@@ -77,6 +77,9 @@ _DEFAULT_POLICY = {
             "C:\\Program Files",
         ],
     },
+    "hive": {
+        "public_mode": False,
+    },
     "network": {
         "inbound_enabled": True,
         "outbound_enabled": True,
@@ -142,8 +145,8 @@ _DEFAULT_POLICY = {
         "mode": "bounded_auto",
         "auto_execute_task_classes": ["research", "system_design"],
         "max_topics_per_task": 2,
-        "max_queries_per_topic": 2,
-        "max_snippets_per_query": 3,
+        "max_queries_per_topic": 4,
+        "max_snippets_per_query": 5,
         "prefer_metadata_first": True,
         "allow_news_pulse": True,
         "news_max_topics_per_task": 1,

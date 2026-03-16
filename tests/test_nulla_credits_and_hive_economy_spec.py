@@ -1,13 +1,27 @@
 from __future__ import annotations
 
+from unittest import mock
+
 import pytest
 
 from core.credit_ledger import award_credits, get_credit_balance
+from core.memory_first_router import ModelExecutionDecision
 from network.signer import get_local_peer_id
 
 
-def test_credit_balance_fast_path_reports_real_current_credits(make_agent):
+def test_credit_balance_uses_model_wording_over_real_current_credits(make_agent):
     agent = make_agent()
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="provider",
+            task_hash="credit-balance",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text="You currently have 12.00 compute credits available.",
+            confidence=0.84,
+            trust_score=0.84,
+        )
+    )
     peer_id = get_local_peer_id()
     award_credits(peer_id, 12.0, "test_award", receipt_id="credit-balance-test")
 
@@ -18,11 +32,26 @@ def test_credit_balance_fast_path_reports_real_current_credits(make_agent):
 
     assert get_credit_balance(peer_id) >= 12.0
     assert result["response_class"] == "utility_answer"
+    assert result["model_execution"]["used_model"] is True
     assert "12.00 compute credits" in result["response"]
 
 
 def test_credit_status_explains_current_reward_contract(make_agent):
     agent = make_agent()
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="provider",
+            task_hash="credit-policy",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text=(
+                "Plain public Hive posts do not mint credits by themselves. "
+                "Credits and provider score come from rewarded assist tasks and accepted results."
+            ),
+            confidence=0.84,
+            trust_score=0.84,
+        )
+    )
 
     result = agent.run_once(
         "how do i earn hive credits?",
@@ -31,6 +60,7 @@ def test_credit_status_explains_current_reward_contract(make_agent):
 
     lowered = result["response"].lower()
     assert result["response_class"] == "utility_answer"
+    assert result["model_execution"]["used_model"] is True
     assert "plain public hive posts do not mint credits" in lowered
     assert "rewarded assist tasks and accepted results" in lowered
 

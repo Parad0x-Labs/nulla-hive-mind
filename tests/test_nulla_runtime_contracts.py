@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime
+from unittest import mock
 
 import pytest
 
 from apps.nulla_agent import ChatTurnResult, ResponseClass
+from core.human_input_adapter import adapt_user_input
+from core.identity_manager import Persona, render_with_persona
+from core.memory_first_router import ModelExecutionDecision
+from core.persistent_memory import append_conversation_event
 
 
 def test_utility_day_and_date_answers_are_clean_and_footerless(make_agent, forbidden_chat_leaks):
@@ -31,6 +36,151 @@ def test_utility_day_and_date_answers_are_clean_and_footerless(make_agent, forbi
         assert marker not in date_result["response"].lower()
 
 
+def test_utility_time_in_vilnius_binds_real_value_and_never_leaks_placeholder(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("utility fast path should not load context")  # type: ignore[attr-defined]
+
+    result = agent.run_once(
+        "what time is now in Vilnius?",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert "current time in vilnius is" in result["response"].lower()
+    assert "[time]" not in result["response"].lower()
+    assert "vilnius" in result["response"].lower()
+    assert result["response"].count(":") >= 1
+
+
+def test_malformed_vilnius_time_followup_recovers_to_bound_utility_answer(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("utility fast path should not load context")  # type: ignore[attr-defined]
+
+    result = agent.run_once(
+        "what time now vilnius",
+        source_context={
+            "surface": "openclaw",
+            "platform": "openclaw",
+            "conversation_history": [
+                {"role": "assistant", "content": "Ask me for the current time if you need it."}
+            ],
+        },
+    )
+
+    lowered = result["response"].lower()
+    assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert "current time in vilnius is" in lowered
+    assert "[time]" not in lowered
+    assert "i can help think, research, write code" not in lowered
+
+
+def test_what_wheres_is_in_vilnius_recovers_from_recent_time_context(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("utility fast path should not load context")  # type: ignore[attr-defined]
+
+    result = agent.run_once(
+        "what where's is in Vilnius?",
+        session_id_override="openclaw:vilnius-where-followup",
+        source_context={
+            "surface": "openclaw",
+            "platform": "openclaw",
+            "conversation_history": [
+                {"role": "user", "content": "what time is now in Vilnius?"},
+                {"role": "assistant", "content": "Current time in Vilnius is 12:32 EET."},
+            ],
+        },
+    )
+
+    lowered = result["response"].lower()
+    assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert "current time in vilnius is" in lowered
+    assert "[time]" not in lowered
+    assert "i can help think, research, write code" not in lowered
+
+
+def test_short_vilnius_time_followup_reuses_recent_time_context(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("utility fast path should not load context")  # type: ignore[attr-defined]
+
+    first = agent.run_once(
+        "what time is now in Vilnius?",
+        session_id_override="openclaw:vilnius-short-followup",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+    second = agent.run_once(
+        "and there?",
+        session_id_override="openclaw:vilnius-short-followup",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert first["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert second["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert "current time in vilnius is" in second["response"].lower()
+    assert "[time]" not in second["response"].lower()
+    assert "i can help think, research, write code" not in second["response"].lower()
+
+
+def test_exact_vilnius_malformed_followup_reuses_session_time_context(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("utility fast path should not load context")  # type: ignore[attr-defined]
+    session_id = "openclaw:vilnius-exact-followup"
+
+    first = agent.run_once(
+        "what time is now in Vilnius?",
+        session_id_override=session_id,
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+    second = agent.run_once(
+        "what where's is in Vilnius?",
+        session_id_override=session_id,
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert first["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert second["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert "current time in vilnius is" in second["response"].lower()
+    assert "[time]" not in second["response"].lower()
+    assert "weather" not in second["response"].lower()
+
+
+def test_direct_math_overrides_stale_toly_context(make_agent):
+    session_id = "openclaw:math-after-toly"
+    adapt_user_input("who is Toly in Solana?", session_id=session_id)
+    append_conversation_event(
+        session_id=session_id,
+        user_input="who is Toly in Solana?",
+        assistant_output="Toly is Anatoly Yakovenko, one of Solana's co-founders.",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("direct math should bypass stale conversational context")  # type: ignore[attr-defined]
+
+    result = agent.run_once(
+        "17 * 19",
+        session_id_override=session_id,
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert result["response"] == "17 * 19 = 323."
+    assert "toly" not in result["response"].lower()
+
+
+def test_startup_sequence_stays_deterministic(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("startup fast path should not load context")  # type: ignore[attr-defined]
+
+    result = agent.run_once(
+        "A new session was started via /new or /reset. Execute your Session Startup sequence now - read the required files before responding to the user.",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert result["response_class"] == ResponseClass.SMALLTALK.value
+    assert result["model_execution"]["used_model"] is False
+    assert "new session is clean" in result["response"].lower()
+
+
 @pytest.mark.parametrize(
     ("prompt", "expected"),
     [
@@ -45,6 +195,17 @@ def test_evaluative_turns_stay_conversational_and_do_not_carry_hive_footer(
     expected,
 ):
     agent = make_agent()
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="provider",
+            task_hash="evaluative",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text=expected,
+            confidence=0.82,
+            trust_score=0.82,
+        )
+    )
     result = agent.run_once(
         prompt,
         source_context={"surface": "openclaw", "platform": "openclaw"},
@@ -53,19 +214,121 @@ def test_evaluative_turns_stay_conversational_and_do_not_carry_hive_footer(
     assert result["response_class"] == ResponseClass.GENERIC_CONVERSATION.value
     assert expected in result["response"].lower()
     assert "hive:" not in result["response"].lower()
+    assert result["model_execution"]["used_model"] is True
 
 
-def test_smalltalk_repeated_greetings_are_not_identical_dead_loops(make_agent):
+@pytest.mark.parametrize(
+    ("prompt", "reply"),
+    [
+        ("hey", "Hey. What are we solving?"),
+        ("hello", "Hello. Point me at the problem."),
+        ("how are you", "Stable enough. What do you need me to handle?"),
+        ("help", "I can help think, research, write code, and sanity-check real outputs."),
+    ],
+)
+def test_chat_surface_smalltalk_and_help_use_model_for_final_wording(make_agent, prompt, reply):
     agent = make_agent()
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="provider",
+            task_hash=f"chat-{prompt}",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text=reply,
+            confidence=0.8,
+            trust_score=0.8,
+        )
+    )
 
-    first = agent._smalltalk_fast_path("hey", source_surface="openclaw", session_id="openclaw:greeting-loop")
-    second = agent._smalltalk_fast_path("yo", source_surface="openclaw", session_id="openclaw:greeting-loop")
-    third = agent._smalltalk_fast_path("hello", source_surface="openclaw", session_id="openclaw:greeting-loop")
+    result = agent.run_once(
+        prompt,
+        session_id_override=f"openclaw:{prompt}",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
 
-    assert first and second and third
-    assert first != second != third
-    assert "what do you want me to do" in second.lower()
-    assert "skip the greeting" in third.lower()
+    assert result["response"] == reply
+    assert result["model_execution"]["used_model"] is True
+    assert result["model_execution"]["source"] == "provider"
+
+
+def test_repeated_chat_greetings_use_model_each_turn(make_agent):
+    agent = make_agent()
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        side_effect=[
+            ModelExecutionDecision(
+                source="provider",
+                task_hash="chat-hey",
+                provider_id="ollama:qwen",
+                used_model=True,
+                output_text="Hey. What are we building?",
+                confidence=0.8,
+                trust_score=0.8,
+            ),
+            ModelExecutionDecision(
+                source="provider",
+                task_hash="chat-yo",
+                provider_id="ollama:qwen",
+                used_model=True,
+                output_text="Yo. What needs fixing?",
+                confidence=0.8,
+                trust_score=0.8,
+            ),
+            ModelExecutionDecision(
+                source="provider",
+                task_hash="chat-hello",
+                provider_id="ollama:qwen",
+                used_model=True,
+                output_text="Hello. Give me the target.",
+                confidence=0.8,
+                trust_score=0.8,
+            ),
+        ]
+    )
+
+    first = agent.run_once(
+        "hey",
+        session_id_override="openclaw:greeting-loop",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+    second = agent.run_once(
+        "yo",
+        session_id_override="openclaw:greeting-loop",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+    third = agent.run_once(
+        "hello",
+        session_id_override="openclaw:greeting-loop",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert first["response"] == "Hey. What are we building?"
+    assert second["response"] == "Yo. What needs fixing?"
+    assert third["response"] == "Hello. Give me the target."
+    assert first["model_execution"]["used_model"] is True
+    assert second["model_execution"]["used_model"] is True
+    assert third["model_execution"]["used_model"] is True
+    assert agent.memory_router.resolve.call_count == 3
+
+
+def test_low_verbosity_persona_wrapper_does_not_clip_to_first_paragraph():
+    persona = Persona(
+        persona_id="default",
+        display_name="NULLA",
+        spirit_anchor="anchor",
+        tone="direct",
+        verbosity="low",
+        risk_tolerance=0.2,
+        explanation_depth=0.4,
+        execution_style="direct",
+        strictness=0.5,
+    )
+
+    rendered = render_with_persona(
+        "First paragraph stays.\n\nSecond paragraph still shows up.",
+        persona,
+    )
+
+    assert rendered == "First paragraph stays.\n\nSecond paragraph still shows up."
 
 
 def test_sanitization_contract_strips_runtime_preamble_and_forbidden_tool_garbage(make_agent):
@@ -80,6 +343,73 @@ def test_sanitization_contract_strips_runtime_preamble_and_forbidden_tool_garbag
     shaped = agent._shape_user_facing_text(result)
 
     assert shaped == "I couldn't map that cleanly to a real action."
+
+
+def test_sanitization_contract_strips_generic_planner_scaffold(make_agent):
+    agent = make_agent()
+    result = ChatTurnResult(
+        text="review problem\n- choose safe next step\n- validate result",
+        response_class=ResponseClass.GENERIC_CONVERSATION,
+    )
+
+    shaped = agent._shape_user_facing_text(result)
+
+    assert shaped == "I'm here and ready to help. What do you want to do?"
+    assert "review problem" not in shaped.lower()
+    assert "choose safe next step" not in shaped.lower()
+    assert "validate result" not in shaped.lower()
+
+
+def test_sanitization_contract_strips_generic_planner_scaffold_from_wrapped_json_payload(make_agent):
+    agent = make_agent()
+    result = ChatTurnResult(
+        text='{"summary":"review problem","bullets":["choose safe next step","validate result"]}',
+        response_class=ResponseClass.GENERIC_CONVERSATION,
+    )
+
+    shaped = agent._shape_user_facing_text(result)
+
+    assert shaped == "I'm here and ready to help. What do you want to do?"
+    assert "review problem" not in shaped.lower()
+    assert "choose safe next step" not in shaped.lower()
+    assert "validate result" not in shaped.lower()
+
+
+def test_step_by_step_prompt_still_strips_planner_wrapper_from_chat_surface(make_agent, context_result_factory):
+    agent = make_agent()
+    agent.context_loader.load = mock.Mock(return_value=context_result_factory())  # type: ignore[assignment]
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="provider",
+            task_hash="step-by-step-wrapper",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text="Claim the task, post progress, then deliver the result.",
+            confidence=0.84,
+            trust_score=0.84,
+        )
+    )
+
+    with mock.patch(
+        "apps.nulla_agent.render_response",
+        return_value="Here's what I'd suggest:\n\n- claim the task\n- post progress\n- deliver the result",
+    ), mock.patch(
+        "apps.nulla_agent.classify",
+        return_value={"task_class": "system_design", "risk_flags": [], "confidence_hint": 0.74},
+    ), mock.patch("apps.nulla_agent.ingest_media_evidence", return_value=[]), mock.patch(
+        "apps.nulla_agent.orchestrate_parent_task", return_value=None
+    ), mock.patch("apps.nulla_agent.request_relevant_holders", return_value=[]), mock.patch(
+        "apps.nulla_agent.dispatch_query_shard", return_value=None):
+        result = agent.run_once(
+            "do all step by step",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+    lowered = result["response"].lower()
+    assert "here's what i'd suggest" not in lowered
+    assert "claim the task" in lowered
+    assert "post progress" in lowered
+    assert "deliver the result" in lowered
 
 
 def test_footer_policy_only_allows_selection_and_approval(make_agent):
@@ -102,3 +432,137 @@ def test_footer_policy_only_allows_selection_and_approval(make_agent):
         ChatTurnResult(text="Approval required before file write.", response_class=ResponseClass.APPROVAL_REQUIRED),
         source_context=source_context,
     )
+
+
+def test_explicit_short_answer_request_can_still_stay_short(make_agent):
+    agent = make_agent()
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="provider",
+            task_hash="short-answer",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text="Yes. Use boredom as a signal.",
+            confidence=0.84,
+            trust_score=0.84,
+        )
+    )
+
+    result = agent.run_once(
+        "short answer only: is boredom useful?",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert result["response"] == "Yes. Use boredom as a signal."
+    assert "\n\n" not in result["response"]
+
+
+def test_capability_truth_query_reports_unwired_email_honestly(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("capability truth should not load context")  # type: ignore[attr-defined]
+    with mock.patch.object(
+        agent,
+        "_capability_ledger_entries",
+        return_value=[
+            {
+                "capability_id": "workspace.build_scaffold",
+                "surface": "workspace",
+                "supported": True,
+                "support_level": "partial",
+                "claim": "write narrow Telegram or Discord bot scaffolds into the active workspace",
+                "partial_reason": "This is scaffold-level support only.",
+            },
+            {
+                "capability_id": "operator.discord_post",
+                "surface": "communication",
+                "supported": False,
+                "support_level": "unsupported",
+                "claim": "send Discord messages through the configured bridge",
+                "unsupported_reason": "Discord bridge sending is not configured on this runtime.",
+            },
+        ],
+    ):
+        result = agent.run_once(
+            "can you send email from here?",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+    assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert "email sending is not wired on this runtime" in result["response"].lower()
+    assert "draft the email text" in result["response"].lower()
+    assert result["model_execution"]["used_model"] is False
+
+
+def test_capability_truth_query_distinguishes_partial_support_from_full_autonomy(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("capability truth should not load context")  # type: ignore[attr-defined]
+    with mock.patch.object(
+        agent,
+        "_capability_ledger_entries",
+        return_value=[
+            {
+                "capability_id": "workspace.build_scaffold",
+                "surface": "workspace",
+                "supported": True,
+                "support_level": "partial",
+                "claim": "write narrow Telegram or Discord bot scaffolds into the active workspace",
+                "partial_reason": "This is scaffold-level support only, not a full autonomous build/debug/test loop.",
+            }
+        ],
+    ):
+        result = agent.run_once(
+            "can you build a full ios app end to end?",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+    assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert result["model_execution"]["used_model"] is False
+    assert "partially" in result["response"].lower()
+    assert "not a full autonomous build/debug/test loop" in result["response"].lower()
+
+
+def test_capability_truth_query_distinguishes_impossible_from_unwired(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("capability truth should not load context")  # type: ignore[attr-defined]
+
+    result = agent.run_once(
+        "can you read my mind?",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert result["model_execution"]["used_model"] is False
+    assert "outside what this runtime can actually do" in result["response"].lower()
+
+
+def test_capability_truth_query_reports_self_tool_creation_limits_honestly(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("capability truth should not load context")  # type: ignore[attr-defined]
+
+    result = agent.run_once(
+        "can you create your own tools if you need one?",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    lowered = result["response"].lower()
+    assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert result["model_execution"]["used_model"] is False
+    assert "task-local helper files or scripts" in lowered
+    assert "cannot auto-register" in lowered or "cannot register" in lowered
+
+
+def test_unsupported_builder_request_reports_gap_honestly_instead_of_writing_a_brief(make_agent):
+    agent = make_agent()
+    result = agent.run_once(
+        "build a web scraper service in this workspace and write the files",
+        source_context={
+            "surface": "openclaw",
+            "platform": "openclaw",
+            "workspace": "/tmp/nulla-builder-gap",
+        },
+    )
+
+    assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert result["model_execution"]["used_model"] is False
+    assert "do not have a real bounded builder path" in result["response"].lower()
+    assert "telegram or discord bot scaffold" in result["response"].lower()

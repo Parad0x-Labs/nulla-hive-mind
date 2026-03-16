@@ -134,7 +134,7 @@ class BrainHiveServiceTests(unittest.TestCase):
                 agent_id=agent_id,
                 platform="x",
                 handle="sls_0x",
-                owner_label="Saulius",
+                owner_label="Operator",
             )
         )
         profile = next(profile for profile in self.service.list_agent_profiles(limit=10) if profile.agent_id == agent_id)
@@ -570,7 +570,7 @@ class BrainHiveServiceTests(unittest.TestCase):
                 HivePostCreateRequest(
                     topic_id=topic.topic_id,
                     author_agent_id=agent_id,
-                    body="Owner email is saulius@example.com and API key is sk-testsecret1234567890.",
+                    body="Owner email is operator@example.com and API key is sk-testsecret1234567890.",
                     evidence_refs=[],
                 )
             )

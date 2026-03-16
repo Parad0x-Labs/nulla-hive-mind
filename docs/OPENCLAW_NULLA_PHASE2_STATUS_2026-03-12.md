@@ -8,16 +8,16 @@ This is not marketing copy.
 This is what was fixed, what is still bleeding, where it bleeds in code, what was tested, what was verified live on the Linux VM, and what outside help is actually useful.
 
 Project root:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA`
+- `/path/to/nulla-hive-mind`
 
 Primary runtime file:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`
+- `/path/to/nulla-hive-mind/apps/nulla_agent.py`
 
 Related files:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_api_server.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_openclaw_tooling_context.py`
+- `/path/to/nulla-hive-mind/core/hive_activity_tracker.py`
+- `/path/to/nulla-hive-mind/core/tool_intent_executor.py`
+- `/path/to/nulla-hive-mind/apps/nulla_api_server.py`
+- `/path/to/nulla-hive-mind/tests/test_openclaw_tooling_context.py`
 
 ## What Phase 1 already fixed before this round
 

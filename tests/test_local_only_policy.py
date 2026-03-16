@@ -60,7 +60,7 @@ class LocalOnlyPolicyTests(unittest.TestCase):
         shard = {
             "schema_version": 1,
             "problem_class": "security_hardening",
-            "summary": "Operator email is saulius@example.com and the API key is sk-testsecret1234567890.",
+            "summary": "Operator email is operator@example.com and the API key is sk-testsecret1234567890.",
             "resolution_pattern": ["identify_sensitive_surfaces", "remove_secret_exposure_paths"],
             "risk_flags": [],
         }
@@ -68,7 +68,7 @@ class LocalOnlyPolicyTests(unittest.TestCase):
             policy_engine.validate_outbound_shard(
                 shard,
                 share_scope="hive_mind",
-                restricted_terms=["saulius@example.com"],
+                restricted_terms=["operator@example.com"],
             )
         )
 

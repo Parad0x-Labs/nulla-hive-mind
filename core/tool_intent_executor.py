@@ -3,12 +3,20 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass, field, is_dataclass
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from core.autonomous_topic_research import research_topic_from_signal
 from core import audit_logger, policy_engine
+from core.curiosity_roamer import CuriosityRoamer
 from core.hive_activity_tracker import HiveActivityTracker, load_hive_activity_tracker_config
-from core.local_operator_actions import OperatorActionIntent, dispatch_operator_action, list_operator_tools
+from core.local_operator_actions import (
+    OperatorActionIntent,
+    dispatch_operator_action,
+    list_operator_tools,
+    operator_capability_ledger,
+)
 from core.public_hive_bridge import PublicHiveBridge, load_public_hive_bridge_config, public_hive_write_enabled
 from core.runtime_continuity import (
     build_tool_receipt_key,
@@ -16,7 +24,14 @@ from core.runtime_continuity import (
     load_tool_receipt,
     store_tool_receipt,
 )
-from core.runtime_execution_tools import execute_runtime_tool, looks_like_execution_request, runtime_execution_tool_specs
+from core.runtime_execution_tools import (
+    execute_runtime_tool,
+    extract_observation_followup_hints,
+    looks_like_execution_request,
+    runtime_execution_capability_ledger,
+    runtime_execution_tool_specs,
+)
+from core.task_router import looks_like_explicit_lookup_request, looks_like_public_entity_lookup_request
 from retrieval.web_adapter import WebAdapter
 from tools.registry import call_tool, load_builtin_tools
 
@@ -39,6 +54,13 @@ _LIVE_LOOKUP_MARKERS = (
     "browse",
     "render",
     "show me",
+    "on x",
+    "on twitter",
+    "on the web",
+    "on web",
+    "google",
+    "find",
+    "check",
 )
 _LOCAL_TOOL_MARKERS = (
     "process",
@@ -53,7 +75,100 @@ _LOCAL_TOOL_MARKERS = (
     "meeting",
     "schedule",
     "tool",
+    "folder",
+    "directory",
+    "mkdir",
 )
+_TOOL_INVENTORY_MARKERS = (
+    "list tools",
+    "show tools",
+    "what tools do you have",
+    "what can you execute",
+    "what actions can you take",
+    "what tools do you need",
+    "which tools do you need",
+    "what would you use",
+)
+_SELF_TOOL_REQUEST_MARKERS = (
+    "create your own tool",
+    "create your own tools",
+    "make your own tool",
+    "make your own tools",
+    "build your own tool",
+    "build your own tools",
+    "register a new tool",
+    "register new tools",
+)
+_DIRECTORY_CREATE_MARKERS = (
+    "create folder",
+    "create a folder",
+    "create directory",
+    "create a directory",
+    "make folder",
+    "make a folder",
+    "set up folder",
+    "setup folder",
+    "set up directory",
+    "setup directory",
+    "mkdir",
+)
+_START_CODE_MARKERS = (
+    "start coding",
+    "start putting code",
+    "put code",
+    "putting code",
+    "write the initial files",
+    "initial files",
+    "starter files",
+    "bootstrap",
+)
+_NAMED_PATH_RE = re.compile(
+    r"(?:named?|called|call)\s+(?:it\s+)?[`\"']?(?P<path>[A-Za-z0-9_./-]+(?:/[A-Za-z0-9_./-]+)*)[`\"']?",
+    re.IGNORECASE,
+)
+_VERB_NAME_FOLDER_RE = re.compile(
+    r"\b(?:create|make|crate|creat|mkdir)\s+(?:the\s+|a\s+|an\s+)?(?P<path>[A-Za-z0-9_./-]+(?:/[A-Za-z0-9_./-]+)*)\s+(?:folder|directory|dir)\b",
+    re.IGNORECASE,
+)
+_FOLDER_PATH_RE = re.compile(
+    r"\b(?:folder|directory|dir|path)\s+(?:called|named)?\s*[`\"']?(?P<path>[A-Za-z0-9_./-]+)",
+    re.IGNORECASE,
+)
+_CREATE_PATH_RE = re.compile(
+    r"\b(?:create|make|setup|set up|bootstrap|mkdir)\s+(?P<path>[A-Za-z0-9_./-]+(?:/[A-Za-z0-9_./-]+)*)\b",
+    re.IGNORECASE,
+)
+_INTO_PATH_RE = re.compile(
+    r"\b(?:in|under|inside)\s+[`\"']?(?P<path>[A-Za-z0-9_./-]+(?:/[A-Za-z0-9_./-]+)*)[`\"']?",
+    re.IGNORECASE,
+)
+_PATH_STOP_WORDS = {
+    "a",
+    "an",
+    "the",
+    "for",
+    "me",
+    "my",
+    "this",
+    "that",
+    "it",
+    "on",
+    "in",
+    "folder",
+    "directory",
+    "dir",
+    "path",
+    "workspace",
+    "repo",
+    "repository",
+    "there",
+    "here",
+    "code",
+    "files",
+    "machine",
+    "computer",
+    "desktop",
+}
 _BUILDER_RESEARCH_MARKERS = (
     "build",
     "design",
@@ -86,6 +201,14 @@ _HIVE_ACTION_PATTERNS = (
     "take this task",
     "take this topic",
     "create topic",
+    "create task",
+    "create new task",
+    "create hive mind task",
+    "create hive task",
+    "new task",
+    "add task",
+    "add to hive",
+    "add to the hive",
     "open topic",
     "post progress",
     "update progress",
@@ -97,6 +220,37 @@ _HIVE_ACTION_PATTERNS = (
     "search artifacts",
     "research this topic",
 )
+_ENTITY_LOOKUP_DROP_TOKENS = frozenset(
+    {
+        "who",
+        "is",
+        "he",
+        "she",
+        "they",
+        "them",
+        "tell",
+        "me",
+        "about",
+        "what",
+        "do",
+        "you",
+        "know",
+        "check",
+        "find",
+        "look",
+        "up",
+        "lookup",
+        "search",
+        "google",
+        "in",
+        "on",
+        "the",
+        "web",
+        "pls",
+        "please",
+    }
+)
+_ENTITY_LOOKUP_KEEP_SHORT_TOKENS = frozenset({"x", "ai"})
 _READ_ONLY_OPERATOR_INTENTS = {
     "operator.list_tools",
     "operator.inspect_processes",
@@ -134,6 +288,64 @@ _SUPPORTED_OPERATOR_TOOL_IDS = {
     "move_path",
     "schedule_calendar_event",
 }
+_CAPABILITY_QUERY_PREFIXES = (
+    "can you ",
+    "could you ",
+    "are you able to ",
+    "do you have a way to ",
+    "do you know how to ",
+    "are you wired to ",
+)
+_IMPOSSIBLE_REQUEST_MARKERS = (
+    "read my mind",
+    "mind read",
+    "teleport",
+    "physically cook",
+    "cook dinner",
+    "taste this",
+    "smell this",
+    "touch this",
+    "be physically there",
+    "drive over",
+    "hack a bank",
+    "steal a password",
+)
+_PARTIAL_BUILD_MARKERS = (
+    "full app",
+    "entire app",
+    "end to end app",
+    "end-to-end app",
+    "full product",
+    "ship the whole app",
+    "ios app",
+    "android app",
+    "mobile app",
+)
+_SWARM_DELEGATION_MARKERS = (
+    "talk to other agents",
+    "delegate to other agents",
+    "delegate this to agents",
+    "helper lane",
+    "merge helper outputs",
+    "swarm delegates",
+    "other hive agents",
+)
+_EMAIL_SEND_MARKERS = (
+    "send email",
+    "send an email",
+    "email this",
+    "mail this",
+    "reply by email",
+)
+_NEARBY_CAPABILITY_IDS = {
+    "workspace.read": ["web.live_lookup"],
+    "workspace.write": ["workspace.read", "sandbox.command"],
+    "sandbox.command": ["workspace.read", "workspace.write"],
+    "hive.write": ["hive.read"],
+    "operator.discord_post": ["operator.telegram_send"],
+    "operator.telegram_send": ["operator.discord_post"],
+    "workspace.build_scaffold": ["workspace.write", "sandbox.command"],
+}
 
 
 @dataclass
@@ -147,6 +359,426 @@ class ToolIntentExecution:
     tool_name: str = ""
     details: dict[str, Any] = field(default_factory=dict)
     learned_plan: Any = None
+
+
+@dataclass
+class WorkflowPlannerDecision:
+    handled: bool
+    reason: str
+    next_payload: dict[str, Any] | None = None
+    stop_after: bool = False
+
+
+def _tool_observation(
+    *,
+    intent: str,
+    tool_surface: str,
+    ok: bool,
+    status: str,
+    **payload: Any,
+) -> dict[str, Any]:
+    observation = {
+        "schema": "tool_observation_v1",
+        "intent": str(intent or "").strip(),
+        "tool_surface": str(tool_surface or "").strip(),
+        "ok": bool(ok),
+        "status": str(status or "").strip(),
+    }
+    for key, value in payload.items():
+        if value in (None, "", [], {}):
+            continue
+        observation[str(key)] = value
+    return observation
+
+
+def runtime_capability_ledger() -> list[dict[str, Any]]:
+    hive_cfg = load_hive_activity_tracker_config()
+    public_hive_cfg = load_public_hive_bridge_config()
+    hive_read_supported = bool(
+        (hive_cfg.enabled and hive_cfg.watcher_api_url)
+        or (public_hive_cfg.enabled and public_hive_cfg.topic_target_url)
+    )
+    hive_write_supported = bool(
+        public_hive_cfg.enabled
+        and public_hive_cfg.topic_target_url
+        and public_hive_write_enabled(public_hive_cfg)
+    )
+    entries: list[dict[str, Any]] = [
+        {
+            "capability_id": "web.live_lookup",
+            "surface": "web",
+            "claim": "run live web search, fetch pages, bounded web research, and browser rendering",
+            "supported": bool(policy_engine.allow_web_fallback()),
+            "unsupported_reason": "Live web lookup is disabled on this runtime.",
+            "intents": sorted(_WEB_TOOL_INTENTS),
+            "public_tag": "web.live_lookup",
+        },
+        {
+            "capability_id": "hive.read",
+            "surface": "hive",
+            "claim": "list live Hive tasks and read research queues, packets, and artifact search results",
+            "supported": hive_read_supported,
+            "unsupported_reason": "Live Hive read actions are not enabled on this runtime.",
+            "intents": [
+                "hive.list_available",
+                "hive.list_research_queue",
+                "hive.export_research_packet",
+                "hive.search_artifacts",
+            ],
+            "public_tag": "hive.read",
+        },
+        {
+            "capability_id": "hive.write",
+            "surface": "hive",
+            "claim": "create, claim, update, and submit real Hive topics or tasks",
+            "supported": hive_write_supported,
+            "unsupported_reason": "Live Hive write actions are not enabled on this runtime.",
+            "intents": [
+                "hive.research_topic",
+                "hive.create_topic",
+                "hive.claim_task",
+                "hive.post_progress",
+                "hive.submit_result",
+            ],
+            "public_tag": "hive.write",
+        },
+    ]
+    entries.extend(runtime_execution_capability_ledger())
+    entries.extend(operator_capability_ledger())
+    return [_annotate_capability_entry(entry) for entry in entries]
+
+
+def capability_entry_for_intent(intent: str) -> dict[str, Any] | None:
+    normalized = str(intent or "").strip()
+    if not normalized:
+        return None
+    for entry in runtime_capability_ledger():
+        if normalized in {str(item).strip() for item in list(entry.get("intents") or []) if str(item).strip()}:
+            return dict(entry)
+    return None
+
+
+def capability_gap_for_intent(
+    intent: str,
+    *,
+    extra_entries: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    normalized_intent = str(intent or "").strip()
+    all_entries = _all_capability_entries(extra_entries=extra_entries)
+    entry = next(
+        (
+            candidate
+            for candidate in all_entries
+            if normalized_intent in {str(item).strip() for item in list(candidate.get("intents") or []) if str(item).strip()}
+        ),
+        None,
+    )
+    if entry is not None:
+        return _capability_gap_from_entry(
+            entry,
+            requested_label=normalized_intent,
+            extra_entries=all_entries,
+        )
+    synthetic = {
+        "requested_capability": normalized_intent or "unknown.intent",
+        "requested_label": normalized_intent or "unknown action",
+        "support_level": "unsupported",
+        "gap_kind": _synthetic_gap_kind_for_intent(normalized_intent),
+        "reason": f"`{normalized_intent}` is not wired on this runtime." if normalized_intent else "That action is not wired on this runtime.",
+        "nearby_alternatives": _nearby_alternatives_for_unknown_intent(normalized_intent, all_entries),
+    }
+    return synthetic
+
+
+def capability_truth_for_request(
+    user_text: str,
+    *,
+    extra_entries: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    text = " ".join(str(user_text or "").split()).strip()
+    if not text:
+        return None
+    lowered = f" {text.lower()} "
+    if any(marker in lowered for marker in _IMPOSSIBLE_REQUEST_MARKERS):
+        return {
+            "requested_capability": "physical_or_impossible_action",
+            "requested_label": text,
+            "support_level": "impossible",
+            "gap_kind": "impossible",
+            "reason": "That is outside what this runtime can actually do.",
+            "nearby_alternatives": ["I can still reason about it, plan it, or help write instructions for a human to carry out."],
+        }
+    all_entries = _all_capability_entries(extra_entries=extra_entries)
+    if any(marker in lowered for marker in _EMAIL_SEND_MARKERS):
+        return {
+            "requested_capability": "email.send",
+            "requested_label": "send email",
+            "support_level": "unsupported",
+            "gap_kind": "unwired",
+            "reason": "Email sending is not wired on this runtime.",
+            "nearby_alternatives": _combine_alternative_text(
+                [
+                    "I can draft the email text here.",
+                    *_nearby_alternatives_from_capability_ids(["operator.discord_post", "operator.telegram_send"], all_entries),
+                ]
+            ),
+        }
+    if any(marker in lowered for marker in _SWARM_DELEGATION_MARKERS):
+        return {
+            "requested_capability": "swarm.delegate_merge",
+            "requested_label": "delegate to other agents and merge their outputs",
+            "support_level": "unsupported",
+            "gap_kind": "future_unsupported",
+            "reason": "Real multi-agent delegation and merge synthesis are not wired on this runtime yet.",
+            "nearby_alternatives": _combine_alternative_text(
+                _nearby_alternatives_from_capability_ids(["hive.read", "hive.write"], all_entries)
+            ),
+        }
+    if any(marker in lowered for marker in _SELF_TOOL_REQUEST_MARKERS):
+        return {
+            "requested_capability": "tooling.self_extension",
+            "requested_label": "create or register new tools on the fly",
+            "support_level": "partial",
+            "claim": (
+                "I can create task-local helper files or scripts inside the active workspace and then use them through bounded workspace writes and local commands."
+            ),
+            "partial_reason": (
+                "I still cannot auto-register brand-new first-class runtime tools or extend the global tool registry on my own."
+            ),
+            "reason": "Self-extension is only partially wired on this runtime.",
+            "nearby_alternatives": _combine_alternative_text(
+                [
+                    "Ask me to create a helper script or module in the workspace and run it locally.",
+                    *_nearby_alternatives_from_capability_ids(["workspace.write", "sandbox.command"], all_entries),
+                ]
+            ),
+        }
+    if any(marker in lowered for marker in _PARTIAL_BUILD_MARKERS) and any(
+        marker in lowered for marker in (" build ", " create ", " make ", " ship ", " code ", " develop ")
+    ):
+        build_entry = next(
+            (entry for entry in all_entries if str(entry.get("capability_id") or "").strip() == "workspace.build_scaffold"),
+            None,
+        )
+        if build_entry is not None:
+            return _capability_gap_from_entry(
+                build_entry,
+                requested_label="build a full application end to end",
+                extra_entries=all_entries,
+            )
+    if any(lowered.strip().startswith(prefix) for prefix in _CAPABILITY_QUERY_PREFIXES):
+        return None
+    return None
+
+
+def render_capability_truth_response(report: dict[str, Any] | None) -> str:
+    payload = dict(report or {})
+    support_level = str(payload.get("support_level") or "unsupported").strip().lower()
+    reason = str(payload.get("reason") or "That capability is not available on this runtime.").strip()
+    claim = str(payload.get("claim") or "").strip()
+    partial_reason = str(payload.get("partial_reason") or "").strip()
+    if support_level == "partial":
+        base = f"Partially. {claim or reason}".strip()
+        if partial_reason:
+            base = f"{base} {partial_reason}".strip()
+    elif support_level == "impossible":
+        base = f"No. {reason}".strip()
+    else:
+        base = f"No. {reason}".strip()
+    alternatives = [str(item).strip() for item in list(payload.get("nearby_alternatives") or []) if str(item).strip()]
+    if not alternatives:
+        return base
+    if len(alternatives) == 1:
+        return f"{base} Closest real alternative here: {alternatives[0]}".strip()
+    return f"{base} Nearby real alternatives here: {'; '.join(alternatives[:3])}".strip()
+
+
+def supported_public_capability_tags(*, limit: int = 16) -> list[str]:
+    tags: list[str] = []
+    seen: set[str] = set()
+    for entry in runtime_capability_ledger():
+        if not entry.get("supported"):
+            continue
+        tag = str(entry.get("public_tag") or entry.get("capability_id") or "").strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        tags.append(tag[:64])
+        if len(tags) >= max(1, int(limit)):
+            break
+    return tags
+
+
+def _all_capability_entries(*, extra_entries: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    entries = [dict(entry) for entry in runtime_capability_ledger()]
+    for entry in list(extra_entries or []):
+        if not isinstance(entry, dict):
+            continue
+        entries.append(_annotate_capability_entry(entry))
+    return entries
+
+
+def _annotate_capability_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(entry or {})
+    capability_id = str(enriched.get("capability_id") or "").strip()
+    supported = bool(enriched.get("supported"))
+    support_level = str(enriched.get("support_level") or "").strip().lower()
+    partial_reason = str(enriched.get("partial_reason") or "").strip()
+    if support_level not in {"full", "partial", "unsupported"}:
+        if partial_reason and supported:
+            support_level = "partial"
+        elif supported:
+            support_level = "full"
+        else:
+            support_level = "unsupported"
+    enriched["support_level"] = support_level
+    if "gap_kind" not in enriched or not str(enriched.get("gap_kind") or "").strip():
+        unsupported_reason = str(enriched.get("unsupported_reason") or "").strip().lower()
+        if support_level == "partial":
+            enriched["gap_kind"] = "partial_support"
+        elif "disabled" in unsupported_reason:
+            enriched["gap_kind"] = "disabled"
+        elif "missing auth" in unsupported_reason:
+            enriched["gap_kind"] = "missing_auth"
+        elif "not configured" in unsupported_reason:
+            enriched["gap_kind"] = "not_configured"
+        elif "future" in unsupported_reason:
+            enriched["gap_kind"] = "future_unsupported"
+        else:
+            enriched["gap_kind"] = "unwired"
+    if "nearby_capability_ids" not in enriched:
+        enriched["nearby_capability_ids"] = list(_NEARBY_CAPABILITY_IDS.get(capability_id, []))
+    return enriched
+
+
+def _capability_gap_from_entry(
+    entry: dict[str, Any],
+    *,
+    requested_label: str,
+    extra_entries: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    annotated = _annotate_capability_entry(entry)
+    all_entries = _all_capability_entries(extra_entries=extra_entries)
+    support_level = str(annotated.get("support_level") or "unsupported").strip().lower()
+    claim = str(annotated.get("claim") or "").strip()
+    reason = (
+        str(annotated.get("partial_reason") or "").strip()
+        if support_level == "partial"
+        else str(annotated.get("unsupported_reason") or claim or "").strip()
+    )
+    if support_level == "full" and bool(annotated.get("supported")):
+        reason = claim
+    return {
+        "requested_capability": str(annotated.get("capability_id") or requested_label).strip(),
+        "requested_label": requested_label,
+        "support_level": support_level,
+        "gap_kind": str(annotated.get("gap_kind") or "unwired").strip(),
+        "claim": claim,
+        "partial_reason": str(annotated.get("partial_reason") or "").strip(),
+        "reason": reason,
+        "nearby_alternatives": _combine_alternative_text(
+            _nearby_alternatives_from_capability_ids(
+                [str(item).strip() for item in list(annotated.get("nearby_capability_ids") or []) if str(item).strip()],
+                all_entries,
+            )
+        ),
+    }
+
+
+def _nearby_alternatives_from_capability_ids(
+    capability_ids: list[str],
+    entries: list[dict[str, Any]],
+) -> list[str]:
+    entry_map = {
+        str(entry.get("capability_id") or "").strip(): dict(entry)
+        for entry in list(entries or [])
+        if str(entry.get("capability_id") or "").strip()
+    }
+    alternatives: list[str] = []
+    for capability_id in list(capability_ids or []):
+        entry = dict(entry_map.get(str(capability_id).strip()) or {})
+        if not entry:
+            continue
+        support_level = str(entry.get("support_level") or "unsupported").strip().lower()
+        if support_level == "unsupported" and not bool(entry.get("supported")):
+            continue
+        claim = str(entry.get("claim") or "").strip()
+        if not claim:
+            continue
+        if support_level == "partial" and str(entry.get("partial_reason") or "").strip():
+            alternatives.append(f"{claim} ({str(entry.get('partial_reason') or '').strip()})")
+        else:
+            alternatives.append(claim)
+    return alternatives
+
+
+def _nearby_alternatives_for_unknown_intent(intent: str, entries: list[dict[str, Any]]) -> list[str]:
+    normalized = str(intent or "").strip().lower()
+    if normalized.startswith("workspace."):
+        return _combine_alternative_text(_nearby_alternatives_from_capability_ids(["workspace.read", "workspace.write"], entries))
+    if normalized.startswith("sandbox."):
+        return _combine_alternative_text(_nearby_alternatives_from_capability_ids(["workspace.read", "sandbox.command"], entries))
+    if normalized.startswith("web.") or normalized.startswith("browser."):
+        return _combine_alternative_text(_nearby_alternatives_from_capability_ids(["web.live_lookup"], entries))
+    if normalized.startswith("hive."):
+        return _combine_alternative_text(_nearby_alternatives_from_capability_ids(["hive.read", "hive.write"], entries))
+    if normalized.startswith("operator."):
+        return _combine_alternative_text(_nearby_alternatives_from_capability_ids(["operator.inspect_processes", "operator.inspect_disk_usage"], entries))
+    return []
+
+
+def _synthetic_gap_kind_for_intent(intent: str) -> str:
+    normalized = str(intent or "").strip().lower()
+    if normalized.startswith(("web.", "browser.", "workspace.", "sandbox.", "hive.", "operator.")):
+        return "unwired"
+    return "unsupported"
+
+
+def _combine_alternative_text(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    combined: list[str] = []
+    for item in list(items or []):
+        clean = str(item or "").strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        combined.append(clean)
+    return combined
+
+
+def _unsupported_execution_for_intent(
+    intent: str,
+    *,
+    status: str,
+    user_safe_override: str | None = None,
+    extra_details: dict[str, Any] | None = None,
+) -> ToolIntentExecution:
+    gap = capability_gap_for_intent(intent)
+    if status in {"disabled", "not_configured", "missing_auth"}:
+        gap["gap_kind"] = status
+    response = render_capability_truth_response(gap)
+    user_safe = str(user_safe_override or response).strip()
+    details = {
+        "capability_gap": gap,
+        **dict(extra_details or {}),
+        "observation": _tool_observation(
+            intent=intent,
+            tool_surface="tool_intent",
+            ok=False,
+            status=status,
+            capability_gap=gap,
+        ),
+    }
+    return ToolIntentExecution(
+        handled=True,
+        ok=False,
+        status=status,
+        response_text=response,
+        user_safe_response_text=user_safe,
+        mode="tool_failed",
+        tool_name=intent,
+        details=details,
+    )
 
 
 def runtime_tool_specs() -> list[dict[str, Any]]:
@@ -313,7 +945,9 @@ def should_attempt_tool_intent(
     source_context = dict(source_context or {})
     surface = str(source_context.get("surface") or "").strip().lower()
     platform = str(source_context.get("platform") or "").strip().lower()
-    if surface not in {"channel", "openclaw", "api"} and platform not in {"openclaw", "telegram", "discord"}:
+    _TOOL_CAPABLE_SURFACES = {"channel", "openclaw", "api", "cli", "terminal", "local", ""}
+    _TOOL_CAPABLE_PLATFORMS = {"openclaw", "telegram", "discord", "local", "cli", ""}
+    if surface not in _TOOL_CAPABLE_SURFACES and platform not in _TOOL_CAPABLE_PLATFORMS:
         return False
 
     text = str(user_text or "").strip()
@@ -330,6 +964,8 @@ def should_attempt_tool_intent(
         return True
     if _URL_RE.search(text):
         return True
+    if looks_like_explicit_lookup_request(text) or looks_like_public_entity_lookup_request(text):
+        return True
     if any(marker in lowered for marker in _LIVE_LOOKUP_MARKERS):
         return True
     if any(marker in lowered for marker in _LOCAL_TOOL_MARKERS):
@@ -340,7 +976,396 @@ def should_attempt_tool_intent(
         return True
     if "hive" in lowered and any(word in lowered for word in ("claim", "topic", "progress", "result", "task")):
         return True
+    padded = f" {lowered} "
+    if any(marker in padded for marker in (
+        " proceed ", " do it ", " do all ", " go ahead ", " carry on ",
+        " start working ", " continue ", " yes proceed ", " yes do it ",
+        " yes go ahead ", " yes continue ", " deliver it ", " submit it ",
+        " execute ", " run it ", " just do it ",
+    )):
+        return True
+    compact = lowered.strip(" \t\n\r?!.,")
+    if compact in {
+        "proceed", "do it", "do all", "go ahead", "carry on", "continue",
+        "start working", "yes", "yes proceed", "yes do it", "ok do it",
+        "ok proceed", "ok go ahead", "deliver it", "submit it", "execute",
+        "run it", "just do it", "yes pls", "yes please", "all good carry on",
+        "proceed with next steps", "proceed with that",
+    }:
+        return True
     return False
+
+
+def _entity_lookup_query_variants(text: str) -> tuple[str, str]:
+    normalized = " ".join(str(text or "").strip().lower().split())
+    if not normalized:
+        return "", ""
+
+    tokens: list[str] = []
+    for token in re.findall(r"[a-z0-9\.]+", normalized):
+        clean = token.strip(".")
+        if not clean or clean in _ENTITY_LOOKUP_DROP_TOKENS:
+            continue
+        if clean == "x.com":
+            clean = "x"
+        if len(clean) == 1 and clean not in _ENTITY_LOOKUP_KEEP_SHORT_TOKENS:
+            continue
+        tokens.append(clean)
+
+    if not tokens:
+        return normalized, normalized
+
+    primary_tokens = list(dict.fromkeys(tokens))[:6]
+    retry_tokens = [
+        re.sub(r"(.)\1+", r"\1", token) if len(token) >= 3 and token not in {"solana", "twitter"} else token
+        for token in primary_tokens
+    ]
+    retry_tokens = list(dict.fromkeys(token for token in retry_tokens if token))
+    if retry_tokens == primary_tokens:
+        if "x" in retry_tokens and "twitter" not in retry_tokens:
+            retry_tokens.append("twitter")
+        elif "profile" not in retry_tokens:
+            retry_tokens.append("profile")
+
+    primary_query = " ".join(primary_tokens).strip() or normalized
+    retry_query = " ".join(retry_tokens).strip() or primary_query
+    return primary_query, retry_query
+
+
+def _looks_like_tool_inventory_request(text: str) -> bool:
+    lowered = " ".join(str(text or "").strip().lower().split())
+    if not lowered:
+        return False
+    return any(marker in lowered for marker in _TOOL_INVENTORY_MARKERS)
+
+
+def _clean_workspace_path(candidate: str) -> str:
+    clean = str(candidate or "").strip().strip("`\"'").strip().rstrip(".,!?")
+    if not clean:
+        return ""
+    if clean.lower() in _PATH_STOP_WORDS:
+        return ""
+    if clean.startswith("/"):
+        clean = clean.lstrip("/")
+    clean = clean.lstrip("./")
+    if not clean or clean.lower() in _PATH_STOP_WORDS:
+        return ""
+    if ".." in clean.split("/"):
+        return ""
+    return clean
+
+
+def _extract_workspace_bootstrap_path(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    for pattern in (_NAMED_PATH_RE, _VERB_NAME_FOLDER_RE, _FOLDER_PATH_RE, _CREATE_PATH_RE, _INTO_PATH_RE):
+        match = pattern.search(raw)
+        if not match:
+            continue
+        clean = _clean_workspace_path(match.group("path"))
+        if clean:
+            return clean
+    return ""
+
+
+def _looks_like_workspace_bootstrap_request(text: str) -> bool:
+    lowered = " ".join(str(text or "").strip().lower().split())
+    if not lowered:
+        return False
+    creates_folder = any(marker in lowered for marker in _DIRECTORY_CREATE_MARKERS)
+    starts_code = any(marker in lowered for marker in _START_CODE_MARKERS)
+    mentions_workspace_target = any(marker in lowered for marker in ("folder", "directory", "dir", "workspace", "repo", "repository"))
+    has_path = bool(_extract_workspace_bootstrap_path(text))
+    fuzzy_create_verb = any(v in lowered for v in ("create", "make", "mkdir", "crate", "creat"))
+    return bool(
+        (creates_folder and (starts_code or has_path))
+        or (starts_code and mentions_workspace_target)
+        or (starts_code and has_path)
+        or (fuzzy_create_verb and mentions_workspace_target and has_path)
+    )
+
+
+def plan_tool_workflow(
+    *,
+    user_text: str,
+    task_class: str,
+    executed_steps: list[dict[str, Any]],
+    source_context: dict[str, Any] | None,
+) -> WorkflowPlannerDecision:
+    text = " ".join(str(user_text or "").split()).strip()
+    lowered = f" {text.lower()} "
+    steps = [dict(step) for step in list(executed_steps or []) if isinstance(step, dict)]
+    replacement = _explicit_replace_request(text)
+    explicit_command = _explicit_command_request(text)
+    compare_or_verify = any(marker in lowered for marker in (" compare ", " versus ", " vs ", " verify ", " confirm ", " is it true "))
+    public_entity_lookup = looks_like_public_entity_lookup_request(text)
+    explicit_lookup = looks_like_explicit_lookup_request(text) or public_entity_lookup
+    tool_inventory_request = _looks_like_tool_inventory_request(text)
+    workspace_bootstrap_path = _extract_workspace_bootstrap_path(text)
+    workspace_bootstrap_request = _looks_like_workspace_bootstrap_request(text)
+    entity_query, entity_retry_query = _entity_lookup_query_variants(text)
+    research_flow = bool(
+        explicit_lookup
+        or compare_or_verify
+        or task_class in {"research", "chat_research", "system_design"}
+        or any(marker in lowered for marker in (" latest ", " current ", " docs ", " documentation ", " research ", " source "))
+    )
+
+    _create_task_markers = (
+        " create task ", " create new task ", " new task for ", " add task ", " add to hive ", " add to the hive ",
+        " create these tasks ", " create them ", " create these ", " yes create ", " yes create them ",
+    )
+    _create_task_fuzzy = lambda lo: ("create" in lo and "task" in lo) or ("create" in lo and ("hive" in lo or "topic" in lo))
+    _proceed_with_task = lambda lo: any(m in lo for m in (" proceed ", " do it ", " do all ", " start working ", " go ahead ", " carry on ")) and ("task" in lo or "hive" in lo or "create" in lo)
+
+    if not steps:
+        if any(marker in lowered for marker in _create_task_markers) or _create_task_fuzzy(lowered) or _proceed_with_task(lowered):
+            raw_title = text.strip()
+            for prefix in ("create hive mind task", "create hive task", "create new task for research", "create new task for", "create new task", "create task for research", "create task for", "create task", "new task for research", "new task for", "new task", "add to the hive a new task", "add to hive a new task", "add to the hive", "add to hive", "add task", "create these tasks", "create them", "create these", "yes create", "yes create them", "do all and start working", "proceed with", "do it", "do all", "start working", "go ahead", "carry on"):
+                if raw_title.lower().startswith(prefix):
+                    raw_title = raw_title[len(prefix):].strip().lstrip("-:–").strip()
+                    break
+            title = raw_title[:180].strip()
+            _generic = title.lower() in ("these tasks", "these", "them", "it", "on hive", "") or len(title) < 4
+            title = title if not _generic else "User-requested Hive task"
+            summary = text.strip()[:4000] or title
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_hive_create_topic",
+                next_payload={
+                    "intent": "hive.create_topic",
+                    "arguments": {"title": title, "summary": summary, "topic_tags": ["research"]},
+                },
+            )
+        if tool_inventory_request:
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_operator_tool_inventory",
+                next_payload={"intent": "operator.list_tools", "arguments": {}},
+            )
+        if workspace_bootstrap_request and workspace_bootstrap_path:
+            wants_desktop = any(m in lowered for m in (" desktop ", " on my desktop", " my desktop", " on desktop", "~/desktop"))
+            wants_home = any(m in lowered for m in (" home ", " home/", " my machine", " this machine", "~/", "folder in my machine"))
+            home_dir = str(Path.home())
+            if wants_desktop:
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_desktop_directory_create",
+                    next_payload={"intent": "sandbox.run_command", "arguments": {"command": f"mkdir -p {home_dir}/Desktop/{workspace_bootstrap_path}"}},
+                )
+            if wants_home:
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_home_directory_create",
+                    next_payload={"intent": "sandbox.run_command", "arguments": {"command": f"mkdir -p {home_dir}/{workspace_bootstrap_path}"}},
+                )
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_workspace_directory_bootstrap",
+                next_payload={"intent": "workspace.ensure_directory", "arguments": {"path": workspace_bootstrap_path}},
+            )
+        if explicit_command and any(marker in lowered for marker in (" retry ", " then retry", " then rerun", " rerun ")):
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_diagnose_run",
+                next_payload={"intent": "sandbox.run_command", "arguments": {"command": explicit_command}},
+            )
+        if replacement is not None:
+            path = str(replacement.get("path") or "").strip()
+            if path:
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_read_before_edit",
+                    next_payload={"intent": "workspace.read_file", "arguments": {"path": path, "start_line": 1, "max_lines": 120}},
+                )
+            query = str(replacement.get("old_text") or "").strip()
+            if query:
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_search_before_edit",
+                    next_payload={"intent": "workspace.search_text", "arguments": {"query": query, "limit": 10}},
+                )
+        if public_entity_lookup:
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_entity_lookup_search",
+                next_payload={"intent": "web.search", "arguments": {"query": entity_query or text, "limit": 4}},
+            )
+        if research_flow:
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_research_search",
+                next_payload={"intent": "web.search", "arguments": {"query": text, "limit": 4}},
+            )
+        if explicit_command:
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_command_run",
+                next_payload={"intent": "sandbox.run_command", "arguments": {"command": explicit_command}},
+            )
+        return WorkflowPlannerDecision(handled=False, reason="no_workflow_plan")
+
+    last_step = dict(steps[-1] or {})
+    last_intent = str(last_step.get("tool_name") or "").strip()
+    last_observation = dict(last_step.get("observation") or {})
+    hints = extract_observation_followup_hints(last_observation)
+
+    if research_flow:
+        if last_intent == "web.search":
+            current_query = str(dict(last_step.get("arguments") or {}).get("query") or "").strip()
+            result_count = int(hints.get("result_count") or 0)
+            if public_entity_lookup and result_count <= 0:
+                if entity_retry_query and entity_retry_query != current_query and not _workflow_step_exists(steps, "web.search", key="query", value=entity_retry_query):
+                    return WorkflowPlannerDecision(
+                        handled=True,
+                        reason="planned_entity_lookup_retry",
+                        next_payload={"intent": "web.search", "arguments": {"query": entity_retry_query, "limit": 4}},
+                    )
+                if not _workflow_step_exists(steps, "web.research"):
+                    return WorkflowPlannerDecision(
+                        handled=True,
+                        reason="planned_entity_lookup_research",
+                        next_payload={"intent": "web.research", "arguments": {"query": entity_retry_query or entity_query or text}},
+                    )
+            if not compare_or_verify and int(hints.get("result_count") or 0) >= 2:
+                return WorkflowPlannerDecision(handled=True, reason="research_enough_after_search", stop_after=True)
+            primary_url = str(hints.get("primary_url") or "").strip()
+            if primary_url and not _workflow_step_exists(steps, "web.fetch", key="url", value=primary_url):
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_fetch_after_search",
+                    next_payload={"intent": "web.fetch", "arguments": {"url": primary_url}},
+                )
+            if compare_or_verify and not _workflow_step_exists(steps, "web.research"):
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_verify_after_search",
+                    next_payload={"intent": "web.research", "arguments": {"query": text}},
+                )
+            if public_entity_lookup and not _workflow_step_exists(steps, "web.research") and result_count < 2:
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_entity_lookup_verify",
+                    next_payload={"intent": "web.research", "arguments": {"query": entity_retry_query or entity_query or text}},
+                )
+            return WorkflowPlannerDecision(handled=True, reason="research_stop_after_search", stop_after=True)
+        if last_intent == "web.fetch":
+            if compare_or_verify and not _workflow_step_exists(steps, "web.research"):
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_research_after_fetch",
+                    next_payload={"intent": "web.research", "arguments": {"query": text}},
+                )
+            return WorkflowPlannerDecision(handled=True, reason="research_stop_after_fetch", stop_after=True)
+        if last_intent == "web.research":
+            return WorkflowPlannerDecision(handled=True, reason="research_stop_after_verify", stop_after=True)
+
+    if last_intent == "workspace.search_text":
+        path = str(hints.get("primary_path") or "").strip()
+        line = int(hints.get("primary_line") or 0)
+        if path and not _workflow_step_exists(steps, "workspace.read_file", key="path", value=path):
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_read_after_search",
+                next_payload={
+                    "intent": "workspace.read_file",
+                    "arguments": {
+                        "path": path,
+                        "start_line": max(1, line - 8) if line else 1,
+                        "max_lines": 60,
+                    },
+                },
+            )
+        return WorkflowPlannerDecision(handled=True, reason="workspace_stop_after_search", stop_after=True)
+
+    if last_intent == "workspace.read_file":
+        read_path = str(hints.get("path") or "").strip()
+        if replacement is not None:
+            target_path = str(replacement.get("path") or read_path).strip()
+            old_text = str(replacement.get("old_text") or "").strip()
+            new_text = str(replacement.get("new_text") or "").strip()
+            if target_path and old_text and new_text and not _workflow_step_exists(steps, "workspace.replace_in_file", key="path", value=target_path):
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_edit_after_read",
+                    next_payload={
+                        "intent": "workspace.replace_in_file",
+                        "arguments": {
+                            "path": target_path,
+                            "old_text": old_text,
+                            "new_text": new_text,
+                            "replace_all": True,
+                        },
+                    },
+                )
+        if explicit_command and not _workflow_step_exists(steps, "sandbox.run_command", key="command", value=explicit_command):
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_command_after_read",
+                next_payload={"intent": "sandbox.run_command", "arguments": {"command": explicit_command}},
+            )
+        return WorkflowPlannerDecision(handled=True, reason="workspace_stop_after_read", stop_after=True)
+
+    if last_intent == "workspace.ensure_directory":
+        return WorkflowPlannerDecision(handled=True, reason="workspace_stop_after_directory_bootstrap", stop_after=True)
+
+    if last_intent == "workspace.write_file":
+        if explicit_command and not _workflow_step_exists(steps, "sandbox.run_command", key="command", value=explicit_command):
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_command_after_write",
+                next_payload={"intent": "sandbox.run_command", "arguments": {"command": explicit_command}},
+            )
+        return WorkflowPlannerDecision(handled=True, reason="workspace_stop_after_write", stop_after=True)
+
+    if last_intent == "workspace.replace_in_file":
+        retry_command = _last_command_from_steps(steps) or explicit_command
+        if retry_command and not _workflow_retry_already_happened(steps, retry_command):
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_retry_after_edit",
+                next_payload={"intent": "sandbox.run_command", "arguments": {"command": retry_command}},
+            )
+        return WorkflowPlannerDecision(handled=True, reason="workspace_stop_after_edit", stop_after=True)
+
+    if last_intent == "sandbox.run_command":
+        returncode = int(hints.get("returncode") or 0)
+        if returncode == 0:
+            return WorkflowPlannerDecision(handled=True, reason="command_stop_after_success", stop_after=True)
+        error_path = str(hints.get("error_path") or "").strip()
+        error_line = int(hints.get("error_line") or 0)
+        if error_path and not _workflow_step_exists(steps, "workspace.read_file", key="path", value=error_path):
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_inspect_after_command_failure",
+                next_payload={
+                    "intent": "workspace.read_file",
+                    "arguments": {
+                        "path": error_path,
+                        "start_line": max(1, error_line - 8) if error_line else 1,
+                        "max_lines": 60,
+                    },
+                },
+            )
+        if replacement is not None:
+            target_path = str(replacement.get("path") or "").strip()
+            if target_path and not _workflow_step_exists(steps, "workspace.read_file", key="path", value=target_path):
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_explicit_inspect_after_command_failure",
+                    next_payload={"intent": "workspace.read_file", "arguments": {"path": target_path, "start_line": 1, "max_lines": 120}},
+                )
+        diagnostic_query = str(hints.get("diagnostic_query") or "").strip()
+        if diagnostic_query and not _workflow_step_exists(steps, "workspace.search_text", key="query", value=diagnostic_query):
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_search_after_command_failure",
+                next_payload={"intent": "workspace.search_text", "arguments": {"query": diagnostic_query, "limit": 10}},
+            )
+        return WorkflowPlannerDecision(handled=True, reason="command_stop_after_failure", stop_after=True)
+
+    return WorkflowPlannerDecision(handled=False, reason="no_followup_plan")
 
 
 def execute_tool_intent(
@@ -389,7 +1414,7 @@ def execute_tool_intent(
         arguments = _inject_idempotency_key(intent, arguments, idempotency_key=idempotency_key)
 
     if intent in _WEB_TOOL_INTENTS:
-        execution = _execute_web_tool(intent, arguments, task_id=task_id)
+        execution = _execute_web_tool(intent, arguments, task_id=task_id, source_context=source_context)
         _maybe_store_tool_receipt(
             execution,
             receipt_key=receipt_key,
@@ -402,6 +1427,17 @@ def execute_tool_intent(
         return execution
     runtime_execution = execute_runtime_tool(intent, arguments, source_context=source_context)
     if runtime_execution is not None:
+        runtime_details = dict(runtime_execution.details or {})
+        runtime_details.setdefault(
+            "observation",
+            _tool_observation(
+                intent=intent,
+                tool_surface="runtime_execution",
+                ok=runtime_execution.ok,
+                status=runtime_execution.status,
+                response_preview=str(runtime_execution.response_text or "")[:280],
+            ),
+        )
         runtime_mode = (
             "tool_preview"
             if runtime_execution.status in {"user_action_required", "simulate_only"}
@@ -416,7 +1452,7 @@ def execute_tool_intent(
             response_text=runtime_execution.response_text,
             mode=runtime_mode,
             tool_name=intent,
-            details=dict(runtime_execution.details or {}),
+            details=runtime_details,
         )
         _maybe_store_tool_receipt(
             execution,
@@ -469,15 +1505,14 @@ def execute_tool_intent(
         target_type="task",
         details={"intent": intent, "arguments": arguments, "source_context": dict(source_context or {})},
     )
-    return ToolIntentExecution(
-        handled=True,
-        ok=False,
+    return _unsupported_execution_for_intent(
+        intent,
         status="unsupported",
-        response_text=f"I won't fake it: `{intent}` is not wired on this runtime.",
-        user_safe_response_text="That action is not wired on this runtime yet.",
-        mode="tool_failed",
-        tool_name=intent,
-        details={"intent": intent, "arguments": arguments},
+        extra_details={
+            "intent": intent,
+            "arguments": arguments,
+        },
+        user_safe_override="That action is not wired on this runtime yet.",
     )
 
 
@@ -509,6 +1544,103 @@ def _inject_idempotency_key(intent: str, arguments: dict[str, Any], *, idempoten
     if intent in _MUTATING_OPERATOR_INTENTS:
         updated.setdefault("action_id", idempotency_key)
     return updated
+
+
+def _workflow_step_exists(steps: list[dict[str, Any]], intent: str, *, key: str | None = None, value: str | None = None) -> bool:
+    normalized_intent = str(intent or "").strip()
+    normalized_value = str(value or "").strip()
+    for step in list(steps or []):
+        if str(step.get("tool_name") or "").strip() != normalized_intent:
+            continue
+        if key is None:
+            return True
+        arguments = dict(step.get("arguments") or {})
+        step_value = str(arguments.get(key) or "").strip()
+        if step_value == normalized_value:
+            return True
+    return False
+
+
+def _last_command_from_steps(steps: list[dict[str, Any]]) -> str:
+    for step in reversed(list(steps or [])):
+        if str(step.get("tool_name") or "").strip() != "sandbox.run_command":
+            continue
+        command = str(dict(step.get("arguments") or {}).get("command") or "").strip()
+        if command:
+            return command
+    return ""
+
+
+def _workflow_retry_already_happened(steps: list[dict[str, Any]], command: str) -> bool:
+    normalized = str(command or "").strip()
+    if not normalized:
+        return False
+    count = 0
+    for step in list(steps or []):
+        if str(step.get("tool_name") or "").strip() != "sandbox.run_command":
+            continue
+        step_command = str(dict(step.get("arguments") or {}).get("command") or "").strip()
+        if step_command == normalized:
+            count += 1
+    return count >= 2
+
+
+def _explicit_replace_request(user_text: str) -> dict[str, str] | None:
+    text = str(user_text or "").strip()
+    if not text:
+        return None
+    fenced = re.search(
+        r"replace\s+`(?P<old>[^`]+)`\s+with\s+`(?P<new>[^`]+)`(?:\s+in\s+(?P<path>[A-Za-z0-9_./-]+\.[A-Za-z0-9_+-]+))?",
+        text,
+        re.IGNORECASE,
+    )
+    if fenced:
+        return {
+            "old_text": str(fenced.group("old") or "").strip(),
+            "new_text": str(fenced.group("new") or "").strip(),
+            "path": _normalize_inline_path(str(fenced.group("path") or "").strip()),
+        }
+    plain = re.search(
+        r"replace\s+(?P<old>[A-Za-z0-9_.:/-]+)\s+with\s+(?P<new>[A-Za-z0-9_.:/-]+)(?:\s+in\s+(?P<path>[A-Za-z0-9_./-]+\.[A-Za-z0-9_+-]+))?",
+        text,
+        re.IGNORECASE,
+    )
+    if plain:
+        return {
+            "old_text": str(plain.group("old") or "").strip(),
+            "new_text": str(plain.group("new") or "").strip(),
+            "path": _normalize_inline_path(str(plain.group("path") or "").strip()),
+        }
+    return None
+
+
+def _explicit_command_request(user_text: str) -> str:
+    text = str(user_text or "").strip()
+    if not text:
+        return ""
+    fenced = re.search(r"(?:run|execute|retry|rerun)\s+`(?P<command>[^`]+)`", text, re.IGNORECASE)
+    if fenced:
+        return _normalize_inline_command(str(fenced.group("command") or "").strip())
+    common = re.search(
+        r"\b(?:run|execute|retry|rerun)\s+(?P<command>(?:pytest(?:\s+-[A-Za-z0-9-]+)*(?:\s+[A-Za-z0-9_./:-]+)*)|(?:python3?\s+[A-Za-z0-9_./:-]+(?:\s+[A-Za-z0-9_./:=+-]+)*)|(?:npm\s+(?:test|run\s+[A-Za-z0-9:_-]+))|(?:cargo\s+test(?:\s+[A-Za-z0-9_./:-]+)*))",
+        text,
+        re.IGNORECASE,
+    )
+    if common:
+        return _normalize_inline_command(str(common.group("command") or "").strip())
+    return ""
+
+
+def _normalize_inline_command(command: str) -> str:
+    clean = " ".join(str(command or "").split()).strip()
+    if not clean:
+        return ""
+    clean = re.sub(r"(?P<stem>[A-Za-z0-9_/-]+)\.\s+(?P<ext>py|js|ts|json|yaml|yml|toml|sh|md)\b", r"\g<stem>.\g<ext>", clean)
+    return clean
+
+
+def _normalize_inline_path(path: str) -> str:
+    return _normalize_inline_command(path)
 
 
 def _maybe_store_tool_receipt(
@@ -569,16 +1701,15 @@ def _execution_from_receipt(receipt: dict[str, Any]) -> ToolIntentExecution | No
     )
 
 
-def _execute_web_tool(intent: str, arguments: dict[str, Any], *, task_id: str) -> ToolIntentExecution:
+def _execute_web_tool(
+    intent: str,
+    arguments: dict[str, Any],
+    *,
+    task_id: str,
+    source_context: dict[str, Any] | None,
+) -> ToolIntentExecution:
     if not policy_engine.allow_web_fallback():
-        return ToolIntentExecution(
-            handled=True,
-            ok=False,
-            status="disabled",
-            response_text="Live web tooling is disabled on this runtime.",
-            mode="tool_failed",
-            tool_name=intent,
-        )
+        return _unsupported_execution_for_intent(intent, status="disabled")
 
     load_builtin_tools()
     try:
@@ -612,8 +1743,31 @@ def _execute_web_tool(intent: str, arguments: dict[str, Any], *, task_id: str) -
                     response_text=f'No live search results came back for "{query}".',
                     mode="tool_executed",
                     tool_name=intent,
-                    details={"query": query},
+                    details={
+                        "query": query,
+                        "result_count": 0,
+                        "results": [],
+                        "observation": _tool_observation(
+                            intent=intent,
+                            tool_surface="web",
+                            ok=True,
+                            status="no_results",
+                            query=query,
+                            result_count=0,
+                            results=[],
+                        ),
+                    },
                 )
+            observation_results = [
+                {
+                    "title": str(row.get("result_title") or row.get("title") or row.get("url") or "Untitled").strip(),
+                    "url": str(row.get("result_url") or row.get("url") or "").strip(),
+                    "snippet": str(row.get("summary") or row.get("snippet") or "").strip()[:180],
+                    "source_profile_label": str(row.get("source_profile_label") or "").strip(),
+                    "origin_domain": str(row.get("origin_domain") or "").strip(),
+                }
+                for row in rows[:limit]
+            ]
             lines = [f'Search results for "{query}":']
             for row in rows:
                 title = str(row.get("result_title") or row.get("title") or row.get("url") or "Untitled").strip()
@@ -635,7 +1789,20 @@ def _execute_web_tool(intent: str, arguments: dict[str, Any], *, task_id: str) -
                 response_text="\n".join(lines),
                 mode="tool_executed",
                 tool_name=intent,
-                details={"query": query, "result_count": len(rows)},
+                details={
+                    "query": query,
+                    "result_count": len(rows),
+                    "results": observation_results,
+                    "observation": _tool_observation(
+                        intent=intent,
+                        tool_surface="web",
+                        ok=True,
+                        status="executed",
+                        query=query,
+                        result_count=len(rows),
+                        results=observation_results,
+                    ),
+                },
             )
 
         if intent == "web.fetch":
@@ -664,13 +1831,24 @@ def _execute_web_tool(intent: str, arguments: dict[str, Any], *, task_id: str) -
                 response_text="\n".join(lines),
                 mode="tool_executed" if status == "ok" else "tool_failed",
                 tool_name=intent,
-                details={"url": url, "fetch_status": status},
+                details={
+                    "url": url,
+                    "fetch_status": status,
+                    "text_preview": preview,
+                    "observation": _tool_observation(
+                        intent=intent,
+                        tool_surface="web",
+                        ok=status == "ok",
+                        status="executed" if status == "ok" else status,
+                        url=url,
+                        fetch_status=status,
+                        text_preview=preview,
+                    ),
+                },
             )
 
         if intent == "web.research":
             query = str(arguments.get("query") or "").strip()
-            max_hits = max(1, min(int(arguments.get("max_hits") or 5), 8))
-            max_pages = max(1, min(int(arguments.get("max_pages") or 3), 4))
             if not query:
                 return ToolIntentExecution(
                     handled=True,
@@ -680,34 +1858,74 @@ def _execute_web_tool(intent: str, arguments: dict[str, Any], *, task_id: str) -
                     mode="tool_failed",
                     tool_name=intent,
                 )
-            result = call_tool("web.research", query=query, max_hits=max_hits, max_pages=max_pages)
-            hits = [_normalize_item(item) for item in list(getattr(result, "hits", []) or [])[:max_hits]]
-            pages = [_normalize_item(item) for item in list(getattr(result, "pages", []) or [])[:max_pages]]
-            provider = str(getattr(result, "provider", "unknown") or "unknown")
-            lines = [f'Web research for "{query}" via {provider}:']
-            for row in hits[:3]:
-                title = str(row.get("title") or row.get("url") or "Untitled").strip()
-                url = str(row.get("url") or "").strip()
-                snippet = str(row.get("snippet") or "").strip()
-                line = f"- {title}"
-                if url:
-                    line += f" - {url}"
+            research_result = CuriosityRoamer().adaptive_research(
+                task_id=task_id,
+                user_input=query,
+                classification={"task_class": "research"},
+                interpretation=SimpleNamespace(topic_hints=[], understanding_confidence=0.82),
+                source_context=dict(source_context or {"surface": "openclaw", "platform": "openclaw"}),
+            )
+            observation_hits = [
+                {
+                    "title": str(row.get("result_title") or row.get("title") or row.get("result_url") or "Untitled").strip(),
+                    "url": str(row.get("result_url") or row.get("url") or "").strip(),
+                    "snippet": str(row.get("summary") or row.get("snippet") or "").strip()[:180],
+                    "domain": str(row.get("origin_domain") or "").strip(),
+                }
+                for row in list(research_result.notes or [])[:5]
+            ]
+            lines = [f'Adaptive web research for "{query}":']
+            if research_result.actions_taken:
+                lines.append("- Actions: " + ", ".join(research_result.actions_taken))
+            if research_result.queries_run:
+                lines.append("- Queries: " + " | ".join(research_result.queries_run[:3]))
+            for row in observation_hits[:3]:
+                line = f"- {row['title']}"
+                if row["url"]:
+                    line += f" - {row['url']}"
+                if row["domain"]:
+                    line += f" [{row['domain']}]"
                 lines.append(line)
-                if snippet:
-                    lines.append(f"  {snippet[:180]}")
-            if pages:
-                first_page = pages[0]
-                page_text = str(first_page.get("text") or "").strip()
-                if page_text:
-                    lines.append(f"- Page preview: {page_text[:240]}")
+                if row["snippet"]:
+                    lines.append(f"  {row['snippet']}")
+            if research_result.admitted_uncertainty:
+                lines.append(f"- Uncertainty: {research_result.uncertainty_reason}")
+            elif research_result.stop_reason:
+                lines.append(f"- Stop reason: {research_result.stop_reason}")
             return ToolIntentExecution(
                 handled=True,
-                ok=bool(hits),
-                status="executed" if hits else "no_results",
+                ok=bool(observation_hits),
+                status="executed" if observation_hits else "no_results",
                 response_text="\n".join(lines),
-                mode="tool_executed" if hits else "tool_failed",
+                user_safe_response_text="\n".join(lines),
+                mode="tool_executed" if observation_hits else "tool_failed",
                 tool_name=intent,
-                details={"query": query, "provider": provider, "hit_count": len(hits)},
+                details={
+                    "query": query,
+                    "strategy": research_result.strategy,
+                    "actions_taken": list(research_result.actions_taken),
+                    "queries_run": list(research_result.queries_run),
+                    "evidence_strength": research_result.evidence_strength,
+                    "uncertainty_reason": research_result.uncertainty_reason,
+                    "hit_count": len(observation_hits),
+                    "hits": observation_hits,
+                    "observation": _tool_observation(
+                        intent=intent,
+                        tool_surface="web",
+                        ok=bool(observation_hits),
+                        status="executed" if observation_hits else "no_results",
+                        query=query,
+                        strategy=research_result.strategy,
+                        actions_taken=list(research_result.actions_taken),
+                        queries_run=list(research_result.queries_run),
+                        evidence_strength=research_result.evidence_strength,
+                        admitted_uncertainty=research_result.admitted_uncertainty,
+                        uncertainty_reason=research_result.uncertainty_reason,
+                        stop_reason=research_result.stop_reason,
+                        hit_count=len(observation_hits),
+                        hits=observation_hits,
+                    ),
+                },
             )
 
         if intent == "browser.render":
@@ -738,7 +1956,24 @@ def _execute_web_tool(intent: str, arguments: dict[str, Any], *, task_id: str) -
                 response_text="\n".join(lines),
                 mode="tool_executed" if status == "ok" else "tool_failed",
                 tool_name=intent,
-                details={"url": url, "final_url": final_url, "render_status": status},
+                details={
+                    "url": url,
+                    "final_url": final_url,
+                    "render_status": status,
+                    "title": title,
+                    "text_preview": text[:240] if text else "",
+                    "observation": _tool_observation(
+                        intent=intent,
+                        tool_surface="web",
+                        ok=status == "ok",
+                        status="executed" if status == "ok" else status,
+                        url=url,
+                        final_url=final_url,
+                        render_status=status,
+                        title=title,
+                        text_preview=text[:240] if text else "",
+                    ),
+                },
             )
     except Exception as exc:
         audit_logger.log(
@@ -757,15 +1992,7 @@ def _execute_web_tool(intent: str, arguments: dict[str, Any], *, task_id: str) -
             details={"error": str(exc)},
         )
 
-    return ToolIntentExecution(
-        handled=True,
-        ok=False,
-        status="unsupported",
-        response_text=f"I won't fake it: `{intent}` is not wired on this runtime.",
-        user_safe_response_text="That action is not wired on this runtime yet.",
-        mode="tool_failed",
-        tool_name=intent,
-    )
+    return _unsupported_execution_for_intent(intent, status="unsupported")
 
 
 def _execute_hive_tool(
@@ -782,24 +2009,10 @@ def _execute_hive_tool(
             public_hive_bridge=public_hive_bridge,
         )
     if public_hive_bridge is None:
-        return ToolIntentExecution(
-            handled=True,
-            ok=False,
-            status="not_configured",
-            response_text="Public Hive write tooling is not configured on this runtime.",
-            mode="tool_failed",
-            tool_name=intent,
-        )
+        return _unsupported_execution_for_intent(intent, status="not_configured")
     write_enabled = getattr(public_hive_bridge, "write_enabled", lambda: True)()
     if intent in {"hive.research_topic", "hive.create_topic", "hive.claim_task", "hive.post_progress", "hive.submit_result"} and not write_enabled:
-        return ToolIntentExecution(
-            handled=True,
-            ok=False,
-            status="missing_auth",
-            response_text="Public Hive write auth is missing on this runtime, so I won't pretend the write lane is live.",
-            mode="tool_failed",
-            tool_name=intent,
-        )
+        return _unsupported_execution_for_intent(intent, status="missing_auth")
     try:
         if intent == "hive.list_research_queue":
             rows = public_hive_bridge.list_public_research_queue(limit=max(1, min(int(arguments.get("limit") or 12), 50)))
@@ -904,13 +2117,49 @@ def _execute_hive_tool(
                 details={"artifacts": rows},
             )
         if intent == "hive.research_topic":
+            run_in_background = bool(arguments.get("run_in_background", False))
+            topic_id_arg = str(arguments.get("topic_id") or "").strip()
+            auto_claim_arg = bool(arguments.get("auto_claim", True))
+
+            if run_in_background:
+                import threading as _threading
+
+                def _background_research() -> None:
+                    try:
+                        research_topic_from_signal(
+                            {"topic_id": topic_id_arg},
+                            public_hive_bridge=public_hive_bridge,
+                            hive_activity_tracker=hive_activity_tracker,
+                            auto_claim=auto_claim_arg,
+                        )
+                    except Exception as exc:
+                        audit_logger.log(
+                            "background_research_error",
+                            target_id=topic_id_arg,
+                            target_type="topic",
+                            details={"error": str(exc)},
+                        )
+
+                _threading.Thread(
+                    target=_background_research,
+                    name=f"nulla-bg-research-{topic_id_arg[:12]}",
+                    daemon=True,
+                ).start()
+                return ToolIntentExecution(
+                    handled=True,
+                    ok=True,
+                    status="started_background",
+                    response_text=f"Started Hive research on `{topic_id_arg}` in the background. You can keep chatting — I'll work on it.",
+                    mode="tool_executed",
+                    tool_name=intent,
+                    details={"topic_id": topic_id_arg, "background": True},
+                )
+
             result = research_topic_from_signal(
-                {
-                    "topic_id": str(arguments.get("topic_id") or "").strip(),
-                },
+                {"topic_id": topic_id_arg},
                 public_hive_bridge=public_hive_bridge,
                 hive_activity_tracker=hive_activity_tracker,
-                auto_claim=bool(arguments.get("auto_claim", True)),
+                auto_claim=auto_claim_arg,
             ).to_dict()
             if not result.get("ok"):
                 return ToolIntentExecution(
@@ -1032,15 +2281,7 @@ def _execute_hive_tool(
             tool_name=intent,
             details={"error": str(exc)},
         )
-    return ToolIntentExecution(
-        handled=True,
-        ok=False,
-        status="unsupported",
-        response_text=f"I won't fake it: `{intent}` is not wired on this runtime.",
-        user_safe_response_text="That action is not wired on this runtime yet.",
-        mode="tool_failed",
-        tool_name=intent,
-    )
+    return _unsupported_execution_for_intent(intent, status="unsupported")
 
 
 def _execute_hive_list_available(
@@ -1064,11 +2305,13 @@ def _execute_hive_list_available(
         except Exception:
             error_text = "I couldn't reach the public Hive bridge right now."
     else:
+        entry = capability_entry_for_intent("hive.list_available")
         return ToolIntentExecution(
             handled=True,
             ok=False,
             status="not_configured",
-            response_text="Hive listing is not configured on this runtime, so I can't report real live Hive tasks.",
+            response_text=render_capability_truth_response(capability_gap_for_intent("hive.list_available")),
+            user_safe_response_text=render_capability_truth_response(capability_gap_for_intent("hive.list_available")),
             mode="tool_failed",
             tool_name="hive.list_available",
         )
@@ -1153,7 +2396,17 @@ def _execute_operator_tool(
         response_text=str(dispatch.response_text or ""),
         mode=mode,
         tool_name=intent,
-        details=dict(dispatch.details or {}),
+        details={
+            **dict(dispatch.details or {}),
+            "observation": _tool_observation(
+                intent=intent,
+                tool_surface="local_operator",
+                ok=bool(dispatch.ok),
+                status=str(dispatch.status),
+                details=dict(dispatch.details or {}),
+                response_preview=str(dispatch.response_text or "")[:280],
+            ),
+        },
         learned_plan=dispatch.learned_plan,
     )
 

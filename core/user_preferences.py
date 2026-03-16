@@ -27,7 +27,7 @@ class UserPreferences:
 _PREFS_FILE = "user_preferences.json"
 _HUMOR_RE = re.compile(r"(?:set\s+)?humou?r\s*[:=]?\s*(\d{1,3})\s*%?", re.IGNORECASE)
 _CHAR_RE = re.compile(
-    r"^(?:set\s+persona|act\s+like|be\s+like|character)\s*[:=]?\s*(.+)$",
+    r"^(?:set\s+persona|act\s+like|act\s+as|be\s+like|be\s+(?:a\s+)?|character|roleplay\s+as|pretend\s+(?:to\s+be|you(?:'re| are)\s+)|play\s+(?:the\s+role\s+of|as)|i\s+name\s+(?:you|u)|your?\s+name\s+(?:is|now)|you\s+are\s+now|from\s+now\s+on\s+you(?:'re| are))\s*[:=]?\s*(.+)$",
     re.IGNORECASE,
 )
 _BOUNDARIES_RE = re.compile(r"^(?:set\s+)?boundaries\s*[:=]?\s*(relaxed|standard|strict)\b", re.IGNORECASE)

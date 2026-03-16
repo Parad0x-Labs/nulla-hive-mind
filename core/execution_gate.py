@@ -45,6 +45,21 @@ class ExecutionGate:
         return False
 
     @staticmethod
+    def local_action_guardrails(
+        action_name: str,
+        *,
+        destructive: bool,
+    ) -> dict[str, bool]:
+        normalized = str(action_name or "").strip().lower()
+        outward_facing = normalized in {"discord_post", "telegram_send"}
+        privacy_sensitive = normalized in {"discord_post", "telegram_send"}
+        return {
+            "destructive": bool(destructive),
+            "outward_facing": outward_facing,
+            "privacy_sensitive": privacy_sensitive,
+        }
+
+    @staticmethod
     def evaluate_local_action(
         action_name: str,
         *,
@@ -53,6 +68,10 @@ class ExecutionGate:
         reads_workspace: bool = False,
         writes_workspace: bool = False,
     ) -> GateDecision:
+        guardrails = ExecutionGate.local_action_guardrails(
+            action_name,
+            destructive=destructive,
+        )
         if not policy_engine.get("execution.allow_safe_local_actions", True):
             return GateDecision(
                 mode="advice_only",
@@ -71,14 +90,27 @@ class ExecutionGate:
             )
 
         if (
-            destructive
+            (
+                guardrails["destructive"]
+                or guardrails["outward_facing"]
+                or guardrails["privacy_sensitive"]
+            )
             and policy_engine.get("execution.require_explicit_user_approval_for_execution", True)
             and not user_approved
-            and ExecutionGate._requires_explicit_approval(action_name)
+            and ExecutionGate._requires_explicit_approval(
+                action_name,
+                destructive=guardrails["destructive"],
+                outward_facing=guardrails["outward_facing"],
+                privacy_sensitive=guardrails["privacy_sensitive"],
+            )
         ):
+            if guardrails["outward_facing"] or guardrails["privacy_sensitive"]:
+                reason = "Outward-facing or privacy-sensitive action requires explicit user approval."
+            else:
+                reason = "Execution requires explicit user approval."
             return GateDecision(
                 mode="advice_only",
-                reason="Execution requires explicit user approval.",
+                reason=reason,
                 requires_user_approval=True,
                 allowed_actions=[],
             )
@@ -107,13 +139,21 @@ class ExecutionGate:
         )
 
     @staticmethod
-    def _requires_explicit_approval(action_name: str) -> bool:
+    def _requires_explicit_approval(
+        action_name: str,
+        *,
+        destructive: bool = False,
+        outward_facing: bool = False,
+        privacy_sensitive: bool = False,
+    ) -> bool:
         prefs = load_preferences()
         autonomy_mode = str(getattr(prefs, "autonomy_mode", "hands_off") or "hands_off").strip().lower()
+        if outward_facing or privacy_sensitive:
+            return True
         if autonomy_mode == "strict":
             return True
         if autonomy_mode == "balanced":
-            return action_name in {
+            return destructive or action_name in {
                 "cleanup_temp_files",
                 "move_path",
                 "schedule_calendar_event",

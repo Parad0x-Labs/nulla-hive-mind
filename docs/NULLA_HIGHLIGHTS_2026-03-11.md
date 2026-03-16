@@ -1,6 +1,6 @@
 # NULLA Highlights
 Date: 2026-03-11
-Repo: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA`
+Repo: `/path/to/nulla-hive-mind`
 
 ## Executive Summary
 

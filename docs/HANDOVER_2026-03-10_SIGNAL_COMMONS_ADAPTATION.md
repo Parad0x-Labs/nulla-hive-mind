@@ -1,6 +1,6 @@
 # NULLA Handover
 Date: 2026-03-10
-Repo: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA`
+Repo: `/path/to/nulla-hive-mind`
 Status: In progress, not yet ready for internal testing
 
 ## 0. Executive Reality
@@ -35,8 +35,8 @@ These systems were already implemented before the last Commons work.
 ### 1.1 Durable useful output layer
 
 Implemented:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/migrations.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/useful_output_store.py`
+- `/path/to/nulla-hive-mind/storage/migrations.py`
+- `/path/to/nulla-hive-mind/storage/useful_output_store.py`
 
 This introduced a canonical `useful_outputs` table and sync pipeline.
 
@@ -74,11 +74,11 @@ This is one of the biggest real changes in the repo.
 ### 1.2 Adaptation loop no longer blindly trusts chat
 
 Implemented:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/adaptation_dataset.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/adaptation_autopilot.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/adaptation_store.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/policy_engine.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/config/default_policy.yaml`
+- `/path/to/nulla-hive-mind/core/adaptation_dataset.py`
+- `/path/to/nulla-hive-mind/core/adaptation_autopilot.py`
+- `/path/to/nulla-hive-mind/storage/adaptation_store.py`
+- `/path/to/nulla-hive-mind/core/policy_engine.py`
+- `/path/to/nulla-hive-mind/config/default_policy.yaml`
 
 Key changes:
 - corpus builder prefers `useful_outputs`
@@ -100,10 +100,10 @@ This is the right direction.
 ### 1.3 Trace / watch / control-plane expose the blocker
 
 Implemented:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/control_plane_workspace.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/runtime_task_rail.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/nulla_user_summary.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_dashboard.py`
+- `/path/to/nulla-hive-mind/core/control_plane_workspace.py`
+- `/path/to/nulla-hive-mind/core/runtime_task_rail.py`
+- `/path/to/nulla-hive-mind/core/nulla_user_summary.py`
+- `/path/to/nulla-hive-mind/core/brain_hive_dashboard.py`
 
 Added visibility for:
 - useful output totals
@@ -118,11 +118,11 @@ This removed a lot of black-box bullshit.
 ### 1.4 Installer doctor
 
 Implemented:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/installer/doctor.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/installer/install_nulla.sh`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/installer/install_nulla.bat`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/installer/write_install_receipt.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/NULLA_STARTER_KIT.md`
+- `/path/to/nulla-hive-mind/installer/doctor.py`
+- `/path/to/nulla-hive-mind/installer/install_nulla.sh`
+- `/path/to/nulla-hive-mind/installer/install_nulla.bat`
+- `/path/to/nulla-hive-mind/installer/write_install_receipt.py`
+- `/path/to/nulla-hive-mind/NULLA_STARTER_KIT.md`
 
 This does not make the installer “finished product”.
 
@@ -147,7 +147,7 @@ These are the files changed in the last active coding pass.
 ### 3.1 Models
 
 Changed:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_models.py`
+- `/path/to/nulla-hive-mind/core/brain_hive_models.py`
 
 Added Pydantic models for Commons:
 - `HiveCommonsEndorseRequest`
@@ -165,7 +165,7 @@ Purpose:
 ### 3.2 DB schema
 
 Changed:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/migrations.py`
+- `/path/to/nulla-hive-mind/storage/migrations.py`
 
 Added tables:
 - `hive_post_endorsements`
@@ -180,7 +180,7 @@ They do not replace existing Hive topic/post/claim structures.
 ### 3.3 Store layer
 
 Changed:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/brain_hive_store.py`
+- `/path/to/nulla-hive-mind/storage/brain_hive_store.py`
 
 Added:
 - `upsert_post_endorsement`
@@ -204,7 +204,7 @@ This is the sqlite backbone for Commons.
 ### 3.4 Service layer
 
 Changed:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_service.py`
+- `/path/to/nulla-hive-mind/core/brain_hive_service.py`
 
 Added:
 - `endorse_post`
@@ -236,7 +236,7 @@ Important behavior:
 ### 3.5 Meet server routes
 
 Changed:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/meet_and_greet_server.py`
+- `/path/to/nulla-hive-mind/apps/meet_and_greet_server.py`
 
 Added new scoped Hive write paths:
 - `/v1/hive/commons/endorsements`
@@ -263,9 +263,9 @@ Also:
 ### 3.6 Policy / quota layer
 
 Changed:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/policy_engine.py`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/config/default_policy.yaml`
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/public_hive_quotas.py`
+- `/path/to/nulla-hive-mind/core/policy_engine.py`
+- `/path/to/nulla-hive-mind/config/default_policy.yaml`
+- `/path/to/nulla-hive-mind/core/public_hive_quotas.py`
 
 Added config:
 - `brain_hive.commons_review_threshold`
@@ -278,7 +278,7 @@ This keeps Commons under the same quota/signed write discipline as other Hive wr
 ### 3.7 Dashboard / watch
 
 Changed:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_dashboard.py`
+- `/path/to/nulla-hive-mind/core/brain_hive_dashboard.py`
 
 Added:
 - `commons_overview.promotion_candidates` in snapshot
@@ -297,7 +297,7 @@ There is still no final write UI for Commons interaction in the dashboard.
 ### 3.8 Control-plane mirror
 
 Changed:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/control_plane_workspace.py`
+- `/path/to/nulla-hive-mind/core/control_plane_workspace.py`
 
 Added:
 - Commons promotion queue loading
@@ -311,7 +311,7 @@ This makes Commons visible to operator tooling.
 ### 3.9 Useful-output gating for Commons
 
 Changed:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/useful_output_store.py`
+- `/path/to/nulla-hive-mind/storage/useful_output_store.py`
 
 This is a very important safety change.
 
@@ -385,7 +385,7 @@ This is the only currently known red slice after the last fixes.
 ## 5. The One Known Remaining Failing Test
 
 Current failing test:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_brain_hive_service.py`
+- `/path/to/nulla-hive-mind/tests/test_brain_hive_service.py`
 - `BrainHiveServiceTests.test_commons_candidate_requires_review_before_promotion`
 
 Exact failure:
@@ -399,7 +399,7 @@ This is the exact current mismatch.
 
 ### 5.1 Why it fails
 
-Current scoring in `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_service.py` likely yields roughly:
+Current scoring in `/path/to/nulla-hive-mind/core/brain_hive_service.py` likely yields roughly:
 - support endorsement: `~1.0`
 - cite endorsement: `~0.75`
 - one comment: `~0.35`
@@ -496,7 +496,7 @@ Current meaningful fields:
 - `loop_state.last_example_count = 12`
 - `loop_state.last_quality_score = 0.81`
 - policy base model:
-  - `base_model_ref = /Users/sauliuskruopis/Desktop/Decentralized_NULLA/.nulla_local/data/trainable_models/Qwen2.5-0.5B-Instruct`
+  - `base_model_ref = /path/to/nulla-hive-mind/.nulla_local/data/trainable_models/Qwen2.5-0.5B-Instruct`
   - `base_provider_name = nulla-trainable-base`
   - `base_model_name = Qwen2.5-0.5B-Instruct`
 
@@ -585,7 +585,7 @@ Expected current result:
 Fix the Commons promotion threshold mismatch.
 
 Likely file:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_service.py`
+- `/path/to/nulla-hive-mind/core/brain_hive_service.py`
 
 Likely decision:
 - strengthen test fixture instead of weakening threshold
@@ -594,7 +594,7 @@ Likely decision:
 Add endpoint tests for Commons API routes.
 
 Best targets:
-- `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_meet_and_greet_service.py`
+- `/path/to/nulla-hive-mind/tests/test_meet_and_greet_service.py`
 - or a new dedicated Hive Commons server test file
 
 Routes to test:
@@ -644,28 +644,28 @@ The immediate blocker is:
 
 ## 14. File-by-File High-Risk Map
 
-### `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_service.py`
+### `/path/to/nulla-hive-mind/core/brain_hive_service.py`
 Why risky:
 - lots of new logic landed quickly
 - scoring + review + promotion all live here
 - one known active behavior mismatch remains here
 
-### `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/brain_hive_store.py`
+### `/path/to/nulla-hive-mind/storage/brain_hive_store.py`
 Why risky:
 - many new upsert/list functions
 - SQL placeholder ordering mistakes are easy here
 
-### `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/storage/useful_output_store.py`
+### `/path/to/nulla-hive-mind/storage/useful_output_store.py`
 Why risky:
 - Commons review gating directly changes training eligibility
 - wrong logic here could silently pollute adaptation corpus
 
-### `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/meet_and_greet_server.py`
+### `/path/to/nulla-hive-mind/apps/meet_and_greet_server.py`
 Why risky:
 - new API surface exists
 - quota and auth behavior not fully endpoint-tested yet
 
-### `/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/brain_hive_dashboard.py`
+### `/path/to/nulla-hive-mind/core/brain_hive_dashboard.py`
 Why risky:
 - dashboard now assumes more Commons data is available
 - compatibility with fake/stub services must stay guarded

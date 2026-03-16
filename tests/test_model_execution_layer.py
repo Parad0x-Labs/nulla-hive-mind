@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import unittest
 import uuid
+from typing import Any
 from unittest import mock
 
 from apps.nulla_agent import NullaAgent
 from adapters.base_adapter import ModelResponse
 from core.human_input_adapter import HumanInputInterpretation
 from core.identity_manager import load_active_persona
-from core.memory_first_router import MemoryFirstRouter
+from core.memory_first_router import MemoryFirstRouter, ModelExecutionDecision
 from core.model_registry import ModelRegistry
 from core.reasoning_engine import build_plan
 from core.task_router import classify, create_task_record
@@ -61,6 +62,28 @@ class ModelExecutionLayerTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def _chat_turn_inputs(self, text: str) -> tuple[Any, HumanInputInterpretation, dict[str, Any], Any]:
+        task = create_task_record(text)
+        interpretation = HumanInputInterpretation(
+            raw_text=task.task_summary,
+            normalized_text=task.task_summary,
+            reconstructed_text=task.task_summary,
+            intent_mode="request",
+            topic_hints=["chat"],
+            reference_targets=[],
+            understanding_confidence=0.82,
+            quality_flags=[],
+        )
+        classification = classify(task.task_summary, context=interpretation.as_context())
+        context_result = self.loader.load(
+            task=task,
+            classification=classification,
+            interpretation=interpretation,
+            persona=self.persona,
+            session_id=f"ctx-{uuid.uuid4().hex}",
+        )
+        return task, interpretation, classification, context_result
+
     def test_memory_first_hit_skips_model_call(self) -> None:
         self._insert_local_shard()
         task = create_task_record("harden local credentials so passwords never leak")
@@ -92,6 +115,71 @@ class ModelExecutionLayerTests(unittest.TestCase):
             )
         self.assertEqual(decision.source, "memory_hit")
         build_adapter.assert_not_called()
+
+    def test_chat_surface_forces_provider_over_exact_cache_hit(self) -> None:
+        task, interpretation, classification, context_result = self._chat_turn_inputs("do you think boredom is useful?")
+        with mock.patch(
+            "core.memory_first_router.get_exact_candidate",
+            return_value={
+                "provider_name": "cached",
+                "model_name": "cached-model",
+                "normalized_output": "Cached answer that should not speak directly.",
+                "structured_output": None,
+                "confidence": 0.88,
+                "trust_score": 0.88,
+                "candidate_id": "cached-1",
+                "validation_state": "valid",
+            },
+        ), mock.patch("core.memory_first_router.should_revalidate", return_value=False), mock.patch.object(
+            self.router,
+            "_execute_provider_task",
+            return_value=ModelExecutionDecision(
+                source="provider_execution",
+                task_hash="chat-cache-forced",
+                provider_id="test-provider",
+                used_model=True,
+                output_text="Fresh provider answer.",
+            ),
+        ) as execute_provider:
+            decision = self.router.resolve(
+                task=task,
+                classification=classification,
+                interpretation=interpretation,
+                context_result=context_result,
+                persona=self.persona,
+                force_model=False,
+                surface="openclaw",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertEqual(decision.source, "provider_execution")
+        execute_provider.assert_called_once()
+
+    def test_chat_surface_forces_provider_over_memory_hit(self) -> None:
+        self._insert_local_shard()
+        task, interpretation, classification, context_result = self._chat_turn_inputs("harden local credentials so passwords never leak")
+        with mock.patch.object(
+            self.router,
+            "_execute_provider_task",
+            return_value=ModelExecutionDecision(
+                source="no_provider_available",
+                task_hash="chat-memory-forced",
+                used_model=False,
+            ),
+        ) as execute_provider:
+            decision = self.router.resolve(
+                task=task,
+                classification=classification,
+                interpretation=interpretation,
+                context_result=context_result,
+                persona=self.persona,
+                force_model=False,
+                surface="openclaw",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertEqual(decision.source, "no_provider_available")
+        execute_provider.assert_called_once()
 
     def test_provider_registration_and_routing_with_trust(self) -> None:
         self.registry.register_manifest(

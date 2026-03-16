@@ -3,14 +3,14 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "decentralized-nulla"
-version = "0.1.0"
-description = "Decentralized AI Agent Swarm — local-first distributed reasoning"
+name = "nulla-hive-mind"
+version = "0.3.0"
+description = "Nulla Hive Mind — local-first decentralized AI agent swarm with distributed reasoning"
 readme = "README.md"
-license = {text = "Proprietary"}
+license = {text = "MIT"}
 requires-python = ">=3.9"
 authors = [
-    {name = "NULLA Team"},
+    {name = "sls_0x"},
 ]
 keywords = ["ai", "agent", "swarm", "decentralized", "reasoning"]
 classifiers = [

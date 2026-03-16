@@ -1,9 +1,47 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Any
 
 from core.identity_manager import render_with_persona
+
+_CHAT_SURFACES = {"channel", "openclaw", "api"}
+_PLANNER_LEAKAGE_MARKERS = (
+    "workflow:",
+    "real steps completed:",
+    "here's what i'd suggest",
+    '"summary":',
+    '"steps":',
+)
+_TEMPLATE_FALLBACK_MARKERS = (
+    "here's what i'd suggest",
+    "no strong match found",
+    "using a safe local fallback",
+    "using best known pattern for",
+    "using candidate output from",
+    "using relevant retained context for",
+    "using external notes as a temporary fallback",
+)
+_EXPLICIT_PLAN_REQUEST_PATTERNS = (
+    r"\bgive me (?:a|the) plan\b",
+    r"\bmake (?:me )?(?:a|the) plan\b",
+    r"\baction plan\b",
+    r"\broadmap\b",
+    r"\bchecklist\b",
+    r"\bexecution checklist\b",
+    r"\bstep[\s-]?by[\s-]?step\b",
+    r"\brollout steps\b",
+    r"\brollout plan\b",
+    r"\bsteps to\b",
+    r"\bshow (?:me )?(?:the )?steps\b",
+    r"\bwhat steps did you take\b",
+    r"\breal steps\b",
+    r"\bworkflow\b",
+    r"\bplan this\b",
+    r"\bplan out\b",
+    r"\boutline (?:a|the) plan\b",
+)
 
 
 @dataclass
@@ -183,8 +221,8 @@ def build_plan(task: Any, classification: dict[str, Any], evidence: dict[str, An
     else:
         confidence = max(0.25, min(0.60, float(classification.get("confidence_hint", 0.35))))
         steps = _fallback_steps(task_class)
-        summary = f"No strong match found. Using a safe local fallback plan for {task_class}."
-        evidence_sources = ["local_fallback"]
+        summary = f"No strong match found. Deferring to model synthesis for {task_class}."
+        evidence_sources = ["model_deferred"]
         risk_flags = base_risks
 
     if task_class == "risky_system_action":
@@ -221,13 +259,63 @@ def render_response(
     prompt_assembly_report: Any | None = None,
     *,
     surface: str = "cli",
+    allow_planner_style: bool = False,
 ) -> str:
     """Render agent response. surface='channel'|'openclaw'|'api' gives clean
     conversational output; surface='cli' (default) gives full diagnostics."""
     if surface in {"channel", "openclaw", "api"}:
-        return _render_conversational(plan, gate_decision, persona, input_interpretation)
+        return _render_conversational(
+            plan,
+            gate_decision,
+            persona,
+            input_interpretation,
+            allow_planner_style=allow_planner_style,
+        )
 
     return _render_diagnostic(plan, gate_decision, persona, input_interpretation, prompt_assembly_report)
+
+
+def explicit_planner_style_requested(user_input: str) -> bool:
+    lowered_input = str(user_input or "").strip().lower()
+    if not lowered_input:
+        return False
+    return any(re.search(pattern, lowered_input) for pattern in _EXPLICIT_PLAN_REQUEST_PATTERNS)
+
+
+def should_use_planner_renderer(
+    *,
+    surface: str = "cli",
+    output_mode: str = "plain_text",
+    user_input: str = "",
+) -> bool:
+    normalized_surface = str(surface or "cli").strip().lower()
+    normalized_output_mode = str(output_mode or "plain_text").strip().lower()
+
+    if normalized_surface not in _CHAT_SURFACES:
+        return True
+    if normalized_output_mode != "action_plan":
+        return False
+    return explicit_planner_style_requested(user_input)
+
+
+def inspect_user_response_shape(
+    response_text: str,
+    *,
+    surface: str = "cli",
+    rendered_via: str = "unknown",
+) -> dict[str, bool | str]:
+    lowered = str(response_text or "").strip().lower()
+    is_chat_surface = surface in _CHAT_SURFACES
+    planner_leakage = any(marker in lowered for marker in _PLANNER_LEAKAGE_MARKERS)
+    template_fallback_hit = any(marker in lowered for marker in _TEMPLATE_FALLBACK_MARKERS)
+    return {
+        "surface": surface,
+        "rendered_via": rendered_via,
+        "chat_surface": is_chat_surface,
+        "planner_leakage": planner_leakage,
+        "template_renderer_hit": is_chat_surface and rendered_via == "reasoning_engine",
+        "template_fallback_hit": is_chat_surface and rendered_via == "reasoning_engine" and template_fallback_hit,
+    }
 
 
 def _render_conversational(
@@ -235,6 +323,8 @@ def _render_conversational(
     gate_decision: Any,
     persona: Any,
     input_interpretation: Any | None = None,
+    *,
+    allow_planner_style: bool = False,
 ) -> str:
     """Clean conversational response for chat surfaces (OpenClaw, channels)."""
     mode = _get(gate_decision, "mode", "advice_only")
@@ -284,7 +374,7 @@ def _render_conversational(
             is_fallback = True
 
     if is_fallback or not summary or len(summary) < 5:
-        body = _build_natural_fallback(plan)
+        body = _build_natural_fallback(plan, allow_planner_style=allow_planner_style)
     else:
         body = summary
         if plan.abstract_steps:
@@ -295,7 +385,7 @@ def _render_conversational(
     return render_with_persona(body, persona)
 
 
-def _build_natural_fallback(plan: Plan) -> str:
+def _build_natural_fallback(plan: Plan, *, allow_planner_style: bool = False) -> str:
     """Generate a helpful natural-language response when no real content exists."""
     if not plan.abstract_steps:
         return "I'm here and listening. What would you like to work on?"
@@ -307,6 +397,8 @@ def _build_natural_fallback(plan: Plan) -> str:
         return "I'm here and ready to help. What would you like to work on?"
 
     step_text = "\n".join(f"- {s}" for s in readable_steps)
+    if not allow_planner_style:
+        return step_text
     return f"Here's what I'd suggest:\n\n{step_text}"
 
 

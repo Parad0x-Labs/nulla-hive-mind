@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 import hashlib
+import operator
 import os
 import platform
 import re
@@ -24,6 +26,270 @@ _PATH_PATTERNS = [
 _URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 _EMAIL_RE = re.compile(r"\b[\w\.-]+@[\w\.-]+\.\w+\b")
 _TOKEN_RE = re.compile(r"\b[A-Fa-f0-9]{24,}\b|\b[a-zA-Z0-9_\-]{32,}\b")
+
+_BUSINESS_CHAT_MARKERS = (
+    "business",
+    "pricing",
+    "position",
+    "positioning",
+    "go to market",
+    "gtm",
+    "sales",
+    "marketing",
+    "revenue",
+    "customer acquisition",
+    "brand strategy",
+    "market strategy",
+)
+_FOOD_CHAT_MARKERS = (
+    "food",
+    "meal",
+    "meals",
+    "recipe",
+    "recipes",
+    "diet",
+    "nutrition",
+    "calories",
+    "protein",
+    "carbs",
+    "fat loss",
+    "what should i eat",
+)
+_RELATIONSHIP_CHAT_MARKERS = (
+    "relationship",
+    "relationships",
+    "partner",
+    "girlfriend",
+    "boyfriend",
+    "wife",
+    "husband",
+    "dating",
+    "breakup",
+    "intimacy",
+    "sex life",
+    "argument",
+)
+_CREATIVE_CHAT_MARKERS = (
+    "brainstorm",
+    "creative",
+    "campaign idea",
+    "campaign ideas",
+    "name ideas",
+    "tagline",
+    "slogan",
+    "story idea",
+    "concept ideas",
+    "creative direction",
+)
+_GENERAL_ADVISORY_MARKERS = (
+    "should i",
+    "what should i do",
+    "help me decide",
+    "need advice",
+    "advice on",
+    "how do i handle",
+)
+_HIVE_MARKERS = ("hive", "hive mind", "brain hive", "public hive")
+_SEMANTIC_HIVE_PATTERNS = (
+    re.compile(r"\b(?:check|show|list|see)\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)\b"),
+    re.compile(r"\bwhat(?:'s| is)\s+in\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)\b"),
+    re.compile(r"\bwhat(?:'s| is)\s+on\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)\b"),
+    re.compile(r"\banything\s+on\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)\b"),
+    re.compile(r"\bshow\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)\s+(?:work|tasks?|queue)\b"),
+    re.compile(r"\bwhat\s+(?:online\s+)?tasks?\s+(?:do\s+)?we\s+have\b"),
+)
+_ENTITY_LOOKUP_QUESTION_PATTERNS = (
+    re.compile(r"\bwho(?:'s|\s+is)\b"),
+    re.compile(r"\btell\s+me\s+about\b"),
+    re.compile(r"\bwhat\s+do\s+you\s+know\s+about\b"),
+    re.compile(r"\bis\s+(?:he|she|they)\s+(?:the\s+)?(?:owner|founder|ceo|cto|creator|co-founder)\b"),
+    re.compile(r"\bwho\s+(?:is|are|was)\s+(?:behind|running|leading)\b"),
+    re.compile(r"\bwhat\s+(?:is|are)\s+(?:his|her|their)\s+(?:role|position|title)\b"),
+    re.compile(r"\bi\s+see\s+(?:him|her|them)\s+mentioned\b"),
+    re.compile(r"\bwho\s+(?:runs?|owns?|founded|created|built|leads?)\b"),
+    re.compile(r"\bfind\s+(?:me\s+)?who\b"),
+)
+_EXPLICIT_LOOKUP_MARKERS = (
+    "find",
+    "look up",
+    "lookup",
+    "search",
+    "google",
+    "check",
+)
+_WEB_SOCIAL_LOOKUP_MARKERS = (
+    "on x",
+    "x.com",
+    "on twitter",
+    "twitter",
+    "on the web",
+    "on web",
+    "google",
+    "online",
+    "web",
+)
+_DIRECT_MATH_EXPRESSION_RE = re.compile(r"^[\d\s\.\+\-\*\/%\(\)]+$")
+_SAFE_ARITHMETIC_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+}
+_NON_WEB_LOOKUP_EXCLUSIONS = (
+    "file",
+    "files",
+    "folder",
+    "workspace",
+    "repo",
+    "repository",
+    "command",
+    "terminal",
+    "shell",
+    "calendar",
+    "email",
+)
+_PLAIN_TEXT_CHAT_TASK_CLASSES = {
+    "chat_conversation",
+    "chat_research",
+    "general_advisory",
+    "business_advisory",
+    "food_nutrition",
+    "relationship_advisory",
+    "creative_ideation",
+}
+_AI_FIRST_CHAT_DOMAIN_TASK_CLASSES = {
+    "unknown",
+    "research",
+    "chat_conversation",
+    "chat_research",
+    "general_advisory",
+    "business_advisory",
+    "food_nutrition",
+    "relationship_advisory",
+    "creative_ideation",
+    "debugging",
+    "dependency_resolution",
+    "config",
+    "system_design",
+    "file_inspection",
+    "shell_guidance",
+}
+
+
+def looks_like_semantic_hive_request(text: str) -> bool:
+    lowered = " ".join(str(text or "").strip().lower().split())
+    if not lowered:
+        return False
+    if any(
+        marker in lowered
+        for marker in (
+            "create task",
+            "create topic",
+            "new task",
+            "new topic",
+            "claim task",
+            "submit result",
+            "post progress",
+            "status",
+            "done",
+            "finished",
+        )
+    ):
+        return False
+    if any(pattern.search(lowered) for pattern in _SEMANTIC_HIVE_PATTERNS):
+        return True
+    if any(marker in lowered for marker in _HIVE_MARKERS) and any(
+        marker in lowered
+        for marker in ("task", "tasks", "work", "queue", "open", "available", "online", "anything")
+    ):
+        return True
+    return False
+
+
+def looks_like_public_entity_lookup_request(text: str) -> bool:
+    lowered = " ".join(str(text or "").strip().lower().split())
+    if not lowered or looks_like_semantic_hive_request(lowered):
+        return False
+    if any(marker in lowered for marker in _NON_WEB_LOOKUP_EXCLUSIONS):
+        return False
+    if any(pattern.search(lowered) for pattern in _ENTITY_LOOKUP_QUESTION_PATTERNS):
+        return True
+    has_lookup_marker = any(marker in lowered for marker in _EXPLICIT_LOOKUP_MARKERS)
+    has_web_or_social_cue = any(marker in lowered for marker in _WEB_SOCIAL_LOOKUP_MARKERS)
+    has_public_context = any(marker in lowered for marker in (
+        "solana", "founder", "ceo", "cto", "person", "guy", "girl", "crypto",
+        "ethereum", "bitcoin", "helius", "blockchain", "defi", "nft",
+        "company", "startup", "project", "protocol", "influencer",
+        "community", "developer", "engineer", "owner", "co-founder",
+    ))
+    return bool(has_lookup_marker and (has_web_or_social_cue or has_public_context))
+
+
+def looks_like_explicit_lookup_request(text: str) -> bool:
+    lowered = " ".join(str(text or "").strip().lower().split())
+    if not lowered or looks_like_semantic_hive_request(lowered):
+        return False
+    if any(marker in lowered for marker in _NON_WEB_LOOKUP_EXCLUSIONS):
+        return False
+    if looks_like_public_entity_lookup_request(lowered):
+        return True
+    return bool(
+        any(marker in lowered for marker in ("look up", "lookup", "search online", "check online", "browse"))
+        or (
+            any(marker in lowered for marker in ("find", "check", "search", "google"))
+            and any(marker in lowered for marker in _WEB_SOCIAL_LOOKUP_MARKERS)
+        )
+    )
+
+
+def looks_like_direct_math_request(text: str) -> bool:
+    lowered = " ".join(str(text or "").strip().lower().split())
+    if not lowered:
+        return False
+    if not _DIRECT_MATH_EXPRESSION_RE.fullmatch(lowered):
+        return False
+    if not any(marker in lowered for marker in ("+", "-", "*", "/", "%")):
+        return False
+    return len(re.findall(r"\d+(?:\.\d+)?", lowered)) >= 2
+
+
+def evaluate_direct_math_request(text: str) -> str | None:
+    expression = " ".join(str(text or "").strip().split())
+    if not looks_like_direct_math_request(expression):
+        return None
+
+    try:
+        parsed = ast.parse(expression, mode="eval")
+    except Exception:
+        return None
+
+    def _eval(node: ast.AST) -> float:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return float(node.value)
+        if isinstance(node, ast.Num):  # pragma: no cover
+            return float(node.n)
+        if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_ARITHMETIC_OPERATORS:
+            return _SAFE_ARITHMETIC_OPERATORS[type(node.op)](_eval(node.left), _eval(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_ARITHMETIC_OPERATORS:
+            return _SAFE_ARITHMETIC_OPERATORS[type(node.op)](_eval(node.operand))
+        raise ValueError("unsupported arithmetic node")
+
+    try:
+        value = _eval(parsed)
+    except Exception:
+        return None
+
+    if isinstance(value, float) and value.is_integer():
+        rendered = str(int(value))
+    else:
+        rendered = f"{value:.12g}"
+    return f"{expression} = {rendered}."
 
 
 @dataclass
@@ -78,6 +344,10 @@ def redact_text(text: str) -> str:
     # compress whitespace
     value = re.sub(r"\s+", " ", value).strip()
     return value
+
+
+def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in text for marker in markers)
 
 
 def create_task_record(user_input: str, *, session_id: str | None = None) -> TaskRecord:
@@ -210,6 +480,9 @@ def classify(user_input: str, context: dict[str, Any] | None = None) -> dict[str
     if risk_flags:
         task_class = "risky_system_action"
         confidence_hint = 0.90
+    elif looks_like_direct_math_request(text):
+        task_class = "chat_conversation"
+        confidence_hint = 0.94
     elif any(k in text for k in ["harden", "protect", "password", "passwords", "secret", "secrets", "leak", "leaks", "credential"]) or {"security", "security hardening", "password leak", "protect"} & topic_hints:
         task_class = "security_hardening"
         confidence_hint = 0.80
@@ -225,12 +498,9 @@ def classify(user_input: str, context: dict[str, Any] | None = None) -> dict[str
     elif any(k in text for k in ["config", "yaml", "json", ".env", "setting", "configure"]):
         task_class = "config"
         confidence_hint = 0.70
-    elif (
-        any(k in text for k in ["hive", "brain hive", "public hive", "hive mind"])
-        and any(k in text for k in ["available", "open", "task", "tasks", "queue", "pull", "claim", "work on", "help with", "select"])
-    ):
+    elif looks_like_semantic_hive_request(text):
         task_class = "integration_orchestration"
-        confidence_hint = 0.82
+        confidence_hint = 0.84
     elif (
         any(
             marker in text
@@ -265,6 +535,24 @@ def classify(user_input: str, context: dict[str, Any] | None = None) -> dict[str
     ):
         task_class = "system_design"
         confidence_hint = 0.80
+    elif _contains_any(text, _BUSINESS_CHAT_MARKERS) or {"business", "pricing", "marketing", "sales"} & topic_hints:
+        task_class = "business_advisory"
+        confidence_hint = 0.62
+    elif _contains_any(text, _FOOD_CHAT_MARKERS) or {"food", "nutrition", "meal", "diet"} & topic_hints:
+        task_class = "food_nutrition"
+        confidence_hint = 0.62
+    elif _contains_any(text, _RELATIONSHIP_CHAT_MARKERS) or {"relationship", "dating", "intimacy"} & topic_hints:
+        task_class = "relationship_advisory"
+        confidence_hint = 0.62
+    elif _contains_any(text, _CREATIVE_CHAT_MARKERS) or {"creative", "brainstorm", "campaign"} & topic_hints:
+        task_class = "creative_ideation"
+        confidence_hint = 0.62
+    elif _contains_any(text, _GENERAL_ADVISORY_MARKERS):
+        task_class = "general_advisory"
+        confidence_hint = 0.58
+    elif looks_like_public_entity_lookup_request(text) or looks_like_explicit_lookup_request(text):
+        task_class = "research"
+        confidence_hint = 0.70
     elif any(k in text for k in ["find", "look up", "research", "search", "what is", "tell me about"]):
         task_class = "research"
         confidence_hint = 0.65
@@ -293,6 +581,12 @@ def classify(user_input: str, context: dict[str, Any] | None = None) -> dict[str
         task_class = "shell_guidance"
         confidence_hint = 0.72
 
+    if task_class == "unknown":
+        model_class = _classify_via_model(user_input)
+        if model_class:
+            task_class = model_class
+            confidence_hint = 0.65
+
     if reference_targets:
         confidence_hint = min(0.92, confidence_hint + 0.04)
     if understanding_confidence:
@@ -306,6 +600,54 @@ def classify(user_input: str, context: dict[str, Any] | None = None) -> dict[str
         "confidence_hint": confidence_hint,
         "context_hints": list(context.keys()),
     }
+
+
+_VALID_TASK_CLASSES = {
+    "chat_conversation", "research", "debugging", "system_design",
+    "integration_orchestration", "shell_guidance", "file_inspection",
+    "config", "dependency_resolution", "security_hardening",
+    "business_advisory", "food_nutrition", "relationship_advisory",
+    "creative_ideation", "general_advisory",
+}
+
+
+def _classify_via_model(user_input: str) -> str:
+    """Ask the local LLM to classify user intent when regex fails."""
+    try:
+        import requests as _req
+        from core.hardware_tier import recommended_ollama_model
+
+        base_url = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+        _req.get(f"{base_url}/api/tags", timeout=1.5)
+
+        class_list = ", ".join(sorted(_VALID_TASK_CLASSES))
+        prompt = (
+            f"Classify this user message into exactly one category.\n"
+            f"Categories: {class_list}\n\n"
+            f"User message: {user_input[:300]}\n\n"
+            f"Reply with ONLY the category name, nothing else."
+        )
+        resp = _req.post(
+            f"{base_url}/v1/chat/completions",
+            json={
+                "model": recommended_ollama_model(),
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 20,
+            },
+            timeout=8,
+        )
+        resp.raise_for_status()
+        raw = resp.json()["choices"][0]["message"]["content"].strip().lower()
+        clean = raw.strip().strip("'\"`.").strip()
+        if clean in _VALID_TASK_CLASSES:
+            return clean
+        for cls in _VALID_TASK_CLASSES:
+            if cls in clean:
+                return cls
+    except Exception:
+        pass
+    return ""
 
 
 def context_strategy(task_class: str, *, context: dict[str, Any] | None = None, user_input: str = "") -> dict[str, Any]:
@@ -402,7 +744,12 @@ def curiosity_profile(task_class: str, *, context: dict[str, Any] | None = None,
     }
 
 
-def model_execution_profile(task_class: str) -> dict[str, Any]:
+def model_execution_profile(
+    task_class: str,
+    *,
+    chat_surface: bool = False,
+    planner_style_requested: bool = False,
+) -> dict[str, Any]:
     mapping = {
         "dependency_resolution": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": True},
         "debugging": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": True},
@@ -414,5 +761,58 @@ def model_execution_profile(task_class: str) -> dict[str, Any]:
         "file_inspection": {"task_kind": "summarization", "output_mode": "summary_block", "allow_paid_fallback": False},
         "shell_guidance": {"task_kind": "summarization", "output_mode": "summary_block", "allow_paid_fallback": False},
         "unknown": {"task_kind": "normalization_assist", "output_mode": "summary_block", "allow_paid_fallback": False},
+        "chat_conversation": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False},
+        "chat_research": {"task_kind": "summarization", "output_mode": "plain_text", "allow_paid_fallback": True},
+        "general_advisory": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False},
+        "business_advisory": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False},
+        "food_nutrition": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False},
+        "relationship_advisory": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False},
+        "creative_ideation": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False},
     }
-    return dict(mapping.get(task_class, mapping["unknown"]))
+    normalized_task_class = str(task_class or "unknown").strip().lower() or "unknown"
+    base_profile = dict(mapping.get(normalized_task_class, mapping["unknown"]))
+
+    if chat_surface and normalized_task_class in _AI_FIRST_CHAT_DOMAIN_TASK_CLASSES:
+        if planner_style_requested:
+            return {
+                "task_kind": "action_plan",
+                "output_mode": "action_plan",
+                "allow_paid_fallback": bool(base_profile.get("allow_paid_fallback", False)),
+            }
+        return {
+            "task_kind": "normalization_assist",
+            "output_mode": "plain_text",
+            "allow_paid_fallback": bool(base_profile.get("allow_paid_fallback", False)),
+        }
+
+    return base_profile
+
+
+def chat_surface_execution_task_class(
+    task_class: str,
+    *,
+    user_input: str = "",
+    context: dict[str, Any] | None = None,
+) -> str:
+    clean_task_class = str(task_class or "unknown").strip().lower() or "unknown"
+    if clean_task_class in _PLAIN_TEXT_CHAT_TASK_CLASSES:
+        return clean_task_class
+    if clean_task_class == "unknown":
+        return "chat_conversation"
+    if clean_task_class == "research":
+        return "chat_research"
+
+    context = context or {}
+    topic_hints = {str(item).lower() for item in context.get("topic_hints") or []}
+    lower = redact_text(user_input).lower()
+    if _contains_any(lower, _BUSINESS_CHAT_MARKERS) or {"business", "pricing", "marketing", "sales"} & topic_hints:
+        return "business_advisory"
+    if _contains_any(lower, _FOOD_CHAT_MARKERS) or {"food", "nutrition", "meal", "diet"} & topic_hints:
+        return "food_nutrition"
+    if _contains_any(lower, _RELATIONSHIP_CHAT_MARKERS) or {"relationship", "dating", "intimacy"} & topic_hints:
+        return "relationship_advisory"
+    if _contains_any(lower, _CREATIVE_CHAT_MARKERS) or {"creative", "brainstorm", "campaign"} & topic_hints:
+        return "creative_ideation"
+    if _contains_any(lower, _GENERAL_ADVISORY_MARKERS):
+        return "general_advisory"
+    return clean_task_class

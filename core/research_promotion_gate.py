@@ -38,6 +38,54 @@ def evaluate_research_promotion_candidate(
     evidence_count = int(counts.get("evidence_count") or 0)
     pattern_total = int(dict(trading.get("pattern_health") or {}).get("total_patterns") or 0)
     backtest = dict(candidate.get("evaluation") or {}).get("backtest")
+    evaluation = dict(candidate.get("evaluation") or {})
+
+    if candidate_kind == "finding":
+        topic_overlap = int(evaluation.get("topic_overlap") or 0)
+        specificity_score = float(evaluation.get("specificity_score") or 0.0)
+        domain_count = int(evaluation.get("domain_count") or 0)
+        snippet_count = int(evaluation.get("snippet_count") or support or 0)
+        missing: list[str] = []
+        gate_score = 0.20
+        if snippet_count >= 1:
+            gate_score += 0.18
+        else:
+            missing.append("need_grounded_snippets")
+        if domain_count >= 1:
+            gate_score += 0.16
+        else:
+            missing.append("need_source_domain")
+        if topic_overlap >= 2:
+            gate_score += 0.22
+        else:
+            missing.append("need_topic_overlap")
+        if specificity_score >= 0.45:
+            gate_score += 0.18
+        else:
+            missing.append("need_specificity")
+        if score_hint >= 0.55:
+            gate_score += 0.12
+        else:
+            missing.append("weak_signal_score")
+        can_promote = not missing
+        status = "approved" if can_promote else "candidate_only"
+        reason = "finding_grounded" if can_promote else "finding_not_specific_enough"
+        return PromotionGateDecision(
+            status=status,
+            can_promote=can_promote,
+            score=round(max(0.0, min(1.0, gate_score)), 4),
+            reason=reason,
+            missing_requirements=missing,
+            metrics={
+                "candidate_kind": candidate_kind,
+                "support": support,
+                "score_hint": score_hint,
+                "topic_overlap": topic_overlap,
+                "specificity_score": specificity_score,
+                "domain_count": domain_count,
+                "snippet_count": snippet_count,
+            },
+        )
 
     missing: list[str] = []
     gate_score = 0.15

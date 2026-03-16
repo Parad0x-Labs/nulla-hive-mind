@@ -225,6 +225,158 @@ class AutonomousTopicResearchTests(unittest.TestCase):
         self.assertIn("Parallel autonomous research started", progress_kwargs["body"])
         self.assertTrue(progress_kwargs["evidence_refs"][0]["parallel_lane"])
 
+    def test_research_topic_from_signal_downgrades_weak_runs_into_visible_summary_status(self) -> None:
+        bridge = mock.Mock()
+        bridge.enabled.return_value = True
+        bridge.get_public_research_packet.return_value = {
+            "packet_schema": "brain_hive.research_packet.v1",
+            "topic": {
+                "topic_id": "topic-weak",
+                "title": "Agent commons watcher UX",
+                "summary": "Audit whether weak research gets marked honestly.",
+                "status": "researching",
+                "topic_tags": ["agent_commons", "design"],
+                "evidence_mode": "candidate_only",
+            },
+            "claims": [],
+            "counts": {"post_count": 0, "claim_count": 0, "active_claim_count": 0, "evidence_count": 0, "source_domain_count": 0},
+            "execution_state": {"execution_state": "open"},
+            "derived_research_questions": [
+                "watcher ux docs",
+                "task flow evidence gaps",
+            ],
+            "trading_feature_export": {},
+        }
+        bridge.claim_public_topic.return_value = {"ok": True, "claim_id": "claim-weak", "topic_id": "topic-weak"}
+        bridge.post_public_topic_progress.return_value = {"ok": True, "post_id": "post-progress-weak"}
+        bridge.submit_public_topic_result.return_value = {"ok": True, "post_id": "post-result-weak", "topic_id": "topic-weak"}
+
+        curiosity = mock.Mock()
+        curiosity.run_external_topic.side_effect = [
+            {
+                "topic_id": "curiosity-weak-1",
+                "candidate_id": "candidate-weak-1",
+                "cached": False,
+                "summary": "Generic watcher UX note without grounded domains.",
+                "snippets": [],
+            },
+            {
+                "topic_id": "curiosity-weak-2",
+                "candidate_id": "",
+                "cached": False,
+                "summary": "",
+                "snippets": [],
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp_dir, mock.patch("core.liquefy_bridge._NULLA_VAULT", Path(tmp_dir)), mock.patch(
+            "core.autonomous_topic_research.get_local_peer_id",
+            return_value="peer-local-1234567890",
+        ), mock.patch(
+            "core.autonomous_topic_research.get_candidate_by_id",
+            side_effect=lambda candidate_id: {"candidate_id": candidate_id, "normalized_output": f"summary for {candidate_id}"},
+        ):
+            result = research_topic_from_signal(
+                {"topic_id": "topic-weak"},
+                public_hive_bridge=bridge,
+                curiosity=curiosity,
+                session_id="auto-research:topic-weak",
+                auto_claim=True,
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.result_status, "researching")
+        self.assertEqual(result.details["quality_summary"]["research_quality_status"], "insufficient_evidence")
+        submit_kwargs = bridge.submit_public_topic_result.call_args.kwargs
+        self.assertEqual(submit_kwargs["post_kind"], "summary")
+        self.assertEqual(submit_kwargs["result_status"], "researching")
+        self.assertIn("Research synthesis card", submit_kwargs["body"])
+        self.assertIn("Confidence: insufficient_evidence", submit_kwargs["body"])
+        self.assertIn("Blockers:", submit_kwargs["body"])
+
+    def test_research_topic_from_signal_promotes_grounded_general_findings_and_posts_single_synthesis_card(self) -> None:
+        bridge = mock.Mock()
+        bridge.enabled.return_value = True
+        bridge.get_public_research_packet.return_value = {
+            "packet_schema": "brain_hive.research_packet.v1",
+            "topic": {
+                "topic_id": "topic-grounded-general",
+                "title": "Agent commons watcher UX",
+                "summary": "Need grounded watcher and task-flow guidance.",
+                "status": "researching",
+                "topic_tags": ["agent_commons", "design"],
+                "evidence_mode": "read_public",
+            },
+            "claims": [],
+            "counts": {"post_count": 1, "claim_count": 0, "active_claim_count": 0, "evidence_count": 1, "source_domain_count": 0},
+            "execution_state": {"execution_state": "open"},
+            "derived_research_questions": [
+                "watcher ux task flow implementation docs",
+                "watcher ux concrete examples constraints",
+            ],
+            "trading_feature_export": {},
+        }
+        bridge.claim_public_topic.return_value = {"ok": True, "claim_id": "claim-grounded", "topic_id": "topic-grounded-general"}
+        bridge.post_public_topic_progress.return_value = {"ok": True, "post_id": "post-progress-grounded"}
+        bridge.submit_public_topic_result.return_value = {
+            "ok": True,
+            "post_id": "post-result-grounded",
+            "topic_id": "topic-grounded-general",
+        }
+
+        curiosity = mock.Mock()
+        curiosity.run_external_topic.side_effect = [
+            {
+                "topic_id": "curiosity-good-1",
+                "candidate_id": "candidate-good-1",
+                "cached": False,
+                "summary": "Watcher drill-down cards should preserve task state and reveal recent transitions clearly.",
+                "snippets": [
+                    {"summary": "Watcher drill-down cards should preserve task state.", "origin_domain": "developer.apple.com"},
+                    {"summary": "Recent transitions should stay visible.", "origin_domain": "developer.chrome.com"},
+                ],
+            },
+            {
+                "topic_id": "curiosity-good-2",
+                "candidate_id": "candidate-good-2",
+                "cached": False,
+                "summary": "Task-flow UX should keep active claims visible and expose blockers without hiding the queue context.",
+                "snippets": [
+                    {"summary": "Active claims stay visible in the queue.", "origin_domain": "material.io"},
+                ],
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp_dir, mock.patch("core.liquefy_bridge._NULLA_VAULT", Path(tmp_dir)), mock.patch(
+            "core.autonomous_topic_research.get_local_peer_id",
+            return_value="peer-local-1234567890",
+        ), mock.patch(
+            "core.autonomous_topic_research.get_candidate_by_id",
+            side_effect=lambda candidate_id: {"candidate_id": candidate_id, "normalized_output": f"summary for {candidate_id}"},
+        ):
+            result = research_topic_from_signal(
+                {"topic_id": "topic-grounded-general"},
+                public_hive_bridge=bridge,
+                curiosity=curiosity,
+                session_id="auto-research:topic-grounded-general",
+                auto_claim=True,
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.result_status, "solved")
+        self.assertEqual(result.details["quality_summary"]["research_quality_status"], "grounded")
+        self.assertGreaterEqual(result.details["quality_summary"]["promoted_finding_count"], 1)
+        submit_kwargs = bridge.submit_public_topic_result.call_args.kwargs
+        self.assertEqual(submit_kwargs["post_kind"], "verdict")
+        self.assertEqual(submit_kwargs["result_status"], "solved")
+        self.assertIn("Research synthesis card", submit_kwargs["body"])
+        self.assertIn("Question: Agent commons watcher UX", submit_kwargs["body"])
+        self.assertIn("Promoted findings:", submit_kwargs["body"])
+        self.assertNotIn("claim-grounded", submit_kwargs["idempotency_key"])
+        synthesis_refs = [item for item in submit_kwargs["evidence_refs"] if item.get("kind") == "research_synthesis_card"]
+        self.assertEqual(len(synthesis_refs), 1)
+        self.assertEqual(synthesis_refs[0]["confidence"], "grounded")
+
 
 if __name__ == "__main__":
     unittest.main()

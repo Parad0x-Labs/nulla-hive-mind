@@ -19,6 +19,7 @@ from core.persistent_memory import (
     user_heuristics_path,
 )
 from core.knowledge_registry import record_remote_holder
+from core.runtime_continuity import create_runtime_checkpoint, update_runtime_checkpoint
 from core.task_router import classify, create_task_record
 from core.tiered_context_loader import TieredContextLoader
 from network.signer import get_local_peer_id
@@ -70,6 +71,10 @@ class TieredContextLoaderTests(unittest.TestCase):
                 "payment_status_markers",
                 "context_access_log",
                 "sniffed_context",
+                "runtime_tool_receipts",
+                "runtime_checkpoints",
+                "runtime_session_events",
+                "runtime_sessions",
             ):
                 if table in existing_tables:
                     conn.execute(f"DELETE FROM {table}")
@@ -149,6 +154,69 @@ class TieredContextLoaderTests(unittest.TestCase):
         )
         self.assertTrue(any(item.source_type == "local_shard" for item in result.relevant_items))
         self.assertLessEqual(result.report.relevant_tokens_used, result.report.relevant_budget)
+
+    def test_relevant_retrieval_includes_structured_runtime_tool_observation(self) -> None:
+        checkpoint = create_runtime_checkpoint(
+            session_id=self.session_id,
+            request_text="latest qwen release notes",
+            source_context={"runtime_session_id": self.session_id, "surface": "openclaw", "platform": "openclaw"},
+        )
+        update_runtime_checkpoint(
+            checkpoint["checkpoint_id"],
+            state={
+                "executed_steps": [
+                    {
+                        "tool_name": "web.search",
+                        "status": "executed",
+                        "summary": "Found Qwen release notes.",
+                    }
+                ],
+                "last_tool_response": {
+                    "handled": True,
+                    "ok": True,
+                    "status": "executed",
+                    "response_text": 'Search results for "latest qwen release notes": ...',
+                    "tool_name": "web.search",
+                    "details": {
+                        "observation": {
+                            "schema": "tool_observation_v1",
+                            "intent": "web.search",
+                            "tool_surface": "web",
+                            "ok": True,
+                            "status": "executed",
+                            "query": "latest qwen release notes",
+                            "results": [
+                                {
+                                    "title": "Qwen release notes",
+                                    "url": "https://example.test/qwen",
+                                    "snippet": "Fresh update summary",
+                                }
+                            ],
+                        }
+                    },
+                },
+            },
+            status="completed",
+        )
+        task = create_task_record("tell me about the latest qwen release notes")
+        interpretation = _interpretation(
+            "tell me about the latest qwen release notes",
+            topics=["qwen", "release notes"],
+        )
+        result = self.loader.load(
+            task=task,
+            classification=classify(task.task_summary, context=interpretation.as_context()),
+            interpretation=interpretation,
+            persona=self.persona,
+            session_id=self.session_id,
+            total_context_budget=5000,
+        )
+
+        tool_items = [item for item in result.relevant_items if item.source_type == "tool_observation"]
+        self.assertTrue(tool_items)
+        self.assertIn('"tool_surface": "web"', result.assembled_context())
+        self.assertIn('"query": "latest qwen release notes"', result.assembled_context())
+        self.assertNotIn("Real tool result from", result.assembled_context())
 
     def test_relevant_retrieval_uses_persistent_memory_and_prior_session_summary(self) -> None:
         append_conversation_event(

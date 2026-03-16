@@ -1,6 +1,6 @@
 # NULLA / OpenClaw Runtime: What Is Fixed, What Is Still Bleeding, What Help Is Needed
 Date: 2026-03-11
-Repo: `/Users/sauliuskruopis/Desktop/Decentralized_NULLA`
+Repo: `/path/to/nulla-hive-mind`
 
 ## Purpose
 This document is not hype and not a generic handover.
@@ -89,21 +89,21 @@ That is the core issue.
 ## 3. Files that currently matter most
 
 ### Request/runtime entry
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_api_server.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_api_server.py)
+- [`/path/to/nulla-hive-mind/apps/nulla_api_server.py`](/path/to/nulla-hive-mind/apps/nulla_api_server.py)
 
 ### Main conversational router and fast paths
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py`](/path/to/nulla-hive-mind/apps/nulla_agent.py)
 
 ### Hive intent / task list / footer logic
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py)
+- [`/path/to/nulla-hive-mind/core/hive_activity_tracker.py`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py)
 
 ### Tool execution result object and failure shaping
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py)
+- [`/path/to/nulla-hive-mind/core/tool_intent_executor.py`](/path/to/nulla-hive-mind/core/tool_intent_executor.py)
 
 ### Current regression coverage
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_openclaw_tooling_context.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_openclaw_tooling_context.py)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_hive_activity_tracker.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_hive_activity_tracker.py)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_api_server.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_api_server.py)
+- [`/path/to/nulla-hive-mind/tests/test_openclaw_tooling_context.py`](/path/to/nulla-hive-mind/tests/test_openclaw_tooling_context.py)
+- [`/path/to/nulla-hive-mind/tests/test_hive_activity_tracker.py`](/path/to/nulla-hive-mind/tests/test_hive_activity_tracker.py)
+- [`/path/to/nulla-hive-mind/tests/test_nulla_api_server.py`](/path/to/nulla-hive-mind/tests/test_nulla_api_server.py)
 
 ---
 
@@ -112,7 +112,7 @@ That is the core issue.
 ### 4.1 Raw internal tool failures no longer belong in normal chat
 
 In:
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py)
+- [`/path/to/nulla-hive-mind/core/tool_intent_executor.py`](/path/to/nulla-hive-mind/core/tool_intent_executor.py)
 
 `ToolIntentExecution` now has:
 
@@ -138,7 +138,7 @@ return ToolIntentExecution(
 ```
 
 Then in:
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py`](/path/to/nulla-hive-mind/apps/nulla_agent.py)
 
 normal chat now goes through `_tool_failure_user_message(...)` instead of exposing raw tool/runtime text.
 
@@ -152,7 +152,7 @@ in normal chat for that path.
 ### 4.2 Repeated greeting loop is no longer one exact canned line
 
 In:
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py`](/path/to/nulla-hive-mind/apps/nulla_agent.py)
 
 smalltalk now uses session-local repetition state:
 
@@ -171,7 +171,7 @@ This is still deterministic, but it no longer looks like a totally dead Telegram
 ### 4.3 Natural Hive phrases are broader now
 
 In:
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py)
+- [`/path/to/nulla-hive-mind/core/hive_activity_tracker.py`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py)
 
 Hive pull/list patterns were widened to catch phrases like:
 
@@ -190,7 +190,7 @@ That specifically targeted real failures like:
 ### 4.4 Last shown Hive task set is now stored in interaction state
 
 In:
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py)
+- [`/path/to/nulla-hive-mind/core/hive_activity_tracker.py`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py)
 
 When a task list is shown, the tracker now stores:
 
@@ -206,7 +206,7 @@ set_hive_interaction_state(
 ```
 
 Then in:
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py`](/path/to/nulla-hive-mind/apps/nulla_agent.py)
 
 short follow-ups use:
 - `_interaction_pending_topic_ids(...)`
@@ -217,7 +217,7 @@ This is what makes `yes` / `ok` reuse the last real shown task set instead of fa
 ### 4.5 API session continuity is better now
 
 In:
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_api_server.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_api_server.py)
+- [`/path/to/nulla-hive-mind/apps/nulla_api_server.py`](/path/to/nulla-hive-mind/apps/nulla_api_server.py)
 
 `_stable_openclaw_session_id(...)` was widened to accept:
 
@@ -385,7 +385,7 @@ Example class of failure:
 That is not catastrophic, but it still makes the system feel synthetic and “bot stitched together from parts.”
 
 This currently lives around:
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py`](/path/to/nulla-hive-mind/apps/nulla_agent.py)
 - `_decorate_chat_response(...)`
 - `_fast_path_result(...)`
 - `_maybe_hive_footer(...)`
@@ -690,23 +690,23 @@ This runtime starts feeling like a real AI only when all of these are true:
 If other engineers / AI agents are going to help, send them:
 
 ### Existing context docs
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_RUNTIME_FAILURE_FLOW_2026-03-11.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_RUNTIME_FAILURE_FLOW_2026-03-11.md)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/HANDOVER_2026-03-10_SIGNAL_COMMONS_ADAPTATION.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/HANDOVER_2026-03-10_SIGNAL_COMMONS_ADAPTATION.md)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/NULLA_HIGHLIGHTS_2026-03-11.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/NULLA_HIGHLIGHTS_2026-03-11.md)
+- [`/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_RUNTIME_FAILURE_FLOW_2026-03-11.md`](/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_RUNTIME_FAILURE_FLOW_2026-03-11.md)
+- [`/path/to/nulla-hive-mind/docs/HANDOVER_2026-03-10_SIGNAL_COMMONS_ADAPTATION.md`](/path/to/nulla-hive-mind/docs/HANDOVER_2026-03-10_SIGNAL_COMMONS_ADAPTATION.md)
+- [`/path/to/nulla-hive-mind/docs/NULLA_HIGHLIGHTS_2026-03-11.md`](/path/to/nulla-hive-mind/docs/NULLA_HIGHLIGHTS_2026-03-11.md)
 
 ### Primary code files
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_api_server.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_api_server.py)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/hive_activity_tracker.py)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core/tool_intent_executor.py)
+- [`/path/to/nulla-hive-mind/apps/nulla_api_server.py`](/path/to/nulla-hive-mind/apps/nulla_api_server.py)
+- [`/path/to/nulla-hive-mind/apps/nulla_agent.py`](/path/to/nulla-hive-mind/apps/nulla_agent.py)
+- [`/path/to/nulla-hive-mind/core/hive_activity_tracker.py`](/path/to/nulla-hive-mind/core/hive_activity_tracker.py)
+- [`/path/to/nulla-hive-mind/core/tool_intent_executor.py`](/path/to/nulla-hive-mind/core/tool_intent_executor.py)
 
 ### Current regression tests
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_openclaw_tooling_context.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_openclaw_tooling_context.py)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_hive_activity_tracker.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_hive_activity_tracker.py)
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_api_server.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/tests/test_nulla_api_server.py)
+- [`/path/to/nulla-hive-mind/tests/test_openclaw_tooling_context.py`](/path/to/nulla-hive-mind/tests/test_openclaw_tooling_context.py)
+- [`/path/to/nulla-hive-mind/tests/test_hive_activity_tracker.py`](/path/to/nulla-hive-mind/tests/test_hive_activity_tracker.py)
+- [`/path/to/nulla-hive-mind/tests/test_nulla_api_server.py`](/path/to/nulla-hive-mind/tests/test_nulla_api_server.py)
 
 ### This doc
-- [`/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_RUNTIME_HELP_NEEDED_2026-03-11.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/OPENCLAW_NULLA_RUNTIME_HELP_NEEDED_2026-03-11.md)
+- [`/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_RUNTIME_HELP_NEEDED_2026-03-11.md`](/path/to/nulla-hive-mind/docs/OPENCLAW_NULLA_RUNTIME_HELP_NEEDED_2026-03-11.md)
 
 ---
 

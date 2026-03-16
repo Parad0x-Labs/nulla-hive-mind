@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from core import policy_engine
+from core.bootstrap_context import canonical_runtime_transcript
 from core.internal_message_schema import InternalMessage, InternalModelRequest
 from core.local_operator_actions import list_operator_tools
 from core.tool_intent_executor import runtime_tool_specs
@@ -10,6 +11,23 @@ from core.user_preferences import load_preferences
 
 
 _STRUCTURED_OUTPUT_MODES = {"json_object", "action_plan", "tool_intent", "summary_block"}
+_CHAT_SURFACES = {"channel", "openclaw", "api"}
+_PLAIN_TEXT_CHAT_TASK_CLASSES = {
+    "chat_conversation",
+    "chat_research",
+    "research",
+    "general_advisory",
+    "business_advisory",
+    "food_nutrition",
+    "relationship_advisory",
+    "creative_ideation",
+    "debugging",
+    "dependency_resolution",
+    "config",
+    "system_design",
+    "file_inspection",
+    "shell_guidance",
+}
 _TOOL_LABELS = {
     "inspect_disk_usage": "disk inspection",
     "cleanup_temp_files": "temp cleanup",
@@ -37,8 +55,9 @@ def normalize_prompt(
 ) -> InternalModelRequest:
     ambiguity = float(getattr(interpretation, "understanding_confidence", 0.0) or 0.0)
     user_text = getattr(interpretation, "reconstructed_text", "") or getattr(task, "task_summary", "")
+    task_class = str(classification.get("task_class", "unknown"))
 
-    if surface in {"channel", "openclaw", "api"}:
+    if surface in _CHAT_SURFACES:
         return _build_conversational_request(
             user_text=user_text,
             persona=persona,
@@ -84,20 +103,41 @@ def normalize_prompt(
         content=context_result.assembled_context() or "No additional context beyond bootstrap.",
         metadata={"retrieval_confidence": context_result.report.retrieval_confidence},
     )
+    generation_profile = _generation_profile(
+        surface=surface,
+        task_kind=task_kind,
+        output_mode=output_mode,
+        task_class=task_class,
+        user_text=user_text,
+        context_attached=bool((context_result.assembled_context() or "").strip()),
+    )
     return InternalModelRequest(
         task_kind=task_kind,
-        task_class=str(classification.get("task_class", "unknown")),
+        task_class=task_class,
         output_mode=output_mode,
         messages=[system, user, context],
         trace_id=trace_id,
-        max_output_tokens=_max_output_tokens(output_mode),
-        temperature=_temperature_for_mode(output_mode),
+        max_output_tokens=int(generation_profile["max_output_tokens"]),
+        temperature=float(generation_profile["temperature"]),
         ambiguity_confidence=ambiguity,
         constraints=constraints,
         context_summary=context_result.report.to_dict(),
         metadata={
             "persona_id": getattr(persona, "persona_id", "default"),
             "task_id": getattr(task, "task_id", ""),
+            "generation_profile": generation_profile,
+            "chat_truth_prompt": {
+                "surface": surface,
+                "task_kind": task_kind,
+                "output_mode": output_mode,
+                "structured_output": output_mode in _STRUCTURED_OUTPUT_MODES,
+                "context_attached": bool((context_result.assembled_context() or "").strip()),
+                "generation_profile_id": str(generation_profile["profile_id"]),
+                "requested_temperature": float(generation_profile["temperature"]),
+                "requested_top_p": generation_profile.get("top_p"),
+                "requested_max_output_tokens": int(generation_profile["max_output_tokens"]),
+                "adaptive_length": bool(generation_profile["adaptive_length"]),
+            },
         },
         attachments=list((context_result.report.to_dict().get("external_evidence_attachments") or [])),
     )
@@ -118,6 +158,10 @@ def _build_conversational_request(
     """Build a natural conversational prompt for chat surfaces."""
     persona_name = getattr(persona, "display_name", "NULLA")
     persona_tone = getattr(persona, "tone", "calm")
+    prompt_profile = _chat_system_prompt_profile(
+        output_mode=output_mode,
+        task_kind=task_kind,
+    )
 
     tone_guide = {
         "calm": "You are warm, clear, and thoughtful.",
@@ -126,23 +170,41 @@ def _build_conversational_request(
         "savage": "You are blunt and no-nonsense, but still helpful.",
     }.get(persona_tone, "You are helpful and conversational.")
 
-    assembled_context = context_result.assembled_context() or ""
-    context_block = ""
-    if assembled_context and assembled_context != "No additional context beyond bootstrap.":
-        context_block = f"\n\nRelevant context from your memory:\n{assembled_context[:2000]}"
+    context_message = _conversational_context_message(
+        context_result,
+        prompt_profile=prompt_profile,
+    )
     source_context = dict(source_context or {})
     source_platform = str(source_context.get("platform", "") or "").strip().lower()
     source_surface = str(source_context.get("surface", "") or "").strip().lower()
+    runtime_session_id = str(
+        source_context.get("runtime_session_id")
+        or source_context.get("session_id")
+        or ""
+    ).strip()
     has_openclaw_tools = source_platform in {"openclaw", "web_companion", "telegram", "discord"} or source_surface in {"channel", "openclaw", "api"}
-    tooling_guidance = _tooling_guidance(has_openclaw_tools=has_openclaw_tools)
     format_guidance = _chat_output_guidance(output_mode)
-    tool_catalog_guidance = _tool_intent_catalog_text() if output_mode == "tool_intent" else ""
+    conversation_safety_guidance = _conversational_safety_guidance()
+    tooling_guidance = ""
+    tool_catalog_guidance = ""
 
-    system = InternalMessage(
-        role="system",
-        content=(
+    if prompt_profile == "chat_minimal":
+        system_content = (
+            f"You are {persona_name}. "
+            f"{tone_guide} "
+            f"{conversation_safety_guidance} "
+            "Be truthful about uncertainty, freshness, and capabilities. "
+            "Use relevant context when it helps, but do not mention internal systems, confidence scores, or planning steps. "
+            "Keep responses concise but complete. "
+            f"{format_guidance}"
+        )
+    else:
+        tooling_guidance = _tooling_guidance(has_openclaw_tools=has_openclaw_tools)
+        tool_catalog_guidance = _tool_intent_catalog_text() if output_mode == "tool_intent" else ""
+        system_content = (
             f"You are {persona_name}, a knowledgeable AI assistant. "
             f"{tone_guide} "
+            f"{conversation_safety_guidance} "
             "You can help with coding, debugging, system design, research, "
             "and general conversation. "
             "Keep responses concise but complete. "
@@ -151,25 +213,110 @@ def _build_conversational_request(
             f"{format_guidance} "
             f"{tool_catalog_guidance} "
             "Do not mention internal systems, confidence scores, or planning steps."
-            f"{context_block}"
-        ),
+        )
+
+    system = InternalMessage(role="system", content=system_content)
+    history_messages, transcript_source = _history_messages_for_chat(
+        source_context,
+        runtime_session_id=runtime_session_id,
+        current_user_text=user_text,
+        prompt_profile=prompt_profile,
     )
-    history_messages = _history_messages_from_source_context(source_context, current_user_text=user_text)
     user = InternalMessage(role="user", content=user_text)
+    generation_profile = _generation_profile(
+        surface=source_surface or surface_from_platform(source_platform),
+        task_kind=task_kind,
+        output_mode=output_mode,
+        task_class=str(classification.get("task_class", "unknown")),
+        user_text=user_text,
+        history_messages=len(history_messages),
+        context_attached=context_message is not None,
+    )
+    messages = [system, *history_messages]
+    if context_message is not None:
+        messages.append(context_message)
+    messages.append(user)
 
     return InternalModelRequest(
         task_kind=task_kind,
         task_class=str(classification.get("task_class", "unknown")),
         output_mode=output_mode,
-        messages=[system, *history_messages, user],
+        messages=messages,
         trace_id=trace_id,
-        max_output_tokens=_max_output_tokens(output_mode),
-        temperature=_temperature_for_mode(output_mode),
+        max_output_tokens=int(generation_profile["max_output_tokens"]),
+        temperature=float(generation_profile["temperature"]),
         ambiguity_confidence=ambiguity,
         constraints=[],
         context_summary=context_result.report.to_dict(),
-        metadata={"persona_id": getattr(persona, "persona_id", "default")},
+        metadata={
+            "persona_id": getattr(persona, "persona_id", "default"),
+            "generation_profile": generation_profile,
+            "system_prompt_profile": prompt_profile,
+            "chat_truth_prompt": {
+                "surface": source_surface or "cli",
+                "task_kind": task_kind,
+                "output_mode": output_mode,
+                "structured_output": output_mode in _STRUCTURED_OUTPUT_MODES,
+                "history_messages": len(history_messages),
+                "transcript_source": transcript_source,
+                "context_attached": context_message is not None,
+                "context_delivery": "context_message" if context_message is not None else "none",
+                "system_prompt_profile": prompt_profile,
+                "speech_safety_mode": "conversation_freer",
+                "tooling_guidance_enabled": bool(tooling_guidance.strip()),
+                "execution_safety_guidance_enabled": bool(tooling_guidance.strip()),
+                "runtime_session_id_present": bool(runtime_session_id),
+                "client_history_message_count": len(
+                    list(
+                        source_context.get("client_conversation_history")
+                        or source_context.get("conversation_history")
+                        or []
+                    )
+                ),
+                "generation_profile_id": str(generation_profile["profile_id"]),
+                "requested_temperature": float(generation_profile["temperature"]),
+                "requested_top_p": generation_profile.get("top_p"),
+                "requested_max_output_tokens": int(generation_profile["max_output_tokens"]),
+                "adaptive_length": bool(generation_profile["adaptive_length"]),
+            },
+        },
         attachments=list((context_result.report.to_dict().get("external_evidence_attachments") or [])),
+    )
+
+
+def _history_messages_for_chat(
+    source_context: dict[str, Any] | None,
+    *,
+    runtime_session_id: str,
+    current_user_text: str,
+    prompt_profile: str,
+    max_messages: int = 10,
+    max_chars: int = 5000,
+) -> tuple[list[InternalMessage], str]:
+    if prompt_profile == "chat_minimal":
+        transcript, transcript_source = canonical_runtime_transcript(
+            session_id=runtime_session_id or None,
+            source_context=source_context,
+            current_user_text=current_user_text,
+            max_messages=max_messages,
+            max_chars=max_chars,
+        )
+        if transcript:
+            return (
+                [InternalMessage(role=item["role"], content=item["content"]) for item in transcript],
+                transcript_source,
+            )
+        return [], transcript_source
+
+    history_messages = _history_messages_from_source_context(
+        source_context,
+        current_user_text=current_user_text,
+        max_messages=max_messages,
+        max_chars=max_chars,
+    )
+    return (
+        history_messages,
+        "client_conversation_history" if history_messages else "none",
     )
 
 
@@ -221,9 +368,154 @@ def _temperature_for_mode(output_mode: str) -> float:
     return 0.2
 
 
+def _generation_profile(
+    *,
+    surface: str,
+    task_kind: str,
+    output_mode: str,
+    task_class: str,
+    user_text: str,
+    history_messages: int = 0,
+    context_attached: bool = False,
+) -> dict[str, Any]:
+    normalized_surface = str(surface or "cli").strip().lower()
+    normalized_task_kind = str(task_kind or "").strip().lower()
+    normalized_output_mode = str(output_mode or "plain_text").strip().lower()
+    normalized_task_class = str(task_class or "unknown").strip().lower()
+
+    if normalized_output_mode == "tool_intent":
+        return {
+            "profile_id": "tool_extraction_low_temp",
+            "profile_family": "structured_low_temp",
+            "temperature": 0.05,
+            "top_p": 0.15,
+            "max_output_tokens": _max_output_tokens("tool_intent"),
+            "adaptive_length": False,
+            "stop_sequences": [],
+        }
+    if normalized_output_mode == "action_plan":
+        return {
+            "profile_id": "planner_structured_low_temp",
+            "profile_family": "structured_low_temp",
+            "temperature": 0.08,
+            "top_p": 0.2,
+            "max_output_tokens": _max_output_tokens("action_plan"),
+            "adaptive_length": False,
+            "stop_sequences": [],
+        }
+    if normalized_output_mode in {"summary_block", "json_object"}:
+        return {
+            "profile_id": "structured_response_low_temp",
+            "profile_family": "structured_low_temp",
+            "temperature": 0.1,
+            "top_p": 0.25,
+            "max_output_tokens": _max_output_tokens(normalized_output_mode),
+            "adaptive_length": False,
+            "stop_sequences": [],
+        }
+
+    if normalized_output_mode == "plain_text" and normalized_surface in _CHAT_SURFACES:
+        if normalized_task_class in _PLAIN_TEXT_CHAT_TASK_CLASSES or normalized_task_kind in {"conversation", "normalization_assist"}:
+            return {
+                "profile_id": "chat_plain_text",
+                "profile_family": "chat_plain_text",
+                "temperature": 0.72,
+                "top_p": 0.92,
+                "max_output_tokens": _adaptive_chat_max_output_tokens(
+                    user_text,
+                    history_messages=history_messages,
+                    context_attached=context_attached,
+                    research=False,
+                ),
+                "adaptive_length": True,
+                "stop_sequences": [],
+            }
+
+    return {
+        "profile_id": "default_plain_text",
+        "profile_family": "default_plain_text",
+        "temperature": _temperature_for_mode(normalized_output_mode),
+        "top_p": 0.85 if normalized_output_mode == "plain_text" else 0.25,
+        "max_output_tokens": _max_output_tokens(normalized_output_mode),
+        "adaptive_length": False,
+        "stop_sequences": [],
+    }
+
+
+def _adaptive_chat_max_output_tokens(
+    user_text: str,
+    *,
+    history_messages: int = 0,
+    context_attached: bool = False,
+    research: bool = False,
+) -> int:
+    word_count = len(str(user_text or "").split())
+    base = 320 if research else 240
+    growth = min(260 if research else 180, word_count * (5 if research else 4))
+    history_bonus = min(80, max(0, int(history_messages)) * 12)
+    context_bonus = 40 if context_attached else 0
+    floor = 320 if research else 220
+    ceiling = 760 if research else 520
+    requested = base + growth + history_bonus + context_bonus
+    return max(floor, min(ceiling, requested))
+
+
+def surface_from_platform(source_platform: str) -> str:
+    if source_platform in _CHAT_SURFACES:
+        return source_platform
+    return "cli"
+
+
+def _assembled_context_for_prompt_profile(context_result: Any, *, prompt_profile: str) -> str:
+    assembled = getattr(context_result, "assembled_context", None)
+    if assembled is None:
+        return ""
+    try:
+        return str(assembled(prompt_profile=prompt_profile) or "")
+    except TypeError:
+        return str(assembled() or "")
+
+
+def _conversational_context_message(
+    context_result: Any,
+    *,
+    prompt_profile: str,
+) -> InternalMessage | None:
+    assembled_context = _assembled_context_for_prompt_profile(
+        context_result,
+        prompt_profile=prompt_profile,
+    )
+    if not assembled_context or assembled_context == "No additional context beyond bootstrap.":
+        return None
+    return InternalMessage(
+        role="context",
+        content=f"Relevant context and evidence:\n{assembled_context[:2000]}",
+        metadata={
+            "prompt_profile": prompt_profile,
+            "retrieval_confidence": getattr(getattr(context_result, "report", None), "retrieval_confidence", None),
+        },
+    )
+
+
+def _chat_system_prompt_profile(*, output_mode: str, task_kind: str) -> str:
+    normalized_output_mode = str(output_mode or "plain_text").strip().lower()
+    normalized_task_kind = str(task_kind or "").strip().lower()
+    if normalized_output_mode == "plain_text" and normalized_task_kind != "tool_intent":
+        return "chat_minimal"
+    return "chat_operational"
+
+
+def _conversational_safety_guidance() -> str:
+    return (
+        "Handle sensitive, intimate, profane, or controversial discussion directly and non-judgmentally when the user is asking for conversation, explanation, or analysis rather than real-world action. "
+        "Do not treat discussion-only prompts as permission to use tools, reveal private data, or escalate into action approval language."
+    )
+
+
 def _tooling_guidance(*, has_openclaw_tools: bool) -> str:
     if not has_openclaw_tools:
         return (
+            "These action rules apply only to real tool use or side effects, not to ordinary conversation. "
             "Use local context first and be explicit when live external data is needed. "
             "Never claim you performed live web lookup or any tool action unless the result is present in this run."
         )
@@ -265,10 +557,16 @@ def _tooling_guidance(*, has_openclaw_tools: bool) -> str:
             "Only stop for destructive changes, leak risk, ambiguous side effects, or clearly outward-facing actions the user did not explicitly command."
         )
 
+    research_guidance = (
+        "When relaying Hive research results, include the grounding status (grounded/partial/insufficient) from the tool output. "
+        "Never present partial or insufficient evidence as conclusive."
+    )
     return (
+        "These action rules apply only when using tools or proposing real-world side effects; they do not restrict ordinary conversation. "
         f"{capability_line} "
         "Email and inbox tooling are not guaranteed; if a tool is not explicitly wired, say so instead of implying it exists. "
         "Never claim you searched the web, checked Hive, fetched live data, or used an external tool unless concrete evidence from that action is present in this run. "
+        f"{research_guidance} "
         f"{approval_line}"
     )
 

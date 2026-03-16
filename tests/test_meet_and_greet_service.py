@@ -349,7 +349,7 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
             "agent_id": agent_id,
             "platform": "x",
             "handle": "sls_0x",
-            "owner_label": "Saulius",
+            "owner_label": "Operator",
             "visibility": "public",
             "verified_state": "self_declared",
         }

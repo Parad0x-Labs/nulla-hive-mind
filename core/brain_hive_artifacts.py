@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from core.liquefy_bridge import pack_json_artifact
+from core.liquefy_bridge import load_packed_bytes, pack_json_artifact
 from storage.db import get_connection
 
 
@@ -238,6 +239,30 @@ def search_artifact_manifests(
         ranked.append((score, row))
     ranked.sort(key=lambda item: (item[0], str(item[1].get("created_at") or "")), reverse=True)
     return [item[1] for item in ranked[: max(1, min(int(limit), 100))]]
+
+
+def load_artifact_manifest_payload(
+    *,
+    artifact_id: str | None = None,
+    manifest: dict[str, Any] | None = None,
+) -> Any | None:
+    manifest_row = dict(manifest or {})
+    if not manifest_row and str(artifact_id or "").strip():
+        loaded = get_artifact_manifest(str(artifact_id or "").strip())
+        manifest_row = dict(loaded or {})
+    if not manifest_row:
+        return None
+    artifact_path = Path(str(manifest_row.get("file_path") or "")).expanduser()
+    if not artifact_path.is_file():
+        return None
+    try:
+        raw = load_packed_bytes(
+            payload=artifact_path.read_bytes(),
+            storage_backend=str(manifest_row.get("storage_backend") or "local_archive"),
+        )
+        return json.loads(raw.decode("utf-8"))
+    except Exception:
+        return None
 
 
 def _row_to_manifest(row: dict[str, Any]) -> dict[str, Any]:

@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import json
+import logging
 from collections import Counter
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from core.brain_hive_artifacts import count_artifact_manifests, list_artifact_manifests
+import requests
+
+from core.brain_hive_artifacts import (
+    count_artifact_manifests,
+    get_artifact_manifest,
+    list_artifact_manifests,
+    load_artifact_manifest_payload,
+)
+from core.hardware_tier import recommended_ollama_model
+
+_log = logging.getLogger(__name__)
 
 
 def build_topic_research_packet(
@@ -16,6 +29,7 @@ def build_topic_research_packet(
     topic_row = _as_dict(topic)
     post_rows = [_as_dict(item) for item in list(posts or [])]
     claim_rows = [_as_dict(item) for item in list(claims or [])]
+    topic_id = str(topic_row.get("topic_id") or "")
     evidence_kind_counts: Counter[str] = Counter()
     post_kind_counts: Counter[str] = Counter()
     source_domains: Counter[str] = Counter()
@@ -37,11 +51,36 @@ def build_topic_research_packet(
         for claim in claim_rows
         if str(claim.get("status") or "").strip().lower() == "active"
     ]
-    artifacts = list_artifact_manifests(topic_id=str(topic_row.get("topic_id") or ""), limit=8)
+    artifacts = list_artifact_manifests(topic_id=topic_id, limit=16)
+    artifact_manifest_by_id = {
+        str(item.get("artifact_id") or "").strip(): dict(item)
+        for item in artifacts
+        if str(item.get("artifact_id") or "").strip()
+    }
+    bundle_quality = _latest_bundle_quality(
+        topic_row=topic_row,
+        artifact_manifests=artifacts,
+    )
+    for domain, count in bundle_quality["source_domain_counts"].most_common():
+        source_domains[domain] += int(count)
+    artifact_refs = _collect_artifact_refs(
+        topic_id=topic_id,
+        post_rows=post_rows,
+        artifact_manifest_by_id=artifact_manifest_by_id,
+    )
+    artifact_resolution = _summarize_artifact_resolution(artifact_refs)
+    research_quality = _research_quality_summary(
+        topic_row=topic_row,
+        trading_feature_export=trading_feature_export,
+        source_domain_count=len(source_domains),
+        artifact_resolution=artifact_resolution,
+        bundle_quality=bundle_quality,
+    )
+    latest_synthesis_card = _latest_synthesis_card(post_rows)
     packet = {
         "packet_schema": "brain_hive.research_packet.v1",
         "topic": {
-            "topic_id": str(topic_row.get("topic_id") or ""),
+            "topic_id": topic_id,
             "title": str(topic_row.get("title") or "Untitled topic"),
             "summary": str(topic_row.get("summary") or ""),
             "status": str(topic_row.get("status") or "open"),
@@ -62,7 +101,7 @@ def build_topic_research_packet(
             "claim_count": len(claim_rows),
             "active_claim_count": len(active_claims),
             "execution_state": _execution_state(topic_row=topic_row, claim_rows=claim_rows),
-            "artifact_count": count_artifact_manifests(topic_id=str(topic_row.get("topic_id") or "")),
+            "artifact_count": count_artifact_manifests(topic_id=topic_id),
         },
         "counts": {
             "post_count": len(post_rows),
@@ -70,6 +109,11 @@ def build_topic_research_packet(
             "active_claim_count": len(active_claims),
             "evidence_count": evidence_count,
             "source_domain_count": len(source_domains),
+            "nonempty_query_count": int(bundle_quality["nonempty_query_count"]),
+            "dead_query_count": int(bundle_quality["dead_query_count"]),
+            "promoted_finding_count": int(bundle_quality["promoted_finding_count"]),
+            "mined_feature_count": int(bundle_quality["mined_feature_count"]),
+            "offtopic_hit_count": int(bundle_quality["offtopic_hit_count"]),
         },
         "post_kind_counts": [
             {"kind": kind, "count": int(count)}
@@ -129,6 +173,19 @@ def build_topic_research_packet(
             }
             for item in artifacts
         ],
+        "artifact_refs": artifact_refs,
+        "artifact_resolution_status": str(artifact_resolution.get("status") or "none"),
+        "artifact_resolution": artifact_resolution,
+        "nonempty_query_count": int(bundle_quality["nonempty_query_count"]),
+        "dead_query_count": int(bundle_quality["dead_query_count"]),
+        "promoted_finding_count": int(bundle_quality["promoted_finding_count"]),
+        "mined_feature_count": int(bundle_quality["mined_feature_count"]),
+        "research_quality_status": str(research_quality.get("status") or "insufficient_evidence"),
+        "research_quality_reasons": list(research_quality.get("reasons") or [])[:8],
+        "latest_synthesis_card": latest_synthesis_card,
+        "synthesis_card_count": int(latest_synthesis_card.get("count") or 0),
+        "latest_bundle_artifact_id": str(bundle_quality.get("bundle_artifact_id") or ""),
+        "latest_bundle_created_at": str(bundle_quality.get("latest_bundle_created_at") or ""),
     }
     return packet
 
@@ -155,13 +212,21 @@ def build_research_queue_entry(
         "claim_count": int(dict(packet.get("counts") or {}).get("claim_count") or 0),
         "active_claim_count": int(dict(packet.get("counts") or {}).get("active_claim_count") or 0),
         "evidence_count": int(dict(packet.get("counts") or {}).get("evidence_count") or 0),
+        "source_domain_count": int(dict(packet.get("counts") or {}).get("source_domain_count") or 0),
         "artifact_count": int(dict(packet.get("execution_state") or {}).get("artifact_count") or 0),
         "execution_state": str(dict(packet.get("execution_state") or {}).get("execution_state") or "open"),
+        "artifact_resolution_status": str(packet.get("artifact_resolution_status") or "none"),
+        "nonempty_query_count": int(packet.get("nonempty_query_count") or 0),
+        "dead_query_count": int(packet.get("dead_query_count") or 0),
+        "promoted_finding_count": int(packet.get("promoted_finding_count") or 0),
+        "mined_feature_count": int(packet.get("mined_feature_count") or 0),
+        "research_quality_status": str(packet.get("research_quality_status") or "insufficient_evidence"),
+        "research_quality_reasons": list(packet.get("research_quality_reasons") or [])[:6],
         "research_priority": priority,
         "commons_signal_strength": commons_signal_strength,
         "steering_reasons": steering_reasons[:8],
         "commons_signal": dict(commons_signal or {}),
-        "suggested_questions": list(packet.get("derived_research_questions") or [])[:4],
+        "suggested_questions": list(packet.get("derived_research_questions") or [])[:6],
         "trading_signal_count": int(
             len(list(trading_export.get("heuristic_seed_signals") or []))
             + len(list(trading_export.get("hidden_edges") or []))
@@ -181,16 +246,125 @@ def derive_research_questions(
     title = str(topic_row.get("title") or "this topic").strip()
     summary = str(topic_row.get("summary") or "").strip()
     tags = [str(item).strip().lower() for item in list(topic_row.get("topic_tags") or []) if str(item).strip()]
-    questions: list[str] = [
-        f"Best way to research topic: {title}",
-        f"What evidence is still missing or weak for {title}?",
-    ]
+
+    model_questions = _derive_questions_via_model(
+        title=title, summary=summary, tags=tags,
+        trading_feature_export=trading_feature_export,
+    )
+    if model_questions:
+        return model_questions
+
+    return _derive_questions_template(
+        title=title, summary=summary, tags=tags,
+        trading_feature_export=trading_feature_export,
+        evidence_kind_counts=evidence_kind_counts,
+    )
+
+
+def _derive_questions_via_model(
+    *,
+    title: str,
+    summary: str,
+    tags: list[str],
+    trading_feature_export: dict[str, Any],
+) -> list[str]:
+    """Use the local LLM to generate focused, specific research questions."""
+    base_url = _ollama_base_url()
+    if not base_url:
+        return []
+
+    context_parts = [f"Topic: {title}"]
     if summary:
-        questions.append(f"How should agents split research and scripting work for {title} based on: {summary[:180]}?")
-    if not any(str(claim.get("status") or "").strip().lower() == "active" for claim in claim_rows):
-        questions.append(f"What is the fastest credible first-pass research plan for {title}?")
-    if "script" in " ".join(tags) or "automation" in " ".join(tags):
-        questions.append(f"What validation or benchmark gate should block weak scripts for {title}?")
+        context_parts.append(f"Summary: {summary}")
+    if tags:
+        context_parts.append(f"Tags: {', '.join(tags[:8])}")
+    if trading_feature_export:
+        context_parts.append("This topic involves trading/financial heuristic research.")
+
+    prompt = (
+        "You are a research assistant generating web search queries for a decentralized AI system.\n\n"
+        f"{chr(10).join(context_parts)}\n\n"
+        "Generate exactly 6 focused, specific web search queries that would find concrete, "
+        "actionable evidence for this topic. Each query should target different aspects:\n"
+        "1. Core technical implementation details\n"
+        "2. Real-world examples, case studies, or benchmarks\n"
+        "3. Known limitations, failure modes, or constraints\n"
+        "4. Best practices or proven patterns from production systems\n"
+        "5. Integration points, APIs, or tooling\n"
+        "6. Troubleshooting or common pitfalls\n\n"
+        "Requirements:\n"
+        "- Each query must be specific enough to return relevant results (not generic)\n"
+        "- Include technical terms, library names, or framework names when relevant\n"
+        "- Avoid vague queries like 'best practices for X' without specifics\n"
+        "- Each query should be a single line, no numbering\n\n"
+        "Return ONLY the 6 queries, one per line, nothing else."
+    )
+
+    try:
+        model = recommended_ollama_model()
+        resp = requests.post(
+            f"{base_url}/v1/chat/completions",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7,
+                "max_tokens": 400,
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        text = resp.json()["choices"][0]["message"]["content"].strip()
+        lines = [
+            line.strip().lstrip("0123456789.-) ").strip()
+            for line in text.splitlines()
+            if line.strip() and len(line.strip()) > 10
+        ]
+        questions = list(dict.fromkeys(q[:240] for q in lines if q))[:6]
+        if len(questions) >= 2:
+            _log.info("Model-derived %d research questions for: %s", len(questions), title[:80])
+            return questions
+    except Exception as exc:
+        _log.debug("Model research question generation failed, using templates: %s", exc)
+
+    return []
+
+
+def _ollama_base_url() -> str:
+    """Resolve the local Ollama endpoint. Empty string if not reachable."""
+    import os
+    url = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    try:
+        requests.get(f"{url}/api/tags", timeout=2)
+        return url
+    except Exception:
+        return ""
+
+
+def _derive_questions_template(
+    *,
+    title: str,
+    summary: str,
+    tags: list[str],
+    trading_feature_export: dict[str, Any],
+    evidence_kind_counts: Counter[str],
+) -> list[str]:
+    """Fallback: template-based question generation when model is unavailable."""
+    questions: list[str] = []
+    core_query = _sharp_core_query(title=title, summary=summary)
+    if core_query:
+        questions.append(core_query)
+    implementation_query = _implementation_query(title=title, summary=summary, tags=tags)
+    if implementation_query:
+        questions.append(implementation_query)
+    evidence_gap_query = _evidence_gap_query(title=title, summary=summary, tags=tags, evidence_kind_counts=evidence_kind_counts)
+    if evidence_gap_query:
+        questions.append(evidence_gap_query)
+    comparison_query = _comparison_query(title=title, summary=summary, tags=tags)
+    if comparison_query:
+        questions.append(comparison_query)
+    limitations_query = _limitations_query(title=title, summary=summary)
+    if limitations_query:
+        questions.append(limitations_query)
     if trading_feature_export:
         questions.append(f"Which exported trading features best explain misses or hidden edges in {title}?")
         for signal in list(trading_feature_export.get("heuristic_seed_signals") or [])[:2]:
@@ -209,6 +383,61 @@ def derive_research_questions(
         seen.add(key)
         deduped.append(clean[:240])
     return deduped[:6]
+
+
+def _sharp_core_query(*, title: str, summary: str) -> str:
+    summary_terms = _important_terms(summary, limit=5)
+    if summary_terms:
+        return f'"{title}" {" ".join(summary_terms)}'
+    return f'"{title}"'
+
+
+def _implementation_query(*, title: str, summary: str, tags: list[str]) -> str:
+    lowered = f"{title} {summary}".lower()
+    if {"design", "ux", "ui"} & set(tags) or any(token in lowered for token in ("ux", "ui", "watcher", "workflow", "task flow")):
+        return f"{title} UX design patterns real-world examples 2025 2026"
+    if {"integration", "api", "bot", "automation", "script"} & set(tags) or any(
+        token in lowered for token in ("api", "integration", "automation", "script", "bot")
+    ):
+        return f"{title} implementation tutorial GitHub example code"
+    if any(token in lowered for token in ("trading", "crypto", "solana", "defi", "token")):
+        return f"{title} strategy backtest results performance data"
+    if any(token in lowered for token in ("cold email", "marketing", "sales", "outreach")):
+        return f"{title} proven templates conversion rates case study"
+    return f"{title} how to implement step by step guide"
+
+
+def _evidence_gap_query(
+    *,
+    title: str,
+    summary: str,
+    tags: list[str],
+    evidence_kind_counts: Counter[str],
+) -> str:
+    del evidence_kind_counts
+    summary_terms = _important_terms(summary, limit=3)
+    tag_str = " ".join(tags[:4])
+    if "script" in tag_str or "automation" in tag_str:
+        return f"{title} benchmark results comparison {' '.join(summary_terms)}".strip()
+    if "trading" in tag_str or "crypto" in f"{title} {summary}".lower():
+        return f"{title} risk analysis common mistakes failures {' '.join(summary_terms)}".strip()
+    return f"{title} real examples case studies {' '.join(summary_terms)} site:reddit.com OR site:github.com".strip()
+
+
+def _comparison_query(*, title: str, summary: str, tags: list[str]) -> str:
+    lowered = f"{title} {summary}".lower()
+    if any(token in lowered for token in ("tool", "framework", "library", "platform", "service")):
+        return f"{title} alternatives comparison pros cons 2025 2026"
+    if any(token in lowered for token in ("strategy", "approach", "method", "technique")):
+        return f"{title} vs alternatives which is better comparison"
+    return f"{title} expert opinions discussion site:reddit.com OR site:news.ycombinator.com"
+
+
+def _limitations_query(*, title: str, summary: str) -> str:
+    lowered = f"{title} {summary}".lower()
+    if any(token in lowered for token in ("ai", "model", "llm", "agent", "autonomous")):
+        return f"{title} limitations challenges pitfalls lessons learned"
+    return f"{title} common problems troubleshooting FAQ"
 
 
 def _research_priority(packet: dict[str, Any], *, commons_signal: dict[str, Any] | None = None) -> tuple[float, list[str], float]:
@@ -484,6 +713,309 @@ def _ref_domains(ref: dict[str, Any]) -> list[str]:
             if domain:
                 domains.append(domain)
     return list(dict.fromkeys(domains))
+
+
+def _collect_artifact_refs(
+    *,
+    topic_id: str,
+    post_rows: list[dict[str, Any]],
+    artifact_manifest_by_id: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    refs_by_id: dict[str, dict[str, Any]] = {}
+    for post in post_rows:
+        for ref in list(post.get("evidence_refs") or []):
+            if not isinstance(ref, dict):
+                continue
+            artifact_id = str(ref.get("artifact_id") or "").strip()
+            if not artifact_id:
+                continue
+            manifest = dict(artifact_manifest_by_id.get(artifact_id) or get_artifact_manifest(artifact_id) or {})
+            file_path = str(manifest.get("file_path") or ref.get("file_path") or "").strip()
+            exists_local = bool(file_path and Path(file_path).expanduser().is_file())
+            exists_public_index = bool(manifest)
+            refs_by_id[artifact_id] = {
+                "artifact_id": artifact_id,
+                "kind": str(ref.get("kind") or "").strip(),
+                "source_kind": str(manifest.get("source_kind") or "").strip(),
+                "topic_id": str(manifest.get("topic_id") or topic_id or "").strip(),
+                "title": str(manifest.get("title") or "").strip(),
+                "storage_backend": str(manifest.get("storage_backend") or ref.get("storage_backend") or "").strip(),
+                "content_sha256": str(manifest.get("content_sha256") or ref.get("content_sha256") or "").strip(),
+                "resolvable_path": file_path,
+                "exists_local": exists_local,
+                "exists_public_index": exists_public_index,
+                "public_search_hit": exists_public_index,
+                "surfaceable": exists_public_index,
+                "failure_reason": _artifact_failure_reason(
+                    exists_local=exists_local,
+                    exists_public_index=exists_public_index,
+                    file_path=file_path,
+                ),
+                "created_at": str(manifest.get("created_at") or post.get("created_at") or "").strip(),
+            }
+    rows = list(refs_by_id.values())
+    rows.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("artifact_id") or "")), reverse=True)
+    return rows[:24]
+
+
+def _artifact_failure_reason(*, exists_local: bool, exists_public_index: bool, file_path: str) -> str:
+    if not exists_public_index:
+        return "artifact_not_indexed_on_this_node"
+    if file_path and not exists_local:
+        return "artifact_path_missing"
+    return ""
+
+
+def _summarize_artifact_resolution(artifact_refs: list[dict[str, Any]]) -> dict[str, Any]:
+    total_refs = len(list(artifact_refs or []))
+    resolved_count = sum(1 for ref in list(artifact_refs or []) if not str(ref.get("failure_reason") or "").strip())
+    local_missing_count = sum(1 for ref in list(artifact_refs or []) if str(ref.get("failure_reason") or "") == "artifact_path_missing")
+    public_index_missing_count = sum(
+        1
+        for ref in list(artifact_refs or [])
+        if str(ref.get("failure_reason") or "") == "artifact_not_indexed_on_this_node"
+    )
+    unresolved_count = total_refs - resolved_count
+    if total_refs <= 0:
+        status = "none"
+    elif unresolved_count <= 0:
+        status = "resolved"
+    elif resolved_count > 0:
+        status = "partial"
+    else:
+        status = "missing"
+    return {
+        "status": status,
+        "total_refs": total_refs,
+        "resolved_count": resolved_count,
+        "unresolved_count": unresolved_count,
+        "local_missing_count": local_missing_count,
+        "public_index_missing_count": public_index_missing_count,
+    }
+
+
+def _latest_bundle_quality(
+    *,
+    topic_row: dict[str, Any],
+    artifact_manifests: list[dict[str, Any]],
+) -> dict[str, Any]:
+    bundle_rows = [
+        dict(item)
+        for item in list(artifact_manifests or [])
+        if str(item.get("source_kind") or "").strip() == "research_bundle"
+    ]
+    bundle_rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+    payload: dict[str, Any] = {}
+    bundle_manifest: dict[str, Any] = {}
+    for manifest in bundle_rows:
+        loaded = load_artifact_manifest_payload(manifest=manifest)
+        if isinstance(loaded, dict):
+            payload = dict(loaded)
+            bundle_manifest = dict(manifest)
+            break
+    query_results = [dict(item) for item in list(payload.get("query_results") or []) if isinstance(item, dict)]
+    source_domain_counts: Counter[str] = Counter()
+    offtopic_hit_count = 0
+    for item in query_results:
+        for domain in _query_result_domains(item):
+            source_domain_counts[domain] += 1
+        if _query_result_looks_off_topic(topic_row=topic_row, query_result=item):
+            offtopic_hit_count += 1
+    promotion_decisions = [dict(item) for item in list(payload.get("promotion_decisions") or []) if isinstance(item, dict)]
+    mined_features = dict(payload.get("mined_features") or {})
+    nonempty_query_count = sum(1 for item in query_results if _query_result_has_evidence(item))
+    queries_total = len(query_results)
+    return {
+        "bundle_artifact_id": str(bundle_manifest.get("artifact_id") or ""),
+        "latest_bundle_created_at": str(bundle_manifest.get("created_at") or ""),
+        "queries_total": queries_total,
+        "nonempty_query_count": nonempty_query_count,
+        "dead_query_count": max(0, queries_total - nonempty_query_count),
+        "promoted_finding_count": sum(
+            1 for item in promotion_decisions if bool(dict(item.get("gate") or {}).get("can_promote"))
+        ),
+        "mined_feature_count": _mined_feature_count(mined_features),
+        "offtopic_hit_count": offtopic_hit_count,
+        "source_domain_counts": source_domain_counts,
+    }
+
+
+def _query_result_has_evidence(query_result: dict[str, Any]) -> bool:
+    if str(query_result.get("relevance_status") or "").strip().lower() == "off_topic":
+        return False
+    if int(query_result.get("snippet_count") or 0) > 0:
+        return True
+    return bool(str(query_result.get("summary") or "").strip())
+
+
+def _query_result_domains(query_result: dict[str, Any]) -> list[str]:
+    domains = [str(item or "").strip().lower() for item in list(query_result.get("source_domains") or []) if str(item or "").strip()]
+    return list(dict.fromkeys(domains))
+
+
+def _query_result_looks_off_topic(*, topic_row: dict[str, Any], query_result: dict[str, Any]) -> bool:
+    if str(query_result.get("relevance_status") or "").strip().lower() == "off_topic":
+        return True
+    if not _query_result_has_evidence(query_result):
+        return False
+    haystack_tokens = _topic_tokens(
+        " ".join(
+            [
+                str(topic_row.get("title") or ""),
+                str(topic_row.get("summary") or ""),
+                str(query_result.get("query") or ""),
+            ]
+        )
+    )
+    summary_tokens = _topic_tokens(str(query_result.get("summary") or ""))
+    if not haystack_tokens or not summary_tokens:
+        return False
+    overlap = len(haystack_tokens & summary_tokens)
+    generic_nav_hits = sum(
+        1
+        for marker in (
+            "skip navigation",
+            "get started",
+            "platforms",
+            "components",
+            "documentation",
+            "wear os",
+        )
+        if marker in str(query_result.get("summary") or "").lower()
+    )
+    return overlap < 2 and generic_nav_hits > 0
+
+
+def _latest_synthesis_card(post_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    latest: dict[str, Any] = {}
+    latest_timestamp = ""
+    count = 0
+    for post in post_rows:
+        timestamp = str(post.get("created_at") or "")
+        for ref in list(post.get("evidence_refs") or []):
+            if not isinstance(ref, dict):
+                continue
+            if str(ref.get("kind") or "").strip().lower() != "research_synthesis_card":
+                continue
+            count += 1
+            if timestamp >= latest_timestamp:
+                latest = {
+                    "question": str(ref.get("question") or "").strip(),
+                    "searched": [str(item) for item in list(ref.get("searched") or []) if str(item).strip()][:4],
+                    "found": [str(item) for item in list(ref.get("found") or []) if str(item).strip()][:4],
+                    "source_domains": [str(item) for item in list(ref.get("source_domains") or []) if str(item).strip()][:8],
+                    "artifacts": [dict(item) for item in list(ref.get("artifacts") or []) if isinstance(item, dict)][:6],
+                    "promoted_findings": [str(item) for item in list(ref.get("promoted_findings") or []) if str(item).strip()][:6],
+                    "confidence": str(ref.get("confidence") or "").strip(),
+                    "blockers": [str(item) for item in list(ref.get("blockers") or []) if str(item).strip()][:6],
+                    "state_token": str(ref.get("state_token") or "").strip(),
+                    "created_at": timestamp,
+                }
+                latest_timestamp = timestamp
+    if latest:
+        latest["count"] = count
+    return latest
+
+
+def _important_terms(text: str, *, limit: int) -> list[str]:
+    stopwords = {
+        "about",
+        "agent",
+        "agents",
+        "better",
+        "build",
+        "flow",
+        "have",
+        "improve",
+        "into",
+        "make",
+        "need",
+        "nulla",
+        "task",
+        "tasks",
+        "that",
+        "this",
+        "topic",
+        "watcher",
+        "with",
+    }
+    terms: list[str] = []
+    for token in _topic_tokens(text):
+        if token in stopwords:
+            continue
+        terms.append(token)
+    return terms[: max(0, int(limit))]
+
+
+def _topic_tokens(text: str) -> set[str]:
+    tokens = {
+        token
+        for token in "".join(ch if ch.isalnum() else " " for ch in str(text or "").lower()).split()
+        if len(token) >= 4
+    }
+    return tokens
+
+
+def _mined_feature_count(mined_features: dict[str, Any]) -> int:
+    return (
+        len(list(mined_features.get("feature_rows") or []))
+        + len(list(mined_features.get("heuristic_candidates") or []))
+        + len(list(mined_features.get("script_ideas") or []))
+    )
+
+
+def _research_quality_summary(
+    *,
+    topic_row: dict[str, Any],
+    trading_feature_export: dict[str, Any],
+    source_domain_count: int,
+    artifact_resolution: dict[str, Any],
+    bundle_quality: dict[str, Any],
+) -> dict[str, Any]:
+    reasons: list[str] = []
+    nonempty_query_count = int(bundle_quality.get("nonempty_query_count") or 0)
+    dead_query_count = int(bundle_quality.get("dead_query_count") or 0)
+    promoted_finding_count = int(bundle_quality.get("promoted_finding_count") or 0)
+    offtopic_hit_count = int(bundle_quality.get("offtopic_hit_count") or 0)
+    unresolved_artifacts = int(artifact_resolution.get("unresolved_count") or 0)
+    explicit_local_only = bool(trading_feature_export) and str(topic_row.get("evidence_mode") or "").strip().lower() in {
+        "mixed",
+        "local_only",
+        "internal_only",
+        "candidate_only",
+    }
+    if unresolved_artifacts > 0:
+        reasons.append(f"Artifacts unresolved: {unresolved_artifacts}.")
+    if nonempty_query_count <= 0:
+        reasons.append("No non-empty research queries produced evidence.")
+    elif nonempty_query_count < 2:
+        reasons.append(f"Only {nonempty_query_count} research query returned usable evidence.")
+    if dead_query_count > 0:
+        reasons.append(f"{dead_query_count} research queries returned no usable evidence.")
+    if source_domain_count < 2 and not explicit_local_only:
+        reasons.append("Distinct source domains are below the grounded threshold.")
+    if promoted_finding_count <= 0:
+        reasons.append("No promoted findings passed the evidence gate.")
+    if offtopic_hit_count > 0:
+        reasons.append(f"Detected {offtopic_hit_count} off-topic research contamination hit(s).")
+
+    if unresolved_artifacts > 0:
+        status = "artifact_missing"
+    elif nonempty_query_count <= 0:
+        status = "query_failed"
+    elif offtopic_hit_count >= max(1, nonempty_query_count):
+        status = "off_topic"
+    elif nonempty_query_count < 2 or (source_domain_count < 2 and not explicit_local_only):
+        status = "insufficient_evidence"
+    elif promoted_finding_count <= 0 or dead_query_count > 0:
+        status = "partial"
+    else:
+        status = "grounded"
+
+    return {
+        "status": status,
+        "reasons": reasons[:8],
+    }
 
 
 def _as_dict(value: Any) -> dict[str, Any]:

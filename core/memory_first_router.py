@@ -17,6 +17,7 @@ from core.prompt_normalizer import normalize_prompt
 from core.task_router import model_execution_profile
 
 _STRUCTURED_OUTPUT_MODES = {"json_object", "action_plan", "tool_intent", "summary_block"}
+_CHAT_TRUTH_SURFACES = {"channel", "openclaw", "api"}
 
 
 @dataclass
@@ -76,6 +77,11 @@ class MemoryFirstRouter:
         surface: str = "cli",
         source_context: dict[str, Any] | None = None,
     ) -> ModelExecutionDecision:
+        force_model = _force_model_on_chat_surface(
+            force_model=force_model,
+            surface=surface,
+            source_context=source_context,
+        )
         profile = model_execution_profile(str(classification.get("task_class", "unknown")))
         task_kind = str(profile["task_kind"])
         output_mode = str(profile["output_mode"])
@@ -345,3 +351,18 @@ def _memory_is_good_enough(context_result: Any, classification: dict[str, Any]) 
     if task_class in {"shell_guidance", "file_inspection"} and retrieval_confidence >= 0.45:
         return True
     return retrieval_confidence >= 0.72
+
+
+def _force_model_on_chat_surface(
+    *,
+    force_model: bool,
+    surface: str,
+    source_context: dict[str, Any] | None,
+) -> bool:
+    if force_model:
+        return True
+    normalized_surface = str(surface or "").strip().lower()
+    if normalized_surface in _CHAT_TRUTH_SURFACES:
+        return True
+    source_surface = str((source_context or {}).get("surface", "") or "").strip().lower()
+    return source_surface in _CHAT_TRUTH_SURFACES

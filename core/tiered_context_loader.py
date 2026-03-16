@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,29 +32,31 @@ class TieredContextResult:
     retrieval_confidence_score: float
     cold_decision: ColdContextDecision
 
-    def assembled_context(self) -> str:
+    def assembled_context(self, *, prompt_profile: str = "default") -> str:
         sections: list[str] = []
-        if self.bootstrap_items:
-            sections.append("Bootstrap Context:\n" + "\n".join(f"- {item.title}: {item.content}" for item in self.bootstrap_items))
-        if self.relevant_items:
-            sections.append("Relevant Context:\n" + "\n".join(f"- {item.title}: {item.content}" for item in self.relevant_items))
-        if self.cold_items:
-            sections.append("Cold Context:\n" + "\n".join(f"- {item.title}: {item.content}" for item in self.cold_items))
+        bootstrap_items = _filter_context_items_for_prompt_profile(self.bootstrap_items, prompt_profile=prompt_profile)
+        relevant_items = _filter_context_items_for_prompt_profile(self.relevant_items, prompt_profile=prompt_profile)
+        cold_items = _filter_context_items_for_prompt_profile(self.cold_items, prompt_profile=prompt_profile)
+        sections.extend(_render_context_sections("Bootstrap Context", bootstrap_items))
+        sections.extend(_render_context_sections("Relevant Context", relevant_items))
+        sections.extend(_render_context_sections("Cold Context", cold_items))
         return "\n\n".join(sections)
 
     def context_snippets(self) -> list[dict[str, Any]]:
         snippets: list[dict[str, Any]] = []
         for item in self.relevant_items + self.cold_items:
-            snippets.append(
-                {
-                    "title": item.title,
-                    "source_type": item.source_type,
-                    "summary": item.content,
-                    "confidence": item.confidence,
-                    "priority": item.priority,
-                    "metadata": dict(item.metadata),
-                }
-            )
+            payload = {
+                "title": item.title,
+                "source_type": item.source_type,
+                "summary": item.content,
+                "confidence": item.confidence,
+                "priority": item.priority,
+                "metadata": dict(item.metadata),
+            }
+            observation = _observation_payload_from_item(item)
+            if observation is not None:
+                payload["observation"] = observation
+            snippets.append(payload)
         return snippets
 
     def retrieval_profile(self) -> dict[str, Any]:
@@ -65,6 +68,54 @@ class TieredContextResult:
             "local_candidate_count": len(self.local_candidates),
             "swarm_metadata_count": len(self.swarm_metadata),
         }
+
+
+def _filter_context_items_for_prompt_profile(
+    items: list[ContextItem],
+    *,
+    prompt_profile: str,
+) -> list[ContextItem]:
+    if prompt_profile != "chat_minimal":
+        return list(items)
+    return [
+        item
+        for item in items
+        if not bool((item.metadata or {}).get("exclude_from_chat_minimal_system_prompt"))
+    ]
+
+
+def _observation_payload_from_item(item: ContextItem) -> dict[str, Any] | None:
+    metadata = dict(item.metadata or {})
+    observation = metadata.get("observation")
+    if isinstance(observation, dict) and observation:
+        return dict(observation)
+    if str(metadata.get("context_format") or "").strip() != "structured_observation":
+        return None
+    try:
+        loaded = json.loads(str(item.content or ""))
+    except Exception:
+        return None
+    return dict(loaded) if isinstance(loaded, dict) else None
+
+
+def _render_context_sections(label: str, items: list[ContextItem]) -> list[str]:
+    if not items:
+        return []
+    narrative_items = [item for item in items if _observation_payload_from_item(item) is None]
+    observation_payloads = [
+        payload
+        for payload in (_observation_payload_from_item(item) for item in items)
+        if isinstance(payload, dict) and payload
+    ]
+    sections: list[str] = []
+    if narrative_items:
+        sections.append(label + ":\n" + "\n".join(f"- {item.title}: {item.content}" for item in narrative_items))
+    if observation_payloads:
+        sections.append(
+            label.replace("Context", "Observations") + ":\n" +
+            json.dumps(observation_payloads, indent=2, sort_keys=True, ensure_ascii=True, default=str)
+        )
+    return sections
 
 
 def _local_candidate_items(task: Any, classification: dict[str, Any]) -> tuple[list[ContextItem], list[dict[str, Any]]]:
@@ -117,6 +168,83 @@ def _dialogue_items(session_id: str) -> list[ContextItem]:
             )
         )
     return items
+
+
+def _runtime_tool_observation_items(session_id: str) -> list[ContextItem]:
+    if not str(session_id or "").strip():
+        return []
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT checkpoint_id, status, state_json, updated_at
+            FROM runtime_checkpoints
+            WHERE session_id = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (session_id,),
+        ).fetchone()
+    except Exception:
+        return []
+    finally:
+        conn.close()
+    if not row:
+        return []
+    try:
+        state = json.loads(str(row["state_json"] or "{}"))
+    except Exception:
+        return []
+    if not isinstance(state, dict):
+        return []
+    last_tool_response = dict(state.get("last_tool_response") or {})
+    if not last_tool_response:
+        return []
+    details = dict(last_tool_response.get("details") or {})
+    observation = details.get("observation")
+    if not isinstance(observation, dict) or not observation:
+        observation = {
+            "schema": "tool_observation_v1",
+            "intent": str(last_tool_response.get("tool_name") or "").strip(),
+            "tool_surface": "runtime_tool",
+            "ok": bool(last_tool_response.get("ok")),
+            "status": str(last_tool_response.get("status") or "").strip(),
+            "response_preview": str(last_tool_response.get("response_text") or "").strip()[:320],
+        }
+    executed_steps = [
+        {
+            "tool_name": str(step.get("tool_name") or "").strip(),
+            "status": str(step.get("status") or "").strip(),
+            "summary": str(step.get("summary") or "").strip(),
+        }
+        for step in list(state.get("executed_steps") or [])[-4:]
+        if isinstance(step, dict)
+    ]
+    payload = dict(observation)
+    if executed_steps:
+        payload["recent_steps"] = executed_steps
+    payload["checkpoint_status"] = str(row["status"] or "").strip()
+    payload["checkpoint_updated_at"] = str(row["updated_at"] or "").strip()
+    content = json.dumps(payload, sort_keys=True, ensure_ascii=True, default=str)
+    tool_name = str(payload.get("intent") or last_tool_response.get("tool_name") or "tool").strip() or "tool"
+    return [
+        ContextItem(
+            item_id=f"runtime-tool-observation-{row['checkpoint_id']}",
+            layer="relevant",
+            source_type="tool_observation",
+            title=f"Recent tool observation {tool_name}",
+            content=content[:1800],
+            priority=0.92,
+            confidence=0.79,
+            include_reason="recent_runtime_tool_observation",
+            metadata={
+                "checkpoint_id": str(row["checkpoint_id"] or "").strip(),
+                "updated_at": str(row["updated_at"] or "").strip(),
+                "context_format": "structured_observation",
+                "observation": payload,
+            },
+        )
+    ]
 
 
 def _persistent_memory_items(query_text: str, topic_hints: list[str]) -> list[ContextItem]:
@@ -450,6 +578,7 @@ class TieredContextLoader:
         query_text = getattr(interpretation, "reconstructed_text", "") or getattr(task, "task_summary", "")
         topic_hints = list(getattr(interpretation, "topic_hints", []) or [])
         relevant_candidates = list(local_items)
+        relevant_candidates.extend(_runtime_tool_observation_items(session_id))
         relevant_candidates.extend(_dialogue_items(session_id))
         relevant_candidates.extend(_user_heuristic_items(query_text, topic_hints))
         relevant_candidates.extend(_persistent_memory_items(query_text, topic_hints))

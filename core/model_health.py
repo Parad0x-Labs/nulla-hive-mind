@@ -55,8 +55,8 @@ def record_provider_failure(
     *,
     error: str,
     timeout: bool = False,
-    failure_threshold: int = 3,
-    cooldown_seconds: int = 45,
+    failure_threshold: int = 5,
+    cooldown_seconds: int = 20,
 ) -> ProviderHealth:
     state = get_provider_health(provider_id)
     state.total_failures += 1

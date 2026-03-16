@@ -160,13 +160,13 @@ def test_rename_command_respects_owner_authority() -> None:
 def test_auto_memory_extraction_persists_names_and_style_preferences() -> None:
     append_conversation_event(
         session_id="openclaw:test-user",
-        user_input="My name is Saulius. Keep answers concise and brutally honest.",
+        user_input="My name is Operator. Keep answers concise and brutally honest.",
         assistant_output="Noted.",
         source_context={"surface": "channel", "platform": "openclaw"},
     )
 
     remembered = "\n".join(summarize_memory(limit=20)).lower()
-    assert "operator name is saulius" in remembered
+    assert "operator name is operator" in remembered
     assert "keep answers concise and brutally honest" in remembered
 
     hits = search_relevant_memory("what style should you use", topic_hints=["concise", "honest"], limit=4)
@@ -200,7 +200,7 @@ def test_user_heuristics_capture_stack_sources_and_autonomy_preferences() -> Non
 def test_new_name_replaces_old_name_memory() -> None:
     append_conversation_event(
         session_id="openclaw:test-user",
-        user_input="My name is Saulius.",
+        user_input="My name is Operator.",
         assistant_output="Noted.",
         source_context={"surface": "channel", "platform": "openclaw"},
     )
@@ -212,7 +212,7 @@ def test_new_name_replaces_old_name_memory() -> None:
     )
 
     remembered = "\n".join(summarize_memory(limit=20)).lower()
-    assert "operator name is saulius" not in remembered
+    assert "operator name is operator" not in remembered
     assert "operator name is sl" in remembered
 
 

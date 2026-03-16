@@ -12,6 +12,7 @@ from core.runtime_task_events import (
     reset_runtime_event_state,
 )
 from core.runtime_task_rail import render_runtime_task_rail_html
+from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
 from storage.migrations import run_migrations
 
 
@@ -60,13 +61,35 @@ class RuntimeTaskEventsTests(unittest.TestCase):
         html = render_runtime_task_rail_html()
         self.assertIn("NULLA Task Rail", html)
         self.assertIn("NULLA Trace Rail", html)
+        self.assertIn("NULLA Operator Workstation", html)
+        self.assertIn("Trace workstation v1", html)
+        self.assertIn("workstation v1", html)
+        self.assertIn("wk-topbar", html)
+        self.assertIn(">Overview<", html)
+        self.assertIn(">Hive<", html)
+        self.assertIn(">Trace<", html)
+        self.assertIn(">Human<", html)
+        self.assertIn(">Agent<", html)
+        self.assertIn(">Raw<", html)
+        self.assertIn(NULLA_WORKSTATION_DEPLOYMENT_VERSION, html)
+        self.assertIn('data-workstation-surface="trace-rail"', html)
         self.assertIn("http://127.0.0.1:11435/trace", html)
         self.assertIn("/api/runtime/sessions", html)
         self.assertIn("/api/runtime/events", html)
-        self.assertIn("/api/runtime/control-plane/status", html)
-        self.assertIn("Adaptation Loop", html)
-        self.assertIn("Hive Budget", html)
-        self.assertIn("Task Rail", html)
+        self.assertIn("selectedStepTitle", html)
+        self.assertIn("selectedStepMeta", html)
+        self.assertIn("traceRawPanel", html)
+        self.assertIn("trace-center-shell", html)
+        self.assertIn("session rail", html)
+        self.assertIn("selected-step center", html)
+        self.assertIn("data-event-seq", html)
+        self.assertIn("Retries / Queries", html)
+        self.assertIn("max-width: none;", html)
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr));", html)
+        self.assertIn("grid-template-columns: minmax(280px, 320px) minmax(0, 1.45fr) minmax(300px, 360px);", html)
+        self.assertNotIn("__WORKSTATION_STYLES__", html)
+        self.assertNotIn("__WORKSTATION_HEADER__", html)
+        self.assertNotIn("__WORKSTATION_SCRIPT__", html)
 
 
 if __name__ == "__main__":

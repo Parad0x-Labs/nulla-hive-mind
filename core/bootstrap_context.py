@@ -6,13 +6,70 @@ from core import policy_engine
 from core.persistent_memory import describe_session_memory_policy, load_memory_excerpt
 from core.prompt_assembly_report import ContextItem
 from core.runtime_paths import project_path
-from core.user_preferences import describe_preferences_for_context
+from core.user_preferences import load_preferences
 from storage.dialogue_memory import get_dialogue_session, recent_dialogue_turns, session_lexicon
 
 
 def _compact_join(items: list[str], *, limit: int) -> str:
     picked = [item.strip() for item in items if item and item.strip()][:limit]
     return ", ".join(picked)
+
+
+def _continuity_lines(session_state: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    current_user_goal = str(session_state.get("current_user_goal") or "").strip()
+    assistant_commitments = [str(item).strip() for item in list(session_state.get("assistant_commitments") or []) if str(item or "").strip()]
+    unresolved_followups = [str(item).strip() for item in list(session_state.get("unresolved_followups") or []) if str(item or "").strip()]
+    user_stance = str(session_state.get("user_stance") or "").strip()
+    emotional_tone = str(session_state.get("emotional_tone") or "").strip()
+
+    if current_user_goal:
+        lines.append(f"Current user goal: {current_user_goal}.")
+    if session_state.get("last_intent_mode"):
+        lines.append(f"User intent mode: {session_state.get('last_intent_mode')}.")
+    if user_stance or emotional_tone:
+        lines.append(
+            "Continuity tone: "
+            f"stance={user_stance or 'none'}, emotion={emotional_tone or 'none'}."
+        )
+    if assistant_commitments:
+        lines.append(f"Assistant commitments: {_compact_join(assistant_commitments, limit=3)}.")
+    if unresolved_followups:
+        lines.append(f"Unresolved followups: {_compact_join(unresolved_followups, limit=3)}.")
+    return lines
+
+
+def _conversation_preference_text() -> str:
+    try:
+        prefs = load_preferences()
+    except Exception:
+        return ""
+    fragments = [
+        f"humor={prefs.humor_percent}/100",
+        f"boundaries={prefs.boundaries_mode}",
+        f"profanity={prefs.profanity_level}/100",
+    ]
+    if getattr(prefs, "character_mode", ""):
+        fragments.append(f"character_mode={prefs.character_mode}")
+    if getattr(prefs, "style_notes", ""):
+        fragments.append(f"style_notes={prefs.style_notes}")
+    return "; ".join(fragment for fragment in fragments if str(fragment or "").strip())
+
+
+def _execution_preference_text() -> str:
+    try:
+        prefs = load_preferences()
+    except Exception:
+        return ""
+    fragments = [
+        f"autonomy={prefs.autonomy_mode}",
+        f"show_workflow={'on' if prefs.show_workflow else 'off'}",
+        f"hive_followups={'on' if prefs.hive_followups else 'off'}",
+        f"idle_research_assist={'on' if prefs.idle_research_assist else 'off'}",
+        f"accept_hive_tasks={'on' if prefs.accept_hive_tasks else 'off'}",
+        f"social_commons={'on' if prefs.social_commons else 'off'}",
+    ]
+    return "; ".join(fragment for fragment in fragments if str(fragment or "").strip())
 
 
 def _read_markdown_context(*parts: str, max_chars: int = 2200) -> str:
@@ -30,6 +87,107 @@ def _read_markdown_context(*parts: str, max_chars: int = 2200) -> str:
     return text
 
 
+def _normalized_dialogue_text(value: Any) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _trim_history_window(
+    items: list[dict[str, str]],
+    *,
+    max_messages: int,
+    max_chars: int,
+) -> list[dict[str, str]]:
+    selected_reversed: list[dict[str, str]] = []
+    used_chars = 0
+    for item in reversed(items):
+        content = str(item.get("content") or "")
+        if selected_reversed and (len(selected_reversed) >= max_messages or used_chars + len(content) > max_chars):
+            break
+        selected_reversed.append(item)
+        used_chars += len(content)
+    return list(reversed(selected_reversed))
+
+
+def _client_conversation_history(
+    source_context: dict[str, Any] | None,
+    *,
+    current_user_text: str,
+    max_messages: int,
+    max_chars: int,
+) -> list[dict[str, str]]:
+    source_context = dict(source_context or {})
+    raw_history = list(
+        source_context.get("client_conversation_history")
+        or source_context.get("conversation_history")
+        or []
+    )
+    normalized: list[dict[str, str]] = []
+    for item in raw_history:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        content = _normalized_dialogue_text(item.get("content"))
+        if role not in {"system", "user", "assistant"} or not content:
+            continue
+        normalized.append({"role": role, "content": content})
+    current_user = _normalized_dialogue_text(current_user_text)
+    if normalized and normalized[-1]["role"] == "user" and normalized[-1]["content"] == current_user:
+        normalized = normalized[:-1]
+    return _trim_history_window(
+        normalized,
+        max_messages=max_messages,
+        max_chars=max_chars,
+    )
+
+
+def canonical_runtime_transcript(
+    *,
+    session_id: str | None,
+    source_context: dict[str, Any] | None,
+    current_user_text: str,
+    max_messages: int = 10,
+    max_chars: int = 5000,
+) -> tuple[list[dict[str, str]], str]:
+    normalized_session_id = str(session_id or "").strip()
+    if normalized_session_id:
+        turns = recent_dialogue_turns(
+            normalized_session_id,
+            limit=max(12, int(max_messages) * 2),
+            speaker_roles=("user", "assistant"),
+        )
+        transcript: list[dict[str, str]] = []
+        for turn in reversed(turns):
+            role = str(turn.get("speaker_role") or "").strip().lower()
+            content = _normalized_dialogue_text(
+                turn.get("reconstructed_input")
+                or turn.get("normalized_input")
+                or turn.get("raw_input")
+            )
+            if role not in {"user", "assistant"} or not content:
+                continue
+            transcript.append({"role": role, "content": content})
+        current_user = _normalized_dialogue_text(current_user_text)
+        if transcript and transcript[-1]["role"] == "user" and transcript[-1]["content"] == current_user:
+            transcript = transcript[:-1]
+        transcript = _trim_history_window(
+            transcript,
+            max_messages=max_messages,
+            max_chars=max_chars,
+        )
+        if transcript:
+            return transcript, "structured_dialogue_memory"
+
+    client_history = _client_conversation_history(
+        source_context,
+        current_user_text=current_user_text,
+        max_messages=max_messages,
+        max_chars=max_chars,
+    )
+    if client_history:
+        return client_history, "client_conversation_history"
+    return [], "none"
+
+
 def build_bootstrap_context(
     *,
     persona: Any,
@@ -40,22 +198,38 @@ def build_bootstrap_context(
     max_lexicon_items: int = 4,
 ) -> list[ContextItem]:
     session_state = get_dialogue_session(session_id)
-    recent_turns = recent_dialogue_turns(session_id, limit=2)
+    recent_turns = recent_dialogue_turns(session_id, limit=2, speaker_roles=("user", "assistant"))
     lexicon = session_lexicon(session_id)
     quality_flags = list(getattr(interpretation, "quality_flags", []) or [])
     topic_hints = list(getattr(interpretation, "topic_hints", []) or [])
     references = list(getattr(interpretation, "reference_targets", []) or [])
+    session_topics = list(session_state.get("topic_hints") or [])
+    continuity_lines = _continuity_lines(session_state)
 
+    character_mode = ""
+    try:
+        _prefs = load_preferences()
+        character_mode = str(getattr(_prefs, "character_mode", "") or "").strip()
+    except Exception:
+        pass
+    persona_content = (
+        f"Persona: {persona.display_name}. Tone: {persona.tone}. "
+        f"Execution style: {persona.execution_style}. Spirit anchor: {persona.spirit_anchor}."
+    )
+    if character_mode:
+        persona_content += (
+            f"\n\nACTIVE ROLEPLAY: You are currently roleplaying as '{character_mode}'. "
+            f"Stay fully in character at all times. Adopt the speech patterns, mannerisms, "
+            f"personality, and vocabulary of '{character_mode}'. Do not break character unless "
+            f"the user explicitly asks you to stop the roleplay."
+        )
     items: list[ContextItem] = [
         ContextItem(
             item_id="bootstrap-persona",
             layer="bootstrap",
             source_type="persona",
             title="Agent identity",
-            content=(
-                f"Persona: {persona.display_name}. Tone: {persona.tone}. "
-                f"Execution style: {persona.execution_style}. Spirit anchor: {persona.spirit_anchor}."
-            ),
+            content=persona_content,
             priority=1.0,
             confidence=0.95,
             must_keep=True,
@@ -67,14 +241,31 @@ def build_bootstrap_context(
             source_type="session_state",
             title="Session topic hints",
             content=(
-                f"Current topics: {_compact_join(topic_hints, limit=4) or 'none'}. "
-                f"References: {_compact_join(references, limit=3) or 'none'}. "
+                f"Current topics: {_compact_join(topic_hints or session_topics, limit=4) or 'none'}. "
+                f"References: {_compact_join(references or ([str(session_state.get('last_subject') or '').strip()] if session_state.get('last_subject') else []), limit=3) or 'none'}. "
                 f"Last subject: {session_state.get('last_subject') or 'none'}."
             ),
             priority=0.95,
             confidence=float(getattr(interpretation, "understanding_confidence", 0.0) or 0.0),
             must_keep=True,
             include_reason="session_grounding",
+        ),
+        *(
+            [
+                ContextItem(
+                    item_id="bootstrap-continuity",
+                    layer="bootstrap",
+                    source_type="dialogue_continuity",
+                    title="Conversation continuity",
+                    content=" ".join(continuity_lines),
+                    priority=0.93,
+                    confidence=0.84,
+                    must_keep=True,
+                    include_reason="continuity_state",
+                )
+            ]
+            if continuity_lines
+            else []
         ),
         ContextItem(
             item_id="bootstrap-task",
@@ -105,8 +296,39 @@ def build_bootstrap_context(
             confidence=0.9,
             must_keep=True,
             include_reason="safety_policy",
+            metadata={"exclude_from_chat_minimal_system_prompt": True},
+        ),
+        ContextItem(
+            item_id="bootstrap-conversation-safety",
+            layer="bootstrap",
+            source_type="conversation_policy",
+            title="Conversation policy",
+            content=(
+                "Sensitive conversation is allowed when the user is asking for discussion, analysis, or explanation only. "
+                "Do not confuse conversation about intimate, controversial, or offensive topics with permission to take action, reveal private data, or bypass safety gates."
+            ),
+            priority=0.89,
+            confidence=0.92,
+            must_keep=True,
+            include_reason="conversation_safety_split",
         ),
     ]
+
+    working = getattr(interpretation, "working_interpretation", None)
+    if working and getattr(working, "grounding_note", ""):
+        items.append(
+            ContextItem(
+                item_id="bootstrap-short-input-grounding",
+                layer="bootstrap",
+                source_type="context_understanding",
+                title="Short/fragmented input grounding",
+                content=getattr(working, "grounding_note", ""),
+                priority=0.91,
+                confidence=0.9,
+                must_keep=True,
+                include_reason="anti_hallucination",
+            )
+        )
 
     # Self-knowledge: load NULLA's self-awareness document
     sk_text = _read_markdown_context("docs", "NULLA_SELF_KNOWLEDGE.md", max_chars=2200)
@@ -138,6 +360,7 @@ def build_bootstrap_context(
                 priority=0.965,
                 confidence=1.0,
                 include_reason="tooling_behavior_contract",
+                metadata={"exclude_from_chat_minimal_system_prompt": True},
             )
         )
 
@@ -153,8 +376,6 @@ def build_bootstrap_context(
                 "The operator can rename me or give me a nickname at any time. "
                 "Internal runtime identity and display naming are separate."
             )
-            if privacy_pact:
-                content += f" Privacy pact: {privacy_pact}"
             items.append(
                 ContextItem(
                     item_id="bootstrap-owner-identity",
@@ -168,6 +389,21 @@ def build_bootstrap_context(
                     include_reason="owner_identity_contract",
                 )
             )
+            if privacy_pact:
+                items.append(
+                    ContextItem(
+                        item_id="bootstrap-owner-privacy-pact",
+                        layer="bootstrap",
+                        source_type="privacy_pact",
+                        title="Privacy pact",
+                        content=f"Privacy pact: {privacy_pact}",
+                        priority=0.98,
+                        confidence=1.0,
+                        must_keep=True,
+                        include_reason="owner_privacy_contract",
+                        metadata={"exclude_from_chat_minimal_system_prompt": True},
+                    )
+                )
     except Exception:
         pass
 
@@ -204,29 +440,42 @@ def build_bootstrap_context(
                     confidence=1.0,
                     must_keep=True,
                     include_reason="memory_sharing_scope",
+                    metadata={"exclude_from_chat_minimal_system_prompt": True},
                 )
             )
     except Exception:
         pass
 
-    # User personalization controls (humor, character mode, boundaries).
-    try:
-        pref_text = describe_preferences_for_context()
-        if pref_text:
-            items.append(
-                ContextItem(
-                    item_id="bootstrap-user-preferences",
-                    layer="bootstrap",
-                    source_type="user_preferences",
-                    title="User preferences",
-                    content=pref_text,
-                    priority=0.91,
-                    confidence=1.0,
-                    include_reason="persistent_user_preferences",
-                )
+    conversation_pref_text = _conversation_preference_text()
+    if conversation_pref_text:
+        items.append(
+            ContextItem(
+                item_id="bootstrap-conversation-preferences",
+                layer="bootstrap",
+                source_type="user_preferences",
+                title="Conversation preferences",
+                content=conversation_pref_text,
+                priority=0.91,
+                confidence=1.0,
+                include_reason="persistent_user_preferences",
             )
-    except Exception:
-        pass
+        )
+
+    execution_pref_text = _execution_preference_text()
+    if execution_pref_text:
+        items.append(
+            ContextItem(
+                item_id="bootstrap-execution-preferences",
+                layer="bootstrap",
+                source_type="execution_preferences",
+                title="Execution preferences",
+                content=execution_pref_text,
+                priority=0.9,
+                confidence=1.0,
+                include_reason="execution_policy_preferences",
+                metadata={"exclude_from_chat_minimal_system_prompt": True},
+            )
+        )
 
     if quality_flags:
         items.append(
@@ -244,7 +493,7 @@ def build_bootstrap_context(
 
     if recent_turns:
         recent_summary = " | ".join(
-            f"{str(turn.get('reconstructed_input') or '')[:80]}"
+            f"{str(turn.get('speaker_role') or 'user').title()}: {str(turn.get('reconstructed_input') or '')[:80]}"
             for turn in recent_turns[:2]
         )
         items.append(

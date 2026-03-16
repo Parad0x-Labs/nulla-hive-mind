@@ -44,13 +44,23 @@ class OpenAICompatibleAdapter(ModelAdapter):
         if not base_url:
             raise RuntimeError(f"{self.manifest.provider_id}: missing runtime_config.base_url")
         api_path = str(self.manifest.runtime_config.get("api_path") or "/v1/chat/completions")
+        generation_profile = dict(request.metadata.get("generation_profile") or {})
         payload: dict[str, Any] = {
             "model": self.manifest.model_name,
             "messages": request.messages or _build_messages(request.system_prompt, request.prompt, attachments=request.attachments),
-            "temperature": request.temperature if request.temperature is not None else self.manifest.runtime_config.get("temperature", 0.2),
+            "temperature": request.temperature
+            if request.temperature is not None
+            else generation_profile.get("temperature", self.manifest.runtime_config.get("temperature", 0.2)),
         }
         if request.max_output_tokens is not None:
             payload["max_tokens"] = int(request.max_output_tokens)
+        elif generation_profile.get("max_output_tokens") is not None:
+            payload["max_tokens"] = int(generation_profile["max_output_tokens"])
+        if generation_profile.get("top_p") is not None:
+            payload["top_p"] = float(generation_profile["top_p"])
+        stop_sequences = [str(item) for item in list(generation_profile.get("stop_sequences") or []) if str(item or "").strip()]
+        if stop_sequences:
+            payload["stop"] = stop_sequences
         if force_json and bool(self.manifest.runtime_config.get("supports_json_mode", False)):
             payload["response_format"] = {"type": "json_object"}
         timeout_seconds = float(self.manifest.runtime_config.get("timeout_seconds") or 30.0)

@@ -16,6 +16,7 @@ import os
 import queue
 import re
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -42,6 +43,7 @@ from core.identity_manager import load_active_persona
 from core.local_worker_pool import resolve_local_worker_capacity
 from core.logging_config import setup_logging
 from core.model_registry import ModelRegistry
+from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
 from core.onboarding import (
     ensure_bootstrap_identity,
     ensure_openclaw_registration,
@@ -49,6 +51,7 @@ from core.onboarding import (
     is_first_boot,
 )
 from core.public_hive_bridge import ensure_public_hive_auth
+from core.release_channel import release_manifest_snapshot
 from core.runtime_task_events import (
     list_runtime_session_events,
     list_runtime_sessions,
@@ -75,10 +78,56 @@ _daemon: NullaDaemon | None = None
 _display_name: str = "NULLA"
 _runtime_model_tag: str = "qwen2.5:7b"
 _runtime_parameter_size: str = "7B"
+_runtime_started_at: str = ""
+_runtime_version_stamp: dict[str, Any] = {}
 _OPENCLAW_SENDER_WRAPPER_RE = re.compile(
     r"^Sender \(untrusted metadata\):\s*```json\s*\{.*?\}\s*```\s*\[[^\]]+\]\s*(.*)$",
     re.DOTALL,
 )
+
+
+def _git_output(*args: str) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(PROJECT_ROOT), *args],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+    except Exception:
+        return ""
+    return str(completed.stdout or "").strip()
+
+
+def _build_runtime_version_stamp() -> dict[str, Any]:
+    release = dict(release_manifest_snapshot())
+    branch = _git_output("branch", "--show-current")
+    commit = _git_output("rev-parse", "--short=12", "HEAD")
+    dirty = bool(_git_output("status", "--short"))
+    release_version = str(release.get("release_version") or "").strip() or "unknown-release"
+    build_parts = [release_version]
+    if commit:
+        build_parts.append(commit)
+    build_id = "+".join(build_parts)
+    if dirty:
+        build_id = f"{build_id}.dirty"
+    started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return {
+        "release_version": release_version,
+        "minimum_compatible_release": str(release.get("minimum_compatible_release") or "").strip(),
+        "protocol_version": int(release.get("protocol_version") or 0),
+        "rollout_stage": str(release.get("rollout_stage") or "").strip(),
+        "channel_name": str(release.get("channel_name") or "").strip(),
+        "branch": branch,
+        "commit": commit,
+        "dirty": dirty,
+        "build_id": build_id,
+        "started_at": started_at,
+        "pid": os.getpid(),
+        "workstation_version": NULLA_WORKSTATION_DEPLOYMENT_VERSION,
+        "model_tag": _runtime_model_tag,
+    }
 
 
 def _parameter_size_for_model(model_tag: str) -> str:
@@ -145,8 +194,8 @@ def _ensure_default_provider(registry: ModelRegistry, model_tag: str) -> None:
             "base_url": "http://127.0.0.1:11434",
             "api_path": "/v1/chat/completions",
             "health_path": "/v1/models",
-            "timeout_seconds": 60,
-            "health_timeout_seconds": 5,
+            "timeout_seconds": 180,
+            "health_timeout_seconds": 10,
             "temperature": 0.7,
             "supports_json_mode": False,
         },
@@ -162,7 +211,7 @@ def _ensure_default_provider(registry: ModelRegistry, model_tag: str) -> None:
 
 
 def _bootstrap() -> None:
-    global _agent, _daemon, _display_name, _runtime_model_tag, _runtime_parameter_size
+    global _agent, _daemon, _display_name, _runtime_model_tag, _runtime_parameter_size, _runtime_started_at, _runtime_version_stamp
 
     run_migrations()
     if not healthcheck():
@@ -193,6 +242,15 @@ def _bootstrap() -> None:
     _runtime_parameter_size = _parameter_size_for_model(_runtime_model_tag)
     _ensure_ollama_model(_runtime_model_tag)
     logger.info("Hardware: %s | GPU: %s | Model tier: %s", probe.accelerator, probe.gpu_name or "none", tier.ollama_tag)
+    _runtime_version_stamp = _build_runtime_version_stamp()
+    _runtime_started_at = str(_runtime_version_stamp.get("started_at") or "")
+    logger.info(
+        "Runtime build: %s | branch=%s | commit=%s | dirty=%s",
+        _runtime_version_stamp.get("build_id") or "unknown",
+        _runtime_version_stamp.get("branch") or "unknown",
+        _runtime_version_stamp.get("commit") or "unknown",
+        _runtime_version_stamp.get("dirty"),
+    )
 
     compute_daemon = ComputeModeDaemon(has_gpu=probe.accelerator != "cpu")
     compute_daemon.start()
@@ -515,6 +573,14 @@ def _stream_agent_with_events(
 
 
 class NullaAPIHandler(BaseHTTPRequestHandler):
+    def _send_runtime_headers(self) -> None:
+        stamp = dict(_runtime_version_stamp or {})
+        self.send_header("X-Nulla-Runtime-Version", str(stamp.get("release_version") or "unknown"))
+        self.send_header("X-Nulla-Runtime-Build", str(stamp.get("build_id") or "unknown"))
+        self.send_header("X-Nulla-Runtime-Started-At", str(stamp.get("started_at") or ""))
+        self.send_header("X-Nulla-Runtime-Commit", str(stamp.get("commit") or ""))
+        self.send_header("X-Nulla-Runtime-Dirty", "1" if bool(stamp.get("dirty")) else "0")
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
@@ -524,6 +590,9 @@ class NullaAPIHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self._send_runtime_headers()
+            self.send_header("X-Nulla-Workstation-Version", NULLA_WORKSTATION_DEPLOYMENT_VERSION)
+            self.send_header("X-Nulla-Workstation-Surface", "trace-rail")
             self.end_headers()
             self.wfile.write(body)
             return
@@ -556,7 +625,19 @@ class NullaAPIHandler(BaseHTTPRequestHandler):
 
         # Health
         if path in {"/healthz", "/v1/healthz"}:
-            self._json_response(200, {"ok": True, "agent": _display_name, "daemon": _daemon is not None})
+            self._json_response(
+                200,
+                {
+                    "ok": True,
+                    "agent": _display_name,
+                    "daemon": _daemon is not None,
+                    "runtime": dict(_runtime_version_stamp or {}),
+                },
+            )
+            return
+
+        if path in {"/api/runtime/version", "/v1/runtime/version"}:
+            self._json_response(200, dict(_runtime_version_stamp or {}))
             return
 
         if path == "/api/runtime/sessions":
@@ -670,6 +751,8 @@ class NullaAPIHandler(BaseHTTPRequestHandler):
         ).strip()
         default_workspace = _default_workspace_root()
         source_context = {
+            "client_conversation_history": history,
+            "client_history_message_count": len(history),
             "conversation_history": history,
             "history_message_count": len(history),
             "workspace": requested_workspace or default_workspace,
@@ -787,6 +870,7 @@ class NullaAPIHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
+        self._send_runtime_headers()
         self.end_headers()
         self.wfile.write(payload)
 

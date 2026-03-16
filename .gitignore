@@ -38,6 +38,35 @@ sandbox_workspace/
 install_doctor.json
 .worktrees/
 
+# Personal / operator identity (never publish)
+USER.md
+MEMORY.md
+SOUL.md
+AGENTS.md
+HEARTBEAT.md
+BOOTSTRAP.md
+TOOLS.md
+Cursor_Claude_Handover.md
+
+# Ops scripts (contain deployment IPs, SSH paths, server configs)
+ops/
+
+# Cluster configs (contain node IPs and auth tokens)
+config/meet_clusters/do_ip_first_4node/
+config/meet_clusters/separated_watch_4node/tls/
+
+# Internal deployment handover docs (contain server IPs, SSH commands)
+docs/HANDOVER_PUBLIC_HIVE_*.md
+
+# Shell launchers with hardcoded local paths
+OpenClaw_NULLA.sh
+Start_NULLA.sh
+Talk_To_NULLA.sh
+*.command
+
+# Agent transcripts / cursor state
+.cursor/
+
 # Databases, logs, pid files
 *.db
 *.db-shm
@@ -61,6 +90,8 @@ install_doctor.json
 *.b64
 data/keys/
 network/identity.json
+ssh/
+nulla-ssh/
 
 # Local packaging / build metadata
 decentralized_nulla.egg-info/
