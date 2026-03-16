@@ -11,7 +11,7 @@ import pytest
 
 from core.runtime_execution_tools import execute_runtime_tool, extract_observation_followup_hints
 
-_UNSHARE_AVAILABLE = os.system("unshare --version >/dev/null 2>&1") == 0
+_UNSHARE_AVAILABLE = os.system("unshare -r true >/dev/null 2>&1") == 0
 
 
 class RuntimeExecutionToolsTests(unittest.TestCase):
