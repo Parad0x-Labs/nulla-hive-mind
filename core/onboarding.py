@@ -97,6 +97,7 @@ def ensure_bootstrap_identity(
     """Create a first-boot identity using installer/env/OpenClaw hints."""
     existing = load_identity()
     if existing.get("agent_name"):
+        _ensure_nullabook_registration(existing["agent_name"])
         return existing
 
     chosen_name = (
@@ -112,6 +113,7 @@ def ensure_bootstrap_identity(
         update_local_persona("default", display_name=chosen_name)
     except Exception:
         pass
+    _ensure_nullabook_registration(chosen_name)
     return load_identity()
 
 
@@ -203,15 +205,18 @@ def run_onboarding_interactive() -> dict:
 
     save_identity(agent_name=name, privacy_pact=pact)
 
-    # Also update the persona display_name in the DB
     try:
         from core.identity_manager import update_local_persona
         update_local_persona("default", display_name=name)
     except Exception:
         pass
 
+    nb_handle = _ensure_nullabook_registration(name)
+
     print()
     print(f"  Locked in. I'm {name}.")
+    if nb_handle:
+        print(f"  NullaBook handle: {nb_handle}")
     if pact and pact != "No specific restrictions set.":
         print("  Privacy pact noted. I'll honor it.")
     print()
@@ -219,6 +224,28 @@ def run_onboarding_interactive() -> dict:
     print()
 
     return load_identity()
+
+
+def _ensure_nullabook_registration(agent_name: str) -> str | None:
+    """Register a NullaBook account if the agent doesn't have one yet.
+
+    Returns the handle on success, or None if registration was skipped.
+    """
+    try:
+        from core.nullabook_identity import has_nullabook_account, register_nullabook_account, get_local_nullabook_handle
+        from core.agent_name_registry import validate_agent_name
+
+        if has_nullabook_account():
+            return get_local_nullabook_handle()
+
+        valid, _ = validate_agent_name(agent_name)
+        if not valid:
+            return None
+
+        reg = register_nullabook_account(handle=agent_name)
+        return reg.profile.handle
+    except Exception:
+        return None
 
 
 def _now_iso() -> str:

@@ -1249,6 +1249,44 @@ def run_migrations(db_path=None) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_escrow_task ON dispatch_credit_escrow(parent_task_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_escrow_poster ON dispatch_credit_escrow(poster_peer_id, status)")
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS nullabook_profiles (
+                peer_id         TEXT PRIMARY KEY,
+                handle          TEXT NOT NULL UNIQUE,
+                canonical_handle TEXT NOT NULL UNIQUE,
+                display_name    TEXT NOT NULL,
+                bio             TEXT NOT NULL DEFAULT '',
+                avatar_seed     TEXT NOT NULL DEFAULT '',
+                profile_url     TEXT NOT NULL DEFAULT '',
+                post_count      INTEGER NOT NULL DEFAULT 0,
+                claim_count     INTEGER NOT NULL DEFAULT 0,
+                glory_score     REAL NOT NULL DEFAULT 0,
+                status          TEXT NOT NULL DEFAULT 'active',
+                joined_at       TEXT NOT NULL,
+                last_active_at  TEXT NOT NULL,
+                updated_at      TEXT NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_nb_profiles_handle ON nullabook_profiles(canonical_handle)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_nb_profiles_status ON nullabook_profiles(status, last_active_at DESC)")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS nullabook_tokens (
+                token_id    TEXT PRIMARY KEY,
+                peer_id     TEXT NOT NULL,
+                token_hash  TEXT NOT NULL UNIQUE,
+                scope       TEXT NOT NULL DEFAULT 'post,profile',
+                status      TEXT NOT NULL DEFAULT 'active',
+                issued_at   TEXT NOT NULL,
+                expires_at  TEXT,
+                last_used_at TEXT,
+                revoked_at  TEXT,
+                FOREIGN KEY (peer_id) REFERENCES nullabook_profiles(peer_id)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_nb_tokens_hash ON nullabook_tokens(token_hash, status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_nb_tokens_peer ON nullabook_tokens(peer_id, status)")
+
         exists = conn.execute(
             "SELECT 1 FROM persona_profiles WHERE persona_id = ? LIMIT 1",
             ("default",),

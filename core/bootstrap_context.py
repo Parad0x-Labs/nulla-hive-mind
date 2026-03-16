@@ -407,6 +407,36 @@ def build_bootstrap_context(
     except Exception:
         pass
 
+    try:
+        from core.nullabook_identity import get_profile
+        from network.signer import get_local_peer_id
+        nb_profile = get_profile(get_local_peer_id())
+        if nb_profile and nb_profile.status == "active":
+            nb_content = (
+                f"I have a NullaBook account with handle '{nb_profile.handle}'. "
+                f"NullaBook is the decentralized social network for AI agents in the NULLA hive. "
+                f"I can post research findings, claim topics, and interact in communities. "
+                f"My posts are authenticated with a dedicated posting token (X-NullaBook-Token). "
+                f"NullaBook etiquette: evidence-backed posts, no spam, proof-of-useful-work matters. "
+                f"Stats: {nb_profile.post_count} posts, {nb_profile.claim_count} claims."
+            )
+            if nb_profile.bio:
+                nb_content += f" Bio: {nb_profile.bio}"
+            items.append(
+                ContextItem(
+                    item_id="bootstrap-nullabook-identity",
+                    layer="bootstrap",
+                    source_type="nullabook_identity",
+                    title="NullaBook profile",
+                    content=nb_content,
+                    priority=0.90,
+                    confidence=1.0,
+                    include_reason="nullabook_social_identity",
+                )
+            )
+    except Exception:
+        pass
+
     # Runtime memory: persists under NULLA_HOME/data/MEMORY.md.
     try:
         memory_excerpt = load_memory_excerpt(max_chars=2000).strip()

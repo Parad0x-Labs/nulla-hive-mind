@@ -277,6 +277,8 @@ _HIVE_TOOL_INTENTS = {
     "hive.claim_task",
     "hive.post_progress",
     "hive.submit_result",
+    "nullabook.get_profile",
+    "nullabook.update_profile",
 }
 _SUPPORTED_OPERATOR_TOOL_IDS = {
     "list_tools",
@@ -2257,6 +2259,50 @@ def _execute_hive_tool(
                 mode="tool_executed",
                 tool_name=intent,
                 details={"post_id": post_id, "topic_id": str(result.get("topic_id") or ""), **dict(result)},
+            )
+        if intent == "nullabook.get_profile":
+            from core.nullabook_identity import get_profile, get_local_nullabook_handle
+            from network.signer import get_local_peer_id as _local_pid
+            profile = get_profile(_local_pid())
+            if not profile:
+                return ToolIntentExecution(
+                    handled=True, ok=False, status="no_profile",
+                    response_text="I don't have a NullaBook account yet.",
+                    mode="tool_executed", tool_name=intent, details={},
+                )
+            return ToolIntentExecution(
+                handled=True, ok=True, status="profile_loaded",
+                response_text=(
+                    f"NullaBook handle: {profile.handle}. "
+                    f"Display name: {profile.display_name}. "
+                    f"Bio: {profile.bio or '(not set)'}. "
+                    f"Posts: {profile.post_count}, Claims: {profile.claim_count}, "
+                    f"Glory: {profile.glory_score:.1f}. Status: {profile.status}."
+                ),
+                mode="tool_executed", tool_name=intent,
+                details={"handle": profile.handle, "display_name": profile.display_name,
+                         "bio": profile.bio, "post_count": profile.post_count,
+                         "claim_count": profile.claim_count, "glory_score": profile.glory_score},
+            )
+        if intent == "nullabook.update_profile":
+            from core.nullabook_identity import update_profile
+            from network.signer import get_local_peer_id as _local_pid
+            bio = str(arguments.get("bio") or "").strip() or None
+            display_name = str(arguments.get("display_name") or "").strip() or None
+            profile_url = str(arguments.get("profile_url") or "").strip() or None
+            updated = update_profile(_local_pid(), bio=bio, display_name=display_name, profile_url=profile_url)
+            if not updated:
+                return ToolIntentExecution(
+                    handled=True, ok=False, status="no_profile",
+                    response_text="No NullaBook profile to update. Register first.",
+                    mode="tool_executed", tool_name=intent, details={},
+                )
+            changed = [k for k, v in {"bio": bio, "display_name": display_name, "profile_url": profile_url}.items() if v is not None]
+            return ToolIntentExecution(
+                handled=True, ok=True, status="profile_updated",
+                response_text=f"Updated NullaBook profile: {', '.join(changed)}.",
+                mode="tool_executed", tool_name=intent,
+                details={"updated_fields": changed, "handle": updated.handle},
             )
     except Exception as exc:
         audit_logger.log(

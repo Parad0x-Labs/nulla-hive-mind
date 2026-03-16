@@ -89,7 +89,7 @@ class MeetAndGreetServerConfig:
     tls_require_client_cert: bool = False
     cors_allowed_origin: str | None = "*"
     cors_allowed_methods: str = "GET,POST,OPTIONS"
-    cors_allowed_headers: str = "Content-Type,X-Nulla-Meet-Token"
+    cors_allowed_headers: str = "Content-Type,X-Nulla-Meet-Token,X-NullaBook-Token"
 
 
 class MeetMetricsCollector:
@@ -281,6 +281,12 @@ def build_server(
                     )
                     if grant.review_required_by_default and parsed.path in {"/v1/hive/topics", "/v1/hive/posts"}:
                         payload["force_review_required"] = True
+                nb_token = str(self.headers.get("X-NullaBook-Token") or "").strip()
+                nb_peer_id: str | None = None
+                if nb_token:
+                    nb_peer_id = _verify_nullabook_token_safe(nb_token)
+                    if nb_peer_id:
+                        payload.setdefault("nullabook_peer_id", nb_peer_id)
             except Exception as exc:
                 audit_logger.log(
                     "meet_write_rejected",
@@ -294,6 +300,8 @@ def build_server(
                 return
             query = parse_qs(parsed.query)
             status_code, envelope = dispatch_request("POST", parsed.path, query, payload, svc, hive_service, metrics)
+            if status_code < 300 and nb_peer_id and parsed.path in {"/v1/hive/posts"}:
+                _nullabook_post_hook(nb_peer_id)
             latency_ms = (time.perf_counter() - started) * 1000.0
             metrics.record(method="POST", path=parsed.path, status_code=status_code, latency_ms=latency_ms)
             self._write_response(status_code, envelope)
@@ -677,6 +685,24 @@ def _query_summary_mode(query: dict[str, list[str]]) -> str:
     if raw in {"regional_detail", "global_summary"}:
         return raw
     return "regional_detail"
+
+
+def _verify_nullabook_token_safe(raw_token: str) -> str | None:
+    """Verify a NullaBook posting token, returning peer_id or None. Never raises."""
+    try:
+        from core.nullabook_identity import verify_token
+        return verify_token(raw_token)
+    except Exception:
+        return None
+
+
+def _nullabook_post_hook(peer_id: str) -> None:
+    """Bump NullaBook post counter after a successful hive post."""
+    try:
+        from core.nullabook_identity import increment_post_count
+        increment_post_count(peer_id)
+    except Exception:
+        pass
 
 
 def _requires_write_auth(host: str) -> bool:

@@ -28,6 +28,7 @@ from core.runtime_paths import CONFIG_HOME_DIR, PROJECT_ROOT, config_path
 from network.signer import get_local_peer_id
 
 _PLACEHOLDER_TOKEN_RE = re.compile(r"(?:replace|set|change).*(?:token|secret)", re.IGNORECASE)
+_UNSET_SENTINEL = object()
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,16 @@ class PublicHiveBridge:
     ) -> None:
         self.config = config or load_public_hive_bridge_config()
         self._urlopen = urlopen or urllib.request.urlopen
+        self._nullabook_token: str | None = _UNSET_SENTINEL
+
+    def _get_nullabook_token(self) -> str | None:
+        if self._nullabook_token is _UNSET_SENTINEL:
+            try:
+                from core.nullabook_identity import load_local_token
+                self._nullabook_token = load_local_token()
+            except Exception:
+                self._nullabook_token = None
+        return self._nullabook_token
 
     def enabled(self) -> bool:
         return bool(self.config.enabled and self.config.meet_seed_urls)
@@ -816,6 +827,9 @@ class PublicHiveBridge:
         auth_token = self._auth_token_for_url(base_url)
         if auth_token:
             request.add_header("X-Nulla-Meet-Token", auth_token)
+        nb_token = self._get_nullabook_token()
+        if nb_token:
+            request.add_header("X-NullaBook-Token", nb_token)
         context = self._ssl_context_for_url(url)
         try:
             with self._urlopen(request, timeout=self.config.request_timeout_seconds, context=context) as response:
