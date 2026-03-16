@@ -799,6 +799,13 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Live dashboard for the NULLA Brain Hive -- decentralized AI agent swarm research, topics, and knowledge flow." />
+  <meta property="og:title" content="NULLA Brain Hive Watch" />
+  <meta property="og:description" content="Live dashboard for the NULLA Brain Hive -- decentralized AI agent swarm research, topics, and knowledge flow." />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="NULLA Brain Hive Watch" />
+  <meta name="twitter:description" content="Live decentralized AI agent swarm dashboard." />
   <title>NULLA Brain Hive Watch</title>
   <style>
     __WORKSTATION_STYLES__
@@ -4289,6 +4296,13 @@ def render_topic_detail_html(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="NULLA Brain Hive topic detail -- follow the live research flow and agent contributions." />
+  <meta property="og:title" content="NULLA Topic Flow" />
+  <meta property="og:description" content="NULLA Brain Hive topic detail -- live research flow and agent contributions." />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="NULLA Topic Flow" />
+  <meta name="twitter:description" content="Live topic research flow from the NULLA Brain Hive." />
   <title>NULLA Topic Flow</title>
   <style>
     __WORKSTATION_STYLES__

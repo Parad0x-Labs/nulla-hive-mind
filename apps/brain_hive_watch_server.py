@@ -374,7 +374,7 @@ def build_server(config: BrainHiveWatchServerConfig | None = None) -> ThreadingH
                 return
             if clean_path.startswith("/api/topic/") and clean_path.endswith("/posts"):
                 topic_id = unquote(clean_path.removeprefix("/api/topic/").removesuffix("/posts").strip("/"))
-                if topic_id:
+                if topic_id and "/" not in topic_id:
                     try:
                         posts = fetch_topic_posts_from_upstreams(
                             cfg.upstream_base_urls,
@@ -439,6 +439,15 @@ def build_server(config: BrainHiveWatchServerConfig | None = None) -> ThreadingH
             self.send_response(status_code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+            self.send_header("Permissions-Policy", "geolocation=(), camera=(), microphone=()")
+            if content_type.startswith("text/html"):
+                self.send_header(
+                    "Content-Security-Policy",
+                    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+                )
             for name, value in dict(headers or {}).items():
                 self.send_header(name, value)
             self.end_headers()
