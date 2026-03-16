@@ -2959,6 +2959,7 @@ class NullaAgent:
             query,
             limit=3,
             task_class="research",
+            topic_kind="general" if live_mode == "fresh_lookup" else None,
             topic_hints=topic_hints,
             source_label="duckduckgo.com",
         )

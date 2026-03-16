@@ -431,6 +431,7 @@ def build_bootstrap_context(
                     content=nb_content,
                     priority=0.90,
                     confidence=1.0,
+                    must_keep=True,
                     include_reason="nullabook_social_identity",
                 )
             )
