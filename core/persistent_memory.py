@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from datetime import datetime, timezone
@@ -7,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from core.privacy_guard import (
-    SHARE_SCOPES,
     keyword_tokens,
     normalize_share_scope,
     parse_restricted_terms,
@@ -15,9 +15,8 @@ from core.privacy_guard import (
     tokenize_restricted_terms,
 )
 from core.runtime_paths import data_path, project_path
-from storage.dialogue_memory import record_dialogue_turn
 from storage.db import get_connection
-
+from storage.dialogue_memory import record_dialogue_turn
 
 _MEMORY_FILE = "MEMORY.md"
 _CONVERSATION_LOG_FILE = "conversation_log.jsonl"
@@ -321,7 +320,7 @@ def set_session_memory_policy(
             ),
         )
         if _table_exists(conn, "local_tasks"):
-            try:
+            with contextlib.suppress(Exception):
                 conn.execute(
                     """
                     UPDATE local_tasks
@@ -330,10 +329,8 @@ def set_session_memory_policy(
                     """,
                     (normalized_scope, normalized_session_id),
                 )
-            except Exception:
-                pass
         if _table_exists(conn, "learning_shards"):
-            try:
+            with contextlib.suppress(Exception):
                 conn.execute(
                     """
                     UPDATE learning_shards
@@ -349,8 +346,6 @@ def set_session_memory_policy(
                         normalized_session_id,
                     ),
                 )
-            except Exception:
-                pass
         conn.commit()
     finally:
         conn.close()
@@ -1065,9 +1060,7 @@ def _should_auto_extract(text: str) -> bool:
         return False
     if lowered.startswith(("remember ", "remember that ", "forget ", "erase ", "/memory")):
         return False
-    if len(lowered) < 12:
-        return False
-    return True
+    return not len(lowered) < 12
 
 
 def _should_skip_memory_sentence(sentence: str) -> bool:
@@ -1076,9 +1069,7 @@ def _should_skip_memory_sentence(sentence: str) -> bool:
         return True
     if len(sentence) < 12:
         return True
-    if any(hint in lowered for hint in _EPHEMERAL_HINTS):
-        return True
-    return False
+    return bool(any(hint in lowered for hint in _EPHEMERAL_HINTS))
 
 
 def _clean_name(value: str) -> str:

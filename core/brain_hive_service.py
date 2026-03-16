@@ -4,10 +4,9 @@ import json
 from collections import Counter, defaultdict
 from typing import Any
 
-from core.agent_name_registry import get_agent_name
 from core import policy_engine
+from core.agent_name_registry import get_agent_name
 from core.brain_hive_guard import guard_post_submission, guard_topic_submission
-from core.brain_hive_moderation import ModerationDecision, moderate_post_submission, moderate_topic_submission
 from core.brain_hive_models import (
     BrainHiveStatsResponse,
     HiveAgentProfile,
@@ -34,6 +33,7 @@ from core.brain_hive_models import (
     HiveTopicRecord,
     HiveTopicStatusUpdateRequest,
 )
+from core.brain_hive_moderation import ModerationDecision, moderate_post_submission, moderate_topic_submission
 from core.runtime_continuity import load_hive_idempotent_result, store_hive_idempotent_result
 from core.scoreboard_engine import get_peer_scoreboard
 from storage.brain_hive_moderation_store import (
@@ -44,15 +44,15 @@ from storage.brain_hive_moderation_store import (
 )
 from storage.brain_hive_store import (
     create_post,
-    create_topic,
     create_post_comment,
+    create_topic,
     get_commons_promotion_candidate,
     get_commons_promotion_candidate_by_post,
-    get_topic_claim,
     get_topic,
+    get_topic_claim,
+    list_claim_links,
     list_commons_promotion_candidates,
     list_commons_promotion_reviews,
-    list_claim_links,
     list_post_comments,
     list_post_endorsements,
     list_posts,
@@ -61,12 +61,14 @@ from storage.brain_hive_store import (
     list_topic_claims,
     list_topics,
     topic_counts_by_status,
-    update_topic_status as store_update_topic_status,
     upsert_claim_link,
     upsert_commons_promotion_candidate,
     upsert_commons_promotion_review,
     upsert_post_endorsement,
     upsert_topic_claim,
+)
+from storage.brain_hive_store import (
+    update_topic_status as store_update_topic_status,
 )
 from storage.db import get_connection
 from storage.knowledge_index import active_presence
@@ -405,11 +407,11 @@ class BrainHiveService:
 
     def review_object(self, request: HiveModerationReviewRequest) -> HiveModerationReviewSummary:
         if request.object_type == "topic":
-            current = self.get_topic(request.object_id, include_flagged=True)
+            self.get_topic(request.object_id, include_flagged=True)
         else:
             row = self._post_row(request.object_id)
             author_display_name, author_claim_label = self._display_fields(str(row["author_agent_id"]))
-            current = HivePostRecord(
+            HivePostRecord(
                 **row,
                 author_display_name=author_display_name,
                 author_claim_label=author_claim_label,
@@ -647,7 +649,7 @@ class BrainHiveService:
 
     def _is_commons_topic_row(self, topic: dict[str, Any]) -> bool:
         tags = {str(item or "").strip().lower() for item in list(topic.get("topic_tags") or []) if str(item or "").strip()}
-        combined = f"{str(topic.get('title') or '')} {str(topic.get('summary') or '')}".lower()
+        combined = f"{topic.get('title') or ''!s} {topic.get('summary') or ''!s}".lower()
         return (
             "agent_commons" in tags
             or "commons" in tags
@@ -802,7 +804,7 @@ class BrainHiveService:
             "evidence_depth": round(evidence_depth, 3),
             "downstream_use_count": int(downstream_use_count),
             "training_signal_count": int(training_signal_count),
-            "confirmation_agent_count": int(len(confirmation_agents)),
+            "confirmation_agent_count": len(confirmation_agents),
             "ready_for_review": bool(score >= review_threshold and self._is_commons_topic_row(topic)),
             "archive_candidate": bool(score >= archive_threshold and self._is_commons_topic_row(topic)),
             "reasons": sorted({item for item in reasons if item}),

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import psutil
 from dataclasses import dataclass
 from typing import Any
+
+import psutil
 
 from core import audit_logger
 from storage.db import get_connection
@@ -82,11 +83,11 @@ class HelperScheduler:
 
     def can_accept_mesh_task(self) -> bool:
         """
-        Determines if the node has the physical and configured capacity 
+        Determines if the node has the physical and configured capacity
         to accept and run a new helper task.
         """
         active_mesh = self._get_active_mesh_assignments()
-        
+
         # Hard configured cap
         if active_mesh >= self.config.max_concurrent_mesh_tasks:
             return False
@@ -129,9 +130,9 @@ class HelperScheduler:
         """
         active_mesh = self._get_active_mesh_assignments()
         target = self.config.max_concurrent_mesh_tasks - active_mesh
-        
+
         if self.config.reserve_capacity_for_local_user:
             active_user = self._get_active_user_tasks()
             target -= active_user
-            
+
         return max(0, min(self.config.max_concurrent_mesh_tasks, target))

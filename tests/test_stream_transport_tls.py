@@ -4,10 +4,10 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from network.stream_transport import (
+    _LEN_STRUCT,
     StreamClientTlsConfig,
     StreamEndpoint,
     StreamServerTlsConfig,
-    _LEN_STRUCT,
     _build_server_tls_context,
     send_frame,
 )
@@ -56,7 +56,7 @@ class StreamTransportTlsTests(unittest.TestCase):
         endpoint = StreamEndpoint(host="127.0.0.1", port=9001)
         payload = b"x" * 2048
 
-        def fake_get(key: str, default=None):  # noqa: ANN001
+        def fake_get(key: str, default=None):
             if key == "network.stream.max_frame_bytes":
                 return 1024
             return default

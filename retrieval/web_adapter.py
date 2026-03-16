@@ -184,9 +184,7 @@ def _looks_like_navigation_noise(text: str) -> bool:
     token_hits = sum(sample.count(token) for token in (" home ", " menu ", " search ", " settings ", " privacy ", " account ", " login "))
     if token_hits >= 4:
         return True
-    if "home news sport weather" in sample or "home news sport business" in sample:
-        return True
-    return False
+    return bool("home news sport weather" in sample or "home news sport business" in sample)
 
 
 def _notes_from_research(

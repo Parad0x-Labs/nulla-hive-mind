@@ -9,30 +9,32 @@ from pathlib import Path
 
 from apps.nulla_agent import NullaAgent
 from apps.nulla_daemon import DaemonConfig, NullaDaemon
+from core import policy_engine
+from core.adaptation_autopilot import (
+    get_adaptation_autopilot_status,
+    schedule_adaptation_autopilot_tick,
+    score_adaptation_corpus,
+)
 from core.adaptation_dataset import build_adaptation_corpus
-from core.adaptation_autopilot import get_adaptation_autopilot_status, schedule_adaptation_autopilot_tick, score_adaptation_corpus
 from core.backend_manager import BackendManager
 from core.control_plane_workspace import sync_control_plane_workspace
-from core.identity_manager import load_active_persona
+from core.credit_ledger import credit_purchases_enabled, reconcile_ledger
+from core.dna_payment_bridge import dna_bridge
+from core.dna_wallet_manager import DNAWalletManager
 from core.identity_lifecycle import identity_lifecycle_snapshot
+from core.identity_manager import load_active_persona
 from core.local_worker_pool import resolve_local_worker_capacity
-from core.lora_training_pipeline import dependency_status, promote_adaptation_job, run_adaptation_job
+from core.lora_training_pipeline import promote_adaptation_job, run_adaptation_job
 from core.model_registry import ModelRegistry
 from core.nulla_user_summary import build_user_summary, render_user_summary
 from core.release_channel import release_manifest_snapshot
 from core.runtime_paths import data_path
-from core.credit_ledger import credit_purchases_enabled, get_credit_balance, reconcile_ledger
-from core.dna_payment_bridge import dna_bridge
-from core.dna_wallet_manager import DNAWalletManager
 from core.trainable_base_manager import stage_trainable_base, trainable_base_status
-from core import policy_engine
 from network.signer import get_local_peer_id
 from storage.adaptation_store import (
     create_adaptation_corpus,
-    get_adaptation_corpus,
     create_adaptation_job,
-    get_adaptation_job,
-    list_adaptation_corpora,
+    get_adaptation_corpus,
     list_adaptation_eval_runs,
     list_adaptation_job_events,
     list_adaptation_jobs,
@@ -40,6 +42,7 @@ from storage.adaptation_store import (
 )
 from storage.db import healthcheck
 from storage.migrations import run_migrations
+
 
 def cmd_up() -> int:
     # 1. Boot local storage first
@@ -284,9 +287,9 @@ def cmd_adaptation_status(json_mode: bool = False) -> int:
     print(f"Deps ok:      {payload['dependency_status']['ok']}")
     print(f"Device:       {payload['dependency_status']['device']}")
     print(f"Modules:      {payload['dependency_status']['modules']}")
-    print(f"Loop status:  {str((payload.get('loop_state') or {}).get('status') or 'idle')}")
-    print(f"Decision:     {str((payload.get('loop_state') or {}).get('last_decision') or '')}")
-    print(f"Reason:       {str((payload.get('loop_state') or {}).get('last_reason') or '')}")
+    print(f"Loop status:  {(payload.get('loop_state') or {}).get('status') or 'idle'!s}")
+    print(f"Decision:     {(payload.get('loop_state') or {}).get('last_decision') or ''!s}")
+    print(f"Reason:       {(payload.get('loop_state') or {}).get('last_reason') or ''!s}")
     print(f"Corpora:      {len(payload['recent_corpora'])}")
     print(f"Jobs:         {len(payload['recent_jobs'])}")
     print(f"Evals:        {len(payload['recent_evals'])}")

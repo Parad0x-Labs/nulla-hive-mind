@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections import OrderedDict
-from dataclasses import dataclass
 import hashlib
 import time
-from typing import List
+from collections import OrderedDict
+from dataclasses import dataclass
+
 
 @dataclass
 class DHTNode:
@@ -22,7 +22,7 @@ class RoutingTable:
         self._buckets: list[OrderedDict[str, DHTNode]] = [OrderedDict() for _ in range(self.bucket_count)]
         # compatibility surface for existing callers
         self.nodes: dict[str, DHTNode] = {}
-        
+
     def _distance(self, id1: str, id2: str) -> int:
         return self._peer_int(id1) ^ self._peer_int(id2)
 
@@ -79,24 +79,24 @@ class RoutingTable:
             return
         self._buckets[bucket_index].pop(peer_id, None)
 
-    def find_closest_peers(self, target_id: str, count: int = 20) -> List[DHTNode]:
+    def find_closest_peers(self, target_id: str, count: int = 20) -> list[DHTNode]:
         """
         Returns up to 'count' closest peers to 'target_id' according to XOR metric.
         """
         if not self.nodes:
             return []
-            
+
         distances = []
         for node in self.nodes.values():
             dist = self._distance(target_id, node.peer_id)
             distances.append((dist, node))
-            
+
         distances.sort(key=lambda x: x[0])
-        
+
         # Return top N nodes
         return [item[1] for item in distances[: max(1, int(count))]]
-        
-    def get_all_nodes(self) -> List[DHTNode]:
+
+    def get_all_nodes(self) -> list[DHTNode]:
         return list(self.nodes.values())
 
     def prune_stale_nodes(self, *, max_age_seconds: float = 3600.0) -> int:

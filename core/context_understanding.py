@@ -87,7 +87,7 @@ def _expand_phrases(text: str) -> str:
 
 def _apply_connectors(text: str) -> str:
     lower = (text or "").lower()
-    for (a, b), connector in _CONNECTOR_RULES:
+    for (a, b), _connector in _CONNECTOR_RULES:
         if a in lower and b in lower:
             pass
     return text

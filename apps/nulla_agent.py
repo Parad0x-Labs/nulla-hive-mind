@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import re
@@ -18,7 +19,6 @@ from core.autonomous_topic_research import pick_autonomous_research_signal, rese
 from core.candidate_knowledge_lane import get_candidate_by_id
 from core.channel_actions import dispatch_outbound_post_intent, parse_channel_post_intent
 from core.curiosity_roamer import AdaptiveResearchResult, CuriosityRoamer
-from core.human_input_adapter import adapt_user_input, runtime_session_id
 from core.hive_activity_tracker import (
     HiveActivityTracker,
     clear_hive_interaction_state,
@@ -28,15 +28,17 @@ from core.hive_activity_tracker import (
     set_hive_interaction_state,
     update_session_hive_state,
 )
-from core.local_operator_actions import dispatch_operator_action, parse_operator_action_intent
-from core.onboarding import get_agent_display_name
-from core.media_analysis_pipeline import MediaAnalysisPipeline
-from core.media_ingestion import build_media_context_snippets, ingest_media_evidence
+from core.human_input_adapter import adapt_user_input, runtime_session_id
 from core.identity_manager import load_active_persona
 from core.knowledge_fetcher import request_relevant_holders
 from core.knowledge_registry import register_local_shard, sync_local_learning_shards
+from core.local_operator_actions import dispatch_operator_action, parse_operator_action_intent
+from core.logging_config import setup_logging
+from core.media_analysis_pipeline import MediaAnalysisPipeline
+from core.media_ingestion import build_media_context_snippets, ingest_media_evidence
 from core.memory_first_router import MemoryFirstRouter
-from core.public_hive_bridge import PublicHiveBridge
+from core.onboarding import get_agent_display_name
+from core.parent_orchestrator import orchestrate_parent_task
 from core.persistent_memory import (
     append_conversation_event,
     ensure_memory_files,
@@ -44,6 +46,7 @@ from core.persistent_memory import (
     search_user_heuristics,
     session_memory_policy,
 )
+from core.public_hive_bridge import PublicHiveBridge
 from core.reasoning_engine import (
     Plan,
     build_plan,
@@ -52,8 +55,6 @@ from core.reasoning_engine import (
     render_response,
     should_use_planner_renderer,
 )
-from core.parent_orchestrator import orchestrate_parent_task
-from core.runtime_execution_tools import execute_runtime_tool, looks_like_execution_request
 from core.runtime_continuity import (
     create_runtime_checkpoint,
     finalize_runtime_checkpoint,
@@ -64,6 +65,7 @@ from core.runtime_continuity import (
     resume_runtime_checkpoint,
     update_runtime_checkpoint,
 )
+from core.runtime_execution_tools import execute_runtime_tool, looks_like_execution_request
 from core.runtime_task_events import emit_runtime_event
 from core.shard_synthesizer import build_generalized_query, from_task_result
 from core.task_router import (
@@ -77,6 +79,7 @@ from core.task_router import (
     looks_like_semantic_hive_request,
     model_execution_profile,
 )
+from core.tiered_context_loader import TieredContextLoader
 from core.tool_intent_executor import (
     _looks_like_workspace_bootstrap_request,
     capability_truth_for_request,
@@ -87,14 +90,12 @@ from core.tool_intent_executor import (
     should_attempt_tool_intent,
     supported_public_capability_tags,
 )
-from core.tiered_context_loader import TieredContextLoader
 from core.user_preferences import load_preferences, maybe_handle_preference_command
-from core.logging_config import setup_logging
+from network.signer import get_local_peer_id
 from retrieval.swarm_query import dispatch_query_shard
 from retrieval.web_adapter import WebAdapter
 from storage.db import get_connection
 from storage.migrations import run_migrations
-from network.signer import get_local_peer_id
 
 _log = logging.getLogger(__name__)
 
@@ -547,7 +548,7 @@ class NullaAgent:
             self._emit_runtime_event(
                 source_context,
                 event_type="task_classified",
-                message=f"Task classified as {str(classification.get('task_class') or 'unknown')}.",
+                message=f"Task classified as {classification.get('task_class') or 'unknown'!s}.",
                 task_id=task.task_id,
                 task_class=str(classification.get("task_class") or "unknown"),
             )
@@ -1541,10 +1542,8 @@ class NullaAgent:
                 source["source_profile"] = str(note.get("source_profile_label") or "").strip()
             raw_confidence = note.get("confidence")
             if raw_confidence not in {None, ""}:
-                try:
+                with contextlib.suppress(Exception):
                     source["confidence"] = float(raw_confidence)
-                except Exception:
-                    pass
             sources.append(source)
         observations: dict[str, Any] = {
             "channel": "adaptive_research",
@@ -2243,18 +2242,7 @@ class NullaAgent:
             marker in lowered for marker in (" open ", " fetch ", " browse ", " render ")
         ):
             return True
-        if str(task_class or "").strip().lower() == "integration_orchestration" and any(
-            marker in lowered
-            for marker in (
-                " write the files ",
-                " edit the files ",
-                " patch the files ",
-                " create the files ",
-                " generate the files ",
-            )
-        ):
-            return True
-        return False
+        return bool(str(task_class or "").strip().lower() == "integration_orchestration" and any(marker in lowered for marker in (" write the files ", " edit the files ", " patch the files ", " create the files ", " generate the files ")))
 
     def _should_keep_ai_first_chat_lane(
         self,
@@ -4044,8 +4032,8 @@ class NullaAgent:
                 }
                 continue
             seen[key]["attempts"] = int(seen[key].get("attempts") or 1) + 1
-            seen[key]["step_indexes"] = list(seen[key].get("step_indexes") or []) + [index]
-            seen[key]["returncodes"] = list(seen[key].get("returncodes") or []) + [int(observation.get("returncode") or 0)]
+            seen[key]["step_indexes"] = [*list(seen[key].get("step_indexes") or []), index]
+            seen[key]["returncodes"] = [*list(seen[key].get("returncodes") or []), int(observation.get("returncode") or 0)]
         for entry in seen.values():
             if int(entry.get("attempts") or 0) <= 1:
                 continue
@@ -4162,7 +4150,7 @@ class NullaAgent:
                 return (
                     f"I completed {len(executed_steps)} bounded builder step"
                     f"{'' if len(executed_steps) == 1 else 's'} under `{root_dir}`, "
-                    f"but the loop stopped at `{str(getattr(failed_execution, 'tool_name', '') or 'tool')}`. {failure_text}"
+                    f"but the loop stopped at `{getattr(failed_execution, 'tool_name', '') or 'tool'!s}`. {failure_text}"
                 ).strip()
             return failure_text
         if executed_steps:
@@ -4289,7 +4277,7 @@ class NullaAgent:
             if str(getattr(execution, "mode", "") or "").strip() != "tool_executed":
                 failed_execution = execution
                 stop_reason = (
-                    f"{str(getattr(execution, 'mode', '') or 'tool_failed')}:{str(getattr(execution, 'status', '') or 'failed')}"
+                    f"{getattr(execution, 'mode', '') or 'tool_failed'!s}:{getattr(execution, 'status', '') or 'failed'!s}"
                 )
                 break
 
@@ -4490,25 +4478,7 @@ class NullaAgent:
             and any(marker in lowered for marker in ("telegram", "discord", "bot", "agent", "service"))
             and any(marker in lowered for marker in ("workspace", "repo", "repository", "write the files", "create the files", "generate the code"))
         )
-        if not (
-            "write the files" in lowered
-            or "create the files" in lowered
-            or "generate the code" in lowered
-            or "build the code" in lowered
-            or "building the code" in lowered
-            or "start working" in lowered
-            or "start building" in lowered
-            or "start creating" in lowered
-            or "implement it" in lowered
-            or "edit the files" in lowered
-            or "patch the files" in lowered
-            or "launch local" in lowered
-            or scaffold_request
-            or generic_bootstrap_request
-            or self._explicit_runtime_workflow_request(user_input=effective_input, task_class=task_class)
-        ):
-            return False
-        return True
+        return "write the files" in lowered or "create the files" in lowered or "generate the code" in lowered or "build the code" in lowered or "building the code" in lowered or "start working" in lowered or "start building" in lowered or "start creating" in lowered or "implement it" in lowered or "edit the files" in lowered or "patch the files" in lowered or "launch local" in lowered or scaffold_request or generic_bootstrap_request or self._explicit_runtime_workflow_request(user_input=effective_input, task_class=task_class)
 
     def _workspace_build_target(self, *, query_text: str, interpretation: Any) -> dict[str, str]:
         lowered = str(query_text or "").lower()
@@ -4532,9 +4502,7 @@ class NullaAgent:
         ]
         if "python" in lowered:
             language = "python"
-        elif "typescript" in lowered or "node" in lowered or "javascript" in lowered:
-            language = "typescript"
-        elif preferred_stacks and preferred_stacks[0] in {"typescript", "javascript"}:
+        elif "typescript" in lowered or "node" in lowered or "javascript" in lowered or (preferred_stacks and preferred_stacks[0] in {"typescript", "javascript"}):
             language = "typescript"
         else:
             language = "python"
@@ -6071,9 +6039,7 @@ class NullaAgent:
             return True
         if "execution posture: `tool_" in workflow_summary:
             return True
-        if len(response_text) >= 280:
-            return True
-        return False
+        return len(response_text) >= 280
 
     def _task_workflow_summary(
         self,
@@ -6535,7 +6501,7 @@ class NullaAgent:
         if not signal:
             return
 
-        auto_session_id = f"auto-research:{str(signal.get('topic_id') or '')}"
+        auto_session_id = f"auto-research:{signal.get('topic_id') or ''!s}"
         self._sync_public_presence(
             status="busy",
             source_context={"surface": "background", "platform": "openclaw", "lane": "autonomous_research"},
@@ -6557,12 +6523,9 @@ class NullaAgent:
             )
             with self._activity_lock:
                 self._last_idle_hive_research_ts = now
-            if result.ok:
-                if result.topic_id:
-                    try:
-                        self.hive_activity_tracker.note_watched_topic(session_id=auto_session_id, topic_id=result.topic_id)
-                    except Exception:
-                        pass
+            if result.ok and result.topic_id:
+                with contextlib.suppress(Exception):
+                    self.hive_activity_tracker.note_watched_topic(session_id=auto_session_id, topic_id=result.topic_id)
         finally:
             self._sync_public_presence(
                 status=self._idle_public_presence_status(),
@@ -6677,14 +6640,7 @@ class NullaAgent:
             "go ahead", "start working", "just do it",
         )):
             return True
-        if any(marker in compact for marker in (
-            "do research", "start research", "run research", "deliver to hive",
-            "deliver to the hive", "deliver it to hive", "deliver it to the hive",
-            "submit to hive", "submit to the hive", "post to hive",
-            "research and deliver", "research it", "do it properly",
-        )):
-            return True
-        return False
+        return bool(any(marker in compact for marker in ("do research", "start research", "run research", "deliver to hive", "deliver to the hive", "deliver it to hive", "deliver it to the hive", "submit to hive", "submit to the hive", "post to hive", "research and deliver", "research it", "do it properly")))
 
     def _maybe_handle_hive_research_followup(
         self,
@@ -6867,7 +6823,7 @@ class NullaAgent:
             _tracker = self.hive_activity_tracker
 
             def _bg_research() -> None:
-                try:
+                with contextlib.suppress(Exception):
                     research_topic_from_signal(
                         _signal,
                         public_hive_bridge=_bridge,
@@ -6876,8 +6832,6 @@ class NullaAgent:
                         session_id=session_id,
                         auto_claim=True,
                     )
-                except Exception:
-                    pass
 
             _threading.Thread(target=_bg_research, name=f"bg-research-{topic_id[:12]}", daemon=True).start()
             response = f"Started Hive research on `{title}` in the background. We can keep chatting — I'll work on it."
@@ -7190,10 +7144,8 @@ class NullaAgent:
                 ),
             )
 
-        try:
+        with contextlib.suppress(Exception):
             self.hive_activity_tracker.note_watched_topic(session_id=session_id, topic_id=topic_id)
-        except Exception:
-            pass
         tag_suffix = f" Tags: {', '.join(topic_tags[:6])}." if topic_tags else ""
         response = f"Created Hive task `{title}` (#{topic_id[:8]}).{tag_suffix}"
         return self._action_fast_path_result(
@@ -7289,24 +7241,7 @@ class NullaAgent:
             return False
         if "hive" not in text and "topic" not in text and "create" not in text:
             return False
-        if any(
-            marker in text
-            for marker in (
-                "claim task",
-                "pull hive tasks",
-                "open hive tasks",
-                "open tasks",
-                "show me",
-                "what do we have",
-                "any tasks",
-                "list tasks",
-                "ignore hive",
-                "research complete",
-                "status",
-            )
-        ):
-            return False
-        return True
+        return not any(marker in text for marker in ("claim task", "pull hive tasks", "open hive tasks", "open tasks", "show me", "what do we have", "any tasks", "list tasks", "ignore hive", "research complete", "status"))
 
     def _infer_hive_topic_tags(self, title: str) -> list[str]:
         stopwords = {
@@ -7584,32 +7519,7 @@ class NullaAgent:
                 )
             ):
                 return True
-            if bare_hint in compact_text and any(
-                phrase in text
-                for phrase in (
-                    "full research",
-                    "research on this",
-                    "research this",
-                    "do this in full",
-                    "do all step by step",
-                    "lets do this",
-                    "let's do this",
-                    "do this",
-                    "start this",
-                    "start that",
-                    "work on this",
-                    "work on that",
-                    "deliver to hive",
-                    "deliver it to hive",
-                    "post it to hive",
-                    "submit it to hive",
-                    "pls",
-                    "please",
-                    "full",
-                )
-            ):
-                return True
-            return False
+            return bool(bare_hint in compact_text and any(phrase in text for phrase in ("full research", "research on this", "research this", "do this in full", "do all step by step", "lets do this", "let's do this", "do this", "start this", "start that", "work on this", "work on that", "deliver to hive", "deliver it to hive", "post it to hive", "submit it to hive", "pls", "please", "full")))
         if (has_pending_topics or history_has_task_list) and shown_titles:
             normalized_titles = [
                 self._normalize_hive_topic_text(str(title or ""))
@@ -7697,9 +7607,7 @@ class NullaAgent:
             return True
         if "hive" in text and any(phrase in text for phrase in ("pick one", "start the hive research", "start hive research", "pick a task", "choose one")):
             return True
-        if "research" in text and "pick one" in text:
-            return True
-        return False
+        return bool("research" in text and "pick one" in text)
 
     def _looks_like_ambiguous_hive_selection_followup(
         self,
@@ -8151,10 +8059,8 @@ class NullaAgent:
                     target_type="shard",
                     details={"reason": "shareability_gate_blocked"},
                 )
-        try:
+        with contextlib.suppress(Exception):
             sync_local_learning_shards()
-        except Exception:
-            pass
 
 
 def main() -> int:

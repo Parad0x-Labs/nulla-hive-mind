@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from core.discovery_index import endpoint_for_peer, register_peer_endpoint, upsert_peer_minimal
+from core.knowledge_freshness import utcnow
 from core.knowledge_possession_challenge import (
     issue_knowledge_possession_challenge,
     respond_to_knowledge_possession_challenge,
     verify_knowledge_possession_response,
 )
-from core.knowledge_freshness import utcnow
 from core.meet_and_greet_models import (
     HealthResponse,
     IndexDeltaRecord,
@@ -63,7 +63,6 @@ from storage.meet_node_registry import (
 )
 from storage.payment_status import get_payment_status, list_payment_status, upsert_payment_status
 from storage.replica_table import holders_for_shard
-
 
 SummaryMode = Literal["regional_detail", "global_summary"]
 

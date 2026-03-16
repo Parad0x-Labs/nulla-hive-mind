@@ -8,8 +8,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 from apps.nulla_agent import ChatTurnResult, NullaAgent, ResponseClass
-from core.bootstrap_context import build_bootstrap_context
 from core.autonomous_topic_research import AutonomousResearchResult
+from core.bootstrap_context import build_bootstrap_context
 from core.curiosity_roamer import CuriosityResult
 from core.hive_activity_tracker import session_hive_state, update_session_hive_state
 from core.human_input_adapter import HumanInputInterpretation
@@ -18,8 +18,8 @@ from core.memory_first_router import ModelExecutionDecision
 from core.prompt_normalizer import normalize_prompt
 from core.public_hive_bridge import PublicHiveBridgeConfig
 from core.runtime_task_events import register_runtime_event_sink, unregister_runtime_event_sink
-from core.tool_intent_executor import ToolIntentExecution
 from core.task_router import classify, create_task_record
+from core.tool_intent_executor import ToolIntentExecution
 from core.user_preferences import maybe_handle_preference_command
 from storage.migrations import run_migrations
 
@@ -865,7 +865,7 @@ class OpenClawToolingContextTests(unittest.TestCase):
                     "origin_domain": "core.telegram.org",
                 }
             ],
-        ) as planned_search, mock.patch("apps.nulla_agent.orchestrate_parent_task", return_value=None), mock.patch(
+        ), mock.patch("apps.nulla_agent.orchestrate_parent_task", return_value=None), mock.patch(
             "apps.nulla_agent.request_relevant_holders", return_value=[]
         ), mock.patch("apps.nulla_agent.dispatch_query_shard", return_value=None), mock.patch.object(
             agent, "_sync_public_presence", return_value=None
@@ -1340,7 +1340,7 @@ class OpenClawToolingContextTests(unittest.TestCase):
             agent.hive_activity_tracker,
             "note_watched_topic",
             return_value=None,
-        ) as note_watched_topic:
+        ):
             result = agent.run_once(
                 request_text,
                 session_id_override="openclaw:create-hive-task",

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from typing import Any
+
 from storage.db import get_connection
+
 
 def store_final_response(parent_task_id: str, raw: str, rendered: str, status: str, confidence: float) -> None:
     conn = get_connection()

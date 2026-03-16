@@ -1,8 +1,9 @@
 from __future__ import annotations
-from dataclasses import dataclass
+
 import importlib.util
 import platform
-from typing import Optional, List
+from dataclasses import dataclass
+
 
 @dataclass
 class HardwareProfile:
@@ -15,7 +16,7 @@ class HardwareProfile:
     has_onnxruntime: bool
     torch_cuda_available: bool
     torch_mps_available: bool
-    onnx_providers: List[str]
+    onnx_providers: list[str]
 
 @dataclass
 class BackendSelection:
@@ -39,7 +40,7 @@ class BackendManager:
         torch_cuda_available = False
         torch_mps_available = False
         is_nvidia_capable = False
-        onnx_providers: List[str] = []
+        onnx_providers: list[str] = []
 
         if has_torch:
             try:
@@ -76,7 +77,7 @@ class BackendManager:
             onnx_providers=onnx_providers,
         )
 
-    def select_backend(self, hw: Optional[HardwareProfile] = None) -> BackendSelection:
+    def select_backend(self, hw: HardwareProfile | None = None) -> BackendSelection:
         hw = hw or self.detect_hardware()
 
         # 1) Apple Silicon: MLX first

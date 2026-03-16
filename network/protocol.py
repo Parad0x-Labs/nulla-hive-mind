@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from core import policy_engine
 from core.identity_lifecycle import enforce_active_identity
 from network import signer
+from network.assist_models import validate_assist_payload
 from network.knowledge_models import validate_knowledge_payload
 from storage.db import get_connection
-from network.assist_models import validate_assist_payload
 
 _ALLOWED_TYPES = {
     "PING",
@@ -162,7 +162,7 @@ class ReportAbusePayload(BaseModel):
     accused_peer_id: str = Field(min_length=16, max_length=256)
     signal_type: str = Field(min_length=3, max_length=64)
     severity: float = Field(ge=0.0, le=1.0)
-    task_id: Optional[str] = Field(default=None, min_length=8, max_length=128)
+    task_id: str | None = Field(default=None, min_length=8, max_length=128)
     details: dict[str, Any] = Field(default_factory=dict)
     ttl: int = Field(default=0, ge=0, le=5)
 
@@ -201,7 +201,7 @@ class ShardPayloadBody(BaseModel):
     trust_score: float = Field(ge=0.0, le=1.0)
     risk_flags: list[str] = Field(default_factory=list, max_length=32)
     freshness_ts: datetime
-    expires_ts: Optional[datetime] = None
+    expires_ts: datetime | None = None
     signature: str = Field(default="", max_length=4096)
 
 

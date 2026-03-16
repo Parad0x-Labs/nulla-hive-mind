@@ -4,10 +4,9 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from relay.channel_outbound import append_outbound_post
 from relay.bridge_workers.discord_bridge import DiscordBridge
 from relay.bridge_workers.telegram_bridge import TelegramBridge
-
+from relay.channel_outbound import append_outbound_post
 
 _VERB_RE = re.compile(r"\b(post|send|publish|announce|share)\b", re.IGNORECASE)
 _QUOTED_RE = re.compile(r"['\"]([^'\"]{1,4000})['\"]")

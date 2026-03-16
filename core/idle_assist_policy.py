@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
 
-from network.assist_models import CapabilityAd, TaskOffer
 from core.task_capsule import TaskCapsule
+from network.assist_models import CapabilityAd, TaskOffer
 
 
 @dataclass

@@ -4,7 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from core.knowledge_possession_challenge import issue_knowledge_possession_challenge, verify_knowledge_possession_response
+from core.knowledge_possession_challenge import (
+    issue_knowledge_possession_challenge,
+    verify_knowledge_possession_response,
+)
 from core.meet_and_greet_models import KnowledgeChallengeIssueRequest, KnowledgeChallengeVerifyRequest
 from network.signer import get_local_peer_id
 from storage.knowledge_holder_audit_store import (

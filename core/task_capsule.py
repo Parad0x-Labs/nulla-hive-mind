@@ -5,12 +5,11 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from network import signer
-
 
 _URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 _EMAIL_RE = re.compile(r"\b[\w\.-]+@[\w\.-]+\.\w+\b")
@@ -95,7 +94,7 @@ class TaskCapsule(BaseModel):
     privacy_level: Literal["strict", "standard", "relaxed"] = "strict"
     learning_allowed: bool = False
     is_benchmark: bool = False
-    required_model: Optional[str] = None
+    required_model: str | None = None
     max_response_bytes: int = Field(ge=256, le=65536, default=8192)
     deadline_ts: datetime
     reward_hint: RewardHint = Field(default_factory=RewardHint)
@@ -118,7 +117,7 @@ class TaskCapsule(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_scope(self) -> "TaskCapsule":
+    def validate_scope(self) -> TaskCapsule:
         if self.privacy_level != "strict":
             raise ValueError("v1 only allows privacy_level='strict'")
         if "execute" not in self.forbidden_operations:

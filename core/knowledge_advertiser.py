@@ -6,7 +6,7 @@ from typing import Any
 from core import audit_logger
 from core.discovery_index import peer_trust, recent_peer_endpoints
 from core.knowledge_freshness import DEFAULT_KNOWLEDGE_TTL_SECONDS, DEFAULT_LEASE_SECONDS, iso_now, lease_expiry
-from core.knowledge_registry import holders_for_fetch, local_manifest, record_remote_holder, sync_local_learning_shards
+from core.knowledge_registry import holders_for_fetch, local_manifest, sync_local_learning_shards
 from network.protocol import encode_message
 from network.signer import get_local_peer_id as local_peer_id
 from network.transport import send_message

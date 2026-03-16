@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-
 from unittest import mock
 
 from core.public_hive_quotas import reserve_public_hive_write_quota

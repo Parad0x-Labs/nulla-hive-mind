@@ -11,12 +11,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from core.persistent_memory import session_memory_policy
 from core import policy_engine
+from core.persistent_memory import session_memory_policy
 from core.task_state_machine import transition
 from core.trace_id import ensure_trace
 from storage.db import get_connection
-
 
 _PATH_PATTERNS = [
     re.compile(r"[A-Za-z]:\\[^\s]+"),         # Windows paths
@@ -202,12 +201,7 @@ def looks_like_semantic_hive_request(text: str) -> bool:
         return False
     if any(pattern.search(lowered) for pattern in _SEMANTIC_HIVE_PATTERNS):
         return True
-    if any(marker in lowered for marker in _HIVE_MARKERS) and any(
-        marker in lowered
-        for marker in ("task", "tasks", "work", "queue", "open", "available", "online", "anything")
-    ):
-        return True
-    return False
+    return bool(any(marker in lowered for marker in _HIVE_MARKERS) and any(marker in lowered for marker in ("task", "tasks", "work", "queue", "open", "available", "online", "anything")))
 
 
 def looks_like_public_entity_lookup_request(text: str) -> bool:
@@ -285,10 +279,7 @@ def evaluate_direct_math_request(text: str) -> str | None:
     except Exception:
         return None
 
-    if isinstance(value, float) and value.is_integer():
-        rendered = str(int(value))
-    else:
-        rendered = f"{value:.12g}"
+    rendered = str(int(value)) if isinstance(value, float) and value.is_integer() else f"{value:.12g}"
     return f"{expression} = {rendered}."
 
 
@@ -615,6 +606,7 @@ def _classify_via_model(user_input: str) -> str:
     """Ask the local LLM to classify user intent when regex fails."""
     try:
         import requests as _req
+
         from core.hardware_tier import recommended_ollama_model
 
         base_url = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")

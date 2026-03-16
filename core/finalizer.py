@@ -4,11 +4,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from core import audit_logger
-from core.identity_manager import load_active_persona, render_with_persona
-from core.task_reassembler import ReassembledPlan, check_and_reassemble as reassemble_parent_task
 from core.final_response_store import store_final_response
+from core.identity_manager import load_active_persona, render_with_persona
 from core.liquefy_bridge import export_task_bundle
 from core.solana_anchor import anchor_vault_proof
+from core.task_reassembler import ReassembledPlan
+from core.task_reassembler import check_and_reassemble as reassemble_parent_task
 from storage.db import get_connection
 
 

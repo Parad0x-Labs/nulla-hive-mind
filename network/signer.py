@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import base64
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from dataclasses import dataclass
 
 from core.runtime_paths import data_path
 
 try:
-    from nacl import encoding, exceptions, signing  # type: ignore
+    from nacl import encoding, signing  # type: ignore
 
     _SIGNER_BACKEND = "pynacl"
 except ImportError:
-    from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 

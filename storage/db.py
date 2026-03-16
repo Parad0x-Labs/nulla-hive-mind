@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 import threading
 from pathlib import Path
 
 from core.runtime_paths import data_path
-
 
 DEFAULT_DB_PATH = data_path("nulla_web0_v2.db")
 
@@ -48,7 +48,7 @@ class _PooledConnection:
     def _real_close(self) -> None:
         self._conn.close()
 
-    def __enter__(self) -> "_PooledConnection":
+    def __enter__(self) -> _PooledConnection:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
@@ -63,10 +63,8 @@ class _PooledConnection:
             if self._conn.in_transaction:
                 self._conn.commit()
         except Exception:
-            try:
+            with contextlib.suppress(Exception):
                 self._conn.rollback()
-            except Exception:
-                pass
         return False
 
     def __getattr__(self, name: str):
@@ -94,10 +92,8 @@ def get_connection(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
             cached._conn.execute("SELECT 1")
             return cached  # type: ignore[return-value]
         except Exception:
-            try:
+            with contextlib.suppress(Exception):
                 cached._real_close()
-            except Exception:
-                pass
 
     conn = _make_connection(db_path)
     pooled = _PooledConnection(conn)

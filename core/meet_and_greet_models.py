@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,16 +18,16 @@ class PresenceUpsertRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent_id: str = Field(min_length=16, max_length=256)
-    agent_name: Optional[str] = Field(default=None, max_length=64)
+    agent_name: str | None = Field(default=None, max_length=64)
     status: Literal["idle", "busy", "offline", "limited"]
     capabilities: list[str] = Field(default_factory=list, max_length=32)
     home_region: str = Field(default="global", max_length=64)
-    current_region: Optional[str] = Field(default=None, max_length=64)
+    current_region: str | None = Field(default=None, max_length=64)
     transport_mode: str = Field(default="lan_only", max_length=64)
     trust_score: float = Field(ge=0, le=1)
     timestamp: datetime
     lease_seconds: int = Field(ge=30, le=3600)
-    endpoint: Optional[PeerEndpointRecord] = None
+    endpoint: PeerEndpointRecord | None = None
 
 
 class PresenceWithdrawRequest(BaseModel):
@@ -42,27 +42,27 @@ class PresenceRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent_id: str
-    agent_name: Optional[str] = None
+    agent_name: str | None = None
     status: str
     capabilities: list[str] = Field(default_factory=list)
     home_region: str = "global"
-    current_region: Optional[str] = None
+    current_region: str | None = None
     transport_mode: str
     trust_score: float
     last_heartbeat_at: str
     lease_expires_at: str
-    endpoint: Optional[PeerEndpointRecord] = None
+    endpoint: PeerEndpointRecord | None = None
     summary_only: bool = False
 
 
 class KnowledgeSearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    query_text: Optional[str] = Field(default=None, max_length=512)
-    problem_class: Optional[str] = Field(default=None, max_length=128)
+    query_text: str | None = Field(default=None, max_length=512)
+    problem_class: str | None = Field(default=None, max_length=128)
     topic_tags: list[str] = Field(default_factory=list, max_length=16)
     min_trust_weight: float = Field(default=0.0, ge=0, le=1)
-    preferred_region: Optional[str] = Field(default=None, max_length=64)
+    preferred_region: str | None = Field(default=None, max_length=64)
     summary_mode: Literal["regional_detail", "global_summary"] = "regional_detail"
     limit: int = Field(default=20, ge=1, le=200)
 
@@ -79,7 +79,7 @@ class KnowledgeHolderRecord(BaseModel):
     access_mode: str
     fetch_route: dict[str, Any] = Field(default_factory=dict)
     status: str
-    endpoint: Optional[PeerEndpointRecord] = None
+    endpoint: PeerEndpointRecord | None = None
     summary_only: bool = False
 
 
@@ -94,11 +94,11 @@ class KnowledgeIndexEntry(BaseModel):
     summary_digest: str
     size_bytes: int
     metadata: dict[str, Any] = Field(default_factory=dict)
-    latest_freshness: Optional[str] = None
+    latest_freshness: str | None = None
     replication_count: int = 0
     live_holder_count: int = 0
     stale_holder_count: int = 0
-    priority_region: Optional[str] = None
+    priority_region: str | None = None
     region_replication_counts: dict[str, int] = Field(default_factory=dict)
     summary_mode: Literal["regional_detail", "global_summary"] = "regional_detail"
     holders: list[KnowledgeHolderRecord] = Field(default_factory=list)
@@ -111,7 +111,7 @@ class PaymentStatusUpsertRequest(BaseModel):
     payer_peer_id: str = Field(min_length=16, max_length=256)
     payee_peer_id: str = Field(min_length=16, max_length=256)
     status: Literal["unpaid", "reserved", "paid", "disputed", "failed"]
-    receipt_reference: Optional[str] = Field(default=None, max_length=256)
+    receipt_reference: str | None = Field(default=None, max_length=256)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -122,7 +122,7 @@ class PaymentStatusRecord(BaseModel):
     payer_peer_id: str
     payee_peer_id: str
     status: str
-    receipt_reference: Optional[str] = None
+    receipt_reference: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     updated_at: str
 
@@ -151,7 +151,7 @@ class MeetNodeRecord(BaseModel):
     priority: int
     status: str
     metadata: dict[str, Any] = Field(default_factory=dict)
-    last_seen_at: Optional[str] = None
+    last_seen_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -160,10 +160,10 @@ class MeetSyncStateRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     remote_node_id: str
-    last_snapshot_cursor: Optional[str] = None
-    last_delta_cursor: Optional[str] = None
-    last_sync_at: Optional[str] = None
-    last_error: Optional[str] = None
+    last_snapshot_cursor: str | None = None
+    last_delta_cursor: str | None = None
+    last_sync_at: str | None = None
+    last_error: str | None = None
     updated_at: str
 
 
@@ -171,7 +171,7 @@ class IndexDeltaRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     delta_id: str
-    peer_id: Optional[str] = None
+    peer_id: str | None = None
     delta_type: str
     payload: dict[str, Any] = Field(default_factory=dict)
     created_at: str
@@ -180,10 +180,10 @@ class IndexDeltaRecord(BaseModel):
 class IndexSnapshotResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    snapshot_cursor: Optional[str] = None
+    snapshot_cursor: str | None = None
     source_region: str = "global"
     summary_mode: Literal["regional_detail", "global_summary"] = "regional_detail"
-    meet_nodes: list["MeetNodeRecord"] = Field(default_factory=list)
+    meet_nodes: list[MeetNodeRecord] = Field(default_factory=list)
     active_presence: list[PresenceRecord] = Field(default_factory=list)
     knowledge_index: list[KnowledgeIndexEntry] = Field(default_factory=list)
     payment_status: list[PaymentStatusRecord] = Field(default_factory=list)
@@ -197,15 +197,15 @@ class HealthResponse(BaseModel):
     active_presence_count: int
     knowledge_entry_count: int
     payment_marker_count: int
-    snapshot_cursor: Optional[str] = None
+    snapshot_cursor: str | None = None
 
 
 class ApiEnvelope(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ok: bool
-    result: Optional[Any] = None
-    error: Optional[str] = None
+    result: Any | None = None
+    error: str | None = None
 
 
 class SignedApiWriteEnvelope(BaseModel):
@@ -242,8 +242,8 @@ class KnowledgeChallengeRecord(BaseModel):
     status: str
     created_at: str
     expires_at: str
-    updated_at: Optional[str] = None
-    verification_note: Optional[str] = None
+    updated_at: str | None = None
+    verification_note: str | None = None
 
 
 class KnowledgeChallengeResponseRequest(BaseModel):

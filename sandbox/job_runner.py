@@ -29,7 +29,7 @@ class JobRunner:
         if cwd is None:
             cwd = self.policy.workspace_root
         cwd_path = Path(cwd).resolve()
-        allowed_roots = (self.policy.workspace_root,) + tuple(self.policy.writable_roots)
+        allowed_roots = (self.policy.workspace_root, *tuple(self.policy.writable_roots))
         if not path_within_roots(cwd_path, allowed_roots):
             raise ValueError("Execution cwd escapes allowed workspace roots.")
         if command_uses_network(argv) and not self.policy.allow_network_egress:
@@ -44,8 +44,7 @@ class JobRunner:
         completed = subprocess.run(
             argv,
             cwd=str(cwd_path),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
             timeout=self.policy.max_seconds,
             shell=False,
@@ -100,7 +99,7 @@ class JobRunner:
         unshare = shutil.which("unshare")
         if not unshare:
             return None
-        return [unshare, "-n", "--"] + list(argv)
+        return [unshare, "-n", "--", *list(argv)]
 
     def _linux_firejail_prefix(self, argv: list[str]) -> list[str] | None:
         if os.name != "posix":
@@ -110,4 +109,4 @@ class JobRunner:
         firejail = shutil.which("firejail")
         if not firejail:
             return None
-        return [firejail, "--net=none", "--quiet", "--"] + list(argv)
+        return [firejail, "--net=none", "--quiet", "--", *list(argv)]

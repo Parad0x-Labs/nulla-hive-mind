@@ -4,7 +4,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from core.meet_and_greet_models import IndexDeltaRecord, IndexSnapshotResponse, PresenceUpsertRequest
 from core.meet_and_greet_replication import MeetAndGreetReplicator

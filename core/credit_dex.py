@@ -3,14 +3,13 @@ from __future__ import annotations
 import heapq
 import math
 import threading
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 from core import audit_logger
 from network.signer import get_local_peer_id as local_peer_id
-from storage.db import get_connection
+
 
 @dataclass(order=True)
 class _PrioritizedCreditOffer:
@@ -61,7 +60,7 @@ class CreditMarketQueue:
                 credits_available=int(offer.get("credits_available", 0)),
                 seller_wallet_address=str(offer.get("seller_wallet_address", "")),
             )
-            
+
             heapq.heappush(self._offers, p_offer)
             self._offer_map[offer_id] = p_offer
 
@@ -88,7 +87,7 @@ class CreditMarketQueue:
             for p_offer in sorted_offers:
                 if credits_remaining <= 0:
                     break
-                
+
                 # Exclude self from buying your own credits
                 if p_offer.seller_peer_id == local_peer_id():
                     continue
@@ -116,7 +115,7 @@ global_credit_market = CreditMarketQueue()
 
 def check_and_generate_credit_offer(auto_sell_threshold: int = 1000, usdc_ask_price: float = 0.05) -> dict[str, Any] | None:
     """
-    Called periodically by the background loop. 
+    Called periodically by the background loop.
     Checks local ledger balance; if above threshold, returns an offer dict to broadcast.
     """
     from core.credit_ledger import get_credit_balance
@@ -129,7 +128,7 @@ def check_and_generate_credit_offer(auto_sell_threshold: int = 1000, usdc_ask_pr
             return None
 
         offer_id = f"creditoffer_{local_peer_id()[:8]}_{int(datetime.now(timezone.utc).timestamp())}"
-        
+
         offer = {
             "offer_id": offer_id,
             "seller_peer_id": local_peer_id(),
@@ -138,7 +137,7 @@ def check_and_generate_credit_offer(auto_sell_threshold: int = 1000, usdc_ask_pr
             "seller_wallet_address": "simulated_solana_wallet_address", # Hardcoded until Phase 29 full wallet binding
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        
+
         audit_logger.log(
             "credit_offer_generated",
             target_id=offer_id,

@@ -7,11 +7,8 @@ from typing import Any, Callable
 from core.runtime_continuity import (
     append_runtime_event,
     configure_runtime_continuity_db_path,
-    list_runtime_session_events,
-    list_runtime_sessions,
     reset_runtime_continuity_state,
 )
-
 
 RuntimeEventSink = Callable[[dict[str, Any]], None]
 

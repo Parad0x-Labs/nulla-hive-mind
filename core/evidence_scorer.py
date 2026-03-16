@@ -74,7 +74,7 @@ def score_result(result: TaskResult | dict[str, Any], capsule: dict[str, Any] | 
     summary = str(capsule.get("summary") or "")
     abstract_inputs = list(ctx.get("abstract_inputs") or [])
     constraints = list(ctx.get("known_constraints") or [])
-    support_score = _clamp(_overlap([obj.summary] + list(obj.evidence), [summary] + abstract_inputs))
+    support_score = _clamp(_overlap([obj.summary, *list(obj.evidence)], [summary, *abstract_inputs]))
     constraint_fit = _clamp(_overlap(list(obj.abstract_steps) + list(obj.evidence), constraints))
 
     if constraint_fit < 0.35:

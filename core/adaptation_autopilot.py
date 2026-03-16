@@ -11,6 +11,7 @@ from typing import Any
 from core import audit_logger, policy_engine
 from core.adaptation_dataset import build_adaptation_corpus, load_adaptation_examples, score_adaptation_rows
 from core.lora_training_pipeline import dependency_status, promote_adaptation_job, run_adaptation_job
+from core.model_registry import ModelRegistry
 from core.public_hive_bridge import PublicHiveBridge
 from core.semantic_judge import evaluate_semantic_agreement
 from storage.adaptation_store import (
@@ -24,17 +25,15 @@ from storage.adaptation_store import (
     list_adaptation_corpora,
     list_adaptation_eval_runs,
     list_adaptation_jobs,
-    update_corpus_spec,
     update_adaptation_eval_run,
     update_adaptation_job,
     update_corpus_analysis,
+    update_corpus_spec,
     upsert_adaptation_loop_state,
 )
 from storage.migrations import run_migrations
-from storage.model_provider_manifest import ModelProviderManifest, set_provider_manifest_enabled
+from storage.model_provider_manifest import set_provider_manifest_enabled
 from storage.useful_output_store import summarize_useful_outputs
-from core.model_registry import ModelRegistry
-
 
 _AUTOPILOT_LOCK = threading.Lock()
 _AUTOPILOT_THREAD: threading.Thread | None = None

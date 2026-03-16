@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 _EXPLICIT_ARCHIVE_MARKERS = (
     "old history",
     "older history",

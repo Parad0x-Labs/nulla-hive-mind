@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 
 from storage.model_provider_manifest import ModelProviderManifest
 
-
 CANONICAL_CAPABILITIES = {
     "summarize",
     "classify",

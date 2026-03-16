@@ -6,10 +6,8 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any
 
 from core import policy_engine
-
 
 DEFAULT_TIMEOUT_SECONDS = 12.0
 

@@ -6,17 +6,16 @@ from dataclasses import dataclass
 from typing import Callable
 
 from core import audit_logger
-from core.bootstrap_adapters import BootstrapMirrorAdapter
 from core.adaptation_autopilot import schedule_adaptation_autopilot_tick
-from core.bootstrap_sync import publish_local_presence_snapshots, prune_expired_topic_files, sync_from_bootstrap_topics
+from core.bootstrap_adapters import BootstrapMirrorAdapter
+from core.bootstrap_sync import prune_expired_topic_files, publish_local_presence_snapshots, sync_from_bootstrap_topics
 from core.control_plane_workspace import sync_control_plane_workspace
-from core.knowledge_freshness import iso_now
 from core.discovery_index import prune_stale_capabilities
-from core.knowledge_advertiser import broadcast_local_knowledge_ads, broadcast_presence_heartbeat
+from core.hardware_challenge import initiate_random_hardware_challenge
+from core.knowledge_freshness import iso_now
 from core.reward_engine import finalize_confirmed_rewards, release_mature_pending_rewards
 from core.timeout_policy import reap_stale_subtasks
 from retrieval.swarm_query import broadcast_capability_ad
-from core.hardware_challenge import initiate_random_hardware_challenge
 from storage.knowledge_index import prune_expired_presence
 from storage.replica_table import prune_expired_holders
 
@@ -104,12 +103,12 @@ class MaintenanceLoop:
 
         # 2.5) Phase 23: Initiate DHT Discovery
         try:
-            from network.dht import get_routing_table
             from network.assist_router import build_find_node_message
-            from network.transport import send_message
+            from network.dht import get_routing_table
             from network.signer import get_local_peer_id
+            from network.transport import send_message
             from storage.db import get_connection
-            
+
             table = get_routing_table()
             table.prune_stale_nodes(max_age_seconds=float(self.config.stale_capability_hours) * 3600.0)
             if len(table.nodes) < 20:
@@ -119,7 +118,7 @@ class MaintenanceLoop:
                     (get_local_peer_id(),),
                 ).fetchall()
                 conn.close()
-                
+
                 if rows:
                     payload = build_find_node_message(get_local_peer_id())
                     sent = 0

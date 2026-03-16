@@ -11,7 +11,6 @@ from core import policy_engine
 from core.execution_gate import ExecutionGate
 from sandbox.sandbox_runner import SandboxRunner
 
-
 _EXECUTION_REQUEST_MARKERS = (
     "run ",
     "execute ",
@@ -421,10 +420,7 @@ def _resolve_workspace_path(raw_path: str | None, *, workspace_root: Path) -> Pa
     if not raw:
         return workspace_root
     candidate = Path(raw)
-    if not candidate.is_absolute():
-        candidate = (workspace_root / candidate).resolve()
-    else:
-        candidate = candidate.resolve()
+    candidate = (workspace_root / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
     if candidate != workspace_root and workspace_root not in candidate.parents:
         raise ValueError("Path escapes the active workspace.")
     return candidate

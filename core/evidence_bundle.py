@@ -21,7 +21,7 @@ def build_evidence_bundle(
     constraints: list[str],
     environment_tags: dict[str, str],
 ) -> EvidenceBundle:
-    evidence_items: list[Any] = [summary] + list(abstract_inputs) + list(constraints) + [environment_tags]
+    evidence_items: list[Any] = [summary, *list(abstract_inputs), *list(constraints), environment_tags]
     manifest = build_context_manifest(
         task_id=task_id,
         trace_id=trace_id,

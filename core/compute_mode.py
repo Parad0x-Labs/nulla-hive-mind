@@ -11,10 +11,8 @@ from __future__ import annotations
 
 import os
 import platform
-import time
 from dataclasses import dataclass
-from threading import Thread, Event
-from typing import Optional
+from threading import Event, Thread
 
 
 @dataclass
@@ -30,7 +28,7 @@ _POLL_INTERVAL_SECONDS = 15
 _IDLE_THRESHOLD_SECONDS = 120  # 2 min without input → idle
 
 
-def current_idle_seconds() -> Optional[float]:
+def current_idle_seconds() -> float | None:
     """Return seconds since last user input, or None if detection unavailable."""
     system = platform.system().lower()
 
@@ -45,8 +43,8 @@ def current_idle_seconds() -> Optional[float]:
 
 def compute_budget(
     *,
-    idle_seconds: Optional[float] = None,
-    cpu_cores: Optional[int] = None,
+    idle_seconds: float | None = None,
+    cpu_cores: int | None = None,
     has_gpu: bool = False,
 ) -> ComputeBudget:
     cores = cpu_cores or os.cpu_count() or 2
@@ -79,7 +77,7 @@ class ComputeModeDaemon:
         self._has_gpu = has_gpu
         self._budget = compute_budget(idle_seconds=0, has_gpu=has_gpu)
         self._stop = Event()
-        self._thread: Optional[Thread] = None
+        self._thread: Thread | None = None
 
     @property
     def budget(self) -> ComputeBudget:
@@ -112,7 +110,7 @@ class ComputeModeDaemon:
 # Platform-specific idle detection
 # ---------------------------------------------------------------------------
 
-def _win_idle() -> Optional[float]:
+def _win_idle() -> float | None:
     try:
         import ctypes
 
@@ -129,7 +127,7 @@ def _win_idle() -> Optional[float]:
     return None
 
 
-def _mac_idle() -> Optional[float]:
+def _mac_idle() -> float | None:
     try:
         import subprocess
         result = subprocess.run(
@@ -147,7 +145,7 @@ def _mac_idle() -> Optional[float]:
     return None
 
 
-def _linux_idle() -> Optional[float]:
+def _linux_idle() -> float | None:
     try:
         import subprocess
         result = subprocess.run(

@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from core.model_health import circuit_is_open
-from core.model_selection_policy import ModelSelectionRequest
 from core.model_registry import ModelRegistry
+from core.model_selection_policy import ModelSelectionRequest
 from storage.model_provider_manifest import ModelProviderManifest
 
 

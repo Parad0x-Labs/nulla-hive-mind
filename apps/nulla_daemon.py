@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import uuid
 import signal
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
 import threading
 import time
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 
 from core import audit_logger, policy_engine
 from core.bootstrap_adapters import BootstrapMirrorAdapter
@@ -19,8 +19,6 @@ from core.capability_tokens import (
     revoke_capability_tokens_for_task,
     verify_assignment_capability,
 )
-from core.helper_scheduler import HelperScheduler, SchedulerConfig
-from core.local_worker_pool import resolve_local_worker_capacity
 from core.discovery_index import (
     endpoint_for_peer,
     peer_trust,
@@ -30,13 +28,19 @@ from core.discovery_index import (
     same_host_group_suspect,
     upsert_peer_minimal,
 )
-from core.user_preferences import hive_task_intake_enabled
+from core.helper_scheduler import HelperScheduler, SchedulerConfig
 from core.idle_assist_policy import IdleAssistConfig
 from core.knowledge_advertiser import broadcast_hello, broadcast_local_knowledge_ads, broadcast_presence_heartbeat
 from core.knowledge_registry import load_shareable_shard_payload, register_local_shard, sync_local_learning_shards
+from core.liquefy_bridge import apply_local_execution_safety
+from core.local_worker_pool import resolve_local_worker_capacity
+from core.logging_config import setup_logging
 from core.maintenance import MaintenanceConfig, MaintenanceLoop
 from core.parent_orchestrator import continue_parent_orchestration
 from core.result_reviewer import auto_review_task_result
+from core.task_state_machine import current_state, transition
+from core.timeout_policy import reap_stale_subtasks
+from core.user_preferences import hive_task_intake_enabled
 from network.assist_models import AssistFilters, CapabilityAd
 from network.assist_router import (
     build_capability_ad_message,
@@ -49,21 +53,18 @@ from network.assist_router import (
     pick_best_claim_for_task,
     prepare_task_assignment,
 )
-from network.protocol import Envelope, Protocol, encode_message, peek_message_type, validate_payload, verify_signature
 from network.knowledge_models import validate_knowledge_payload
 from network.knowledge_router import handle_knowledge_message
+from network.pow_hashcash import generate_pow, required_pow_difficulty
 from network.presence_router import handle_presence_message
+from network.protocol import Envelope, Protocol, encode_message, peek_message_type, validate_payload, verify_signature
 from network.rate_limiter import allow as rate_allow
 from network.signer import get_local_peer_id as local_peer_id
-from network.transport import UDPTransportServer, TransportRuntime, send_message
+from network.transport import TransportRuntime, UDPTransportServer, send_message
 from retrieval.swarm_query import request_specific_shard
 from sandbox.helper_worker import run_task_capsule
-from core.timeout_policy import reap_stale_subtasks
-from core.liquefy_bridge import apply_local_execution_safety
 from storage.db import get_connection
 from storage.migrations import run_migrations
-from network.pow_hashcash import generate_pow, required_pow_difficulty
-from core.logging_config import setup_logging
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -155,7 +156,7 @@ class NullaDaemon:
         if int(self.config.health_bind_port) > 0 and not _is_loopback_host(self.config.health_bind_host):
             if not str(self.config.health_auth_token or "").strip():
                 raise ValueError("Non-loopback daemon health endpoint requires a health_auth_token.")
-        
+
         # Phase 30: Generate Sybil Resistance Proof-of-Work
         audit_logger.log("daemon_genesis_pow", target_id=local_peer_id(), target_type="daemon", details={"status": "calculating"})
         pow_difficulty = required_pow_difficulty(default=4)
@@ -276,7 +277,7 @@ class NullaDaemon:
             self.maintenance.stop()
         if self.transport:
             self.transport.stop()
-            
+
         self._order_book_running = False
         if self._order_book_thread:
             self._order_book_thread.join(timeout=2.0)
@@ -299,7 +300,7 @@ class NullaDaemon:
         daemon = self
 
         class HealthHandler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # noqa: N802
+            def do_GET(self) -> None:
                 if self.path.rstrip("/") not in {"/healthz", "/v1/healthz"}:
                     self.send_response(404)
                     self.send_header("Content-Type", "application/json")
@@ -350,10 +351,10 @@ class NullaDaemon:
         }
 
     def _run_order_book_loop(self) -> None:
+        from core.credit_dex import check_and_generate_credit_offer
+        from core.liquefy_bridge import stream_telemetry_event
         from core.order_book import global_order_book
         from network.assist_router import build_task_claim_message
-        from core.liquefy_bridge import stream_telemetry_event
-        from core.credit_dex import check_and_generate_credit_offer
         from retrieval.swarm_query import broadcast_credit_offer
 
         last_credit_check_time = 0.0

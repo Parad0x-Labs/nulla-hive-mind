@@ -9,7 +9,7 @@ from network.transfer_manager import TransferManager
 
 class TransferManagerLimitTests(unittest.TestCase):
     def test_rejects_manifest_that_exceeds_memory_budget(self) -> None:
-        def fake_get(key: str, default=None):  # noqa: ANN001
+        def fake_get(key: str, default=None):
             if key == "network.stream.max_incoming_bytes":
                 return 64
             return default
@@ -26,7 +26,7 @@ class TransferManagerLimitTests(unittest.TestCase):
         self.assertEqual(body.get("reason"), "manifest_too_large")
 
     def test_rejects_when_incoming_transfer_count_limit_is_reached(self) -> None:
-        def fake_get(key: str, default=None):  # noqa: ANN001
+        def fake_get(key: str, default=None):
             if key == "network.stream.max_incoming_transfers":
                 return 1
             if key == "network.stream.max_incoming_bytes":

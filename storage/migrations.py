@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 import re
 from datetime import datetime, timezone
+
 from storage.db import get_connection
 
 SCHEMA_SQL = """

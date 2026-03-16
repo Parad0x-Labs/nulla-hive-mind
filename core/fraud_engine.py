@@ -5,12 +5,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from core import audit_logger
+from core import audit_logger, scoreboard_engine
 from core.contribution_proof import append_contribution_proof_receipt
-from core.reputation_graph import pair_graph_risk, record_pair_graph_signal
-from storage.db import get_connection
 from core.liquefy_bridge import stream_telemetry_event
-from core import scoreboard_engine
+from storage.db import get_connection
 
 
 @dataclass

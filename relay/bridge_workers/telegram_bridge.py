@@ -4,7 +4,7 @@ import json
 import os
 import time
 from datetime import datetime, timezone
-from urllib import request, error
+from urllib import error, request
 
 from relay.channel_outbound import TOPIC_BY_PLATFORM
 
@@ -45,7 +45,7 @@ class TelegramBridge:
         alias = str(target or "default").strip().lower() or "default"
         return self.chat_ids.get(alias) or self.chat_id
 
-    def _tg_request(self, method: str, data: dict = None) -> dict:
+    def _tg_request(self, method: str, data: dict | None = None) -> dict:
         url = f"https://api.telegram.org/bot{self.bot_token}/{method}"
         req = request.Request(url)
         req.add_header('Content-Type', 'application/json')
@@ -57,7 +57,7 @@ class TelegramBridge:
             print(f"[TelegramBridge] Error calling {method}: {e}")
             return {}
 
-    def _mirror_request(self, path: str, method: str = "GET", data: dict = None) -> dict:
+    def _mirror_request(self, path: str, method: str = "GET", data: dict | None = None) -> dict:
         req = request.Request(f"{self.mirror_url}{path}", method=method)
         req.add_header('Content-Type', 'application/json')
         try:

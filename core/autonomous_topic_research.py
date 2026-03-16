@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import contextlib
+import logging
 from dataclasses import dataclass, field
 from hashlib import sha1
 from pathlib import Path
 from typing import Any
-
-import logging
 
 from core import audit_logger
 from core.brain_hive_artifacts import store_artifact_manifest
@@ -150,10 +150,8 @@ def research_topic_from_signal(
             tool_name="hive.claim_task",
         )
         if hive_activity_tracker is not None:
-            try:
+            with contextlib.suppress(Exception):
                 hive_activity_tracker.note_watched_topic(session_id=event_session, topic_id=topic_id)
-            except Exception:
-                pass
 
     public_hive_bridge.post_public_topic_progress(
         topic_id=topic_id,
@@ -189,7 +187,7 @@ def research_topic_from_signal(
         topic_id=topic_id,
         claim_id=claim_id or None,
         session_id=event_session,
-        tags=list(topic.get("topic_tags") or []) + ["research_packet"],
+        tags=[*list(topic.get("topic_tags") or []), "research_packet"],
         metadata={"packet_schema": packet.get("packet_schema"), "topic_status": topic.get("status")},
     )
     _event(
@@ -306,7 +304,7 @@ def research_topic_from_signal(
         topic_id=topic_id,
         claim_id=claim_id or None,
         session_id=event_session,
-        tags=list(topic.get("topic_tags") or []) + ["autonomous_research", "research_bundle"],
+        tags=[*list(topic.get("topic_tags") or []), "autonomous_research", "research_bundle"],
         metadata={
             "query_count": len(query_results),
             "candidate_count": len(candidate_ids),
@@ -531,9 +529,7 @@ def _query_result_preview(*, query: str, result: dict[str, Any], topic: dict[str
     relevance_status = "relevant"
     if not summary_text and not snippets:
         relevance_status = "empty"
-    elif generic_nav_hits > 0 and topic_overlap < 2:
-        relevance_status = "off_topic"
-    elif summary_text and topic_overlap <= 0 and specificity_score < 0.45:
+    elif (generic_nav_hits > 0 and topic_overlap < 2) or (summary_text and topic_overlap <= 0 and specificity_score < 0.45):
         relevance_status = "off_topic"
     return {
         "query": str(query),
@@ -637,9 +633,7 @@ def _artifact_ref_is_resolved(artifact_ref: dict[str, Any]) -> bool:
     file_path = str(artifact_ref.get("file_path") or "").strip()
     if not artifact_id:
         return False
-    if file_path and not Path(file_path).expanduser().is_file():
-        return False
-    return True
+    return not (file_path and not Path(file_path).expanduser().is_file())
 
 
 def _candidate_ref(candidate_id: str) -> dict[str, Any]:
@@ -837,7 +831,7 @@ def _extract_research_finding_candidates(
         candidates.append(
             {
                 "candidate_kind": "finding",
-                "candidate_id": f"finding::{str(topic.get('topic_id') or 'topic')}::{index}",
+                "candidate_id": f"finding::{topic.get('topic_id') or 'topic'!s}::{index}",
                 "label": label,
                 "rule_text": summary[:400],
                 "support": max(snippet_count, len(domains), 1),
@@ -925,10 +919,10 @@ def _topic_tokens(text: str) -> set[str]:
 
 def _quality_state_token(quality_summary: dict[str, Any]) -> str:
     return (
-        f"{quality_summary.get('research_quality_status')}:" 
-        f"{quality_summary.get('nonempty_query_count')}:" 
-        f"{quality_summary.get('promoted_finding_count')}:" 
-        f"{quality_summary.get('source_domain_count')}:" 
+        f"{quality_summary.get('research_quality_status')}:"
+        f"{quality_summary.get('nonempty_query_count')}:"
+        f"{quality_summary.get('promoted_finding_count')}:"
+        f"{quality_summary.get('source_domain_count')}:"
         f"{quality_summary.get('artifact_refs_resolved')}"
     )
 
@@ -1019,11 +1013,11 @@ def _generate_refinement_queries(
 
     context = f"Topic: {title}\n"
     if weak:
-        context += f"Queries that returned NO useful results:\n"
+        context += "Queries that returned NO useful results:\n"
         for r in weak[:3]:
             context += f"  - {r.get('query', '')}\n"
     if strong:
-        context += f"Queries that DID return useful results:\n"
+        context += "Queries that DID return useful results:\n"
         for r in strong[:2]:
             context += f"  - {r.get('query', '')} (found: {r.get('snippet_count', 0)} snippets from {', '.join(r.get('source_domains', [])[:3])})\n"
 

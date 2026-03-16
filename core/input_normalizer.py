@@ -4,7 +4,6 @@ import difflib
 import re
 from dataclasses import dataclass, field
 
-
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_'\-]+|[^\w\s]")
 
 _DEFAULT_REWRITES = {

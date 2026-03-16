@@ -3,12 +3,11 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from storage.db import get_connection
-
 
 ProviderSourceType = Literal["local_path", "http", "subprocess"]
 WeightLocation = Literal["external", "user-supplied", "bundled"]
@@ -49,13 +48,13 @@ class ModelProviderManifest(BaseModel):
     provider_name: str = Field(min_length=2, max_length=128)
     model_name: str = Field(min_length=1, max_length=256)
     source_type: ProviderSourceType
-    adapter_type: Optional[AdapterType] = None
-    license_name: Optional[str] = Field(default=None, max_length=128)
-    license_reference: Optional[str] = Field(default=None, max_length=512)
-    license_url_or_reference: Optional[str] = Field(default=None, max_length=512)
+    adapter_type: AdapterType | None = None
+    license_name: str | None = Field(default=None, max_length=128)
+    license_reference: str | None = Field(default=None, max_length=512)
+    license_url_or_reference: str | None = Field(default=None, max_length=512)
     weight_location: WeightLocation = "external"
-    weights_bundled: Optional[bool] = None
-    redistribution_allowed: Optional[bool] = None
+    weights_bundled: bool | None = None
+    redistribution_allowed: bool | None = None
     runtime_dependency: str = Field(default="", max_length=256)
     notes: str = Field(default="", max_length=4096)
     capabilities: list[str] = Field(default_factory=list, max_length=24)
@@ -93,7 +92,7 @@ class ModelProviderManifest(BaseModel):
         return seen
 
     @model_validator(mode="after")
-    def _validate_weight_flags(self) -> "ModelProviderManifest":
+    def _validate_weight_flags(self) -> ModelProviderManifest:
         if self.weights_bundled is not None:
             expected = "bundled" if self.weights_bundled else self.weight_location
             if self.weights_bundled and self.weight_location != "bundled":
@@ -287,10 +286,7 @@ def manifests_missing_license_metadata(*, enabled_only: bool = False) -> list[Mo
 def load_provider_manifest_file(path: str | Path) -> list[ModelProviderManifest]:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     if isinstance(raw, dict):
-        if "providers" in raw:
-            raw = raw["providers"]
-        else:
-            raw = [raw]
+        raw = raw.get("providers", [raw])
     if not isinstance(raw, list):
         raise ValueError("Provider manifest file must contain an object or a list of objects.")
     return [ModelProviderManifest.model_validate(item) for item in raw]

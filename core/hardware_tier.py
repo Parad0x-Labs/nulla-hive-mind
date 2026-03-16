@@ -17,15 +17,14 @@ from __future__ import annotations
 import os
 import platform
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
 class MachineProbe:
     cpu_cores: int
     ram_gb: float
-    gpu_name: Optional[str]
-    vram_gb: Optional[float]
+    gpu_name: str | None
+    vram_gb: float | None
     accelerator: str  # cuda | mps | directml | cpu
 
 
@@ -61,7 +60,7 @@ def probe_machine() -> MachineProbe:
     )
 
 
-def select_qwen_tier(probe: Optional[MachineProbe] = None) -> QwenTier:
+def select_qwen_tier(probe: MachineProbe | None = None) -> QwenTier:
     """Pick the best Qwen tier this machine can handle."""
     override_tag = _override_model_tag()
     if override_tag:
@@ -86,12 +85,12 @@ def select_qwen_tier(probe: Optional[MachineProbe] = None) -> QwenTier:
     return TIERS[-1]
 
 
-def recommended_ollama_model(probe: Optional[MachineProbe] = None) -> str:
+def recommended_ollama_model(probe: MachineProbe | None = None) -> str:
     """Return the Ollama model tag string for the best tier."""
     return select_qwen_tier(probe).ollama_tag
 
 
-def tier_summary(probe: Optional[MachineProbe] = None) -> dict:
+def tier_summary(probe: MachineProbe | None = None) -> dict:
     """Human-readable summary for installers/logs."""
     if probe is None:
         probe = probe_machine()
@@ -135,7 +134,7 @@ def _detect_ram_gb() -> float:
     return 4.0  # conservative fallback
 
 
-def _override_model_tag() -> Optional[str]:
+def _override_model_tag() -> str | None:
     raw = str(
         os.environ.get("NULLA_OLLAMA_MODEL")
         or os.environ.get("NULLA_FORCE_OLLAMA_MODEL")
@@ -148,7 +147,7 @@ def _override_model_tag() -> Optional[str]:
     return raw or None
 
 
-def _detect_gpu() -> tuple[Optional[str], Optional[float], str]:
+def _detect_gpu() -> tuple[str | None, float | None, str]:
     """Returns (gpu_name, vram_gb, accelerator)."""
 
     # CUDA path (Windows + Linux NVIDIA)
@@ -169,12 +168,12 @@ def _detect_gpu() -> tuple[Optional[str], Optional[float], str]:
     return None, None, "cpu"
 
 
-def _try_cuda() -> tuple[Optional[str], Optional[float], str]:
+def _try_cuda() -> tuple[str | None, float | None, str]:
     try:
         import torch  # type: ignore
         if torch.cuda.is_available():
             name = torch.cuda.get_device_name(0)
-            free, total = torch.cuda.mem_get_info(0)
+            _free, total = torch.cuda.mem_get_info(0)
             return name, float(total) / (1024.0 ** 3), "cuda"
     except Exception:
         pass
@@ -198,7 +197,7 @@ def _try_cuda() -> tuple[Optional[str], Optional[float], str]:
     return None, None, "cpu"
 
 
-def _try_mps() -> tuple[Optional[str], Optional[float], str]:
+def _try_mps() -> tuple[str | None, float | None, str]:
     if platform.system().lower() != "darwin":
         return None, None, "cpu"
     if platform.machine().lower() not in {"arm64", "aarch64"}:
@@ -216,7 +215,7 @@ def _try_mps() -> tuple[Optional[str], Optional[float], str]:
     return "Apple Silicon", ram, "mps"
 
 
-def _try_directml() -> tuple[Optional[str], Optional[float], str]:
+def _try_directml() -> tuple[str | None, float | None, str]:
     """Detect AMD/Intel GPUs on Windows via WMI."""
     if platform.system().lower() != "windows":
         return None, None, "cpu"

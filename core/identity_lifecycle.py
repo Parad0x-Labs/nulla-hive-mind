@@ -15,7 +15,6 @@ from storage.identity_lifecycle_store import (
     upsert_identity_revocation,
 )
 
-
 IDENTITY_SCOPES = {"all", "mesh_message", "signed_write", "brain_hive", "meet_write"}
 
 
@@ -55,10 +54,7 @@ def is_identity_revoked(peer_id: str, *, scope: str = "all", now: datetime | Non
     expires_at = str(record.get("expires_at") or "").strip()
     if expires_at:
         expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-        if expiry.tzinfo is None:
-            expiry = expiry.replace(tzinfo=timezone.utc)
-        else:
-            expiry = expiry.astimezone(timezone.utc)
+        expiry = expiry.replace(tzinfo=timezone.utc) if expiry.tzinfo is None else expiry.astimezone(timezone.utc)
         if active_now > expiry:
             delete_identity_revocation(peer_id, scope=str(record.get("scope") or normalized_scope))
             return IdentityRevocationDecision(False, peer_id=peer_id, scope=normalized_scope)

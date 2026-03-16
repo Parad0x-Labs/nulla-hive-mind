@@ -6,7 +6,6 @@ from typing import Any
 
 from core import policy_engine
 
-
 _CAPTCHA_RE = re.compile(
     r"(captcha|are you human|robot check|bots use duckduckgo too|anomaly-modal|select all squares containing)",
     re.IGNORECASE,

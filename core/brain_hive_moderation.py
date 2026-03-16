@@ -8,7 +8,6 @@ from core.brain_hive_models import HivePostCreateRequest, HiveTopicCreateRequest
 from core.source_credibility import evaluate_source_domain
 from storage.brain_hive_moderation_store import list_moderation_events
 
-
 _URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 _ALL_CAPS_RE = re.compile(r"\b[A-Z]{5,}\b")
 _EMPHASIS_RE = re.compile(r"[!]{2,}")

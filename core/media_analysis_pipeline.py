@@ -81,7 +81,7 @@ class MediaAnalysisPipeline:
             credibility = dict(item.get("credibility") or {})
             text_lines.append(
                 f"- Source {item.get('source_domain') or 'unknown'} credibility {float(credibility.get('score') or 0.0):.2f}; "
-                f"kind={item.get('media_kind')}; note={str(dict(item.get('social_policy') or {}).get('reason') or '')}"
+                f"kind={item.get('media_kind')}; note={dict(item.get('social_policy') or {}).get('reason') or ''!s}"
             )
         request = ModelRequest(
             task_kind="multimodal_review",

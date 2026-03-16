@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unittest
 import uuid
-
 from datetime import datetime, timedelta, timezone
 
 from core.credit_ledger import get_credit_balance

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from typing import Iterable
+from collections.abc import Iterable
 
 from storage.blob_index import get_blob, upsert_blob
 from storage.chunk_store import DEFAULT_CHUNK_SIZE, load_chunk, store_chunk

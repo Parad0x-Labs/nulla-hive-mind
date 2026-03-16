@@ -4,10 +4,9 @@ import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 SourceLabel = Literal[
     "watcher-derived",
@@ -74,7 +73,7 @@ def _dedupe_sorted(values: list[str]) -> list[str]:
     return sorted(clean)
 
 
-def _parse_ts(value: Optional[str]) -> datetime:
+def _parse_ts(value: str | None) -> datetime:
     clean = str(value or "").strip()
     if not clean:
         return datetime.fromtimestamp(0, tz=timezone.utc)
@@ -88,7 +87,7 @@ def _parse_ts(value: Optional[str]) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _max_timestamp(*values: Optional[str]) -> str:
+def _max_timestamp(*values: str | None) -> str:
     clean = [str(item or "").strip() for item in values if str(item or "").strip()]
     if not clean:
         return ""
@@ -111,7 +110,7 @@ class FreshnessState(BaseModel):
     status: FreshnessLabel = "unknown"
     observed_at: str = ""
     stale_after_seconds: int = 0
-    age_seconds: Optional[int] = None
+    age_seconds: int | None = None
 
 
 class MergeVersionMetadata(BaseModel):
@@ -335,19 +334,19 @@ def create_snapshot(
     agent_id: str,
     peer_id: str,
     runtime_session_id: str = "",
-    known_peers: Optional[list[PeerSnapshotRecord]] = None,
-    known_tasks: Optional[list[TaskSnapshotRecord]] = None,
-    observations: Optional[list[ObservationRecord]] = None,
-    artifacts: Optional[list[ArtifactRecord]] = None,
-    claims: Optional[list[ClaimRecord]] = None,
-    source_labels: Optional[list[SourceLabel]] = None,
-    freshness: Optional[FreshnessState] = None,
-    merge_meta: Optional[MergeVersionMetadata] = None,
-    unresolved_conflicts: Optional[list[ConflictRecord]] = None,
+    known_peers: list[PeerSnapshotRecord] | None = None,
+    known_tasks: list[TaskSnapshotRecord] | None = None,
+    observations: list[ObservationRecord] | None = None,
+    artifacts: list[ArtifactRecord] | None = None,
+    claims: list[ClaimRecord] | None = None,
+    source_labels: list[SourceLabel] | None = None,
+    freshness: FreshnessState | None = None,
+    merge_meta: MergeVersionMetadata | None = None,
+    unresolved_conflicts: list[ConflictRecord] | None = None,
     visibility: VisibilityLabel = "shared",
-    metadata: Optional[dict[str, Any]] = None,
-    snapshot_id: Optional[str] = None,
-    timestamp: Optional[str] = None,
+    metadata: dict[str, Any] | None = None,
+    snapshot_id: str | None = None,
+    timestamp: str | None = None,
 ) -> NetworkSnapshot:
     snapshot = NetworkSnapshot(
         snapshot_id=str(snapshot_id or create_snapshot_id()),
@@ -381,7 +380,7 @@ def create_snapshot(
         snapshot.source_labels = _dedupe_sorted(collected)
     if not snapshot.merge_meta.merge_cursor:
         snapshot.merge_meta.merge_cursor = hashlib.sha256(
-            f"{snapshot.snapshot_id}:{snapshot.timestamp}:{snapshot.peer_id}".encode("utf-8")
+            f"{snapshot.snapshot_id}:{snapshot.timestamp}:{snapshot.peer_id}".encode()
         ).hexdigest()[:16]
     return snapshot
 
@@ -492,8 +491,8 @@ def empty_merged_state() -> MergedSwarmState:
 def merge_snapshots(
     *,
     snapshots: list[NetworkSnapshot],
-    existing_state: Optional[MergedSwarmState] = None,
-    generated_at: Optional[str] = None,
+    existing_state: MergedSwarmState | None = None,
+    generated_at: str | None = None,
 ) -> MergedSwarmState:
     state = existing_state.model_copy(deep=True) if existing_state is not None else empty_merged_state()
     conflict_index = {conflict.conflict_id for conflict in state.conflicts}
@@ -603,7 +602,7 @@ def merge_snapshots(
 def build_model_observation_pack(
     *,
     state: MergedSwarmState,
-    branch: Optional[TaskBranchState] = None,
+    branch: TaskBranchState | None = None,
     max_observations: int = 24,
     max_claims: int = 12,
 ) -> dict[str, Any]:
@@ -656,7 +655,7 @@ def build_model_observation_pack(
     }
 
 
-def render_human_summary(*, state: MergedSwarmState, branch: Optional[TaskBranchState] = None) -> str:
+def render_human_summary(*, state: MergedSwarmState, branch: TaskBranchState | None = None) -> str:
     fresh_peers = 0
     stale_peers = 0
     for item in state.peer_registry.values():
@@ -802,8 +801,8 @@ def _merge_registry_item(
             conflict_index.add(conflict.conflict_id)
         conflict_ids.append(conflict.conflict_id)
     envelope.current = merged_current
-    envelope.source_snapshot_ids = _dedupe_sorted(list(envelope.source_snapshot_ids) + [snapshot_id])
-    envelope.merged_from_snapshot_ids = _dedupe_sorted(list(envelope.merged_from_snapshot_ids) + [snapshot_id])
+    envelope.source_snapshot_ids = _dedupe_sorted([*list(envelope.source_snapshot_ids), snapshot_id])
+    envelope.merged_from_snapshot_ids = _dedupe_sorted([*list(envelope.merged_from_snapshot_ids), snapshot_id])
     envelope.source_labels = _dedupe_sorted(list(envelope.source_labels) + list(incoming.get("source_labels") or []))
     envelope.first_seen_at = envelope.first_seen_at or observed_at
     envelope.last_seen_at = _max_timestamp(envelope.last_seen_at, observed_at)
@@ -847,7 +846,7 @@ def _merge_freshness_state(existing: FreshnessState, incoming: FreshnessState) -
 
 
 def _conflict_id(registry_name: str, entity_id: str, field_name: str) -> str:
-    digest = hashlib.sha256(f"{registry_name}:{entity_id}:{field_name}".encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.sha256(f"{registry_name}:{entity_id}:{field_name}".encode()).hexdigest()[:16]
     return f"conflict-{digest}"
 
 

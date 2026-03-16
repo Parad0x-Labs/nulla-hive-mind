@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -8,8 +9,8 @@ from core.cold_context_gate import ColdContextDecision, evaluate_cold_context_ga
 from core.context_budgeter import BudgetedLayer, ContextBudget, budget_layer, normalize_budget
 from core.context_relevance_ranker import rank_context_items, retrieval_confidence
 from core.knowledge_fetcher import consult_relevant_swarm_metadata
-from core.persistent_memory import search_relevant_memory, search_session_summaries, search_user_heuristics
 from core.liquefy_bridge import lookup_cold_archive_candidates
+from core.persistent_memory import search_relevant_memory, search_session_summaries, search_user_heuristics
 from core.prompt_assembly_report import ContextItem, PromptAssemblyReport
 from core.shard_matcher import find_local_candidates
 from core.shard_ranker import rank

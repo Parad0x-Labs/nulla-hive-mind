@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 
 import core.api_write_auth as api_write_auth
 import network.signer as signer_mod
-from core.identity_lifecycle import revoke_identity
 from core.hive_write_grants import build_hive_write_grant
+from core.identity_lifecycle import revoke_identity
 from storage.db import get_connection
 from storage.migrations import run_migrations
 

@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from apps.nulla_agent import NullaAgent
+from core.bootstrap_adapters import FileTopicAdapter
 from core.channel_actions import (
     ChannelPostDispatchResult,
     ChannelPostIntent,
@@ -17,7 +18,6 @@ from relay.bridge_workers.telegram_bridge import TelegramBridge
 from relay.channel_outbound import append_outbound_post
 from storage.db import get_connection
 from storage.migrations import run_migrations
-from core.bootstrap_adapters import FileTopicAdapter
 
 
 def _count_learning_shards() -> int:

@@ -3,11 +3,10 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any
 
 from storage.db import get_connection
 from storage.migrations import run_migrations
-
 
 _WORD_RE = re.compile(r"[a-z0-9][a-z0-9_\-']+", re.IGNORECASE)
 _STOPWORDS = {
@@ -55,7 +54,7 @@ def save_sniffed_context(parent_peer_id: str, prompt_data: Any, result_data: Any
         conn.close()
 
 
-def get_recent_contexts(limit: int = 50) -> List[Dict[str, Any]]:
+def get_recent_contexts(limit: int = 50) -> list[dict[str, Any]]:
     """Retrieves the recent learning dataset snippets."""
     _init_db()
     conn = get_connection()
@@ -69,11 +68,11 @@ def get_recent_contexts(limit: int = 50) -> List[Dict[str, Any]]:
         conn.close()
 
 
-def search_recent_contexts(query_text: str, *, limit: int = 3, search_window: int = 120) -> List[Dict[str, Any]]:
+def search_recent_contexts(query_text: str, *, limit: int = 3, search_window: int = 120) -> list[dict[str, Any]]:
     tokens = set(_keyword_tokens(query_text))
     if not tokens:
         return []
-    ranked: list[tuple[float, Dict[str, Any]]] = []
+    ranked: list[tuple[float, dict[str, Any]]] = []
     for row in get_recent_contexts(limit=max(limit, search_window)):
         prompt_preview = _json_preview(row.get("prompt_json"))
         result_preview = _json_preview(row.get("result_json"))

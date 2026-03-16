@@ -7,7 +7,6 @@ from typing import Any
 
 from storage.db import get_connection
 
-
 DEFAULT_SOURCE_CONFIG = {
     "include_useful_outputs": True,
     "include_conversations": True,

@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 class HelloAd(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent_id: str = Field(min_length=16, max_length=256)
-    agent_name: Optional[str] = Field(default=None, max_length=64)
+    agent_name: str | None = Field(default=None, max_length=64)
     status: Literal["idle", "busy", "offline", "limited"]
     capabilities: list[str] = Field(default_factory=list, max_length=32)
     home_region: str = Field(default="global", max_length=64)
-    current_region: Optional[str] = Field(default=None, max_length=64)
+    current_region: str | None = Field(default=None, max_length=64)
     transport_mode: str = Field(max_length=64)
     trust_score: float = Field(ge=0, le=1)
     timestamp: datetime
@@ -25,11 +25,11 @@ class PresenceHeartbeat(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent_id: str = Field(min_length=16, max_length=256)
-    agent_name: Optional[str] = Field(default=None, max_length=64)
+    agent_name: str | None = Field(default=None, max_length=64)
     status: Literal["idle", "busy", "offline", "limited"]
     capabilities: list[str] = Field(default_factory=list, max_length=32)
     home_region: str = Field(default="global", max_length=64)
-    current_region: Optional[str] = Field(default=None, max_length=64)
+    current_region: str | None = Field(default=None, max_length=64)
     transport_mode: str = Field(max_length=64)
     trust_score: float = Field(ge=0, le=1)
     timestamp: datetime

@@ -221,7 +221,7 @@ def _ensure_config_defaults(cfg: dict[str, Any], *, paths: OpenClawPaths) -> dic
     install.setdefault("nodeManager", "pnpm")
 
     models = cfg.setdefault("models", {})
-    providers = models.setdefault("providers", {})
+    models.setdefault("providers", {})
     _ensure_ollama_provider(cfg, _detect_best_model())
 
     cfg.setdefault("auth", {"profiles": {}})

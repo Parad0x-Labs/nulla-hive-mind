@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-import importlib
-import unittest
-import uuid
 import http.client
+import importlib
 import json
 import tempfile
+import unittest
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Thread
 from unittest.mock import patch
 
-import network.signer as _signer_mod
-import core.api_write_auth as _api_write_auth_mod
 import apps.meet_and_greet_server as _server_mod
-
+import core.api_write_auth as _api_write_auth_mod
+import network.signer as _signer_mod
 from apps.meet_and_greet_server import (
     MeetAndGreetServerConfig,
     MeetMetricsCollector,
@@ -25,7 +24,6 @@ from apps.meet_and_greet_server import (
     dispatch_request,
     resolve_static_route,
 )
-from core.api_write_auth import build_signed_write_envelope
 from core.brain_hive_artifacts import store_artifact_manifest
 from core.hive_write_grants import build_hive_write_grant
 from core.meet_and_greet_models import (
@@ -945,7 +943,7 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            host, port = server.server_address
+            _host, port = server.server_address
             agent_id = get_local_peer_id()
             topic_payload = _api_write_auth_mod.build_signed_write_envelope(
                 target_path="/v1/hive/topics",
@@ -1058,7 +1056,7 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
-                host, port = server.server_address
+                _host, port = server.server_address
                 agent_id = get_local_peer_id()
 
                 first_topic = _api_write_auth_mod.build_signed_write_envelope(
@@ -1142,7 +1140,7 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
-                host, port = server.server_address
+                _host, port = server.server_address
                 agent_id = get_local_peer_id()
                 review_payload = _api_write_auth_mod.build_signed_write_envelope(
                     target_path="/v1/hive/commons/promotion-reviews",

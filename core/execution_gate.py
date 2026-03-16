@@ -1,25 +1,26 @@
-from dataclasses import dataclass
 import shlex
-from typing import List, Any
+from dataclasses import dataclass
+from typing import Any
 
 from core import policy_engine
 from core.user_preferences import load_preferences
+
 
 @dataclass
 class GateDecision:
     mode: str                     # blocked, advice_only, simulate_only, sandbox, execute
     reason: str
     requires_user_approval: bool
-    allowed_actions: List[str]
+    allowed_actions: list[str]
 
 class ExecutionGate:
     """
     V2: The Hard Wall.
     No execution passes without explicitly fulfilling the 9 safety checks.
     """
-    
+
     @staticmethod
-    def _contains_blocked_risk(risk_flags: List[str]) -> bool:
+    def _contains_blocked_risk(risk_flags: list[str]) -> bool:
         blocked = {
             "destructive_command",
             "privileged_action",
@@ -31,7 +32,7 @@ class ExecutionGate:
         return any(flag in blocked for flag in risk_flags)
 
     @staticmethod
-    def _actions_within_workspace(actions: List[dict]) -> bool:
+    def _actions_within_workspace(actions: list[dict]) -> bool:
         # In V2, we enforce a basic path traversal check here, augmented by filesystem_guard later
         for act in actions:
             cmd = act.get("cmd", "")
@@ -232,7 +233,7 @@ class ExecutionGate:
         }
 
     @staticmethod
-    def _base_command(argv: List[str]) -> str:
+    def _base_command(argv: list[str]) -> str:
         if not argv:
             return ""
         first = str(argv[0] or "").strip().lower()
@@ -247,7 +248,7 @@ class ExecutionGate:
         return first
 
     @staticmethod
-    def _is_read_only_command(base_cmd: str, argv: List[str]) -> bool:
+    def _is_read_only_command(base_cmd: str, argv: list[str]) -> bool:
         readonly_bases = {
             "ls",
             "dir",
@@ -273,7 +274,7 @@ class ExecutionGate:
         return False
 
     @staticmethod
-    def _is_destructive_command(base_cmd: str, argv: List[str], lowered: str) -> bool:
+    def _is_destructive_command(base_cmd: str, argv: list[str], lowered: str) -> bool:
         if base_cmd in {"rm", "del", "format", "mkfs", "shutdown", "reboot"}:
             return True
         if base_cmd == "git":
@@ -302,8 +303,7 @@ class ExecutionGate:
         Evaluates the plan against the exact 9-step constraint list from the V2 Spec.
         """
         # 1. Global default: advice-only
-        default_mode = "advice_only"
-            
+
         risk_flags = plan.risk_flags if hasattr(plan, 'risk_flags') else []
         safe_actions = plan.safe_actions if hasattr(plan, 'safe_actions') else []
         confidence = plan.confidence if hasattr(plan, 'confidence') else 0.5

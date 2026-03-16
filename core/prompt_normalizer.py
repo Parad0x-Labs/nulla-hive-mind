@@ -9,7 +9,6 @@ from core.local_operator_actions import list_operator_tools
 from core.tool_intent_executor import runtime_tool_specs
 from core.user_preferences import load_preferences
 
-
 _STRUCTURED_OUTPUT_MODES = {"json_object", "action_plan", "tool_intent", "summary_block"}
 _CHAT_SURFACES = {"channel", "openclaw", "api"}
 _PLAIN_TEXT_CHAT_TASK_CLASSES = {
@@ -139,7 +138,7 @@ def normalize_prompt(
                 "adaptive_length": bool(generation_profile["adaptive_length"]),
             },
         },
-        attachments=list((context_result.report.to_dict().get("external_evidence_attachments") or [])),
+        attachments=list(context_result.report.to_dict().get("external_evidence_attachments") or []),
     )
 
 
@@ -280,7 +279,7 @@ def _build_conversational_request(
                 "adaptive_length": bool(generation_profile["adaptive_length"]),
             },
         },
-        attachments=list((context_result.report.to_dict().get("external_evidence_attachments") or [])),
+        attachments=list(context_result.report.to_dict().get("external_evidence_attachments") or []),
     )
 
 

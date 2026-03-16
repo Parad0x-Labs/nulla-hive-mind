@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import importlib
 import json
 import threading
@@ -7,8 +8,8 @@ import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import network.signer as signer_mod
 import network.protocol as protocol_mod
+import network.signer as signer_mod
 from storage.db import get_connection
 from storage.migrations import run_migrations
 
@@ -22,10 +23,8 @@ class ProtocolRegressionTests(unittest.TestCase):
         try:
             conn.execute("DELETE FROM nonce_cache")
             for table in ("identity_revocations", "identity_key_history"):
-                try:
+                with contextlib.suppress(Exception):
                     conn.execute(f"DELETE FROM {table}")
-                except Exception:
-                    pass
             conn.commit()
         finally:
             conn.close()

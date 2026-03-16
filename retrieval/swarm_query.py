@@ -20,7 +20,7 @@ def _nonce() -> str:
 
 def broadcast_capability_ad(raw_message: bytes, *, limit: int = 25) -> int:
     sent = 0
-    for peer_id, host, port in recent_peer_endpoints(exclude_peer_id=local_peer_id(), limit=limit):
+    for _peer_id, host, port in recent_peer_endpoints(exclude_peer_id=local_peer_id(), limit=limit):
         if send_message(host, port, raw_message):
             sent += 1
 
@@ -43,7 +43,7 @@ def dispatch_query_shard(query: dict[str, Any], *, limit: int = 5) -> int:
     )
 
     sent = 0
-    for peer_id, host, port in recent_peer_endpoints(exclude_peer_id=local_peer_id(), limit=limit):
+    for _peer_id, host, port in recent_peer_endpoints(exclude_peer_id=local_peer_id(), limit=limit):
         if send_message(host, port, msg):
             sent += 1
 
@@ -166,7 +166,7 @@ def broadcast_credit_offer(offer_payload: dict[str, Any], *, limit: int = 50) ->
 
     sent = 0
     # Blast the offer to recent peers so they can cache it in their local order books
-    for peer_id, host, port in recent_peer_endpoints(exclude_peer_id=local_peer_id(), limit=limit):
+    for _peer_id, host, port in recent_peer_endpoints(exclude_peer_id=local_peer_id(), limit=limit):
         if send_message(host, port, msg):
             sent += 1
 

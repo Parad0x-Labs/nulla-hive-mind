@@ -14,7 +14,6 @@ from storage.replica_table import all_holders
 from storage.swarm_memory import get_recent_contexts
 from storage.useful_output_store import sync_useful_outputs
 
-
 _OUTBOUND_SENT_EVENTS = {
     "hello_ad_broadcast",
     "presence_heartbeat_broadcast",
@@ -352,7 +351,7 @@ def _table_columns(conn: Any, table_name: str) -> set[str]:
     if not _table_exists(conn, table_name):
         return set()
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-    return {str(row["name"]) if "name" in row.keys() else str(row[1]) for row in rows}
+    return {str(row["name"]) if "name" in row else str(row[1]) for row in rows}
 
 
 def _count_table_rows(conn: Any, table_name: str, where_clause: str | None = None) -> int:

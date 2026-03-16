@@ -1,6 +1,7 @@
 """Bounded work queue with backpressure for daemon message processing."""
 from __future__ import annotations
 
+import contextlib
 import logging
 import queue
 import threading
@@ -52,20 +53,16 @@ class WorkQueue:
         except queue.Full:
             logger.warning("WorkQueue %s full — applying backpressure (dropped item)", self.name)
             if self._on_reject:
-                try:
+                with contextlib.suppress(Exception):
                     self._on_reject(item)
-                except Exception:
-                    pass
             return False
 
     def stop(self, timeout: float = 5.0) -> None:
         self._running = False
         # Drain with poison pills
         for _ in self._workers:
-            try:
+            with contextlib.suppress(queue.Full):
                 self._queue.put_nowait(None)
-            except queue.Full:
-                pass
         for t in self._workers:
             t.join(timeout=timeout)
         self._workers.clear()

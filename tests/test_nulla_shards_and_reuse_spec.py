@@ -7,7 +7,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.knowledge_registry import load_shareable_shard_payload, record_remote_holder, register_local_shard, search_swarm_memory_metadata
+from core.knowledge_registry import (
+    load_shareable_shard_payload,
+    record_remote_holder,
+    register_local_shard,
+    search_swarm_memory_metadata,
+)
 from core.shard_synthesizer import from_task_result
 from network.signer import get_local_peer_id
 from storage.db import get_connection
@@ -88,7 +93,7 @@ def test_register_local_public_shard_can_be_loaded_back():
         )
         mp.setattr(
             "core.knowledge_registry.put_bytes",
-            lambda payload: {  # noqa: ARG005
+            lambda payload: {
                 "manifest_id": "cas-manifest",
                 "blob_hash": "blob-hash",
                 "chunk_hashes": ["chunk-a"],

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from threading import RLock
-from typing import Any, Optional
+from typing import Any
 
 import yaml
+
 from core.privacy_guard import shard_privacy_risks, share_scope_is_public
 from core.runtime_paths import config_path
 
@@ -285,7 +286,7 @@ _DEFAULT_POLICY = {
     },
 }
 
-_POLICY_CACHE: Optional[dict[str, Any]] = None
+_POLICY_CACHE: dict[str, Any] | None = None
 _POLICY_LOCK = RLock()
 _POLICY_PATH = config_path("default_policy.yaml")
 
@@ -437,19 +438,11 @@ def outbound_shard_validation_errors(
 
     blocked: list[str] = []
     for reason in privacy_risks:
-        if reason == "filesystem_path" and not bool(get("shards.allow_paths_in_shards", False)):
-            blocked.append(reason)
-        elif reason in {"secret_assignment", "openai_key", "github_token", "aws_access_key", "slack_token"} and not bool(
+        if (reason == "filesystem_path" and not bool(get("shards.allow_paths_in_shards", False))) or (reason in {"secret_assignment", "openai_key", "github_token", "aws_access_key", "slack_token"} and not bool(
             get("shards.allow_tokens_in_shards", False)
-        ):
-            blocked.append(reason)
-        elif reason in {"email", "phone_number", "postal_address"} and not bool(get("shards.allow_contact_details_in_shards", False)):
-            blocked.append(reason)
-        elif reason in {"identity_marker", "name_disclosure", "location_disclosure"} and not bool(
+        )) or (reason in {"email", "phone_number", "postal_address"} and not bool(get("shards.allow_contact_details_in_shards", False))) or (reason in {"identity_marker", "name_disclosure", "location_disclosure"} and not bool(
             get("shards.allow_identity_facts_in_shards", False)
-        ):
-            blocked.append(reason)
-        elif reason.startswith("restricted_term:"):
+        )) or reason.startswith("restricted_term:"):
             blocked.append(reason)
     return list(dict.fromkeys(blocked))
 

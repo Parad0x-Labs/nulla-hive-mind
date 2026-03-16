@@ -10,7 +10,6 @@ from core.task_capsule import TaskCapsule
 from network import signer
 from storage.db import get_connection
 
-
 ASSIGNMENT_CAPABILITY = "EXECUTE_TASK_CAPSULE"
 
 

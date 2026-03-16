@@ -9,9 +9,9 @@ from typing import Any
 from core import policy_engine
 from core.contribution_proof import append_contribution_proof_receipt
 from core.task_capsule import TaskCapsule
-from network.signer import sign
-from network.signer import get_local_peer_id
+from network.signer import get_local_peer_id, sign
 from storage.db import execute_query
+
 
 class AssistCoordinator:
     """
@@ -83,7 +83,7 @@ class AssistCoordinator:
         unsigned = dict(capsule_dict)
         unsigned.pop("signature", None)
         to_sign = json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        
+
         capsule_dict["signature"] = sign(to_sign)
 
         return TaskCapsule.model_validate(capsule_dict)
@@ -145,7 +145,7 @@ class AssistCoordinator:
         now = datetime.now(timezone.utc)
 
         is_harmful = outcome in ("harmful", "rejected")
-        
+
         if outcome == "accepted":
             reward = AssistCoordinator.calculate_reward(
                 helpfulness_score=helpfulness_score,

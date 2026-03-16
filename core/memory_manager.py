@@ -1,10 +1,11 @@
-import json
 import uuid
-from typing import List, Dict, Any, Optional
 from datetime import datetime
+from typing import Any
+
 from core.knowledge_registry import register_local_shard
 from core.task_router import redact_text
 from storage.db import execute_query
+
 
 class MemoryManager:
     """
@@ -18,7 +19,7 @@ class MemoryManager:
 
     def __init__(self):
         # Short term transient memory exists only in memory for the run
-        self.short_term: List[Dict[str, Any]] = []
+        self.short_term: list[dict[str, Any]] = []
 
     def log_short_term(self, role: str, content: str):
         """Append to the current task execution context."""
@@ -46,7 +47,7 @@ class MemoryManager:
         execute_query("""
             INSERT INTO local_tasks (
                 task_id, session_id, task_class, task_summary, redacted_input_hash,
-                environment_os, environment_runtime, environment_version_hint, 
+                environment_os, environment_runtime, environment_version_hint,
                 plan_mode, share_scope, confidence, outcome, harmful_flag, created_at, updated_at
             ) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, 'local_only', ?, ?, 0, ?, ?)
         """, (
@@ -58,7 +59,7 @@ class MemoryManager:
         ))
         return task_id
 
-    def load_relevant_local_memory(self, task_class: str) -> List[Dict]:
+    def load_relevant_local_memory(self, task_class: str) -> list[dict]:
         """Looks up similar local tasks to assist reasoning engine."""
         rows = execute_query(
             "SELECT * FROM local_tasks WHERE task_class = ? ORDER BY created_at DESC LIMIT 5",
@@ -74,9 +75,9 @@ class MemoryManager:
         now = datetime.now().isoformat()
         execute_query("""
             INSERT OR REPLACE INTO learning_shards (
-                shard_id, schema_version, problem_class, problem_signature, 
-                summary, resolution_pattern_json, environment_tags_json, 
-                source_type, source_node_id, quality_score, trust_score, 
+                shard_id, schema_version, problem_class, problem_signature,
+                summary, resolution_pattern_json, environment_tags_json,
+                source_type, source_node_id, quality_score, trust_score,
                 local_validation_count, local_failure_count, quarantine_status,
                 risk_flags_json, freshness_ts, expires_ts, signature,
                 origin_task_id, origin_session_id, share_scope, restricted_terms_json,
@@ -91,7 +92,7 @@ class MemoryManager:
             shard.get("resolution_pattern_json", "[]"),
             shard.get("environment_tags_json", "{}"),
             shard.get("source_type", "local_generated"),
-            shard.get("source_node_id", None),
+            shard.get("source_node_id"),
             shard.get("quality_score", 0.5),
             shard.get("trust_score", 0.5),
             shard.get("local_validation_count", 0),
@@ -99,8 +100,8 @@ class MemoryManager:
             shard.get("quarantine_status", "active"),
             shard.get("risk_flags_json", "[]"),
             shard.get("freshness_ts", now),
-            shard.get("expires_ts", None),
-            shard.get("signature", None),
+            shard.get("expires_ts"),
+            shard.get("signature"),
             now,
             now
         ))

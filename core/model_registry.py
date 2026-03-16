@@ -9,8 +9,8 @@ from adapters.local_model_path_adapter import LocalModelPathAdapter
 from adapters.local_qwen_provider import LocalQwenProvider
 from adapters.local_subprocess_adapter import LocalSubprocessAdapter
 from adapters.openai_compatible_adapter import OpenAICompatibleAdapter
-from adapters.peft_lora_adapter import PeftLoRAAdapter
 from adapters.optional_transformers_adapter import OptionalTransformersAdapter
+from adapters.peft_lora_adapter import PeftLoRAAdapter
 from core.model_selection_policy import ModelSelectionRequest, rank_providers, select_provider
 from storage.model_provider_manifest import (
     ModelProviderManifest,

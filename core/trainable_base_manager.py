@@ -9,10 +9,9 @@ from typing import Any
 import yaml
 
 from core import policy_engine
-from core.runtime_paths import CONFIG_HOME_DIR, data_path, project_path
 from core.model_registry import ModelRegistry
+from core.runtime_paths import CONFIG_HOME_DIR, data_path, project_path
 from storage.model_provider_manifest import ModelProviderManifest
-
 
 _METADATA_FILENAME = "nulla_trainable_base.json"
 _CURATED_BASES = {
@@ -217,10 +216,7 @@ def _verify_model_dir(*, model_dir: Path, trust_remote_code: bool) -> dict[str, 
 def _looks_like_model_dir(model_dir: Path) -> bool:
     if not (model_dir / "config.json").exists():
         return False
-    for pattern in ("*.safetensors", "*.bin"):
-        if any(model_dir.glob(pattern)):
-            return True
-    return False
+    return any(any(model_dir.glob(pattern)) for pattern in ("*.safetensors", "*.bin"))
 
 
 def _register_staged_base_manifest(metadata: dict[str, Any]) -> None:

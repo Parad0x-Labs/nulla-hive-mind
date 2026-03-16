@@ -9,12 +9,13 @@ from sandbox.job_runner import JobRunner
 from sandbox.network_guard import parse_command
 from sandbox.resource_limits import ExecutionPolicy
 
+
 class SandboxRunner:
     """
     Acts as the single point of OS-level command execution.
     Requires an explicit allowance from the local ExecutionGate prior to launching any process.
     """
-    
+
     ALLOWED_COMMANDS = [
         "dir", "ls", "pwd",
         "echo", "cat", "type", "head", "tail", "wc",
@@ -25,7 +26,7 @@ class SandboxRunner:
         "git", "node", "nodejs", "env",
         "mkdir", "touch", "cp", "mv",
     ]
-    
+
     _PACKAGE_INSTALL_COMMANDS = {"pip", "pip3", "npm", "npx", "yarn", "pnpm", "cargo"}
 
     def __init__(self, gate: ExecutionGate, workspace_path: str):
@@ -41,7 +42,7 @@ class SandboxRunner:
                 allow_network_egress=False,
             )
         )
-        
+
     def run_command(self, cmd: str, *, cwd: str | None = None) -> dict:
         """
         Takes an arbitrary shell command, asks the Execution Gate, and runs it if allowed.
@@ -50,20 +51,20 @@ class SandboxRunner:
         target_cwd = cwd or self.workspace
         if not apply_local_execution_safety(sandbox_context={"workspace": target_cwd}, payload={"cmd": cmd}):
             return {"error": "Liquefy safety guard blocked execution", "status": "blocked_by_policy"}
-            
+
         gate_result = self.gate.evaluate_command(cmd)
-        
+
         if gate_result["decision"] == "blocked":
             return {"error": gate_result["reason"], "status": "blocked_by_policy"}
-            
+
         if gate_result["decision"] == "advice_only":
             return {"error": gate_result["reason"], "status": "user_action_required"}
 
         if gate_result["decision"] == "simulate_only":
             return {"error": gate_result["reason"], "status": "simulate_only"}
-            
+
         # Optional Simulator check could go here if decision == "simulate"
-        
+
         # Step 2: Validate whitelist
         allowed = False
         argv = parse_command(cmd)
@@ -81,10 +82,10 @@ class SandboxRunner:
                 break
         if base_cmd in self.ALLOWED_COMMANDS:
             allowed = True
-            
+
         if not allowed:
             return {"error": f"Base command '{base_cmd}' not in Sandbox whitelist.", "allowed": self.ALLOWED_COMMANDS}
-            
+
         # Step 3: Proceed with execution
         try:
             runner = self.job_runner
@@ -113,6 +114,6 @@ class SandboxRunner:
         except subprocess.TimeoutExpired:
             return {"error": f"Command timed out after 120s: {cmd}"}
         except ValueError as e:
-            return {"error": f"Sandbox execution blocked: {str(e)}", "status": "blocked_by_policy"}
+            return {"error": f"Sandbox execution blocked: {e!s}", "status": "blocked_by_policy"}
         except Exception as e:
-            return {"error": f"Sandbox execution failure: {str(e)}"}
+            return {"error": f"Sandbox execution failure: {e!s}"}

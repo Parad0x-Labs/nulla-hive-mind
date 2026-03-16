@@ -5,7 +5,6 @@ from pathlib import Path
 
 from core.runtime_paths import data_path
 
-
 CHUNK_ROOT = data_path("cas_chunks")
 DEFAULT_CHUNK_SIZE = 64 * 1024
 

@@ -1,24 +1,25 @@
-import os
 from pathlib import Path
+
 from core import policy_engine
+
 
 class FilesystemGuard:
     """
     Enforces strict filesystem virtualization rules.
     Blocks any writes escaping the specific sandbox environment root.
     """
-    
+
     def __init__(self, sandbox_root: Path):
         self.root = sandbox_root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
-        
+
     def safe_resolve(self, relative_path: str) -> Path:
         """
         Takes a relative string path and resolves it inside the sandbox.
         Throws PermissionError if it attempts directory traversal.
         """
         target = (self.root / relative_path).resolve()
-        
+
         # Check against global Policy Engine hard-bans
         is_allowed = True
         reason = ""
@@ -30,15 +31,15 @@ class FilesystemGuard:
                 break
         if not is_allowed:
             raise PermissionError(f"[FILESYSTEM GUARD] Access Denied: {reason}")
-            
+
         # Ensure it stays within the sandbox root
         try:
             target.relative_to(self.root)
         except ValueError:
             raise PermissionError(f"[FILESYSTEM GUARD] Access Denied: Path escapes sandbox boundary ({relative_path})")
-            
+
         return target
-        
+
     def write_file(self, rel_path: str, content: str) -> dict:
         try:
             p = self.safe_resolve(rel_path)
@@ -53,14 +54,14 @@ class FilesystemGuard:
             p = self.safe_resolve(rel_path)
             if not p.exists():
                 return {"error": "File or directory not found"}
-            
+
             if p.is_dir():
                 try:
                     entries = [str(x.relative_to(self.root)) for x in p.iterdir()][:100]
                     return {"type": "directory", "entries": entries}
                 except Exception as e:
                     return {"error": f"Failed to list directory: {e}"}
-            
+
             return {"type": "file", "content": p.read_text(encoding="utf-8")}
         except Exception as e:
             return {"error": str(e)}

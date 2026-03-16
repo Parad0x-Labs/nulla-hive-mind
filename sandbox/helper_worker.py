@@ -281,7 +281,7 @@ def _run_template_reasoning(
         result_type = "research_summary"
 
     elif capsule.task_type == "classification":
-        evidence = [problem_class] + abstract_inputs[:2]
+        evidence = [problem_class, *abstract_inputs[:2]]
         summary = (
             f"This subtask maps most closely to {problem_class}. "
             f"The abstract inputs align with that class and do not require direct execution."

@@ -1,12 +1,13 @@
 import hashlib
 import os
 import time
-from core import audit_logger
-from core import policy_engine
+
+from core import audit_logger, policy_engine
+
 
 def _compute_hash(identity_string: str, nonce: str) -> str:
     """Computes a SHA-256 hash using the identity string and the nonce."""
-    payload = f"{identity_string}:{nonce}".encode("utf-8")
+    payload = f"{identity_string}:{nonce}".encode()
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -26,13 +27,13 @@ def required_pow_difficulty(default: int = 4) -> int:
 def generate_pow(identity_string: str, target_difficulty: int = 4) -> str:
     """
     Phase 30: Sybil Resistance at Genesis
-    Spins the CPU until it finds a nonce that hashes (with the ip_address) 
+    Spins the CPU until it finds a nonce that hashes (with the ip_address)
     to a digest starting with `target_difficulty` number of leading zeros.
     """
     target_prefix = "0" * target_difficulty
     nonce_counter = 0
     start_time = time.time()
-    
+
     audit_logger.log(
         "pow_generation_started",
         target_id=identity_string,
@@ -57,9 +58,9 @@ def generate_pow(identity_string: str, target_difficulty: int = 4) -> str:
                 }
             )
             return nonce
-            
+
         nonce_counter += 1
-        
+
         # Failsafe so the node doesn't melt on extreme difficulty tests (hard limit ~2m iterations)
         if nonce_counter > 5_000_000:
             audit_logger.log(
@@ -76,7 +77,7 @@ def verify_pow(identity_string: str, nonce: str, target_difficulty: int = 4) -> 
     """
     if not nonce:
         return False
-        
+
     target_prefix = "0" * target_difficulty
     digest = _compute_hash(identity_string, nonce)
     return digest.startswith(target_prefix)

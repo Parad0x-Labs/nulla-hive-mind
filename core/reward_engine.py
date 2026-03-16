@@ -6,11 +6,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from core import audit_logger
+from core import audit_logger, fraud_engine, policy_engine, scoreboard_engine
 from core.contribution_proof import append_contribution_proof_receipt
-from core import fraud_engine
-from core import policy_engine
-from core import scoreboard_engine
 from storage.db import get_connection
 from storage.migrations import run_migrations
 
@@ -199,7 +196,7 @@ def _task_reward_hint(task_id: str) -> tuple[int, int]:
 
 def _fraud_window_hours(task_complexity: float) -> int:
     # 0.0 -> 6h, 1.0 -> 48h
-    return int(round(6 + (42 * _clamp(task_complexity))))
+    return round(6 + (42 * _clamp(task_complexity)))
 
 
 def _calc_assist_score(
@@ -287,7 +284,7 @@ def create_pending_assist_reward(
         compute_credits_pending = 0.0
         outcome = "rejected"
     else:
-        points_awarded = int(math.floor(base_points * score))
+        points_awarded = math.floor(base_points * score)
         wnull_pending = 0  # Frozen: scoreboard-first economy
         # Credits are held as pending until the fraud window clears.
         compute_credits_pending = float(score)
@@ -465,7 +462,7 @@ def release_mature_pending_rewards(limit: int = 100) -> int:
                         (
                             str(current["helper_peer_id"] or ""),
                             credit_amount,
-                            f"confirmed_contribution:{str(current['task_id'] or '')}",
+                            f"confirmed_contribution:{current['task_id'] or ''!s}",
                             reward_receipt_id,
                             _utcnow(),
                         ),

@@ -46,7 +46,7 @@ def _tracker(payload: dict) -> HiveActivityTracker:
             watcher_api_url="http://watch.example.test/api/dashboard",
             timeout_seconds=2,
         ),
-        fetch_json=lambda url, timeout_seconds, context: {"ok": True, "result": payload},  # noqa: ARG005
+        fetch_json=lambda url, timeout_seconds, context: {"ok": True, "result": payload},
     )
 
 
@@ -582,7 +582,7 @@ def test_pull_the_tasks_uses_local_only_label_when_watcher_is_unreachable_but_se
             watcher_api_url="http://watch.example.test/api/dashboard",
             timeout_seconds=2,
         ),
-        fetch_json=lambda url, timeout_seconds, context: (_ for _ in ()).throw(RuntimeError("watcher offline")),  # noqa: ARG005
+        fetch_json=lambda url, timeout_seconds, context: (_ for _ in ()).throw(RuntimeError("watcher offline")),
     )
     update_session_hive_state(
         "openclaw:local-fallback",

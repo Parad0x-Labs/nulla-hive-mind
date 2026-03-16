@@ -1,12 +1,12 @@
 from __future__ import annotations
-	
+
 import hashlib
 import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
-	
+
 from core import audit_logger, policy_engine
 from core.knowledge_freshness import DEFAULT_KNOWLEDGE_TTL_SECONDS, expires_at, iso_now
 from core.liquefy_bridge import load_packed_bytes, pack_bytes_artifact
@@ -16,7 +16,6 @@ from storage.cas import get_bytes, put_bytes
 from storage.db import get_connection
 from storage.knowledge_manifests import all_manifests, manifest_for_shard, upsert_manifest
 from storage.replica_table import holders_for_shard, mark_holder_withdrawn, upsert_holder
-
 
 _TAG_TOKEN_RE = re.compile(r"[a-z0-9_\\-]+")
 

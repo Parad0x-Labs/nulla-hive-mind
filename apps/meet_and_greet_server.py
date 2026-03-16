@@ -14,8 +14,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from pydantic import ValidationError
 
-from core import audit_logger
-from core import policy_engine
+from core import audit_logger, policy_engine
 from core.api_write_auth import unwrap_signed_write_with_meta
 from core.brain_hive_dashboard import (
     build_dashboard_snapshot,
@@ -53,7 +52,6 @@ from core.meet_and_greet_service import MeetAndGreetConfig, MeetAndGreetService
 from core.public_hive_quotas import reserve_public_hive_write_quota
 from network.knowledge_models import KnowledgeAdvert, KnowledgeRefresh, KnowledgeReplicaAd, KnowledgeWithdraw
 from network.signer import get_local_peer_id
-
 
 _HIVE_SERVICE: BrainHiveService | None = None
 _SCOPED_HIVE_WRITE_PATHS = {
@@ -169,10 +167,10 @@ def build_server(
     class Handler(BaseHTTPRequestHandler):
         server_version = "NullaMeetAndGreet/0.1"
 
-        def do_OPTIONS(self) -> None:  # noqa: N802
+        def do_OPTIONS(self) -> None:
             self._write_bytes_response(204, "text/plain", b"")
 
-        def do_GET(self) -> None:  # noqa: N802
+        def do_GET(self) -> None:
             parsed = urlparse(self.path)
             if _requires_auth_for_request(cfg.host) and _is_protected_api_path(parsed.path):
                 header_token = str(self.headers.get("X-Nulla-Meet-Token") or "").strip()
@@ -195,7 +193,7 @@ def build_server(
             metrics.record(method="GET", path=parsed.path, status_code=status_code, latency_ms=latency_ms)
             self._write_response(status_code, envelope)
 
-        def do_POST(self) -> None:  # noqa: N802
+        def do_POST(self) -> None:
             parsed = urlparse(self.path)
             started = time.perf_counter()
             if _requires_auth_for_request(cfg.host):
@@ -378,7 +376,7 @@ def dispatch_request(
     try:
         if method == "GET":
             if clean_path == "/v1/metrics":
-                return _ok((metrics.snapshot() if metrics else {}))
+                return _ok(metrics.snapshot() if metrics else {})
             if clean_path == "/v1/hive/dashboard":
                 topic_limit = _query_int(query, "topic_limit") or 12
                 post_limit = _query_int(query, "post_limit") or 24
@@ -713,14 +711,14 @@ def _format_public_hive_quota_error(quota: Any) -> str:
     if reason == "insufficient_route_trust":
         return (
             "Public Hive write blocked: peer trust is too low for this route at tier "
-            f"{str(getattr(quota, 'trust_tier', 'newcomer'))}."
+            f"{getattr(quota, 'trust_tier', 'newcomer')!s}."
         )
     if reason == "daily_public_hive_quota_exhausted":
         return (
             "Public Hive write quota exhausted for today. "
             f"Used {float(getattr(quota, 'used_points', 0.0)):.1f}/"
             f"{float(getattr(quota, 'limit_points', 0.0)):.1f} points at tier "
-            f"{str(getattr(quota, 'trust_tier', 'newcomer'))}."
+            f"{getattr(quota, 'trust_tier', 'newcomer')!s}."
         )
     if reason == "quota_storage_error":
         return "Public Hive write blocked because quota storage failed."

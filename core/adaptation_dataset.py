@@ -14,7 +14,6 @@ from storage.adaptation_store import get_adaptation_corpus, update_corpus_build
 from storage.db import get_connection
 from storage.useful_output_store import list_useful_outputs, sync_useful_outputs
 
-
 _SECRET_PATTERNS = (
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
     re.compile(r"\b(password|passphrase|secret|api[_ -]?key|private[_ -]?key|seed phrase|mnemonic)\b", re.IGNORECASE),
@@ -177,7 +176,7 @@ def build_adaptation_corpus(corpus_id: str) -> CorpusBuildResult:
     unique_examples: list[AdaptationExample] = []
     seen: set[str] = set()
     for item in examples:
-        digest = hashlib.sha256(f"{item.source}\n{item.instruction}\n{item.output}".encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(f"{item.source}\n{item.instruction}\n{item.output}".encode()).hexdigest()
         if digest in seen:
             source_stats["deduped"] += 1
             continue

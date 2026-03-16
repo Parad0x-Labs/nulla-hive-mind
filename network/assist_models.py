@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -15,7 +15,7 @@ class AssistFilters(BaseModel):
     min_reward_points: int = Field(default=0, ge=0, le=1000)
     trusted_peers_only: bool = False
     # privacy-safe install-group hint; NOT a hardware fingerprint
-    host_group_hint_hash: Optional[str] = Field(default=None, min_length=8, max_length=128)
+    host_group_hint_hash: str | None = Field(default=None, min_length=8, max_length=128)
 
 
 class CapabilityAd(BaseModel):
@@ -84,7 +84,7 @@ class TaskClaim(BaseModel):
     helper_agent_id: str = Field(min_length=16, max_length=256)
     declared_capabilities: list[str] = Field(max_length=16)
     current_load: int = Field(ge=0, le=32)
-    host_group_hint_hash: Optional[str] = Field(default=None, min_length=8, max_length=128)
+    host_group_hint_hash: str | None = Field(default=None, min_length=8, max_length=128)
     timestamp: datetime
 
 
@@ -97,7 +97,7 @@ class TaskAssign(BaseModel):
     parent_agent_id: str
     helper_agent_id: str
     assignment_mode: Literal["single", "parallel", "verification"]
-    capability_token: Optional[dict[str, Any]] = None
+    capability_token: dict[str, Any] | None = None
     timestamp: datetime
 
 
@@ -124,7 +124,7 @@ class TaskResult(BaseModel):
     evidence: list[str] = Field(default_factory=list, max_length=32)
     abstract_steps: list[str] = Field(default_factory=list, max_length=32)
     risk_flags: list[str] = Field(default_factory=list, max_length=16)
-    result_hash: Optional[str] = Field(default=None, min_length=16, max_length=128)
+    result_hash: str | None = Field(default=None, min_length=16, max_length=128)
     timestamp: datetime
 
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-
 DEFAULT_LEASE_SECONDS = 180
 DEFAULT_KNOWLEDGE_TTL_SECONDS = 900
 

@@ -5,7 +5,6 @@ with the NULLA swarm through any channel.
 """
 from __future__ import annotations
 
-import json
 import logging
 import time
 import uuid

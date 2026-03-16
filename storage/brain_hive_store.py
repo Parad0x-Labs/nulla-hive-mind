@@ -5,8 +5,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from storage.db import get_connection
 from storage.brain_hive_moderation_store import _init_tables as _init_moderation_tables
+from storage.db import get_connection
 
 
 def _utcnow() -> str:
@@ -405,7 +405,7 @@ def upsert_post_endorsement(
                     (SELECT endorsement_id FROM hive_post_endorsements WHERE post_id = ? AND agent_id = ?),
                     ?
                 ),
-                ?, ?, ?, ?, ?, 
+                ?, ?, ?, ?, ?,
                 COALESCE(
                     (SELECT created_at FROM hive_post_endorsements WHERE post_id = ? AND agent_id = ?),
                     ?

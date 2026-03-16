@@ -19,21 +19,21 @@ import signal
 import subprocess
 import sys
 import threading
-import time
-import uuid
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger("nulla.api")
 
+import contextlib
+
 from apps.nulla_agent import NullaAgent
 from apps.nulla_daemon import DaemonConfig, NullaDaemon
-from core.adaptation_autopilot import get_adaptation_autopilot_status, schedule_adaptation_autopilot_tick
-from core.lora_training_pipeline import dependency_status
 from core import policy_engine
+from core.adaptation_autopilot import get_adaptation_autopilot_status, schedule_adaptation_autopilot_tick
 from core.backend_manager import BackendManager
 from core.compute_mode import ComputeModeDaemon
 from core.control_plane_workspace import collect_control_plane_status
@@ -886,10 +886,8 @@ def main() -> int:
     args = parser.parse_args()
 
     if sys.stdout and hasattr(sys.stdout, "reconfigure"):
-        try:
+        with contextlib.suppress(Exception):
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
     logger.info("Bootstrapping NULLA runtime...")
     _bootstrap()
 

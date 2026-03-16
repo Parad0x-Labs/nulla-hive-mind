@@ -1,6 +1,7 @@
 import time
-from typing import List, Optional
+
 from storage.db import get_connection
+
 
 def _init_pin_table() -> None:
     """Ensures chunk pin tracking exists in SQLite."""
@@ -22,7 +23,7 @@ def pin_chunk(chunk_hash: str) -> None:
     """Records that we officially host this chunk."""
     _init_pin_table()
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    
+
     conn = get_connection()
     try:
         conn.execute("""
@@ -46,7 +47,7 @@ def unpin_chunk(chunk_hash: str) -> None:
     finally:
         conn.close()
 
-def get_pinned_chunks(limit: int = 100) -> List[str]:
+def get_pinned_chunks(limit: int = 100) -> list[str]:
     """Returns a list of chunk hashes we are currently pinning, ordered by least-recently used."""
     _init_pin_table()
     conn = get_connection()

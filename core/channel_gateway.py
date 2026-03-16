@@ -4,7 +4,6 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-
 _SAFE_SEGMENT_RE = re.compile(r"[^a-zA-Z0-9_\-]+")
 
 

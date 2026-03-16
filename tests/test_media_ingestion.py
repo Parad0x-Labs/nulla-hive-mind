@@ -6,7 +6,7 @@ from unittest import mock
 
 from apps.nulla_agent import NullaAgent
 from core.media_analysis_pipeline import MediaAnalysisPipeline
-from core.media_ingestion import build_media_context_snippets, build_multimodal_attachments, ingest_media_evidence
+from core.media_ingestion import build_multimodal_attachments, ingest_media_evidence
 from core.social_source_policy import evaluate_social_source
 from storage.db import get_connection
 from storage.migrations import run_migrations

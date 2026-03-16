@@ -9,11 +9,11 @@ from typing import Any
 
 from core import audit_logger
 from core.bootstrap_adapters import BootstrapMirrorAdapter, FileTopicAdapter
-from core.discovery_index import record_bootstrap_presence, register_peer_endpoint, endpoint_for_peer
-from network.signer import get_local_peer_id as local_peer_id, sign, verify
-from storage.db import get_connection
+from core.discovery_index import endpoint_for_peer, record_bootstrap_presence, register_peer_endpoint
 from core.runtime_paths import data_path
-
+from network.signer import get_local_peer_id as local_peer_id
+from network.signer import sign, verify
+from storage.db import get_connection
 
 BOOTSTRAP_DIR = data_path("bootstrap")
 DEFAULT_TOPICS = ["topic_a", "topic_b", "topic_c"]
@@ -89,10 +89,7 @@ def _verify_snapshot(snapshot: dict[str, Any]) -> bool:
     except Exception:
         return False
 
-    if expires <= datetime.now(timezone.utc):
-        return False
-
-    return True
+    return not expires <= datetime.now(timezone.utc)
 
 
 def _local_capability_records(limit: int = 128) -> list[dict[str, Any]]:

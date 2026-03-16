@@ -1,15 +1,14 @@
 from __future__ import annotations
-	
+
 import json
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Lock
-	
+
 from core import policy_engine
 from storage.db import get_connection
 from storage.migrations import run_migrations
-
 
 LEDGER_MODE = "simulated"
 _LEDGER_TABLE_READY = False

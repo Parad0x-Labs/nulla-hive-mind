@@ -21,7 +21,6 @@ from storage.adaptation_store import (
 )
 from storage.model_provider_manifest import ModelProviderManifest
 
-
 _REQUIRED_DEPS = ("torch", "transformers", "peft")
 
 
@@ -55,7 +54,7 @@ class AdaptationDataset:
         prompt_ids = self._tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
         full_ids = self._tokenizer(full_text, add_special_tokens=False)["input_ids"]
         if not full_ids or full_ids[-1] != self._eos_id:
-            full_ids = list(full_ids) + [self._eos_id]
+            full_ids = [*list(full_ids), self._eos_id]
         if len(full_ids) > self._cutoff_len:
             prompt_keep = min(len(prompt_ids), max(32, self._cutoff_len // 2))
             response_keep = max(32, self._cutoff_len - prompt_keep)
@@ -236,7 +235,8 @@ def promote_adaptation_job(job_id: str) -> dict[str, Any]:
 def _train_adapter(job: dict[str, Any], rows: list[dict[str, Any]], device: str, *, output_dir: str) -> dict[str, Any]:
     import torch
     from torch.utils.data import DataLoader
-    from transformers import AutoModelForCausalLM, AutoTokenizer, logging as transformers_logging
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import logging as transformers_logging
     LoraConfig, TaskType, get_peft_model = _import_peft_symbols()
     transformers_logging.set_verbosity_error()
 
@@ -524,7 +524,7 @@ def _infer_target_modules(model: Any) -> list[str]:
         "fc2",
     )
     discovered: list[str] = []
-    linear_type = getattr(torch.nn, "Linear")
+    linear_type = torch.nn.Linear
     for name, module in model.named_modules():
         module_type_name = module.__class__.__name__
         if not isinstance(module, linear_type) and module_type_name != "Conv1D":

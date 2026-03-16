@@ -7,10 +7,10 @@ from datetime import datetime, timezone
 
 from core import audit_logger
 from core.candidate_knowledge_lane import record_candidate_output
+from core.final_response_store import store_final_response
 from core.human_input_adapter import adapt_user_input
 from core.knowledge_registry import record_remote_holder, register_local_shard
 from core.nulla_user_summary import build_user_summary, render_user_summary
-from core.final_response_store import store_final_response
 from network.signer import get_local_peer_id
 from storage.db import get_connection
 from storage.migrations import run_migrations

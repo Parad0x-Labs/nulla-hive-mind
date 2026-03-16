@@ -10,6 +10,7 @@ from apps.nulla_agent import NullaAgent
 from core.final_response_store import store_final_response
 from core.human_input_adapter import HumanInputInterpretation
 from core.identity_manager import load_active_persona
+from core.knowledge_registry import record_remote_holder
 from core.persistent_memory import (
     append_conversation_event,
     conversation_log_path,
@@ -18,7 +19,6 @@ from core.persistent_memory import (
     session_summaries_path,
     user_heuristics_path,
 )
-from core.knowledge_registry import record_remote_holder
 from core.runtime_continuity import create_runtime_checkpoint, update_runtime_checkpoint
 from core.task_router import classify, create_task_record
 from core.tiered_context_loader import TieredContextLoader

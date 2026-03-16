@@ -7,7 +7,6 @@ from time import time
 from core import audit_logger, policy_engine
 from network import quarantine
 
-
 _EVENTS: dict[str, deque[float]] = defaultdict(deque)
 _BREACHES: dict[str, int] = defaultdict(int)
 _LOCK = RLock()

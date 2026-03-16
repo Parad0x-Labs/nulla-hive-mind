@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 SHARE_SCOPES = {"local_only", "hive_mind", "public_knowledge"}
 _SHARE_SCOPE_ALIASES = {
     "local_only": "local_only",

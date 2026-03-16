@@ -17,7 +17,6 @@ from network.signer import get_local_peer_id
 from network.transport import send_message
 from storage.db import get_connection
 
-
 _PENDING_BENCHMARKS: dict[str, dict[str, Any]] = {}
 _LOCK = threading.Lock()
 

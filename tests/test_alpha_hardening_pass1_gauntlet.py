@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import uuid
 from contextlib import ExitStack, contextmanager
-from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
-from apps.nulla_agent import NullaAgent
-from core.autonomous_topic_research import AutonomousResearchResult
 from core.bootstrap_context import build_bootstrap_context
 from core.curiosity_roamer import AdaptiveResearchResult, CuriosityResult
 from core.human_input_adapter import adapt_user_input
@@ -19,7 +16,6 @@ from core.persistent_memory import append_conversation_event
 from core.task_router import create_task_record
 from core.tool_intent_executor import ToolIntentExecution
 from storage.dialogue_memory import get_dialogue_session
-
 
 FORBIDDEN_PLANNER_LEAKS = (
     "workflow:",

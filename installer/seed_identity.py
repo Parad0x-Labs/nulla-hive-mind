@@ -10,9 +10,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import contextlib
+
+from core.credit_ledger import ensure_starter_credits
 from core.identity_manager import update_local_persona
 from core.onboarding import ensure_bootstrap_identity, force_rename, load_identity
-from core.credit_ledger import ensure_starter_credits
 from network.signer import get_local_peer_id
 
 
@@ -24,10 +26,8 @@ def ensure_identity(*, agent_name: str, privacy_pact: str, owner_note: str, forc
         if force and chosen != requested:
             force_rename(requested)
             chosen = requested
-        try:
+        with contextlib.suppress(Exception):
             update_local_persona("default", display_name=chosen)
-        except Exception:
-            pass
         return chosen
 
     seeded = ensure_bootstrap_identity(
@@ -36,14 +36,10 @@ def ensure_identity(*, agent_name: str, privacy_pact: str, owner_note: str, forc
         owner_note=owner_note,
     )
     chosen = str(seeded.get("agent_name") or requested).strip() or requested
-    try:
+    with contextlib.suppress(Exception):
         update_local_persona("default", display_name=chosen)
-    except Exception:
-        pass
-    try:
+    with contextlib.suppress(Exception):
         ensure_starter_credits(get_local_peer_id())
-    except Exception:
-        pass
     return chosen
 
 

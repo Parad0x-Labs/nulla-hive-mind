@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-
 MAX_BODY_BYTES = 256 * 1024  # 256 KB
 
 
@@ -71,9 +70,7 @@ def _basic_snapshot_shape_ok(snapshot: dict[str, Any]) -> bool:
         return False
     if not isinstance(snapshot.get("records"), list):
         return False
-    if not isinstance(snapshot.get("record_count"), int):
-        return False
-    return True
+    return isinstance(snapshot.get("record_count"), int)
 
 
 def build_handler(store: FileMirrorStore):

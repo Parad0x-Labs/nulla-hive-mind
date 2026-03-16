@@ -18,7 +18,6 @@ from core.memory_first_router import ModelExecutionDecision
 from core.model_registry import ModelRegistry
 from core.tool_intent_executor import ToolIntentExecution
 
-
 if os.environ.get("NULLA_ALPHA_LIVE_SOAK") != "1":
     pytestmark = pytest.mark.skip(reason="set NULLA_ALPHA_LIVE_SOAK=1 to run live alpha soak")
 

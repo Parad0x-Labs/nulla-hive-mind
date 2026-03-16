@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
 
-from storage.db import get_connection
 from core import policy_engine
+from storage.db import get_connection
+
 
 @dataclass
 class Persona:
@@ -67,14 +67,14 @@ def load_active_persona(persona_id: str = "default") -> Persona:
 def update_local_persona(
     persona_id: str,
     *,
-    display_name: Optional[str] = None,
-    tone: Optional[str] = None,
-    verbosity: Optional[str] = None,
-    risk_tolerance: Optional[float] = None,
-    explanation_depth: Optional[float] = None,
-    execution_style: Optional[str] = None,
-    strictness: Optional[float] = None,
-    spirit_anchor: Optional[str] = None,
+    display_name: str | None = None,
+    tone: str | None = None,
+    verbosity: str | None = None,
+    risk_tolerance: float | None = None,
+    explanation_depth: float | None = None,
+    execution_style: str | None = None,
+    strictness: float | None = None,
+    spirit_anchor: str | None = None,
 ) -> None:
     """
     Local-only persona tuning.

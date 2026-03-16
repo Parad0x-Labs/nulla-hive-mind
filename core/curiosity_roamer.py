@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -25,7 +26,6 @@ from core.task_router import looks_like_explicit_lookup_request, looks_like_publ
 from network.signer import get_local_peer_id
 from retrieval.web_adapter import WebAdapter
 from storage.curiosity_state import queue_curiosity_topic, record_curiosity_run, update_curiosity_topic
-
 
 _IDLE_COMMONS_SEEDS: tuple[tuple[str, str, str], ...] = (
     ("integration", "OpenClaw and Liquefy integration improvements", "integration refresh"),
@@ -981,10 +981,8 @@ def _adaptive_research_metrics(notes: list[dict[str, Any]]) -> dict[str, Any]:
                 official_count += 1
         raw_confidence = note.get("confidence")
         if raw_confidence not in {None, ""}:
-            try:
+            with contextlib.suppress(Exception):
                 confidence_scores.append(float(raw_confidence))
-            except Exception:
-                pass
         label = str(note.get("source_profile_label") or "").strip().lower()
         if "official" in label or "docs" in label:
             official_count += 1

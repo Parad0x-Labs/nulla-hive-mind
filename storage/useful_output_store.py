@@ -9,7 +9,6 @@ from typing import Any
 from storage.db import DEFAULT_DB_PATH, get_connection
 from storage.migrations import run_migrations
 
-
 _GENERIC_FALLBACK_PATTERNS = (
     re.compile(r"\bi won't fake it\b", re.IGNORECASE),
     re.compile(r"\binvalid tool payload\b", re.IGNORECASE),
@@ -44,7 +43,7 @@ def _json_loads(raw: Any, fallback: Any) -> Any:
 
 
 def _stable_useful_output_id(source_type: str, source_id: str) -> str:
-    digest = hashlib.sha256(f"{source_type}:{source_id}".encode("utf-8")).hexdigest()[:24]
+    digest = hashlib.sha256(f"{source_type}:{source_id}".encode()).hexdigest()[:24]
     return f"uo-{digest}"
 
 
@@ -58,10 +57,7 @@ def _table_columns(conn: Any, table_name: str) -> set[str]:
 
 def _extract_artifact_ids(value: Any) -> list[str]:
     artifact_ids: list[str] = []
-    if isinstance(value, list):
-        items = value
-    else:
-        items = list(_json_loads(value, []))
+    items = value if isinstance(value, list) else list(_json_loads(value, []))
     for item in items:
         if isinstance(item, dict):
             for key in ("artifact_id", "bundle_artifact_id", "packet_artifact_id", "id"):
@@ -136,7 +132,7 @@ def _hive_instruction(row: dict[str, Any]) -> str:
 
 def _is_commons_hive_row(row: dict[str, Any]) -> bool:
     tags = {str(item or "").strip().lower() for item in _json_loads(row.get("topic_tags_json"), []) if str(item or "").strip()}
-    combined = f"{str(row.get('title') or '')} {str(row.get('topic_summary') or row.get('summary') or '')}".lower()
+    combined = f"{row.get('title') or ''!s} {row.get('topic_summary') or row.get('summary') or ''!s}".lower()
     return (
         "agent_commons" in tags
         or "commons" in tags
@@ -775,7 +771,7 @@ def list_useful_outputs(
             ORDER BY quality_score DESC, source_updated_at DESC
             LIMIT ?
             """,
-            tuple(params + [max(1, int(limit))]),
+            tuple([*params, max(1, int(limit))]),
         ).fetchall()
     finally:
         conn.close()

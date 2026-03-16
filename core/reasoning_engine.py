@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from core.identity_manager import render_with_persona
@@ -203,7 +203,7 @@ def build_plan(task: Any, classification: dict[str, Any], evidence: dict[str, An
         if not web_notes and _looks_like_ungrounded_live_lookup(summary):
             summary = _ungrounded_live_lookup_summary(task_class)
             confidence = min(confidence, 0.38)
-            risk_flags = list(dict.fromkeys(risk_flags + ["ungrounded_live_claim"]))
+            risk_flags = list(dict.fromkeys([*risk_flags, "ungrounded_live_claim"]))
     elif context_snippets:
         top = context_snippets[0]
         confidence = max(0.30, min(0.68, float(top.get("confidence", classification.get("confidence_hint", 0.35)) or 0.35)))

@@ -7,15 +7,15 @@ from typing import Any
 
 from core import audit_logger, policy_engine
 from core.evidence_bundle import build_evidence_bundle
+from core.liquefy_bridge import stream_telemetry_event
 from core.provenance_store import store_manifest
-from core.task_state_machine import transition
 from core.task_capsule import TaskCapsule, build_task_capsule
 from core.task_router import redact_text
+from core.task_state_machine import transition
 from core.trace_id import ensure_trace
 from network.assist_models import RewardHint, TaskOffer
 from network.signer import get_local_peer_id as local_peer_id
 from retrieval.swarm_query import broadcast_task_offer
-from core.liquefy_bridge import stream_telemetry_event
 
 
 @dataclass
@@ -286,7 +286,7 @@ def decompose_task(
                 offer=offer,
             )
         )
-        
+
         stream_telemetry_event(
             event_type="TASK_OFFER",
             target_id=subtask_id,

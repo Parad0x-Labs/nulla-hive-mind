@@ -7,8 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from core.autonomous_topic_research import research_topic_from_signal
 from core import audit_logger, policy_engine
+from core.autonomous_topic_research import research_topic_from_signal
 from core.curiosity_roamer import CuriosityRoamer
 from core.hive_activity_tracker import HiveActivityTracker, load_hive_activity_tracker_config
 from core.local_operator_actions import (
@@ -34,7 +34,6 @@ from core.runtime_execution_tools import (
 from core.task_router import looks_like_explicit_lookup_request, looks_like_public_entity_lookup_request
 from retrieval.web_adapter import WebAdapter
 from tools.registry import call_tool, load_builtin_tools
-
 
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 _LIVE_LOOKUP_MARKERS = (
@@ -985,15 +984,7 @@ def should_attempt_tool_intent(
     )):
         return True
     compact = lowered.strip(" \t\n\r?!.,")
-    if compact in {
-        "proceed", "do it", "do all", "go ahead", "carry on", "continue",
-        "start working", "yes", "yes proceed", "yes do it", "ok do it",
-        "ok proceed", "ok go ahead", "deliver it", "submit it", "execute",
-        "run it", "just do it", "yes pls", "yes please", "all good carry on",
-        "proceed with next steps", "proceed with that",
-    }:
-        return True
-    return False
+    return compact in {"proceed", "do it", "do all", "go ahead", "carry on", "continue", "start working", "yes", "yes proceed", "yes do it", "ok do it", "ok proceed", "ok go ahead", "deliver it", "submit it", "execute", "run it", "just do it", "yes pls", "yes please", "all good carry on", "proceed with next steps", "proceed with that"}
 
 
 def _entity_lookup_query_variants(text: str) -> tuple[str, str]:
@@ -1116,8 +1107,10 @@ def plan_tool_workflow(
         " create task ", " create new task ", " new task for ", " add task ", " add to hive ", " add to the hive ",
         " create these tasks ", " create them ", " create these ", " yes create ", " yes create them ",
     )
-    _create_task_fuzzy = lambda lo: ("create" in lo and "task" in lo) or ("create" in lo and ("hive" in lo or "topic" in lo))
-    _proceed_with_task = lambda lo: any(m in lo for m in (" proceed ", " do it ", " do all ", " start working ", " go ahead ", " carry on ")) and ("task" in lo or "hive" in lo or "create" in lo)
+    def _create_task_fuzzy(lo):
+        return ("create" in lo and "task" in lo) or ("create" in lo and ("hive" in lo or "topic" in lo))
+    def _proceed_with_task(lo):
+        return any(m in lo for m in (" proceed ", " do it ", " do all ", " start working ", " go ahead ", " carry on ")) and ("task" in lo or "hive" in lo or "create" in lo)
 
     if not steps:
         if any(marker in lowered for marker in _create_task_markers) or _create_task_fuzzy(lowered) or _proceed_with_task(lowered):
@@ -2030,9 +2023,9 @@ def _execute_hive_tool(
             for row in rows[:8]:
                 preview_lines.append(
                     "- "
-                    f"{str(row.get('topic_id') or '')}: {str(row.get('title') or 'Untitled topic')} "
-                    f"[status={str(row.get('status') or 'open')}, "
-                    f"state={str(row.get('execution_state') or 'open')}, "
+                    f"{row.get('topic_id') or ''!s}: {row.get('title') or 'Untitled topic'!s} "
+                    f"[status={row.get('status') or 'open'!s}, "
+                    f"state={row.get('execution_state') or 'open'!s}, "
                     f"claims={int(row.get('active_claim_count') or 0)}, "
                     f"priority={float(row.get('research_priority') or 0.0):.2f}]"
                 )
@@ -2066,8 +2059,8 @@ def _execute_hive_tool(
                 status="exported",
                 response_text=(
                     f"Exported machine-readable research packet for `{topic_id}`: "
-                    f"{str(topic.get('title') or 'Untitled topic')} "
-                    f"[state={str(execution_state.get('execution_state') or 'open')}, "
+                    f"{topic.get('title') or 'Untitled topic'!s} "
+                    f"[state={execution_state.get('execution_state') or 'open'!s}, "
                     f"posts={int(counts.get('post_count') or 0)}, "
                     f"evidence={int(counts.get('evidence_count') or 0)}]"
                 ),
@@ -2104,8 +2097,8 @@ def _execute_hive_tool(
             lines = [f'Research artifacts for "{query_text}":']
             for row in rows[:8]:
                 lines.append(
-                    f"- {str(row.get('artifact_id') or '')}: {str(row.get('title') or 'Untitled artifact')} "
-                    f"[kind={str(row.get('source_kind') or '')}, topic={str(row.get('topic_id') or '')}]"
+                    f"- {row.get('artifact_id') or ''!s}: {row.get('title') or 'Untitled artifact'!s} "
+                    f"[kind={row.get('source_kind') or ''!s}, topic={row.get('topic_id') or ''!s}]"
                 )
             return ToolIntentExecution(
                 handled=True,
@@ -2214,7 +2207,7 @@ def _execute_hive_tool(
                 handled=True,
                 ok=True,
                 status="claimed",
-                response_text=f"Claimed Hive topic `{str(result.get('topic_id') or '')}` with claim `{claim_id}`.",
+                response_text=f"Claimed Hive topic `{result.get('topic_id') or ''!s}` with claim `{claim_id}`.",
                 mode="tool_executed",
                 tool_name=intent,
                 details={"claim_id": claim_id, "topic_id": str(result.get("topic_id") or ""), **dict(result)},
@@ -2236,7 +2229,7 @@ def _execute_hive_tool(
                 status="progress_posted",
                 response_text=(
                     f"Posted {str(arguments.get('progress_state') or 'working').strip() or 'working'} progress "
-                    f"to Hive topic `{str(result.get('topic_id') or '')}`."
+                    f"to Hive topic `{result.get('topic_id') or ''!s}`."
                 ),
                 mode="tool_executed",
                 tool_name=intent,
@@ -2258,7 +2251,7 @@ def _execute_hive_tool(
                 ok=True,
                 status="result_submitted",
                 response_text=(
-                    f"Submitted result to Hive topic `{str(result.get('topic_id') or '')}` "
+                    f"Submitted result to Hive topic `{result.get('topic_id') or ''!s}` "
                     f"and marked it `{str(arguments.get('result_status') or 'solved').strip() or 'solved'}`."
                 ),
                 mode="tool_executed",
@@ -2305,7 +2298,7 @@ def _execute_hive_list_available(
         except Exception:
             error_text = "I couldn't reach the public Hive bridge right now."
     else:
-        entry = capability_entry_for_intent("hive.list_available")
+        capability_entry_for_intent("hive.list_available")
         return ToolIntentExecution(
             handled=True,
             ok=False,

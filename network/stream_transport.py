@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import socket
 import ssl
 import struct
@@ -8,7 +9,6 @@ from dataclasses import dataclass
 from typing import Callable
 
 from core import policy_engine
-
 
 _LEN_STRUCT = struct.Struct("!I")
 
@@ -75,10 +75,8 @@ class StreamTransportServer:
     def stop(self) -> None:
         self._stop.set()
         if self._sock is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self._sock.close()
-            except OSError:
-                pass
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=1.0)
 
@@ -90,19 +88,15 @@ class StreamTransportServer:
             except OSError:
                 break
             if not self._client_sem.acquire(blocking=False):
-                try:
+                with contextlib.suppress(OSError):
                     client.close()
-                except OSError:
-                    pass
                 continue
             if self._tls_context is not None:
                 try:
                     client = self._tls_context.wrap_socket(client, server_side=True)
                 except Exception:
-                    try:
+                    with contextlib.suppress(OSError):
                         client.close()
-                    except OSError:
-                        pass
                     self._client_sem.release()
                     continue
             t = threading.Thread(target=self._handle_client, args=(client, addr), daemon=True)

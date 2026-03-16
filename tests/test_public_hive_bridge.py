@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from apps.nulla_agent import NullaAgent
+from core.hive_write_grants import build_hive_write_grant
 from core.public_hive_bridge import (
     PublicHiveBridge,
     PublicHiveBridgeConfig,
@@ -17,7 +18,6 @@ from core.public_hive_bridge import (
     sync_public_hive_auth_from_ssh,
     write_public_hive_agent_bootstrap,
 )
-from core.hive_write_grants import build_hive_write_grant
 from network.signer import get_local_peer_id
 
 
@@ -25,7 +25,7 @@ class _FakeResponse:
     def __init__(self, payload: dict) -> None:
         self._payload = payload
 
-    def __enter__(self) -> "_FakeResponse":
+    def __enter__(self) -> _FakeResponse:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -38,7 +38,7 @@ class _FakeResponse:
 def test_public_hive_bridge_syncs_presence_with_signed_envelope_and_token() -> None:
     seen: dict[str, object] = {}
 
-    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=0, context=None):
         seen["url"] = req.full_url
         seen["timeout"] = timeout
         seen["token"] = req.get_header("X-nulla-meet-token")
@@ -75,7 +75,7 @@ def test_public_hive_bridge_syncs_presence_with_signed_envelope_and_token() -> N
 
 
 def test_public_hive_bridge_surfaces_http_error_body_for_write_failures() -> None:
-    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=0, context=None):
         raise urllib.error.HTTPError(
             req.full_url,
             429,
@@ -207,7 +207,7 @@ def test_sync_public_hive_auth_from_ssh_writes_runtime_bootstrap() -> None:
         "tls_insecure_skip_verify": False,
     }
 
-    def fake_runner(cmd, capture_output=False, check=False, text=False, timeout=0):  # noqa: ANN001
+    def fake_runner(cmd, capture_output=False, check=False, text=False, timeout=0):
         assert cmd[0] == "ssh"
         assert "-i" in cmd
         assert capture_output is True
@@ -342,7 +342,7 @@ def test_ensure_public_hive_auth_marks_ssh_sync_as_ok() -> None:
         "upstream_base_urls": ["https://seed-eu.example.test:8766"],
     }
 
-    def fake_runner(cmd, capture_output=False, check=False, text=False, timeout=0):  # noqa: ANN001
+    def fake_runner(cmd, capture_output=False, check=False, text=False, timeout=0):
         del cmd, capture_output, check, text, timeout
         return type("Completed", (), {"stdout": json.dumps(remote_payload)})()
 
@@ -366,7 +366,7 @@ def test_ensure_public_hive_auth_marks_ssh_sync_as_ok() -> None:
 def test_public_hive_bridge_joins_existing_related_topic_before_creating_duplicate() -> None:
     seen: list[tuple[str, str]] = []
 
-    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=0, context=None):
         del timeout, context
         method = req.get_method()
         seen.append((method, req.full_url))
@@ -421,7 +421,7 @@ def test_public_hive_bridge_joins_existing_related_topic_before_creating_duplica
 def test_public_hive_bridge_posts_into_existing_agent_commons_topic() -> None:
     seen: list[tuple[str, str]] = []
 
-    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=0, context=None):
         del timeout, context
         method = req.get_method()
         seen.append((method, req.full_url))
@@ -477,7 +477,7 @@ def test_public_hive_bridge_posts_into_existing_agent_commons_topic() -> None:
 def test_public_hive_bridge_claims_posts_progress_and_submits_result() -> None:
     seen: list[tuple[str, str, dict[str, object]]] = []
 
-    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=0, context=None):
         del timeout, context
         method = req.get_method()
         payload = json.loads(req.data.decode("utf-8")) if getattr(req, "data", None) else {}
@@ -544,7 +544,7 @@ def test_public_hive_bridge_attaches_route_scoped_write_grant() -> None:
     )
     seen: dict[str, object] = {}
 
-    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=0, context=None):
         del timeout, context
         seen["payload"] = json.loads(req.data.decode("utf-8"))
         return _FakeResponse({"ok": True, "result": {"post_id": "post-1"}, "error": None})
@@ -579,7 +579,7 @@ def test_public_hive_bridge_attaches_route_scoped_write_grant() -> None:
 def test_public_hive_bridge_reads_review_queue_and_submits_review() -> None:
     seen: list[tuple[str, str, dict[str, object]]] = []
 
-    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=0, context=None):
         del timeout, context
         method = req.get_method()
         payload = json.loads(req.data.decode("utf-8")) if getattr(req, "data", None) else {}
@@ -615,7 +615,7 @@ def test_public_hive_bridge_reads_review_queue_and_submits_review() -> None:
 
 
 def test_public_hive_bridge_reads_research_queue_packet_and_artifacts() -> None:
-    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=0, context=None):
         del timeout, context
         method = req.get_method()
         if method == "GET" and req.full_url.endswith("/v1/hive/research-queue?limit=5"):
@@ -646,7 +646,7 @@ def test_public_hive_bridge_reads_research_queue_packet_and_artifacts() -> None:
 
 
 def test_public_hive_bridge_falls_back_when_research_queue_route_is_missing() -> None:
-    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=0, context=None):
         del timeout, context
         method = req.get_method()
         if method == "GET" and req.full_url.endswith("/v1/hive/research-queue?limit=5"):
@@ -696,7 +696,7 @@ def test_public_hive_bridge_falls_back_when_research_queue_route_is_missing() ->
 
 
 def test_public_hive_bridge_falls_back_when_research_packet_route_is_missing() -> None:
-    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=0, context=None):
         del timeout, context
         method = req.get_method()
         if method == "GET" and req.full_url.endswith("/v1/hive/topics/topic-1/research-packet"):
@@ -756,7 +756,7 @@ def test_public_hive_bridge_falls_back_when_research_packet_route_is_missing() -
 
 
 def test_public_hive_bridge_overlays_truth_fields_when_direct_research_packet_is_stale() -> None:
-    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=0, context=None):
         del timeout, context
         method = req.get_method()
         if method == "GET" and req.full_url.endswith("/v1/hive/topics/topic-1/research-packet"):
@@ -844,7 +844,7 @@ def test_public_hive_bridge_overlays_truth_fields_when_direct_research_packet_is
 
 
 def test_public_hive_bridge_overlays_truth_fields_when_direct_research_queue_is_stale() -> None:
-    def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=0, context=None):
         del timeout, context
         method = req.get_method()
         if method == "GET" and req.full_url.endswith("/v1/hive/research-queue?limit=5"):

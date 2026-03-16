@@ -11,7 +11,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-
 MAX_BODY_BYTES = 256 * 1024  # 256 KB
 
 

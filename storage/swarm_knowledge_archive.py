@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 from core.runtime_paths import data_path
 from core.swarm_knowledge_fabric import (
@@ -17,13 +17,13 @@ from core.swarm_knowledge_fabric import (
 )
 
 
-def archive_root(*, root_dir: Optional[Union[str, Path]] = None) -> Path:
+def archive_root(*, root_dir: str | Path | None = None) -> Path:
     if root_dir is not None:
         return Path(root_dir).expanduser().resolve()
     return data_path("swarm_fabric")
 
 
-def ensure_archive_layout(*, root_dir: Optional[Union[str, Path]] = None) -> dict[str, Path]:
+def ensure_archive_layout(*, root_dir: str | Path | None = None) -> dict[str, Path]:
     root = archive_root(root_dir=root_dir)
     layout = {
         "root": root,
@@ -43,7 +43,7 @@ def ensure_archive_layout(*, root_dir: Optional[Union[str, Path]] = None) -> dic
 def commit_snapshot(
     snapshot: NetworkSnapshot,
     *,
-    root_dir: Optional[Union[str, Path]] = None,
+    root_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     layout = ensure_archive_layout(root_dir=root_dir)
     snapshot_path = _write_snapshot(snapshot=snapshot, layout=layout)
@@ -123,7 +123,7 @@ def commit_snapshot(
     }
 
 
-def load_snapshot(snapshot_id: str, *, root_dir: Optional[Union[str, Path]] = None) -> Optional[NetworkSnapshot]:
+def load_snapshot(snapshot_id: str, *, root_dir: str | Path | None = None) -> NetworkSnapshot | None:
     layout = ensure_archive_layout(root_dir=root_dir)
     manifest_path = layout["manifests"] / "snapshots.jsonl"
     if not manifest_path.exists():
@@ -144,7 +144,7 @@ def load_snapshot(snapshot_id: str, *, root_dir: Optional[Union[str, Path]] = No
     return None
 
 
-def load_task_branch(branch_id: str, *, root_dir: Optional[Union[str, Path]] = None) -> Optional[TaskBranchState]:
+def load_task_branch(branch_id: str, *, root_dir: str | Path | None = None) -> TaskBranchState | None:
     root = archive_root(root_dir=root_dir)
     path = root / "task_branches" / str(branch_id or "").strip() / "branch.json"
     if not path.exists():
@@ -152,7 +152,7 @@ def load_task_branch(branch_id: str, *, root_dir: Optional[Union[str, Path]] = N
     return TaskBranchState.model_validate_json(path.read_text(encoding="utf-8"))
 
 
-def load_merged_state(*, root_dir: Optional[Union[str, Path]] = None) -> Optional[MergedSwarmState]:
+def load_merged_state(*, root_dir: str | Path | None = None) -> MergedSwarmState | None:
     root = archive_root(root_dir=root_dir)
     path = root / "indexes" / "current" / "merged_state.json"
     if not path.exists():
@@ -213,7 +213,7 @@ def _write_peer_records(
     return peer_paths
 
 
-def _merge_branch(*, existing: Optional[TaskBranchState], incoming: TaskBranchState) -> TaskBranchState:
+def _merge_branch(*, existing: TaskBranchState | None, incoming: TaskBranchState) -> TaskBranchState:
     if existing is None:
         return incoming
     merged = existing.model_copy(deep=True)

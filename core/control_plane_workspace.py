@@ -6,12 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from core import policy_engine
-from core import runtime_paths
+from core import policy_engine, runtime_paths
 from storage.db import DEFAULT_DB_PATH, get_connection
 from storage.migrations import run_migrations
 from storage.useful_output_store import summarize_useful_outputs, sync_useful_outputs
-
 
 CONTROL_DIRS = (
     "queue",

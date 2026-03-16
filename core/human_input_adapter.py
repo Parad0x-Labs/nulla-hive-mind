@@ -7,13 +7,12 @@ from core.context_understanding import WorkingInterpretation, expand_unfinished_
 from core.input_normalizer import NormalizationResult, normalize_user_text
 from storage.dialogue_memory import (
     get_dialogue_session,
-    record_dialogue_turn,
     recent_dialogue_turns,
+    record_dialogue_turn,
     session_lexicon,
     update_dialogue_session,
     upsert_lexicon_term,
 )
-
 
 _AMBIGUOUS_REFERENCE_RE = re.compile(r"\b(it|they|them|this|that|this one|that one|other one)\b", re.IGNORECASE)
 _WORD_RE = re.compile(r"[a-z0-9_'\-]+")

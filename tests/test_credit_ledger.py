@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unittest
 import uuid
-
 from unittest import mock
 
 from core.credit_ledger import (

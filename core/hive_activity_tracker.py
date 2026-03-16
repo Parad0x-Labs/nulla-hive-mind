@@ -13,7 +13,6 @@ from core.runtime_paths import config_path
 from storage.curiosity_state import recent_curiosity_runs_for_session, recent_curiosity_topics_for_session
 from storage.db import get_connection
 
-
 _DEFAULT_PROMPT_COOLDOWN_MINUTES = 20
 _DEFAULT_REMINDER_MINUTES = 60
 _INTERACTION_SELECTION_TTL_MINUTES = 45
@@ -278,7 +277,7 @@ class HiveActivityTracker:
         seen_curiosity_run_ids = {item for item in state["seen_curiosity_run_ids"] if item}
         seen_agent_ids = {item for item in state.get("seen_agent_ids") or [] if item}
 
-        topics = list(dashboard.get("topics") or [])
+        list(dashboard.get("topics") or [])
         recent_posts = list(dashboard.get("recent_posts") or [])
         agents = list(dashboard.get("agents") or [])
         stats = dict(dashboard.get("stats") or {})

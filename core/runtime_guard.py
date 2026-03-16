@@ -5,7 +5,6 @@ from urllib.parse import urlparse
 
 from core.runtime_paths import NULLA_HOME, PROJECT_ROOT
 
-
 _PLACEHOLDER_TOKENS = ("placeholder", "change-me", "sample", "example", "replace-me", "todo")
 
 
@@ -44,7 +43,7 @@ def validate_meet_public_deployment(
         issues.append("Non-loopback meet node requires a valid public_base_url.")
     elif host.endswith(".example.nulla") or host.endswith(".example.test") or host == "localhost" or host.startswith("127."):
         issues.append("Non-loopback meet node cannot use placeholder or loopback public_base_url.")
-    if NULLA_HOME == (PROJECT_ROOT / ".nulla_local").resolve():
+    if (PROJECT_ROOT / ".nulla_local").resolve() == NULLA_HOME:
         issues.append("Non-loopback meet node should use a dedicated NULLA_HOME instead of the default project-local runtime.")
     return issues
 

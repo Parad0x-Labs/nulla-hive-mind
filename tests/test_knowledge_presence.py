@@ -6,7 +6,12 @@ import uuid
 from datetime import datetime, timezone
 
 from core.knowledge_advertiser import broadcast_hello
-from core.knowledge_registry import find_relevant_remote_shards, load_shareable_shard_payload, register_local_shard, sync_local_learning_shards
+from core.knowledge_registry import (
+    find_relevant_remote_shards,
+    load_shareable_shard_payload,
+    register_local_shard,
+    sync_local_learning_shards,
+)
 from network.knowledge_models import HelloAd, KnowledgeAdvert
 from network.knowledge_router import handle_knowledge_message
 from network.presence_router import handle_presence_message

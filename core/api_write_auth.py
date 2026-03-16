@@ -10,7 +10,6 @@ from core.meet_and_greet_models import SignedApiWriteEnvelope
 from network import signer
 from network.protocol import consume_nonce_once
 
-
 _ROUTE_BINDINGS: dict[str, tuple[str, ...]] = {
     "/v1/presence/register": ("agent_id",),
     "/v1/presence/heartbeat": ("agent_id",),

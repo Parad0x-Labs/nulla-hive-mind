@@ -9,7 +9,6 @@ from typing import Any
 from core import audit_logger
 from storage.db import get_connection
 
-
 # ---------------------------------------------------------------------------
 # Scoring constants
 # ---------------------------------------------------------------------------
@@ -150,7 +149,7 @@ def zero_out_provider(peer_id: str, reason: str, related_task_id: str | None = N
     current_board = get_peer_scoreboard(peer_id)
     if current_board.provider > 0:
         slash_score(peer_id, "provider", current_board.provider, f"zeroed:{reason}", related_task_id)
-    
+
     # Devastating trust penalty ensuring they can never re-enter the active pool
     slash_score(peer_id, "trust", 999.0, f"blacklist:{reason}", related_task_id)
 

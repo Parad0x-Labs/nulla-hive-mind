@@ -326,7 +326,7 @@ def build_server(config: BrainHiveWatchServerConfig | None = None) -> ThreadingH
     class Handler(BaseHTTPRequestHandler):
         server_version = "NullaBrainHiveWatch/0.1"
 
-        def do_GET(self) -> None:  # noqa: N802
+        def do_GET(self) -> None:
             parsed = urlparse(self.path)
             clean_path = parsed.path.rstrip("/") or "/"
             if clean_path in {"/", "/brain-hive"}:
@@ -421,7 +421,7 @@ def build_server(config: BrainHiveWatchServerConfig | None = None) -> ThreadingH
                 return
             self._write_bytes(404, "text/html; charset=utf-8", render_not_found_html(parsed.path).encode("utf-8"))
 
-        def log_message(self, format: str, *args):  # noqa: A003
+        def log_message(self, format: str, *args):
             return
 
         def _write_json(self, status_code: int, payload: dict) -> None:

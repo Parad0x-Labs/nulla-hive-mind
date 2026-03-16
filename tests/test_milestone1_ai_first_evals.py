@@ -6,12 +6,10 @@ from unittest import mock
 
 import pytest
 
-from core.autonomous_topic_research import AutonomousResearchResult
 from core.curiosity_roamer import CuriosityResult
 from core.media_analysis_pipeline import MediaAnalysisResult
 from core.memory_first_router import ModelExecutionDecision
 from core.task_router import classify
-
 
 FORBIDDEN_PLANNER_LEAKS = (
     "workflow:",
@@ -253,7 +251,7 @@ def test_eval_live_info_synthesis(
     planned_search_return = search_results if search_method == "planned_search_query" else mock.DEFAULT
     search_return = search_results if search_method == "search_query" else mock.DEFAULT
 
-    with mock.patch("apps.nulla_agent.audit_logger.log") as audit_log, mock.patch(
+    with mock.patch("apps.nulla_agent.audit_logger.log"), mock.patch(
         "apps.nulla_agent.WebAdapter.planned_search_query",
         return_value=planned_search_return,
     ), mock.patch(

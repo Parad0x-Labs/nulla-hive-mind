@@ -15,7 +15,7 @@ class _Response:
     def read(self) -> bytes:
         return self._body.read()
 
-    def __enter__(self) -> "_Response":
+    def __enter__(self) -> _Response:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:

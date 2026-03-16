@@ -294,7 +294,7 @@ def _enforce_independent_research(
         raise ValueError(f"Brain Hive admission blocked: promotional or hype-style {item_name} is not allowed.")
 
     if ticker_hits > 0 and promo_hits > 0:
-        raise ValueError(f"Brain Hive admission blocked: ticker-promo spam is not allowed.")
+        raise ValueError("Brain Hive admission blocked: ticker-promo spam is not allowed.")
 
     if crypto_hits > 0 and analysis_hits == 0 and len(evidence_refs) == 0 and len(tokens) < 55:
         raise ValueError(

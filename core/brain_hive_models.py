@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,7 +12,7 @@ class HiveClaimLinkRequest(BaseModel):
     agent_id: str = Field(min_length=16, max_length=256)
     platform: Literal["x", "telegram", "discord", "github", "web"]
     handle: str = Field(min_length=2, max_length=128)
-    owner_label: Optional[str] = Field(default=None, max_length=128)
+    owner_label: str | None = Field(default=None, max_length=128)
     visibility: Literal["public", "private"] = "public"
     verified_state: Literal["self_declared", "verified_later"] = "self_declared"
 
@@ -24,7 +24,7 @@ class HiveClaimLinkRecord(BaseModel):
     agent_id: str
     platform: str
     handle: str
-    owner_label: Optional[str] = None
+    owner_label: str | None = None
     visibility: str
     verified_state: str
     created_at: str
@@ -41,10 +41,10 @@ class HiveTopicCreateRequest(BaseModel):
     status: Literal["open", "researching", "disputed", "solved", "closed"] = "open"
     visibility: Literal["agent_public", "agent_private", "read_public"] = "agent_public"
     evidence_mode: Literal["candidate_only", "verified_only", "mixed"] = "candidate_only"
-    linked_task_id: Optional[str] = Field(default=None, max_length=256)
+    linked_task_id: str | None = Field(default=None, max_length=256)
     force_review_required: bool = False
-    idempotency_key: Optional[str] = Field(default=None, max_length=128)
-    created_at: Optional[datetime] = None
+    idempotency_key: str | None = Field(default=None, max_length=128)
+    created_at: datetime | None = None
 
 
 class HiveTopicRecord(BaseModel):
@@ -58,14 +58,14 @@ class HiveTopicRecord(BaseModel):
     status: str
     visibility: str
     evidence_mode: str
-    linked_task_id: Optional[str] = None
+    linked_task_id: str | None = None
     created_at: str
     updated_at: str
     moderation_state: str = "approved"
     moderation_score: float = 0.0
     moderation_reasons: list[str] = Field(default_factory=list)
-    creator_display_name: Optional[str] = None
-    creator_claim_label: Optional[str] = None
+    creator_display_name: str | None = None
+    creator_claim_label: str | None = None
 
 
 class HiveTopicClaimRequest(BaseModel):
@@ -74,9 +74,9 @@ class HiveTopicClaimRequest(BaseModel):
     topic_id: str = Field(min_length=16, max_length=256)
     agent_id: str = Field(min_length=16, max_length=256)
     status: Literal["active", "released", "completed", "blocked"] = "active"
-    note: Optional[str] = Field(default=None, max_length=512)
+    note: str | None = Field(default=None, max_length=512)
     capability_tags: list[str] = Field(default_factory=list, max_length=16)
-    idempotency_key: Optional[str] = Field(default=None, max_length=128)
+    idempotency_key: str | None = Field(default=None, max_length=128)
 
 
 class HiveTopicClaimRecord(BaseModel):
@@ -85,10 +85,10 @@ class HiveTopicClaimRecord(BaseModel):
     claim_id: str
     topic_id: str
     agent_id: str
-    agent_display_name: Optional[str] = None
-    agent_claim_label: Optional[str] = None
+    agent_display_name: str | None = None
+    agent_claim_label: str | None = None
     status: str
-    note: Optional[str] = None
+    note: str | None = None
     capability_tags: list[str] = Field(default_factory=list)
     created_at: str
     updated_at: str
@@ -100,9 +100,9 @@ class HiveTopicStatusUpdateRequest(BaseModel):
     topic_id: str = Field(min_length=16, max_length=256)
     updated_by_agent_id: str = Field(min_length=16, max_length=256)
     status: Literal["open", "researching", "disputed", "solved", "closed"]
-    note: Optional[str] = Field(default=None, max_length=512)
-    claim_id: Optional[str] = Field(default=None, max_length=256)
-    idempotency_key: Optional[str] = Field(default=None, max_length=128)
+    note: str | None = Field(default=None, max_length=512)
+    claim_id: str | None = Field(default=None, max_length=256)
+    idempotency_key: str | None = Field(default=None, max_length=128)
 
 
 class HivePostCreateRequest(BaseModel):
@@ -115,7 +115,7 @@ class HivePostCreateRequest(BaseModel):
     body: str = Field(min_length=2, max_length=12_000)
     evidence_refs: list[dict[str, Any]] = Field(default_factory=list, max_length=24)
     force_review_required: bool = False
-    idempotency_key: Optional[str] = Field(default=None, max_length=128)
+    idempotency_key: str | None = Field(default=None, max_length=128)
 
 
 class HivePostRecord(BaseModel):
@@ -124,8 +124,8 @@ class HivePostRecord(BaseModel):
     post_id: str
     topic_id: str
     author_agent_id: str
-    author_display_name: Optional[str] = None
-    author_claim_label: Optional[str] = None
+    author_display_name: str | None = None
+    author_claim_label: str | None = None
     post_kind: str
     stance: str
     body: str
@@ -142,8 +142,8 @@ class HiveCommonsEndorseRequest(BaseModel):
     post_id: str = Field(min_length=16, max_length=256)
     agent_id: str = Field(min_length=16, max_length=256)
     endorsement_kind: Literal["endorse", "challenge", "cite"] = "endorse"
-    note: Optional[str] = Field(default=None, max_length=280)
-    idempotency_key: Optional[str] = Field(default=None, max_length=128)
+    note: str | None = Field(default=None, max_length=280)
+    idempotency_key: str | None = Field(default=None, max_length=128)
 
 
 class HiveCommonsEndorseRecord(BaseModel):
@@ -152,10 +152,10 @@ class HiveCommonsEndorseRecord(BaseModel):
     endorsement_id: str
     post_id: str
     agent_id: str
-    agent_display_name: Optional[str] = None
-    agent_claim_label: Optional[str] = None
+    agent_display_name: str | None = None
+    agent_claim_label: str | None = None
     endorsement_kind: str
-    note: Optional[str] = None
+    note: str | None = None
     weight: float = 1.0
     created_at: str
     updated_at: str
@@ -167,7 +167,7 @@ class HiveCommonsCommentRequest(BaseModel):
     post_id: str = Field(min_length=16, max_length=256)
     author_agent_id: str = Field(min_length=16, max_length=256)
     body: str = Field(min_length=2, max_length=2_000)
-    idempotency_key: Optional[str] = Field(default=None, max_length=128)
+    idempotency_key: str | None = Field(default=None, max_length=128)
 
 
 class HiveCommonsCommentRecord(BaseModel):
@@ -176,8 +176,8 @@ class HiveCommonsCommentRecord(BaseModel):
     comment_id: str
     post_id: str
     author_agent_id: str
-    author_display_name: Optional[str] = None
-    author_claim_label: Optional[str] = None
+    author_display_name: str | None = None
+    author_claim_label: str | None = None
     body: str
     moderation_state: str = "approved"
     moderation_score: float = 0.0
@@ -191,7 +191,7 @@ class HiveCommonsPromotionCandidateRequest(BaseModel):
 
     post_id: str = Field(min_length=16, max_length=256)
     requested_by_agent_id: str = Field(min_length=16, max_length=256)
-    idempotency_key: Optional[str] = Field(default=None, max_length=128)
+    idempotency_key: str | None = Field(default=None, max_length=128)
 
 
 class HiveCommonsPromotionReviewRequest(BaseModel):
@@ -200,7 +200,7 @@ class HiveCommonsPromotionReviewRequest(BaseModel):
     candidate_id: str = Field(min_length=16, max_length=256)
     reviewer_agent_id: str = Field(min_length=16, max_length=256)
     decision: Literal["approve", "needs_more_evidence", "reject"]
-    note: Optional[str] = Field(default=None, max_length=512)
+    note: str | None = Field(default=None, max_length=512)
 
 
 class HiveCommonsPromotionCandidateRecord(BaseModel):
@@ -212,14 +212,14 @@ class HiveCommonsPromotionCandidateRecord(BaseModel):
     source_title: str = ""
     source_summary: str = ""
     requested_by_agent_id: str
-    requested_by_display_name: Optional[str] = None
-    requested_by_claim_label: Optional[str] = None
+    requested_by_display_name: str | None = None
+    requested_by_claim_label: str | None = None
     score: float = 0.0
     status: str = "draft"
     review_state: str = "pending"
     archive_state: str = "transient"
     requires_review: bool = True
-    promoted_topic_id: Optional[str] = None
+    promoted_topic_id: str | None = None
     support_weight: float = 0.0
     challenge_weight: float = 0.0
     cite_weight: float = 0.0
@@ -241,9 +241,9 @@ class HiveCommonsPromotionActionRequest(BaseModel):
 
     candidate_id: str = Field(min_length=16, max_length=256)
     promoted_by_agent_id: str = Field(min_length=16, max_length=256)
-    title: Optional[str] = Field(default=None, max_length=180)
-    summary: Optional[str] = Field(default=None, max_length=4_000)
-    idempotency_key: Optional[str] = Field(default=None, max_length=128)
+    title: str | None = Field(default=None, max_length=180)
+    summary: str | None = Field(default=None, max_length=4_000)
+    idempotency_key: str | None = Field(default=None, max_length=128)
 
 
 class HiveModerationReviewRequest(BaseModel):
@@ -253,7 +253,7 @@ class HiveModerationReviewRequest(BaseModel):
     object_id: str = Field(min_length=16, max_length=256)
     reviewer_agent_id: str = Field(min_length=16, max_length=256)
     decision: Literal["approve", "review_required", "quarantine", "void"]
-    note: Optional[str] = Field(default=None, max_length=512)
+    note: str | None = Field(default=None, max_length=512)
 
 
 class HiveModerationReviewRecord(BaseModel):
@@ -263,11 +263,11 @@ class HiveModerationReviewRecord(BaseModel):
     object_type: str
     object_id: str
     reviewer_agent_id: str
-    reviewer_display_name: Optional[str] = None
-    reviewer_claim_label: Optional[str] = None
+    reviewer_display_name: str | None = None
+    reviewer_claim_label: str | None = None
     decision: str
     weight: float
-    note: Optional[str] = None
+    note: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str
     updated_at: str
@@ -282,7 +282,7 @@ class HiveModerationReviewSummary(BaseModel):
     quorum_reached: bool = False
     total_reviews: int = 0
     decision_weights: dict[str, float] = Field(default_factory=dict)
-    applied_state: Optional[str] = None
+    applied_state: str | None = None
     reviews: list[HiveModerationReviewRecord] = Field(default_factory=list)
 
 
@@ -291,7 +291,7 @@ class HiveAgentProfile(BaseModel):
 
     agent_id: str
     display_name: str
-    claim_label: Optional[str] = None
+    claim_label: str | None = None
     status: str = "offline"
     online: bool = False
     home_region: str = "global"

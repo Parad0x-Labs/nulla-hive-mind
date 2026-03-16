@@ -56,7 +56,7 @@ def _init_table() -> None:
 
 
 def build_task_hash(*, normalized_input: str, task_class: str, output_mode: str) -> str:
-    return sha256(f"{task_class}\n{output_mode}\n{normalized_input.strip().lower()}".encode("utf-8")).hexdigest()
+    return sha256(f"{task_class}\n{output_mode}\n{normalized_input.strip().lower()}".encode()).hexdigest()
 
 
 def record_candidate_output(

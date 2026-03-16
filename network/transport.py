@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-import json
+import contextlib
 import os
 import secrets
 import socket
@@ -13,13 +13,13 @@ from uuid import uuid4
 
 from core import audit_logger, policy_engine
 from network.chunk_protocol import decode_frame
-from network.transfer_manager import TransferManager
 from network.stream_transport import (
     StreamClientTlsConfig,
     StreamEndpoint,
     StreamServerTlsConfig,
     StreamTransportServer,
 )
+from network.transfer_manager import TransferManager
 
 try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -190,13 +190,11 @@ def _kill_stale_udp_holder(port: int) -> bool:
                 target_type="transport",
                 details={"port": port},
             )
-            try:
+            with contextlib.suppress(Exception):
                 subprocess.run(
                     ["taskkill", "/F", "/PID", str(holder_pid)],
                     capture_output=True, timeout=5,
                 )
-            except Exception:
-                pass
             return True
     except Exception:
         pass
@@ -272,11 +270,11 @@ class UDPTransportServer:
                     raise
             else:
                 raise
-        
+
         # Phase 23: STUN Public Endpoint Discovery
         from network.stun_client import discover_public_endpoint
         public_endpoint = discover_public_endpoint(sock)
-        
+
         if public_endpoint:
             self.public_host, self.public_port = public_endpoint
             audit_logger.log(
@@ -347,15 +345,11 @@ class UDPTransportServer:
     def stop(self) -> None:
         self._stop.set()
         if self._sock:
-            try:
+            with contextlib.suppress(Exception):
                 self._sock.close()
-            except Exception:
-                pass
         if self._stream_server:
-            try:
+            with contextlib.suppress(Exception):
                 self._stream_server.stop()
-            except Exception:
-                pass
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
 

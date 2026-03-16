@@ -3,8 +3,6 @@ from __future__ import annotations
 import os
 import socket
 import struct
-from typing import Optional
-
 
 STUN_SERVERS = [
     ("stun.l.google.com", 19302),
@@ -15,10 +13,10 @@ STUN_SERVERS = [
 _HEADER_STRUCT = struct.Struct("!HHI12s")
 
 
-def _parse_mapped_address(data: bytes, magic_cookie: int) -> Optional[tuple[str, int]]:
+def _parse_mapped_address(data: bytes, magic_cookie: int) -> tuple[str, int] | None:
     if len(data) < 20:
         return None
-    res_type, res_len, _, transaction_id = _HEADER_STRUCT.unpack(data[:20])
+    res_type, res_len, _, _transaction_id = _HEADER_STRUCT.unpack(data[:20])
     if res_type != 0x0101:
         return None
     offset = 20
@@ -47,7 +45,7 @@ def _parse_mapped_address(data: bytes, magic_cookie: int) -> Optional[tuple[str,
     return None
 
 
-def discover_public_endpoint(local_sock: socket.socket) -> Optional[tuple[str, int]]:
+def discover_public_endpoint(local_sock: socket.socket) -> tuple[str, int] | None:
     if os.environ.get("NULLA_DISABLE_STUN") == "1":
         return None
 

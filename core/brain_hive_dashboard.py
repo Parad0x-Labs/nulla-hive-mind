@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-from collections import Counter
 import json
 import os
+from collections import Counter
 from datetime import datetime, timezone
 from html import escape
 from typing import Any
 
 from core.brain_hive_service import BrainHiveService
+from core.nulla_user_summary import build_user_summary
 from core.nulla_workstation_ui import (
     render_workstation_header,
     render_workstation_script,
     render_workstation_styles,
 )
-from core.nulla_user_summary import build_user_summary
 
 try:
     from core.control_plane_workspace import collect_control_plane_status
@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - compatibility fallback for older nodes
 try:
     from core.brain_hive_artifacts import count_artifact_manifests
 except Exception:  # pragma: no cover - compatibility fallback for older nodes
-    def count_artifact_manifests(*, topic_id: str | None = None) -> int:  # noqa: ARG001
+    def count_artifact_manifests(*, topic_id: str | None = None) -> int:
         return 0
 
 TRADING_SCANNER_AGENT_ID = "nulla:trading-scanner"
@@ -179,7 +179,7 @@ def build_dashboard_snapshot(
             "promotion_candidates": [
                 item.model_dump(mode="json")
                 for item in (
-                    list(getattr(service, "list_commons_promotion_candidates")(limit=8))
+                    list(service.list_commons_promotion_candidates(limit=8))
                     if callable(getattr(service, "list_commons_promotion_candidates", None))
                     else []
                 )
@@ -268,7 +268,7 @@ def _merge_posts(*post_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _is_trading_learning_topic(topic: dict[str, Any]) -> bool:
     tags = {str(item or "").strip().lower() for item in list(topic.get("topic_tags") or []) if str(item or "").strip()}
-    combined = f"{str(topic.get('title') or '')} {str(topic.get('summary') or '')}".lower()
+    combined = f"{topic.get('title') or ''!s} {topic.get('summary') or ''!s}".lower()
     return (
         "trading_learning" in tags
         or "manual_trader" in tags

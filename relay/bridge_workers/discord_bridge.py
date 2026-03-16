@@ -4,11 +4,12 @@ import json
 import os
 import time
 from typing import Any
-from urllib import request, error
+from urllib import error, request
 from urllib.parse import urlencode
 
 from core.channel_gateway import ChannelRequest, process_channel_request
 from relay.channel_outbound import TOPIC_BY_PLATFORM
+
 
 class DiscordBridge:
     def __init__(self):
@@ -80,7 +81,7 @@ class DiscordBridge:
         req.add_header('Content-Type', 'application/json')
         req.add_header('User-Agent', 'NullaDiscordBridge/1.0')
         payload = {"content": content}
-        
+
         try:
             body = json.dumps(payload).encode('utf-8')
             with request.urlopen(req, data=body, timeout=10) as response:
@@ -163,7 +164,7 @@ class DiscordBridge:
                     return text[len(prefix):].strip()
         return None
 
-    def _mirror_request(self, path: str, method: str = "GET", data: dict = None) -> dict:
+    def _mirror_request(self, path: str, method: str = "GET", data: dict | None = None) -> dict:
         req = request.Request(f"{self.mirror_url}{path}", method=method)
         req.add_header('Content-Type', 'application/json')
         try:
@@ -205,10 +206,7 @@ class DiscordBridge:
                 raw_record.update(record)
                 continue
 
-            if not webhook_url:
-                channel_id = self._resolve_channel_id(str(record.get("target") or "default"))
-            else:
-                channel_id = None
+            channel_id = self._resolve_channel_id(str(record.get("target") or "default")) if not webhook_url else None
             if not webhook_url and not channel_id:
                 record["last_error"] = "missing_delivery_target"
                 changed = True

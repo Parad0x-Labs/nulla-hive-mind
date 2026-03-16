@@ -5,7 +5,6 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-
 DDG_ENDPOINT = "https://api.duckduckgo.com/"
 
 

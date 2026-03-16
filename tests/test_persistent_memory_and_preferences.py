@@ -17,8 +17,8 @@ from core.persistent_memory import (
     summarize_memory,
     user_heuristics_path,
 )
-from core.user_preferences import extract_requested_agent_name, load_preferences, maybe_handle_preference_command
 from core.runtime_paths import data_path
+from core.user_preferences import extract_requested_agent_name, load_preferences, maybe_handle_preference_command
 from storage.db import get_connection
 
 

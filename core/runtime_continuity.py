@@ -10,7 +10,6 @@ from typing import Any
 
 from storage.db import DEFAULT_DB_PATH, get_connection
 
-
 _DB_PATH_OVERRIDE: str | Path | None = None
 _LOCK = threading.RLock()
 _RESUMABLE_STATUSES = {"running", "interrupted", "pending_approval"}

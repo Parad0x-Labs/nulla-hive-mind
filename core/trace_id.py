@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from storage.db import get_connection
+
 _TABLE_READY = False
 
 

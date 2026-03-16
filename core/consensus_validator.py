@@ -7,13 +7,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from core import audit_logger
+from core.semantic_judge import evaluate_semantic_agreement
 from core.task_capsule import build_task_capsule
+from core.verdict_engine import evaluate_consensus
 from network.assist_models import RewardHint, TaskOffer
 from network.signer import get_local_peer_id as local_peer_id
 from retrieval.swarm_query import broadcast_task_offer
 from storage.db import get_connection
-from core.semantic_judge import evaluate_semantic_agreement
-from core.verdict_engine import evaluate_consensus
 
 
 @dataclass
@@ -262,11 +262,7 @@ def _build_verification_offer(task_id: str) -> tuple[str, TaskOffer] | None:
             "problem_class": str(ctx.get("problem_class") or "unknown"),
             "environment_tags": ctx.get("environment_tags") or {},
             "abstract_inputs": list(ctx.get("abstract_inputs") or [])[:6],
-            "known_constraints": list(ctx.get("known_constraints") or [])[:6] + [
-                f"verification_of:{task_id}",
-                "independent reviewer required",
-                "no execution",
-            ],
+            "known_constraints": [*list(ctx.get("known_constraints") or [])[:6], f"verification_of:{task_id}", "independent reviewer required", "no execution"],
         },
         allowed_operations=["reason", "compare", "rank", "summarize", "validate"],
         deadline_ts=datetime.now(timezone.utc) + timedelta(minutes=20),
@@ -348,9 +344,9 @@ def decide_consensus_for_task(task_id: str, *, exclude_host_group_hint_hash: str
             from core.scoreboard_engine import zero_out_provider
             zero_out_provider(second.helper_peer_id, "spot_check_failed_catastrophically", task_id)
             audit_logger.log(
-                "anti_cheat_triggered", 
-                target_id=task_id, 
-                target_type="task", 
+                "anti_cheat_triggered",
+                target_id=task_id,
+                target_type="task",
                 details={"cheater": second.helper_peer_id, "margin": round(margin, 4)}
             )
 

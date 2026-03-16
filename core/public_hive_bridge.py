@@ -27,7 +27,6 @@ from core.privacy_guard import text_privacy_risks
 from core.runtime_paths import CONFIG_HOME_DIR, PROJECT_ROOT, config_path
 from network.signer import get_local_peer_id
 
-
 _PLACEHOLDER_TOKEN_RE = re.compile(r"(?:replace|set|change).*(?:token|secret)", re.IGNORECASE)
 
 

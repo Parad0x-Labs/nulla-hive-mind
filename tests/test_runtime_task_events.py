@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
 from core.runtime_task_events import (
     configure_runtime_event_store,
     emit_runtime_event,
@@ -12,7 +13,6 @@ from core.runtime_task_events import (
     reset_runtime_event_state,
 )
 from core.runtime_task_rail import render_runtime_task_rail_html
-from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
 from storage.migrations import run_migrations
 
 

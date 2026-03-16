@@ -1,9 +1,8 @@
-import socket
-import threading
-from network.protocol import Protocol
-from network import quarantine
-from network import rate_limiter
 from dataclasses import dataclass
+
+from network import quarantine, rate_limiter
+from network.protocol import Protocol
+
 
 @dataclass
 class NodeRuntime:
@@ -14,7 +13,7 @@ class NodeRuntime:
 class NullaNode:
     """
     V2: The strict P2P Daemon.
-    Expects incoming requests, validates envelopes via `network.protocol`, 
+    Expects incoming requests, validates envelopes via `network.protocol`,
     and checks rate limits before ever processing a payload.
     """
     def __init__(self, host="0.0.0.0", port=49152):
@@ -41,23 +40,23 @@ class NullaNode:
             # 1. Enforce strict JSON envelope
             envelope = Protocol.decode_and_validate(raw_bytes)
             sender_id = envelope["sender_peer_id"]
-            
+
             # 2. Check Quarantine List
             if quarantine.is_peer_quarantined(sender_id):
                 print(f"[NODE] Ignored msg from quarantined peer: {sender_id}")
                 return
-                
+
             # 3. Rate Limiter check
             if not rate_limiter.allow(sender_id):
                 print(f"[NODE] Rate limit exceeded by peer: {sender_id}")
                 return
-                
+
             # 4. Dispatch by msg_type
             msg_type = envelope["msg_type"]
             print(f"[NODE] Accepted safe envelope: {msg_type} from {sender_id}")
-            
+
             # Process Payload here...
-            
+
         except ValueError as e:
             # Log strike against peer (if possible to extract ID safely)
             print(f"[NODE] Dropped inbound packet. Protocol Error: {e}")

@@ -23,9 +23,8 @@ class MeshEncryptionTests(unittest.TestCase):
         payload = b'{"msg":"secret"}'
         with patch.dict(os.environ, {"NULLA_MESH_PSK_B64": key}, clear=False):
             encrypted = transport._encrypt_for_mesh(payload)
-        with patch.dict(os.environ, {"NULLA_MESH_PSK_B64": ""}, clear=False):
-            with self.assertRaises(ValueError):
-                transport._decrypt_for_mesh(encrypted)
+        with patch.dict(os.environ, {"NULLA_MESH_PSK_B64": ""}, clear=False), self.assertRaises(ValueError):
+            transport._decrypt_for_mesh(encrypted)
 
     def test_mesh_encryption_required_blocks_plain_payloads(self) -> None:
         payload = b'{"msg":"plain"}'

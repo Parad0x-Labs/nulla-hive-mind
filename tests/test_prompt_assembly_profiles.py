@@ -223,7 +223,7 @@ def test_structured_chat_system_prompt_keeps_operational_doctrine(
     output_mode: str,
     task_kind: str,
 ) -> None:
-    request, context_result = _build_request(
+    request, _context_result = _build_request(
         "Find the latest OpenClaw release notes and tell me the next safe step.",
         task_class="system_design",
         task_kind=task_kind,

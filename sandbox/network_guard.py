@@ -3,7 +3,6 @@ from __future__ import annotations
 import shlex
 from pathlib import PurePath
 
-
 _NETWORK_BINARIES = {
     "curl",
     "wget",

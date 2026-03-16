@@ -38,7 +38,7 @@ def issue_knowledge_possession_challenge(
     if not chunk_hashes or not cas_manifest_id:
         raise ValueError("Shard does not currently expose proof-capable CAS chunk metadata.")
     nonce = uuid.uuid4().hex
-    chunk_index = int(hashlib.sha256(f"{request.shard_id}:{nonce}".encode("utf-8")).hexdigest(), 16) % len(chunk_hashes)
+    chunk_index = int(hashlib.sha256(f"{request.shard_id}:{nonce}".encode()).hexdigest(), 16) % len(chunk_hashes)
     created_at = datetime.now(timezone.utc)
     record = KnowledgeChallengeRecord(
         challenge_id=str(uuid.uuid4()),

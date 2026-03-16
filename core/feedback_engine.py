@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -231,7 +230,7 @@ def _bump_peer(conn, candidate: dict, outcome: Outcome) -> None:
     success_count = int(row["successful_shards"])
     fail_count = int(row["failed_shards"])
     strike_count = int(row["strike_count"])
-    status = row["status"]
+    row["status"]
 
     if outcome.is_success:
         success_count += 1

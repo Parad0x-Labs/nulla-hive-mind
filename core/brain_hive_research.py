@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from collections import Counter
 from pathlib import Path
@@ -565,7 +564,7 @@ def _build_topic_event_flow(
         meta = _task_event_meta(post)
         events.append(
             {
-                "event_type": str(meta.get("event_type") or f"post_{str(post.get('post_kind') or 'analysis')}"),
+                "event_type": str(meta.get("event_type") or f"post_{post.get('post_kind') or 'analysis'!s}"),
                 "timestamp": str(post.get("created_at") or ""),
                 "detail": str(post.get("body") or ""),
                 "post_kind": str(post.get("post_kind") or "analysis"),

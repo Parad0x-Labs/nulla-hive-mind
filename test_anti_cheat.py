@@ -1,10 +1,11 @@
-import sys
 import uuid
+
+from core.consensus_validator import decide_consensus_for_task
+from core.discovery_index import get_spot_check_probability
+from core.scoreboard_engine import get_peer_scoreboard
 from storage.db import get_connection
 from storage.migrations import run_migrations
-from core.discovery_index import get_spot_check_probability
-from core.scoreboard_engine import get_peer_scoreboard, slash_score
-from core.consensus_validator import decide_consensus_for_task
+
 
 def _peer_id(label: str) -> str:
     base = f"{label}_{uuid.uuid4().hex}"
@@ -28,7 +29,7 @@ def seed_peer(peer_id: str, successful_shards: int, provider_score: float):
     try:
         conn.execute(
             """
-            INSERT INTO peers (peer_id, trust_score, successful_shards, last_seen_at, created_at, updated_at) 
+            INSERT INTO peers (peer_id, trust_score, successful_shards, last_seen_at, created_at, updated_at)
             VALUES (?, 0.8, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (peer_id, successful_shards)
@@ -36,12 +37,11 @@ def seed_peer(peer_id: str, successful_shards: int, provider_score: float):
         conn.commit()
     finally:
         conn.close()
-    
+
     if provider_score > 0:
         # Award initial score so they have something to lose
-        from core.scoreboard_engine import award_provider_score
         # Simulate some previous task to give them score
-        dummy_task = str(uuid.uuid4())
+        str(uuid.uuid4())
         # Not exact, but we can just insert delta directly
         conn = get_connection()
         try:
@@ -62,10 +62,10 @@ def seed_task_offer(task_id: str):
         conn.execute(
             """
             INSERT INTO task_offers (
-                task_id, parent_peer_id, capsule_id, task_type, subtask_type, summary, 
-                input_capsule_hash, required_capabilities_json, reward_hint_json, max_helpers, 
+                task_id, parent_peer_id, capsule_id, task_type, subtask_type, summary,
+                input_capsule_hash, required_capabilities_json, reward_hint_json, max_helpers,
                 priority, deadline_ts, status, created_at, updated_at
-            ) VALUES (?, 'mock_parent', 'mock_capsule', 'reasoning', 'generic', 'mock task', 
+            ) VALUES (?, 'mock_parent', 'mock_capsule', 'reasoning', 'generic', 'mock task',
                       'hash', '[]', '{}', 2, 'normal', '2030-01-01T00:00:00Z', 'open', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (task_id,)
@@ -75,12 +75,12 @@ def seed_task_offer(task_id: str):
         conn.close()
 
 def insert_mock_result(
-    task_id: str, 
-    helper_id: str, 
-    summary: str, 
-    confidence: float, 
-    helpfulness: float, 
-    quality: float, 
+    task_id: str,
+    helper_id: str,
+    summary: str,
+    confidence: float,
+    helpfulness: float,
+    quality: float,
     review_outcome: str
 ):
     result_id = str(uuid.uuid4())
@@ -148,11 +148,11 @@ def test_anti_cheat():
     seed_peer(cheating_elite, 1500, 8000.0) # Very high provider score
     board_before = get_peer_scoreboard(cheating_elite)
     print(f"Cheater Score Before: {board_before.provider}")
-    
+
     # Honest node gives good answer
     seed_peer(honest_node, 500, 1000)
     insert_mock_result(task_slash, honest_node, "A highly detailed, correct analysis of the smart contract vulnerability.", 1.0, 1.0, 1.0, "")
-    
+
     # Cheating Elite node gets caught providing garbage during their 1% spot check
     insert_mock_result(task_slash, cheating_elite, "bad bot completely garbage answer spam links", 0.1, 0.1, 0.1, "")
 

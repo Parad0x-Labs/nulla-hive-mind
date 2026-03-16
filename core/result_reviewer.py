@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import json
-import math
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from core import audit_logger, policy_engine
+from core import audit_logger, policy_engine, scoreboard_engine
 from core.capability_tokens import revoke_capability_tokens_for_task
+from core.hardware_challenge import evaluate_benchmark_result
+from core.parent_orchestrator import continue_parent_orchestration_after_subtask
 from core.reward_engine import create_pending_assist_reward
 from core.task_state_machine import transition
 from core.trace_id import ensure_trace
@@ -17,9 +18,6 @@ from network.assist_models import TaskResult, TaskReview, TaskReward
 from network.protocol import encode_message
 from network.signer import get_local_peer_id as local_peer_id
 from storage.db import get_connection
-from core.parent_orchestrator import continue_parent_orchestration_after_subtask
-from core import scoreboard_engine
-from core.hardware_challenge import evaluate_benchmark_result
 
 
 @dataclass

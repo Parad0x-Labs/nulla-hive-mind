@@ -7,11 +7,9 @@ import io
 import json
 import os
 from pathlib import Path
-from typing import Optional
 
 from core.openclaw_locator import load_registered_agent_name
 from core.runtime_paths import NULLA_HOME, PROJECT_ROOT, data_path
-
 
 _IDENTITY_FILE = "owner_identity.json"
 
@@ -215,7 +213,7 @@ def run_onboarding_interactive() -> dict:
     print()
     print(f"  Locked in. I'm {name}.")
     if pact and pact != "No specific restrictions set.":
-        print(f"  Privacy pact noted. I'll honor it.")
+        print("  Privacy pact noted. I'll honor it.")
     print()
     print("  Let's go.")
     print()

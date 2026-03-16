@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-
 OutputMode = Literal["plain_text", "json_object", "action_plan", "tool_intent", "summary_block"]
 
 

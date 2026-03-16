@@ -6,8 +6,8 @@ import uuid
 from typing import Any
 from unittest import mock
 
-from apps.nulla_agent import NullaAgent
 from adapters.base_adapter import ModelResponse
+from apps.nulla_agent import NullaAgent
 from core.human_input_adapter import HumanInputInterpretation
 from core.identity_manager import load_active_persona
 from core.memory_first_router import MemoryFirstRouter, ModelExecutionDecision

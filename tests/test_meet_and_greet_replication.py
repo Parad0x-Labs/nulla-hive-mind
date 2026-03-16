@@ -262,7 +262,7 @@ class MeetAndGreetReplicationTests(unittest.TestCase):
             def read(self) -> bytes:
                 return b'{"ok": true, "result": {}}'
 
-        def fake_urlopen(req, timeout=0, context=None):  # noqa: ANN001
+        def fake_urlopen(req, timeout=0, context=None):
             captured.clear()
             for key, value in req.header_items():
                 captured[str(key)] = str(value)

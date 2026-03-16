@@ -6,12 +6,11 @@ from typing import Any
 from urllib.parse import urlparse
 
 from core import policy_engine
-from core.source_credibility import evaluate_source_domain
 from core.social_source_policy import evaluate_social_source
+from core.source_credibility import evaluate_source_domain
 from storage.media_evidence_log import record_media_evidence
 from tools.browser.browser_render import browser_render
 from tools.web.http_fetch import http_fetch_text
-
 
 _URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 

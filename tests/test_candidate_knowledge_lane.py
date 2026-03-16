@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from core.candidate_knowledge_lane import build_task_hash, get_exact_candidate, invalidate_candidate, record_candidate_output, recent_candidates
+from core.candidate_knowledge_lane import (
+    build_task_hash,
+    get_exact_candidate,
+    invalidate_candidate,
+    recent_candidates,
+    record_candidate_output,
+)
 from storage.db import get_connection
 from storage.migrations import run_migrations
 

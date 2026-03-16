@@ -1,6 +1,7 @@
-from storage.db import execute_query
 from datetime import datetime
-import uuid
+
+from storage.db import execute_query
+
 
 class PeerManager:
     """
@@ -39,22 +40,22 @@ class PeerManager:
         """
         peer = PeerManager.get_peer(peer_id)
         if not peer: return
-        
+
         # peer_trust_next = clamp(peer_trust_current + (successful_shards * 0.02) - (failed_shards * 0.04) - (strike_count * 0.10), 0.0, 1.0)
-        
+
         current = float(peer["trust_score"])
         s_shards = int(peer["successful_shards"])
         f_shards = int(peer["failed_shards"])
         strikes = int(peer["strike_count"])
-        
+
         # We always calculate from the base (current) + recent shard impact + delta
         new_trust = PeerManager._clamp(
-            current 
-            + (s_shards * 0.02) 
-            - (f_shards * 0.04) 
-            - (strikes * 0.10) 
+            current
+            + (s_shards * 0.02)
+            - (f_shards * 0.04)
+            - (strikes * 0.10)
             + delta,
             0.0, 1.0
         )
-        
+
         execute_query("UPDATE peers SET trust_score = ?, updated_at = ? WHERE peer_id = ?", (new_trust, datetime.now().isoformat(), peer_id))

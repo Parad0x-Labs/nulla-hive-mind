@@ -7,22 +7,22 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from core import audit_logger
-from core.discovery_index import (
-    get_best_helpers,
-    register_capability_ad,
-    record_bootstrap_presence,
-    upsert_peer_minimal,
-    register_peer_endpoint,
-    endpoint_for_peer,
-)
-from core.idle_assist_policy import IdleAssistConfig, should_accept_offer
 from core.capability_tokens import (
     issue_assignment_capability,
     remember_capability_token,
     revoke_capability_tokens_for_task,
 )
-from core.task_state_machine import current_state, transition
+from core.discovery_index import (
+    endpoint_for_peer,
+    record_bootstrap_presence,
+    register_capability_ad,
+    register_peer_endpoint,
+    upsert_peer_minimal,
+)
+from core.idle_assist_policy import IdleAssistConfig, should_accept_offer
+from core.liquefy_bridge import stream_telemetry_event
 from core.task_capsule import TaskCapsule, verify_task_capsule
+from core.task_state_machine import current_state, transition
 from core.trace_id import ensure_trace
 from network.assist_models import (
     CapabilityAd,
@@ -34,21 +34,21 @@ from network.assist_models import (
     TaskReview,
     validate_assist_payload,
 )
-from network.protocol import Protocol, encode_message
+from network.pow_hashcash import required_pow_difficulty, verify_pow
 from network.protocol import (
     BlockFoundPayload,
     BlockPayloadMsg,
     FindBlockPayload,
     FindNodePayload,
     NodeFoundPayload,
+    Protocol,
     RequestBlockPayload,
+    encode_message,
 )
-from network.rate_limiter import allow as rate_allow
 from network.quarantine import note_peer_violation
+from network.rate_limiter import allow as rate_allow
 from network.signer import get_local_peer_id as local_peer_id
 from storage.db import get_connection
-from core.liquefy_bridge import stream_telemetry_event
-from network.pow_hashcash import required_pow_difficulty, verify_pow
 
 
 def _utcnow() -> str:
@@ -66,7 +66,7 @@ def build_find_node_message(target_id: str) -> bytes:
     )
 
 def build_node_found_message(target_id: str, closest_nodes: list[Any]) -> bytes:
-    from network.protocol import NodeFoundPayload, NodeFoundEntry
+    from network.protocol import NodeFoundEntry, NodeFoundPayload
     entries = []
     for n in closest_nodes:
         entries.append(NodeFoundEntry(peer_id=n.peer_id, ip=n.ip, port=n.port))
@@ -317,7 +317,7 @@ def _store_task_claim(claim: TaskClaim) -> None:
         conn.commit()
     finally:
         conn.close()
-        
+
     stream_telemetry_event("TASK_CLAIM", claim.task_id, {"helper": claim.helper_agent_id})
     transition(
         entity_type="subtask",
@@ -867,7 +867,7 @@ def handle_incoming_assist_message(
         block_hash = payload_model.block_hash
         from core.liquefy_cas import get_chunk
         chunk_data = get_chunk(block_hash)
-        
+
         if chunk_data:
             # We have it; advertise a reachable endpoint when known.
             from network.dht import DHTNode
@@ -890,7 +890,7 @@ def handle_incoming_assist_message(
         chunk_data = get_chunk(block_hash)
         if chunk_data:
             generated.append(build_block_payload_message(block_hash, chunk_data))
-            
+
             # Phase 24: Reward Provider Score for serving data
             from core.scoreboard_engine import award_provider_score
             award_provider_score(
@@ -900,7 +900,7 @@ def handle_incoming_assist_message(
                 helpfulness=1.0,
                 outcome="accepted",
             )
-            
+
             return RouteResult(True, "REQUEST_BLOCK processed. Serving 2MB payload.", generated)
         return RouteResult(False, "REQUEST_BLOCK failed. Block not found locally.", generated)
 
@@ -922,13 +922,13 @@ def handle_incoming_assist_message(
 
     if msg_type == "CAPABILITY_AD":
         ad = payload_model
-        
+
         # Phase 30: Sybil Resistance at Genesis
         required_difficulty = required_pow_difficulty(default=4)
         if not verify_pow(ad.agent_id, ad.genesis_nonce, target_difficulty=required_difficulty):
             note_peer_violation(sender, "sybil_invalid_pow")
             return RouteResult(False, "CAPABILITY_AD rejected: Invalid Proof-of-Work nonce.", generated)
-            
+
         register_capability_ad(ad)
         record_bootstrap_presence(
             peer_id=ad.agent_id,
@@ -1014,13 +1014,14 @@ def handle_incoming_assist_message(
                     _store_task_assignment(assign_obj)
                     assign_msg_bytes = build_task_assign_message(assign_obj)
                     generated.append(assign_msg_bytes)
-                    
+
                     # Phase 28: Spot-check check on first assignment
                     if active_count == 0:
-                        from core.discovery_index import get_spot_check_probability
                         import random
+
+                        from core.discovery_index import get_spot_check_probability
                         prob = get_spot_check_probability(helper_peer_id)
-                        
+
                         if random.random() < prob:
                             # Re-open the offer to catch a 2nd helper for redundant validation
                             conn = get_connection()
@@ -1029,11 +1030,11 @@ def handle_incoming_assist_message(
                                 conn.commit()
                             finally:
                                 conn.close()
-                                
+
                             audit_logger.log(
-                                "spot_check_triggered", 
-                                target_id=claim.task_id, 
-                                target_type="task", 
+                                "spot_check_triggered",
+                                target_id=claim.task_id,
+                                target_type="task",
                                 details={"target_helper": helper_peer_id, "probability": prob}
                             )
 
@@ -1096,9 +1097,9 @@ def handle_incoming_assist_message(
         transfer = payload_model
         # The seller signed this message, telling the receiver they sent the credits
         if transfer.buyer_peer_id == local_peer_id():
-            from core.credit_ledger import award_credits
             from core.credit_dex import global_credit_market
-            
+            from core.credit_ledger import award_credits
+
             # 1. Award locally
             award_credits(
                 local_peer_id(),
@@ -1106,10 +1107,10 @@ def handle_incoming_assist_message(
                 f"dex_purchase:{transfer.transfer_id}",
                 receipt_id=transfer.transfer_id,
             )
-            
+
             # 2. Cleanup local order book just in case
-            global_credit_market.remove_offer(f"creditoffer_{transfer.seller_peer_id[:8]}") # Fuzzy, but buyer side cleanup isn't strict 
-            
+            global_credit_market.remove_offer(f"creditoffer_{transfer.seller_peer_id[:8]}") # Fuzzy, but buyer side cleanup isn't strict
+
             audit_logger.log(
                 "credit_transfer_received",
                 target_id=transfer.transfer_id,
@@ -1118,7 +1119,7 @@ def handle_incoming_assist_message(
                 trace_id=transfer.transfer_id,
             )
             return RouteResult(True, f"Received {transfer.credits_transferred} purchased credits.", generated)
-            
+
         return RouteResult(True, "Credit transfer observed.", generated)
 
     return RouteResult(False, "Unhandled assist message.", generated)

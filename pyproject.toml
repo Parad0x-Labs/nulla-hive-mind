@@ -26,6 +26,7 @@ dependencies = [
     "cryptography>=41.0",
     "requests>=2.28",
     "pynacl>=1.5",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -57,10 +58,27 @@ include = ["core*", "network*", "storage*", "sandbox*", "apps*", "ops*", "retrie
 [tool.ruff]
 target-version = "py39"
 line-length = 120
-select = ["E", "W", "F", "I", "N", "UP", "B", "SIM", "RUF"]
-ignore = ["E501"]
 
-[tool.ruff.isort]
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",
+    "E402",   # module-import-not-at-top (conditional/deferred imports)
+    "E701",   # multiple-statements-on-one-line
+    "E741",   # ambiguous-variable-name
+    "N806",   # non-lowercase-variable-in-function
+    "B904",   # raise-without-from-inside-except
+    "SIM102", # collapsible-if
+    "SIM108", # if-else-block-instead-of-if-exp
+    "SIM112", # uncapitalized-environment-variables
+    "SIM117", # multiple-with-statements
+    "RUF001", # ambiguous-unicode-character-string
+    "RUF002", # ambiguous-unicode-character-docstring
+    "RUF003", # ambiguous-unicode-character-comment
+    "RUF012", # mutable-class-default
+]
+
+[tool.ruff.lint.isort]
 known-first-party = ["core", "network", "storage", "sandbox", "apps", "ops", "retrieval", "channels"]
 
 [tool.mypy]

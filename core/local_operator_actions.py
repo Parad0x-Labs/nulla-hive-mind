@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import csv
 import fnmatch
 import json
@@ -20,7 +21,6 @@ from core.execution_gate import ExecutionGate
 from core.reasoning_engine import Plan
 from core.runtime_paths import data_path
 from storage.db import get_connection
-
 
 _INSPECT_HINTS = (
     "disk bloat",
@@ -1323,10 +1323,7 @@ def _parse_calendar_request(text: str) -> dict[str, Any] | None:
     duration_match = _DURATION_RE.search(text)
     duration_value = int(duration_match.group(1)) if duration_match else 30
     duration_unit = str(duration_match.group(2) or "m").lower() if duration_match else "m"
-    if duration_unit.startswith("h"):
-        duration_minutes = duration_value * 60
-    else:
-        duration_minutes = duration_value
+    duration_minutes = duration_value * 60 if duration_unit.startswith("h") else duration_value
     end_dt = start_dt + timedelta(minutes=max(15, duration_minutes))
     outbox_dir = data_path("calendar_outbox")
     return {
@@ -1445,14 +1442,10 @@ def _operator_safe_path(path: Path) -> bool:
     if _path_is_denied(resolved):
         return False
     allowed_roots = [Path.home().resolve()]
-    try:
+    with contextlib.suppress(Exception):
         allowed_roots.append(Path(tempfile.gettempdir()).resolve())
-    except Exception:
-        pass
-    try:
+    with contextlib.suppress(Exception):
         allowed_roots.append(data_path().parent.resolve())
-    except Exception:
-        pass
     return any(_is_relative_to(resolved, root) or resolved == root for root in allowed_roots)
 
 

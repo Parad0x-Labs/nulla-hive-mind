@@ -14,6 +14,7 @@ from typing import Any
 
 from core import policy_engine
 from core.source_credibility import evaluate_source_domain
+from retrieval.web_adapter import _domain_from_url
 from tools.browser.browser_render import browser_render
 from tools.web.ddg_instant import best_text_blob, ddg_instant_answer
 from tools.web.http_fetch import http_fetch_text
@@ -531,6 +532,6 @@ def _resolve_duckduckgo_result_url(raw_href: str) -> str:
         return ""
     parsed = urlparse(href)
     query = parse_qs(parsed.query)
-    if "uddg" in query and query["uddg"]:
+    if query.get("uddg"):
         return urllib.parse.unquote(query["uddg"][0])
     return href

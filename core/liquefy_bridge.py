@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import gzip
 import hashlib
 import json
@@ -24,10 +25,10 @@ try:
     if _api_dir not in _sys.path:
         _sys.path.insert(0, _api_dir)
 
+    import zstandard as zstd
+    from api.common_zstd import make_cctx
     from api.liquefy_audit_chain import AuditChain
     from api.liquefy_safety import LiquefySafety
-    from api.common_zstd import make_cctx
-    import zstandard as zstd
     LIQUEFY_AVAILABLE = True
 except ImportError:
     LIQUEFY_AVAILABLE = False
@@ -304,7 +305,7 @@ def pack_json_artifact(
 
     chain = _get_audit_chain()
     if chain:
-        try:
+        with contextlib.suppress(Exception):
             chain.append(
                 "research_artifact_packed",
                 span_id=str(packed["artifact_id"]),
@@ -318,8 +319,6 @@ def pack_json_artifact(
                     "content_sha256": str(packed["content_sha256"]),
                 },
             )
-        except Exception:
-            pass
 
     audit_logger.log(
         "liquefy_json_artifact_packed",

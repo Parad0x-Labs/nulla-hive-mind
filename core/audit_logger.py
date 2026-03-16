@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 from storage.db import execute_query, get_connection
 from storage.event_log import append_event
@@ -34,8 +33,8 @@ def _ensure_audit_log_table() -> None:
 
 def log(
     event_type: str,
-    target_id: Optional[str] = None,
-    details: Optional[dict] = None,
+    target_id: str | None = None,
+    details: dict | None = None,
     *,
     actor: str = "system",
     target_type: str = "generic",

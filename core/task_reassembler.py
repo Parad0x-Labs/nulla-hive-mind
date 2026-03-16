@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 from dataclasses import dataclass
@@ -7,7 +8,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core import audit_logger
-from network.assist_models import TaskResult
 from storage.db import get_connection
 
 
@@ -97,14 +97,14 @@ def _get_child_offers(parent_task_id: str) -> list[dict[str, Any]]:
 def _get_accepted_results_for_offers(offer_ids: list[str]) -> list[dict[str, Any]]:
     if not offer_ids:
         return []
-    
+
     conn = get_connection()
     try:
         placeholders = ",".join("?" for _ in offer_ids)
         # We only want results that have been formally accepted through review
         results = conn.execute(
             f"""
-            SELECT * FROM task_results 
+            SELECT * FROM task_results
             WHERE task_id IN ({placeholders})
             AND status IN ('accepted', 'partial')
             """,
@@ -125,11 +125,11 @@ def check_and_reassemble(parent_task_id: str) -> ReassembledPlan | None:
         return None
 
     offer_ids = [offer["task_id"] for offer in child_offers]
-    
+
     pending_offers = [o for o in child_offers if o["status"] not in {"completed", "cancelled"}]
-    
+
     accepted_results = _get_accepted_results_for_offers(offer_ids)
-    
+
     # If we have pending offers, the reassembly is not complete.
     # But we can still return a partial state so the parent knows progress.
     if pending_offers:
@@ -157,25 +157,23 @@ def check_and_reassemble(parent_task_id: str) -> ReassembledPlan | None:
             pending_subtasks=0,
             confidence=0.0,
             completeness_score=0.0,
-            result_hash=hashlib.sha256(f"{parent_task_id}:empty".encode("utf-8")).hexdigest(),
+            result_hash=hashlib.sha256(f"{parent_task_id}:empty".encode()).hexdigest(),
         )
 
     merged_evidence = []
     merged_steps = []
     confidences: list[float] = []
-    
+
     for res in accepted_results:
-        try:
+        with contextlib.suppress(Exception):
             confidences.append(max(0.0, min(1.0, float(res.get("confidence") or 0.0))))
-        except Exception:
-            pass
         try:
             evidence = json.loads(res["evidence_json"])
             if isinstance(evidence, list):
                 merged_evidence.extend(evidence)
         except Exception:
             pass
-            
+
         try:
             steps = json.loads(res["abstract_steps_json"])
             if isinstance(steps, list):

@@ -6,9 +6,8 @@ import time
 from dataclasses import dataclass, field
 
 from apps.meet_and_greet_server import MeetAndGreetServerConfig, build_server
-from core import audit_logger
+from core import audit_logger, policy_engine
 from core.logging_config import setup_logging
-from core import policy_engine
 from core.meet_and_greet_models import MeetNodeRegisterRequest
 from core.meet_and_greet_replication import MeetAndGreetReplicator, ReplicationConfig
 from core.meet_and_greet_service import MeetAndGreetConfig, MeetAndGreetService

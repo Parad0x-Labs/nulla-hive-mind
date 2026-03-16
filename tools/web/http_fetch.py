@@ -7,7 +7,6 @@ from html.parser import HTMLParser
 
 from core import policy_engine
 
-
 _CAPTCHA_RE = re.compile(r"(captcha|are you human|robot check)", re.IGNORECASE)
 _LOGIN_RE = re.compile(r"(sign in|log in|password)", re.IGNORECASE)
 

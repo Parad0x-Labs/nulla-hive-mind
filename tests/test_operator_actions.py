@@ -9,8 +9,8 @@ from apps.nulla_agent import NullaAgent
 from core.execution_gate import ExecutionGate
 from core.local_operator_actions import list_operator_tools, operator_capability_ledger
 from core.persistent_memory import maybe_handle_memory_command
-from core.user_preferences import maybe_handle_preference_command
 from core.runtime_paths import data_path
+from core.user_preferences import maybe_handle_preference_command
 from storage.db import get_connection
 from storage.migrations import run_migrations
 from storage.replica_table import holders_for_shard

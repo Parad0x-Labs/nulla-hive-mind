@@ -17,8 +17,8 @@ from core.brain_hive_dashboard import (
     _augment_dashboard_with_trading_scanner,
     _build_trading_learning_payload,
     _safe_list_recent_topic_claims_feed,
-    build_dashboard_snapshot,
     _safe_list_topic_claims,
+    build_dashboard_snapshot,
     render_dashboard_html,
     render_topic_detail_html,
 )
@@ -47,7 +47,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertEqual(calls[1][1], "cluster-token")
 
     def test_fetch_dashboard_raises_when_all_upstreams_fail(self) -> None:
-        def fake_fetch(url: str, token: str | None) -> dict:  # noqa: ARG001
+        def fake_fetch(url: str, token: str | None) -> dict:
             raise ValueError("unreachable")
 
         with self.assertRaisesRegex(ValueError, "All upstream meet nodes failed"):
@@ -72,7 +72,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertEqual(tokens["https://seed-eu.example.nulla/v1/hive/dashboard"], "eu-token")
 
     def test_fetch_dashboard_prefers_fresher_trading_presence(self) -> None:
-        def fake_fetch(url: str, token: str | None) -> dict:  # noqa: ARG001
+        def fake_fetch(url: str, token: str | None) -> dict:
             if "seed-eu" in url:
                 return {
                     "ok": True,
@@ -105,7 +105,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertEqual(result["source_meet_url"], "https://seed-us.example.nulla")
 
     def test_fetch_dashboard_collapses_duplicate_visible_agents_but_keeps_raw_presence_counts(self) -> None:
-        def fake_fetch(url: str, token: str | None) -> dict:  # noqa: ARG001
+        def fake_fetch(url: str, token: str | None) -> dict:
             return {
                 "ok": True,
                 "result": {
@@ -166,14 +166,14 @@ class BrainHiveWatchServerTests(unittest.TestCase):
             def __init__(self, data: dict) -> None:
                 self._data = data
 
-            def model_dump(self, mode: str = "json") -> dict:  # noqa: ARG002
+            def model_dump(self, mode: str = "json") -> dict:
                 return dict(self._data)
 
         class FakeHive:
             def get_stats(self) -> FakeRecord:
                 return FakeRecord({"active_agents": 0, "task_stats": {}, "region_stats": [], "total_topics": 1, "total_posts": 0})
 
-            def list_topics(self, *, limit: int = 100, include_flagged: bool = False, status: str | None = None):  # noqa: ARG002
+            def list_topics(self, *, limit: int = 100, include_flagged: bool = False, status: str | None = None):
                 return [
                     FakeRecord(
                         {
@@ -192,13 +192,13 @@ class BrainHiveWatchServerTests(unittest.TestCase):
                     )
                 ][:limit]
 
-            def list_agent_profiles(self, *, limit: int = 100):  # noqa: ARG002
+            def list_agent_profiles(self, *, limit: int = 100):
                 return []
 
-            def list_recent_posts_feed(self, *, limit: int = 50):  # noqa: ARG002
+            def list_recent_posts_feed(self, *, limit: int = 50):
                 return []
 
-            def list_posts(self, topic_id: str, *, limit: int = 200, include_flagged: bool = False):  # noqa: ARG002
+            def list_posts(self, topic_id: str, *, limit: int = 200, include_flagged: bool = False):
                 if topic_id != "topic-1":
                     return []
                 return [
@@ -270,23 +270,23 @@ class BrainHiveWatchServerTests(unittest.TestCase):
             def __init__(self, data: dict) -> None:
                 self._data = data
 
-            def model_dump(self, mode: str = "json") -> dict:  # noqa: ARG002
+            def model_dump(self, mode: str = "json") -> dict:
                 return dict(self._data)
 
         class FakeHive:
             def get_stats(self) -> FakeRecord:
                 return FakeRecord({"active_agents": 1, "task_stats": {}, "region_stats": [], "total_topics": 0, "total_posts": 0})
 
-            def list_topics(self, *, limit: int = 100, include_flagged: bool = False, status: str | None = None):  # noqa: ARG002
+            def list_topics(self, *, limit: int = 100, include_flagged: bool = False, status: str | None = None):
                 return []
 
-            def list_agent_profiles(self, *, limit: int = 100):  # noqa: ARG002
+            def list_agent_profiles(self, *, limit: int = 100):
                 return [
                     FakeRecord({"agent_id": "agent-online", "display_name": "NULLA", "online": True}),
                     FakeRecord({"agent_id": "agent-offline", "display_name": "NULLA-old", "online": False}),
                 ][:limit]
 
-            def list_recent_posts_feed(self, *, limit: int = 50):  # noqa: ARG002
+            def list_recent_posts_feed(self, *, limit: int = 50):
                 return []
 
         summary_stub = {
@@ -336,17 +336,17 @@ class BrainHiveWatchServerTests(unittest.TestCase):
             def __init__(self, data: dict) -> None:
                 self._data = data
 
-            def model_dump(self, mode: str = "json") -> dict:  # noqa: ARG002
+            def model_dump(self, mode: str = "json") -> dict:
                 return dict(self._data)
 
         class FakeHive:
             def get_stats(self) -> FakeRecord:
                 return FakeRecord({"active_agents": 3, "task_stats": {}, "region_stats": [], "total_topics": 0, "total_posts": 0})
 
-            def list_topics(self, *, limit: int = 100, include_flagged: bool = False, status: str | None = None):  # noqa: ARG002
+            def list_topics(self, *, limit: int = 100, include_flagged: bool = False, status: str | None = None):
                 return []
 
-            def list_agent_profiles(self, *, limit: int = 100):  # noqa: ARG002
+            def list_agent_profiles(self, *, limit: int = 100):
                 return [
                     FakeRecord({
                         "agent_id": "agent-live",
@@ -377,7 +377,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
                     }),
                 ][:limit]
 
-            def list_recent_posts_feed(self, *, limit: int = 50):  # noqa: ARG002
+            def list_recent_posts_feed(self, *, limit: int = 50):
                 return []
 
         summary_stub = {

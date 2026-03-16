@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 NULLA_HOME = Path(os.environ.get("NULLA_HOME", PROJECT_ROOT / ".nulla_local")).resolve()
 DATA_DIR = (NULLA_HOME / "data").resolve()

@@ -20,7 +20,6 @@ from core.user_preferences import default_preferences, save_preferences
 from storage.db import DEFAULT_DB_PATH, get_connection
 from storage.migrations import run_migrations
 
-
 RUNTIME_TABLES = (
     "audit_log",
     "compute_credit_ledger",

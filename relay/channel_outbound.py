@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from core.bootstrap_adapters import BootstrapMirrorAdapter, HttpJsonMirrorAdapter
-from network.signer import get_local_peer_id as local_peer_id, sign
-
+from network.signer import get_local_peer_id as local_peer_id
+from network.signer import sign
 
 TOPIC_BY_PLATFORM = {
     "discord": "discord_outbound",

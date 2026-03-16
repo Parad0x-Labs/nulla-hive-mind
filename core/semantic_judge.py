@@ -1,5 +1,6 @@
 import logging
 import os
+
 from core import audit_logger
 
 logger = logging.getLogger(__name__)
@@ -12,7 +13,7 @@ def _init_llm_judge():
     global _JUDGE_PIPELINE, _LLM_LOAD_ATTEMPTED
     if _LLM_LOAD_ATTEMPTED:
         return _JUDGE_PIPELINE
-        
+
     _LLM_LOAD_ATTEMPTED = True
     if os.environ.get("NULLA_ENABLE_LOCAL_SEMANTIC_MODEL") != "1":
         logger.info("Semantic Judge local model not enabled; using deterministic fallback.")
@@ -37,7 +38,7 @@ def _init_llm_judge():
         logger.warning("transformers not installed, Semantic Judge disabled.")
     except Exception as e:
         logger.warning(f"Failed to load Semantic Judge LLM: {e}")
-        
+
     return _JUDGE_PIPELINE
 
 def evaluate_semantic_agreement(summary_a: str, summary_b: str) -> float:
@@ -48,7 +49,7 @@ def evaluate_semantic_agreement(summary_a: str, summary_b: str) -> float:
     """
     if not summary_a or not summary_b:
         return 0.5
-        
+
     judge = _init_llm_judge()
     if judge:
         try:
@@ -61,11 +62,11 @@ def evaluate_semantic_agreement(summary_a: str, summary_b: str) -> float:
             return max(0.0, min(1.0, score))
         except Exception as e:
             logger.warning(f"LLM semantic evaluation failed, falling back: {e}")
-            
+
     # Fallback tokenizer algorithm (Legacy Phase 2 behaviour)
     def _tokenize(text: str) -> set[str]:
         return {t for t in "".join(ch if ch.isalnum() else " " for ch in text.lower()).split() if len(t) > 2}
-        
+
     ta = _tokenize(summary_a)
     tb = _tokenize(summary_b)
     if not ta or not tb:

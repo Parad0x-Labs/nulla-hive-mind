@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from core import audit_logger
 from storage.db import get_connection
 
-
 # ---------------------------------------------------------------------------
 # Validation rules
 # ---------------------------------------------------------------------------

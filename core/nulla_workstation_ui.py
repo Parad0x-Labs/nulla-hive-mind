@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from html import escape
 
-
 NULLA_WORKSTATION_DEPLOYMENT_VERSION = "nulla-workstation-2026-03-13-v1"
 
 

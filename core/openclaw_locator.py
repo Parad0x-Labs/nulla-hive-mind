@@ -5,7 +5,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-
 NULLA_AGENT_ID = "nulla"
 
 

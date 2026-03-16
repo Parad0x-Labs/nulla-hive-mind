@@ -7,7 +7,12 @@ from unittest import mock
 from core.curiosity_roamer import AdaptiveResearchResult
 from core.hive_activity_tracker import HiveActivityTracker, HiveActivityTrackerConfig
 from core.public_hive_bridge import PublicHiveBridgeConfig
-from core.tool_intent_executor import execute_tool_intent, plan_tool_workflow, runtime_tool_specs, should_attempt_tool_intent
+from core.tool_intent_executor import (
+    execute_tool_intent,
+    plan_tool_workflow,
+    runtime_tool_specs,
+    should_attempt_tool_intent,
+)
 
 
 class ToolIntentExecutorTests(unittest.TestCase):

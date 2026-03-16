@@ -5,12 +5,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from core import audit_logger, policy_engine
+from core.capacity_predictor import predict_local_override_necessity
 from core.consensus_validator import decide_consensus_for_task
+from core.finalizer import finalize_parent_response
+from core.local_worker_pool import resolve_local_worker_capacity
 from core.task_decomposer import broadcast_decomposed_subtasks, decompose_task, should_decompose
 from core.task_reassembler import check_and_reassemble as reassemble_parent_task
-from core.finalizer import finalize_parent_response
-from core.capacity_predictor import predict_local_override_necessity
-from core.local_worker_pool import resolve_local_worker_capacity
 from core.task_state_machine import transition
 from core.trace_id import ensure_trace
 from storage.db import get_connection
@@ -297,7 +297,7 @@ def orchestrate_parent_task(
                 sub.offer.priority = "background"  # type: ignore
                 sub.capsule.learning_allowed = True
                 sub.offer.capsule = sub.capsule.model_dump(mode="json")
-                
+
     sent = broadcast_decomposed_subtasks(
         decomposed,
         exclude_host_group_hint_hash=exclude_host_group_hint_hash,
