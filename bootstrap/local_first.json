@@ -1,6 +1,6 @@
 {
-  "expires_at": "2026-03-16T21:48:44.294994+00:00",
-  "published_at": "2026-03-16T21:33:44.294994+00:00",
+  "expires_at": "2026-03-16T22:18:12.865470+00:00",
+  "published_at": "2026-03-16T22:03:12.865470+00:00",
   "publisher_peer_id": "e22055438b2e5e2122e59d722b50690665151696f1fc5527c9b00e27e4598a25",
   "record_count": 1,
   "records": [
@@ -13,17 +13,17 @@
       ],
       "capacity": 5,
       "endpoint": {
-        "host": "198.51.100.10",
-        "port": 49200
+        "host": "188.69.178.21",
+        "port": 49152
       },
       "host_group_hint_hash": null,
-      "last_seen_at": "2026-03-16T21:33:13.733997+00:00",
+      "last_seen_at": "2026-03-16T22:02:42.448681+00:00",
       "peer_id": "e22055438b2e5e2122e59d722b50690665151696f1fc5527c9b00e27e4598a25",
       "status": "idle",
       "trust_score": 0.5
     }
   ],
-  "signature": "jzDKLI+O99no9UXxSF+fsJ3VOaz+OSPhAjRepuUayQiYtnkGx6Q9uvvhH02HCdMFIGlSVptMh7st1IYcmD/0Bw==",
-  "snapshot_hash": "a089a24dd907eb267497275a6f83df25dd4e1d3a8d545e29a6913bbc893be0f7",
+  "signature": "F6gQvbwo/TSJ4pDOmgfdvozY0VWFeF1mezU0rzWcq600Zwrr4HSvFBXobGMTdWj1cQl9wYPHedSF2UrdXuEIAg==",
+  "snapshot_hash": "dc64da05be996d30c7959b5530465aa8270ce07fcba715e04f691cb6884f4711",
   "topic_name": "local_first"
 }

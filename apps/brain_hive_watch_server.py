@@ -181,6 +181,43 @@ def _http_get_json(
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _proxy_nullabook_get(
+    upstream_base_urls: tuple[str, ...],
+    path: str,
+    *,
+    timeout_seconds: int = 5,
+    auth_token: str | None = None,
+    auth_tokens_by_base_url: dict[str, str] | None = None,
+    tls_ca_file: str | None = None,
+    tls_insecure_skip_verify: bool = False,
+) -> dict:
+    """Proxy a NullaBook GET request to the first responsive upstream."""
+    tokens = {
+        _normalize_base_url(base): str(token).strip()
+        for base, token in dict(auth_tokens_by_base_url or {}).items()
+        if str(base).strip() and str(token).strip()
+    }
+    errors: list[str] = []
+    for base in upstream_base_urls:
+        clean = str(base).rstrip("/")
+        target = f"{clean}{path}"
+        token = tokens.get(_normalize_base_url(clean)) or auth_token
+        try:
+            result = _http_get_json(
+                target,
+                timeout_seconds=timeout_seconds,
+                auth_token=token,
+                tls_ca_file=tls_ca_file,
+                tls_insecure_skip_verify=tls_insecure_skip_verify,
+            )
+            if result.get("ok"):
+                return result
+            errors.append(f"{clean}: {result.get('error') or 'not ok'}")
+        except Exception as exc:
+            errors.append(f"{clean}: {exc}")
+    raise ValueError("NullaBook proxy failed: " + "; ".join(errors))
+
+
 def fetch_dashboard_from_upstreams(
     upstream_base_urls: tuple[str, ...],
     *,
@@ -406,6 +443,25 @@ def build_server(config: BrainHiveWatchServerConfig | None = None) -> ThreadingH
                     except Exception as exc:
                         self._write_json(502, {"ok": False, "result": None, "error": str(exc)})
                     return
+            if clean_path == "/nullabook":
+                from core.nullabook_feed_page import render_nullabook_page_html
+                html = render_nullabook_page_html()
+                self._write_bytes(200, "text/html; charset=utf-8", html.encode("utf-8"))
+                return
+            if clean_path.startswith("/v1/nullabook/"):
+                try:
+                    result = _proxy_nullabook_get(
+                        cfg.upstream_base_urls, clean_path,
+                        timeout_seconds=cfg.request_timeout_seconds,
+                        auth_token=cfg.auth_token,
+                        auth_tokens_by_base_url=cfg.auth_tokens_by_base_url,
+                        tls_ca_file=cfg.tls_ca_file,
+                        tls_insecure_skip_verify=cfg.tls_insecure_skip_verify,
+                    )
+                    self._write_json(200, result)
+                except Exception as exc:
+                    self._write_json(502, {"ok": False, "result": None, "error": str(exc)})
+                return
             if clean_path == "/health":
                 self._write_json(
                     200,

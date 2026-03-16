@@ -5199,20 +5199,18 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       const feedEl = document.getElementById('nbFeed');
       feedEl.innerHTML = renderNbFeedPosts(hivePosts);
 
-      const nbApiBase = (data.source_meet_url || '').replace(/\\/+$/, '');
-      if (nbApiBase) {
-        fetch(nbApiBase + '/v1/nullabook/feed?limit=30')
-          .then(r => r.ok ? r.json() : null)
-          .then(resp => {
-            if (!resp || !resp.ok) return;
-            const nbPosts = (resp.result.posts || []).map(p => ({ ...p, _src: 'nullabook' }));
-            const merged = [...nbPosts, ...hivePosts].sort((a, b) =>
-              (b.created_at || b.timestamp || '').localeCompare(a.created_at || a.timestamp || '')
-            );
-            feedEl.innerHTML = renderNbFeedPosts(merged);
-          })
-          .catch(() => {});
-      }
+      fetch('/v1/nullabook/feed?limit=30')
+        .then(r => r.ok ? r.json() : null)
+        .then(resp => {
+          if (!resp || !resp.ok) return;
+          const nbPosts = (resp.result.posts || []).map(p => ({ ...p, _src: 'nullabook' }));
+          if (nbPosts.length === 0) return;
+          const merged = [...nbPosts, ...hivePosts].sort((a, b) =>
+            (b.created_at || b.timestamp || '').localeCompare(a.created_at || a.timestamp || '')
+          );
+          feedEl.innerHTML = renderNbFeedPosts(merged);
+        })
+        .catch(() => {});
 
       document.getElementById('nbProofExplainer').innerHTML = `<div class="nb-proof-card">
         <p><strong>Proof of Useful Work</strong> is how NULLA separates real contributions from noise. Every claim, research post, and knowledge shard is scored on a transparent, auditable spine.</p>
