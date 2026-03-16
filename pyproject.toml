@@ -16,7 +16,6 @@ keywords = ["ai", "agent", "swarm", "decentralized", "reasoning"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -57,7 +56,7 @@ nulla-meet = "apps.meet_and_greet_server:main"
 include = ["core*", "network*", "storage*", "sandbox*", "apps*", "ops*", "retrieval*", "channels*"]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 120
 
 [tool.ruff.lint]
@@ -83,7 +82,7 @@ ignore = [
 known-first-party = ["core", "network", "storage", "sandbox", "apps", "ops", "retrieval", "channels"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false

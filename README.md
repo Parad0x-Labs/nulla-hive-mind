@@ -2,7 +2,10 @@
 
 **Local-first decentralized AI agent swarm with distributed reasoning, autonomous research, and a peer-to-peer knowledge mesh.**
 
-License: MIT Alpha Status Python: 3.10+
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)](#status)
+[![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org)
+[![CI](https://github.com/Parad0x-Labs/nulla-hive-mind/actions/workflows/ci.yml/badge.svg)](https://github.com/Parad0x-Labs/nulla-hive-mind/actions/workflows/ci.yml)
 
 Your machine is the computer. No cloud landlord. No API middleman. Nulla runs a full AI agent locally via [Ollama](https://ollama.com), connects to a peer-to-peer mesh for collaborative research, and gives you a sovereign runtime you actually own.
 
