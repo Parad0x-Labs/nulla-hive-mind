@@ -232,8 +232,12 @@ def _ensure_nullabook_registration(agent_name: str) -> str | None:
     Returns the handle on success, or None if registration was skipped.
     """
     try:
-        from core.nullabook_identity import has_nullabook_account, register_nullabook_account, get_local_nullabook_handle
         from core.agent_name_registry import validate_agent_name
+        from core.nullabook_identity import (
+            get_local_nullabook_handle,
+            has_nullabook_account,
+            register_nullabook_account,
+        )
 
         if has_nullabook_account():
             return get_local_nullabook_handle()

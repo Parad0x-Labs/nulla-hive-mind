@@ -35,7 +35,7 @@ class NullaBookIdentityTests(unittest.TestCase):
 
     @patch("core.nullabook_identity.get_local_peer_id", return_value="aabbccdd" * 8)
     def test_token_revocation(self, _mock_pid):
-        from core.nullabook_identity import register_nullabook_account, verify_token, revoke_token
+        from core.nullabook_identity import register_nullabook_account, revoke_token, verify_token
 
         reg = register_nullabook_account("Test_Agent", peer_id="aabbccdd" * 8)
         self.assertIsNotNone(verify_token(reg.token))
@@ -47,7 +47,7 @@ class NullaBookIdentityTests(unittest.TestCase):
 
     @patch("core.nullabook_identity.get_local_peer_id", return_value="aabbccdd" * 8)
     def test_token_rotation(self, _mock_pid):
-        from core.nullabook_identity import register_nullabook_account, verify_token, rotate_token
+        from core.nullabook_identity import register_nullabook_account, rotate_token, verify_token
 
         reg = register_nullabook_account("Rotating_Agent", peer_id="aabbccdd" * 8)
         old_token = reg.token
@@ -59,9 +59,9 @@ class NullaBookIdentityTests(unittest.TestCase):
 
     @patch("core.nullabook_identity.get_local_peer_id", return_value="aabbccdd" * 8)
     def test_profile_crud(self, _mock_pid):
-        from core.nullabook_identity import register_nullabook_account, get_profile, update_profile
+        from core.nullabook_identity import get_profile, register_nullabook_account, update_profile
 
-        reg = register_nullabook_account("Profile_Bot", peer_id="aabbccdd" * 8)
+        register_nullabook_account("Profile_Bot", peer_id="aabbccdd" * 8)
         profile = get_profile("aabbccdd" * 8)
         self.assertIsNotNone(profile)
         self.assertEqual(profile.handle, "Profile_Bot")
@@ -73,7 +73,7 @@ class NullaBookIdentityTests(unittest.TestCase):
 
     @patch("core.nullabook_identity.get_local_peer_id", return_value="aabbccdd" * 8)
     def test_profile_by_handle(self, _mock_pid):
-        from core.nullabook_identity import register_nullabook_account, get_profile_by_handle
+        from core.nullabook_identity import get_profile_by_handle, register_nullabook_account
 
         register_nullabook_account("HandleTest", peer_id="aabbccdd" * 8)
 
@@ -90,7 +90,10 @@ class NullaBookIdentityTests(unittest.TestCase):
     @patch("core.nullabook_identity.get_local_peer_id", return_value="aabbccdd" * 8)
     def test_deactivate_account(self, _mock_pid):
         from core.nullabook_identity import (
-            register_nullabook_account, verify_token, deactivate_account, get_profile,
+            deactivate_account,
+            get_profile,
+            register_nullabook_account,
+            verify_token,
         )
 
         reg = register_nullabook_account("Doomed_Agent", peer_id="aabbccdd" * 8)
@@ -147,8 +150,10 @@ class NullaBookIdentityTests(unittest.TestCase):
     @patch("core.nullabook_identity.get_local_peer_id", return_value="aabbccdd" * 8)
     def test_increment_counters(self, _mock_pid):
         from core.nullabook_identity import (
-            register_nullabook_account, get_profile,
-            increment_post_count, increment_claim_count,
+            get_profile,
+            increment_claim_count,
+            increment_post_count,
+            register_nullabook_account,
         )
 
         register_nullabook_account("Counter_Bot", peer_id="aabbccdd" * 8)
@@ -163,7 +168,7 @@ class NullaBookIdentityTests(unittest.TestCase):
 
     @patch("core.nullabook_identity.get_local_peer_id", return_value="aabbccdd" * 8)
     def test_list_profiles(self, _mock_pid):
-        from core.nullabook_identity import register_nullabook_account, list_profiles
+        from core.nullabook_identity import list_profiles, register_nullabook_account
 
         register_nullabook_account("Agent_A", peer_id="aaaa" * 16)
         register_nullabook_account("Agent_B", peer_id="bbbb" * 16)
@@ -184,9 +189,11 @@ class NullaBookIdentityTests(unittest.TestCase):
 
     @patch("core.nullabook_identity.get_local_peer_id", return_value="aabbccdd" * 8)
     def test_local_token_persistence(self, _mock_pid):
-        from core.nullabook_identity import save_token_locally, load_local_token
-        import tempfile, os
+        import os
+        import tempfile
         from unittest.mock import patch as _patch
+
+        from core.nullabook_identity import load_local_token, save_token_locally
 
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_path = os.path.join(tmpdir, "nullabook_token.secret")

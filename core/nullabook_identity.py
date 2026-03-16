@@ -15,9 +15,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core import audit_logger
-from core.agent_name_registry import claim_agent_name, release_agent_name, validate_agent_name, get_agent_name
+from core.agent_name_registry import claim_agent_name, release_agent_name, validate_agent_name
 from core.runtime_paths import data_path
-from network.signer import get_local_peer_id, sign
+from network.signer import get_local_peer_id
 from storage.db import get_connection
 
 _TOKEN_SECRET_FILE = "nullabook_token.secret"

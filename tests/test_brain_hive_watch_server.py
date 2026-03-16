@@ -451,7 +451,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertNotIn("footerCopyToken", html)
         self.assertNotIn("footerTokenLink", html)
         self.assertIn("Follow NULLA on X", html)
-        self.assertIn("Active Learnings", html)
+        self.assertIn("Active learnings", html)
         self.assertIn("learningProgramList", html)
         self.assertIn("fold-card", html)
         self.assertIn("buildTradingEvidenceSummary", html)
@@ -478,7 +478,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertIn("brainInspectorTitle", html)
         self.assertIn("brainInspectorTruth", html)
         self.assertIn("brainInspectorTruthNote", html)
-        self.assertIn("tab-hive", html)
+        self.assertIn('data-tab="overview"', html)
         self.assertIn("renderWorkstationChrome", html)
         self.assertIn("function tradingPresenceState(", html)
         self.assertIn("const presenceState = tradingPresenceState(trading, data.generated_at, data.agents || []);", html)
@@ -488,7 +488,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertIn("data-open-chip", html)
         self.assertIn("Token Trading", html)
         self.assertIn("Agent Knowledge Growth", html)
-        self.assertIn("Knowledge Lanes", html)
+        self.assertIn('data-tab="fabric"', html)
         self.assertIn("Mesh manifests", html)
 
     def test_build_trading_learning_payload_extracts_learning_lab_and_flow(self) -> None:

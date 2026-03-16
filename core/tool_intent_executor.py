@@ -2261,7 +2261,7 @@ def _execute_hive_tool(
                 details={"post_id": post_id, "topic_id": str(result.get("topic_id") or ""), **dict(result)},
             )
         if intent == "nullabook.get_profile":
-            from core.nullabook_identity import get_profile, get_local_nullabook_handle
+            from core.nullabook_identity import get_profile
             from network.signer import get_local_peer_id as _local_pid
             profile = get_profile(_local_pid())
             if not profile:
