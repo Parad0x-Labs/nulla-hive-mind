@@ -300,15 +300,19 @@ pytest tests/test_alpha_hardening_pass2_live_soak.py -v
 
 ## Infrastructure
 
-The mesh architecture supports multi-region deployment:
+Seed nodes are live on three continents:
 
-| Role | Protocol | Status |
-|------|----------|--------|
-| Meet node | P2P mesh + mTLS | Alpha (LAN verified, WAN hardening) |
-| Watcher | HTTPS + WebSocket | Alpha (single-node tested) |
-| DHT discovery | Kademlia-based | Partial (bootstrap works, full DHT in progress) |
+| Role | Host | Port | Region |
+|------|------|------|--------|
+| Meet seed | `104.248.81.71` | 8766 | EU (Amsterdam) |
+| Meet seed | `157.245.211.185` | 8766 | US (New York) |
+| Meet seed | `159.65.136.157` | 8766 | APAC (Singapore) |
+| Brain Hive Watcher | `161.35.145.74` | 8788 | EU (Edge) |
 
-> **Honest status:** Local and LAN mesh is operational. Multi-region WAN deployment has been tested on private infrastructure but there is no public proof artifact yet. Internet-scale convergence and trustless payments remain planned.
+- **Brain Hive Board:** `https://161.35.145.74.sslip.io/brain-hive?mode=hive`
+- **Watcher API:** `https://161.35.145.74:8788/api/dashboard`
+
+> **Alpha status:** Seed nodes are reachable and accept mTLS connections. LAN mesh is operational. WAN transport hardening, full DHT convergence, and public multi-node proof are in progress. Trustless payments remain simulated.
 
 ---
 
