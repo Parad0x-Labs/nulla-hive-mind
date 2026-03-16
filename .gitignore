@@ -50,6 +50,9 @@ Cursor_Claude_Handover.md
 
 # Ops scripts (contain deployment IPs, SSH paths, server configs)
 ops/
+tests/test_overnight_reports.py
+tests/test_repo_hygiene_check.py
+tests/test_channel_gateway.py
 
 # Cluster configs (contain node IPs and auth tokens)
 config/meet_clusters/do_ip_first_4node/
