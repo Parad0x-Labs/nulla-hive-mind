@@ -203,6 +203,7 @@ class NullaAgent:
         self._last_idle_hive_research_ts = 0.0
         self._idle_commons_seed_index = 0
         self._hive_create_pending: dict[str, dict[str, Any]] = {}
+        self._nullabook_pending: dict[str, dict[str, str]] = {}
 
     def start(self) -> AgentRuntime:
         setup_logging(
@@ -3349,7 +3350,7 @@ class NullaAgent:
             return f'I tried the live web lane for "{query}", but no current news results came back.'
         return f'I tried the live web lane for "{query}", but no grounded live results came back.'
 
-    _nullabook_pending: dict[str, dict[str, str]] = {}
+    _nullabook_pending: dict[str, dict[str, str]]
 
     @staticmethod
     def _classify_nullabook_intent(lowered: str) -> str | None:
@@ -8003,10 +8004,16 @@ class NullaAgent:
     # Hive create confirmation gate
     # ------------------------------------------------------------------
 
-    _HIVE_CONFIRM_POSITIVE = re.compile(
+    _HIVE_CONFIRM_POSITIVE_STRICT = re.compile(
         r"^\s*(?:yes|yea|yeah|yep|yup|ok(?:ay)?|sure|do\s*it|go\s*(?:ahead|for\s*it)|"
         r"lets?\s*(?:go|do\s*it)|for\s*sure|absolutely|confirmed?|lgtm|send\s*it|"
         r"post\s*it|create\s*it|ship\s*it|proceed|affirmative|y)\s*[.!]*\s*$",
+        re.IGNORECASE,
+    )
+    _HIVE_CONFIRM_POSITIVE_LOOSE = re.compile(
+        r"^\s*(?:yes|yea|yeah|yep|yup|ok(?:ay)?|sure|do\s*it|go\s*(?:ahead|for\s*it)|"
+        r"lets?\s*(?:go|do\s*it)|for\s*sure|absolutely|confirmed?|lgtm|send\s*it|"
+        r"post\s*it|create\s*it|ship\s*it|proceed|affirmative)\b",
         re.IGNORECASE,
     )
     _HIVE_CONFIRM_NEGATIVE = re.compile(
@@ -8028,7 +8035,7 @@ class NullaAgent:
             return None
 
         lowered = user_input.strip()
-        if self._HIVE_CONFIRM_POSITIVE.match(lowered):
+        if self._HIVE_CONFIRM_POSITIVE_STRICT.match(lowered) or self._HIVE_CONFIRM_POSITIVE_LOOSE.match(lowered):
             del self._hive_create_pending[session_id]
             return self._execute_confirmed_hive_create(
                 pending, task=task, session_id=session_id, source_context=source_context,
@@ -8056,7 +8063,6 @@ class NullaAgent:
                 ),
             )
 
-        del self._hive_create_pending[session_id]
         return None
 
     def _execute_confirmed_hive_create(

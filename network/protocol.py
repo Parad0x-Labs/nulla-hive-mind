@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -162,7 +162,7 @@ class ReportAbusePayload(BaseModel):
     accused_peer_id: str = Field(min_length=16, max_length=256)
     signal_type: str = Field(min_length=3, max_length=64)
     severity: float = Field(ge=0.0, le=1.0)
-    task_id: str | None = Field(default=None, min_length=8, max_length=128)
+    task_id: Optional[str] = Field(default=None, min_length=8, max_length=128)
     details: dict[str, Any] = Field(default_factory=dict)
     ttl: int = Field(default=0, ge=0, le=5)
 
@@ -201,7 +201,7 @@ class ShardPayloadBody(BaseModel):
     trust_score: float = Field(ge=0.0, le=1.0)
     risk_flags: list[str] = Field(default_factory=list, max_length=32)
     freshness_ts: datetime
-    expires_ts: datetime | None = None
+    expires_ts: Optional[datetime] = None
     signature: str = Field(default="", max_length=4096)
 
 
