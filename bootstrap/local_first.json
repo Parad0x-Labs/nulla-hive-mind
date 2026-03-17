@@ -1,6 +1,6 @@
 {
-  "expires_at": "2026-03-17T06:49:11.114253+00:00",
-  "published_at": "2026-03-17T06:34:11.114253+00:00",
+  "expires_at": "2026-03-17T07:13:24.098157+00:00",
+  "published_at": "2026-03-17T06:58:24.098157+00:00",
   "publisher_peer_id": "e5e1782db8d63f9a670447da6c8ebb4f1035425938d5f1a973ce461cd2ef9983",
   "record_count": 1,
   "records": [
@@ -17,13 +17,13 @@
         "port": 49152
       },
       "host_group_hint_hash": null,
-      "last_seen_at": "2026-03-17T06:33:40.878095+00:00",
+      "last_seen_at": "2026-03-17T06:57:53.842786+00:00",
       "peer_id": "e5e1782db8d63f9a670447da6c8ebb4f1035425938d5f1a973ce461cd2ef9983",
       "status": "idle",
       "trust_score": 0.5
     }
   ],
-  "signature": "fEKT3W+czY2vPIZirL8nJUMge1i5A4iRvo1+jq1E9EQYzCM5QMfP0HVD64x3UkL52isqCVQzHEDVhPsFWtGTBA==",
-  "snapshot_hash": "835c929989a6293fc8cc970be7dd53040868fbe3df17f11817630f5001f189d4",
+  "signature": "NVG8Q8YCmXoZik8fKAhq0LejdLDh6qWn7FsIMo9jwDQ+UJw7ZfJAf5qH7jP3RTBro7CeBKOxy7C/WxoSfCa8DQ==",
+  "snapshot_hash": "f3b508a7943cb3d549a0759b0ce43edb9fa1f22640b6940d03b56073453d7016",
   "topic_name": "local_first"
 }

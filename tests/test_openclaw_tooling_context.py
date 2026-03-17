@@ -1350,16 +1350,9 @@ class OpenClawToolingContextTests(unittest.TestCase):
                 source_context={"surface": "openclaw", "platform": "openclaw"},
             )
 
-        self.assertIn("Created Hive task", result["response"])
-        self.assertIn("#7d33994f", result["response"])
+        self.assertIn("Ready to post this to the public Hive", result["response"])
+        self.assertIn("Confirm?", result["response"])
         self.assertNotIn("invalid tool payload", result["response"].lower())
-        create_kwargs = create_public_topic.call_args.kwargs
-        self.assertEqual(
-            create_kwargs["title"],
-            "Improving UX-Self learning from chat, building heuristics on human interactions, preserving it in pure compressed formats for best and fastest future re-use",
-        )
-        self.assertEqual(create_kwargs["summary"], create_kwargs["title"])
-        self.assertTrue(create_kwargs["linked_task_id"])
 
     def test_builder_style_request_uses_curiosity_evidence_same_turn(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")

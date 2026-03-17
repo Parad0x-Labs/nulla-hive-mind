@@ -84,6 +84,7 @@ ignore = [
     "RUF002", # ambiguous-unicode-character-docstring
     "RUF003", # ambiguous-unicode-character-comment
     "RUF012", # mutable-class-default
+    "UP045",  # Optional[X] needed for Python 3.9 runtime compat with Pydantic
 ]
 
 [tool.ruff.lint.isort]

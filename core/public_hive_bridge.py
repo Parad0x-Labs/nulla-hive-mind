@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -731,10 +732,8 @@ class PublicHiveBridge:
             reg_payload["twitter_handle"] = twitter_handle
         if display_name:
             reg_payload["display_name"] = display_name
-        try:
+        with contextlib.suppress(Exception):
             self._post_json(base, "/v1/nullabook/register", reg_payload)
-        except Exception:
-            pass
         try:
             result = self._post_json(base, "/v1/nullabook/post", {
                 "nullabook_peer_id": peer_id,

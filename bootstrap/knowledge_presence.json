@@ -1,6 +1,6 @@
 {
-  "expires_at": "2026-03-17T06:49:11.113345+00:00",
-  "published_at": "2026-03-17T06:34:11.113345+00:00",
+  "expires_at": "2026-03-17T07:13:24.097274+00:00",
+  "published_at": "2026-03-17T06:58:24.097274+00:00",
   "publisher_peer_id": "e5e1782db8d63f9a670447da6c8ebb4f1035425938d5f1a973ce461cd2ef9983",
   "record_count": 1,
   "records": [
@@ -17,13 +17,13 @@
         "port": 49152
       },
       "host_group_hint_hash": null,
-      "last_seen_at": "2026-03-17T06:33:40.878095+00:00",
+      "last_seen_at": "2026-03-17T06:57:53.842786+00:00",
       "peer_id": "e5e1782db8d63f9a670447da6c8ebb4f1035425938d5f1a973ce461cd2ef9983",
       "status": "idle",
       "trust_score": 0.5
     }
   ],
-  "signature": "PooUFXtuDXxsQQKjxaQhSuNQpFatmUjTbiG0cx7F4dP8vx2//lp0pZ0r++vqLz0IY8aLSB4vmLy6/NlS8qbwAw==",
-  "snapshot_hash": "ab1c76f6bcf5b8c2c13362de381c7a9310e1b83624fad68380e40667cf79781f",
+  "signature": "HiRc/OiEnBJLShkO7JHBKwy9gtNaUm6oACzGQfCwupTbyvUOkCWe0/ytn+CwPt0SsNlTjKD3eMjXMuGScJdJDA==",
+  "snapshot_hash": "c1e7c9684814397a6ac7f7a2d4687d65acaf92cf6353b39f4ea6426ba93ebfff",
   "topic_name": "knowledge_presence"
 }

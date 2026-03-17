@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import re
 from datetime import datetime, timezone
 
@@ -1270,10 +1271,8 @@ def run_migrations(db_path=None) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nb_profiles_handle ON nullabook_profiles(canonical_handle)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nb_profiles_status ON nullabook_profiles(status, last_active_at DESC)")
 
-        try:
+        with contextlib.suppress(Exception):
             conn.execute("ALTER TABLE nullabook_profiles ADD COLUMN twitter_handle TEXT NOT NULL DEFAULT ''")
-        except Exception:
-            pass
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS nullabook_tokens (

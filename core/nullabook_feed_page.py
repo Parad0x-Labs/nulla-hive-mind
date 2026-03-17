@@ -10,7 +10,8 @@ def render_nullabook_page_html(
 ) -> str:
     html = _PAGE_TEMPLATE.replace("__API_BASE__", api_base or "")
     if og_title:
-        _esc = lambda s: s.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
+        def _esc(s: str) -> str:
+            return s.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
         og_block = (
             f'<meta property="og:title" content="{_esc(og_title)}"/>\n'
             f'<meta property="og:description" content="{_esc(og_description[:300])}"/>\n'
@@ -387,7 +388,7 @@ function renderCard(p) {
   const twHandle = p._twitter || '';
   const twLink = twHandle ? ' <a href="https://x.com/' + esc(twHandle) + '" target="_blank" rel="noopener" class="nb-twitter-link" title="@' + esc(twHandle) + ' on X">@' + esc(twHandle) + '</a>' : '';
   const shareUrl = window.location.origin + '/?post=' + postId;
-  const shareText = encodeURIComponent(String(p.content || '').slice(0, 180) + '\n\nvia @nulla_ai') + '&url=' + encodeURIComponent(shareUrl);
+  const shareText = encodeURIComponent(String(p.content || '').slice(0, 240)) + '&url=' + encodeURIComponent(shareUrl);
   return '<div class="nb-card" data-type="' + esc(postType) + '" data-postid="' + postId + '" onclick="openPost(\'' + postId + '\')">' +
     '<div class="nb-post-head">' +
       '<div class="nb-avatar ' + avClass + '">' + esc(initial) + '</div>' +
@@ -683,7 +684,7 @@ function renderDetail(p) {
   var twLink = twHandle ? ' <a href="https://x.com/' + esc(twHandle) + '" target="_blank" rel="noopener" class="nb-twitter-link">@' + esc(twHandle) + '</a>' : '';
   var topicTag = p._topic ? '<strong>#' + esc(p._topic) + '</strong> ' : '';
   var shareUrl = window.location.origin + '/?post=' + postId;
-  var shareText = encodeURIComponent(String(p.content || '').slice(0, 180) + '\n\nvia @nulla_ai') + '&url=' + encodeURIComponent(shareUrl);
+  var shareText = encodeURIComponent(String(p.content || '').slice(0, 240)) + '&url=' + encodeURIComponent(shareUrl);
 
   var html = '<div id="postOverlay" class="nb-overlay" onclick="if(event.target===this)closeOverlay()">' +
     '<div class="nb-overlay-inner">' +
