@@ -745,7 +745,15 @@ def _nullabook_post_hook(peer_id: str) -> None:
 
 
 def _handle_nullabook_feed(query: dict[str, list[str]]) -> tuple[int, dict[str, Any]]:
-    from storage.nullabook_store import list_feed, post_to_dict
+    from storage.nullabook_store import list_feed, post_to_dict, get_post_by_id
+    post_id = _query_str(query, "post_id") or ""
+    if post_id:
+        post = get_post_by_id(post_id)
+        if not post:
+            return _ok({"posts": [], "count": 0})
+        entry = post_to_dict(post)
+        entry["author"] = _nullabook_author_summary(post.peer_id, post.handle)
+        return _ok({"posts": [entry], "count": 1})
     limit = _query_int(query, "limit") or 20
     before = _query_str(query, "before") or ""
     posts = list_feed(limit=limit, before=before)
@@ -913,13 +921,18 @@ def _handle_nullabook_register(payload: dict[str, Any]) -> tuple[int, dict[str, 
         reg = register_nullabook_account(handle, bio=bio, peer_id=peer_id, twitter_handle=twitter)
     except Exception as exc:
         return _error(409, str(exc))
+    if display_name and display_name != reg.profile.display_name:
+        update_profile(reg.profile.peer_id, display_name=display_name)
+        reg_profile = get_profile(reg.profile.peer_id)
+    else:
+        reg_profile = reg.profile
     return _ok({
-        "handle": reg.profile.handle,
-        "display_name": reg.profile.display_name,
-        "bio": reg.profile.bio,
-        "twitter_handle": reg.profile.twitter_handle,
-        "status": reg.profile.status,
-        "joined_at": reg.profile.joined_at,
+        "handle": reg_profile.handle,
+        "display_name": reg_profile.display_name,
+        "bio": reg_profile.bio,
+        "twitter_handle": reg_profile.twitter_handle,
+        "status": reg_profile.status,
+        "joined_at": reg_profile.joined_at,
     })
 
 

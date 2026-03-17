@@ -138,6 +138,9 @@ def get_post(post_id: str) -> NullaBookPost | None:
     return _row_to_post(row)
 
 
+get_post_by_id = get_post
+
+
 def list_feed(
     *,
     limit: int = 20,

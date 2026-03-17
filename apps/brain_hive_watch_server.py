@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib import request
-from urllib.parse import unquote, urlparse, urlsplit, urlunsplit
+from urllib.parse import parse_qs, unquote, urlparse, urlsplit, urlunsplit
 
 from core.brain_hive_dashboard import render_dashboard_html, render_not_found_html, render_topic_detail_html
 from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
@@ -370,7 +370,32 @@ def build_server(config: BrainHiveWatchServerConfig | None = None) -> ThreadingH
                 req_host = (self.headers.get("Host") or "").split(":")[0].lower()
                 if "nullabook" in req_host and clean_path == "/":
                     from core.nullabook_feed_page import render_nullabook_page_html
-                    html = render_nullabook_page_html()
+                    qs = parse_qs(parsed.query or "")
+                    post_id = str((qs.get("post") or [""])[0]).strip()
+                    og_kw: dict[str, str] = {}
+                    if post_id:
+                        try:
+                            for base in cfg.upstream_base_urls:
+                                url = f"{str(base).rstrip('/')}/v1/nullabook/feed?limit=1&post_id={post_id}"
+                                token = (cfg.auth_tokens_by_base_url or {}).get(base) or cfg.auth_token
+                                payload = _http_get_json(
+                                    url, timeout_seconds=3, auth_token=token,
+                                    tls_insecure_skip_verify=cfg.tls_insecure_skip_verify,
+                                )
+                                posts = ((payload.get("result") or {}).get("posts") or [])
+                                if posts:
+                                    p = posts[0]
+                                    author = (p.get("author") or {})
+                                    name = author.get("display_name") or author.get("handle") or p.get("handle") or "Agent"
+                                    og_kw = {
+                                        "og_title": f"{name} on NullaBook",
+                                        "og_description": str(p.get("content") or "")[:300],
+                                        "og_url": f"https://nullabook.com/?post={post_id}",
+                                    }
+                                    break
+                        except Exception:
+                            pass
+                    html = render_nullabook_page_html(**og_kw)
                     self._write_bytes(200, "text/html; charset=utf-8", html.encode("utf-8"))
                     return
                 html = render_dashboard_html(api_endpoint="/api/dashboard", topic_base_path="/brain-hive/topic")
@@ -493,12 +518,20 @@ def build_server(config: BrainHiveWatchServerConfig | None = None) -> ThreadingH
                 try:
                     length = int(self.headers.get("Content-Length") or "0")
                     raw_body = self.rfile.read(length) if length > 0 else b""
+                    tokens = {
+                        _normalize_base_url(b): t
+                        for b, t in (cfg.auth_tokens_by_base_url or {}).items()
+                    }
                     for base in cfg.upstream_base_urls:
                         url = f"{str(base).rstrip('/')}/v1/nullabook/upvote"
-                        req = request.Request(url, data=raw_body, method="POST")
-                        req.add_header("Content-Type", "application/json")
+                        tok = tokens.get(_normalize_base_url(str(base))) or cfg.auth_token
+                        r = request.Request(url, data=raw_body, method="POST")
+                        r.add_header("Content-Type", "application/json")
+                        if tok:
+                            r.add_header("X-Nulla-Meet-Token", tok)
+                        ctx = _ssl_context_for_url(url, tls_insecure_skip_verify=cfg.tls_insecure_skip_verify)
                         try:
-                            with request.urlopen(req, timeout=cfg.request_timeout_seconds) as resp:
+                            with request.urlopen(r, timeout=cfg.request_timeout_seconds, context=ctx) as resp:
                                 result = json.loads(resp.read().decode("utf-8"))
                                 self._write_json(200, result)
                                 return
