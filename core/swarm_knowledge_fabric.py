@@ -4,7 +4,7 @@ import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -110,7 +110,7 @@ class FreshnessState(BaseModel):
     status: FreshnessLabel = "unknown"
     observed_at: str = ""
     stale_after_seconds: int = 0
-    age_seconds: int | None = None
+    age_seconds: Optional[int] = None
 
 
 class MergeVersionMetadata(BaseModel):

@@ -457,6 +457,16 @@ def web_research(
                 notes.append(f"duckduckgo_html_failed:{type(exc).__name__}")
                 continue
 
+        if provider == "google_html":
+            try:
+                hits = _google_html_hits(query, max_hits=max_hits)
+                if hits:
+                    provider_used = "google_html"
+                    break
+            except Exception as exc:
+                notes.append(f"google_html_failed:{type(exc).__name__}")
+                continue
+
     if not hits:
         try:
             specialized = _specialized_live_research(
@@ -611,6 +621,26 @@ def _duckduckgo_html_hits(query: str, *, max_hits: int) -> list[WebHit]:
         if len(hits) >= max(1, int(max_hits)):
             break
     return hits
+
+
+def _google_html_hits(query: str, *, max_hits: int) -> list[WebHit]:
+    from tools.web.google_html import google_html_search
+
+    text = (query or "").strip()
+    if not text:
+        return []
+    raw_results = google_html_search(text, max_results=max_hits, timeout_s=10.0)
+    return [
+        WebHit(
+            title=str(r.get("title") or "").strip(),
+            url=str(r.get("url") or "").strip(),
+            snippet=str(r.get("snippet") or "").strip(),
+            engine="google_html",
+            score=None,
+        )
+        for r in raw_results
+        if str(r.get("url") or "").strip()
+    ]
 
 
 def _resolve_duckduckgo_result_url(raw_href: str) -> str:

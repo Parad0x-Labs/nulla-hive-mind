@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -48,13 +48,13 @@ class ModelProviderManifest(BaseModel):
     provider_name: str = Field(min_length=2, max_length=128)
     model_name: str = Field(min_length=1, max_length=256)
     source_type: ProviderSourceType
-    adapter_type: AdapterType | None = None
-    license_name: str | None = Field(default=None, max_length=128)
-    license_reference: str | None = Field(default=None, max_length=512)
-    license_url_or_reference: str | None = Field(default=None, max_length=512)
+    adapter_type: Optional[AdapterType] = None
+    license_name: Optional[str] = Field(default=None, max_length=128)
+    license_reference: Optional[str] = Field(default=None, max_length=512)
+    license_url_or_reference: Optional[str] = Field(default=None, max_length=512)
     weight_location: WeightLocation = "external"
-    weights_bundled: bool | None = None
-    redistribution_allowed: bool | None = None
+    weights_bundled: Optional[bool] = None
+    redistribution_allowed: Optional[bool] = None
     runtime_dependency: str = Field(default="", max_length=256)
     notes: str = Field(default="", max_length=4096)
     capabilities: list[str] = Field(default_factory=list, max_length=24)

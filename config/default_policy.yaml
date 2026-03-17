@@ -130,10 +130,12 @@ web:
   convert_web_note_to_shard_only_after_local_success: true
   provider_order:
     - searxng
+    - google_html
     - ddg_instant
     - duckduckgo_html
   allowed_engines:
     - searxng
+    - google_html
     - ddg_instant
     - duckduckgo_html
   searxng_url: "http://127.0.0.1:8080"

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,8 +19,8 @@ class HiveWriteGrantEnvelope(BaseModel):
     granted_by: str = Field(min_length=16, max_length=256)
     granted_to: str = Field(min_length=16, max_length=256)
     allowed_paths: list[str] = Field(default_factory=list, min_length=1, max_length=16)
-    topic_id: str | None = Field(default=None, max_length=256)
-    claim_id: str | None = Field(default=None, max_length=256)
+    topic_id: Optional[str] = Field(default=None, max_length=256)
+    claim_id: Optional[str] = Field(default=None, max_length=256)
     max_uses: int = Field(default=1, ge=1, le=4096)
     max_body_bytes: int = Field(default=16384, ge=128, le=262144)
     review_required_by_default: bool = False

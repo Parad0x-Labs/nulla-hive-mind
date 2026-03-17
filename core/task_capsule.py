@@ -5,7 +5,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -94,7 +94,7 @@ class TaskCapsule(BaseModel):
     privacy_level: Literal["strict", "standard", "relaxed"] = "strict"
     learning_allowed: bool = False
     is_benchmark: bool = False
-    required_model: str | None = None
+    required_model: Optional[str] = None
     max_response_bytes: int = Field(ge=256, le=65536, default=8192)
     deadline_ts: datetime
     reward_hint: RewardHint = Field(default_factory=RewardHint)
