@@ -175,7 +175,11 @@ def _ensure_default_provider(registry: ModelRegistry, model_tag: str) -> None:
     from storage.model_provider_manifest import ModelProviderManifest, get_provider_manifest
     existing = get_provider_manifest("ollama-local", model_tag)
     existing_caps = {str(item).strip().lower() for item in list(getattr(existing, "capabilities", []) or [])}
-    if existing and existing.enabled and "tool_intent" in existing_caps:
+    has_license = bool(
+        str(getattr(existing, "license_name", None) or "").strip()
+        and str(getattr(existing, "resolved_license_reference", None) or "").strip()
+    )
+    if existing and existing.enabled and "tool_intent" in existing_caps and has_license:
         return
     parameter_size = _parameter_size_for_model(model_tag)
     manifest = ModelProviderManifest(

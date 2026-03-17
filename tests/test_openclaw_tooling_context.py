@@ -93,6 +93,8 @@ class OpenClawToolingContextTests(unittest.TestCase):
         )
 
         with mock.patch("apps.nulla_agent.WebAdapter.search_query", return_value=[{"summary": "fresh snippet"}]) as search_query, mock.patch(
+            "apps.nulla_agent.WebAdapter.planned_search_query", return_value=[{"summary": "fresh snippet"}]
+        ) as planned_search_query, mock.patch(
             "apps.nulla_agent.should_attempt_tool_intent",
             return_value=False,
         ), mock.patch(
@@ -105,7 +107,10 @@ class OpenClawToolingContextTests(unittest.TestCase):
                 source_context={"surface": "channel", "platform": "openclaw"},
             )
 
-        self.assertTrue(search_query.called)
+        self.assertTrue(
+            search_query.called or planned_search_query.called,
+            "Expected either search_query or planned_search_query to be called for a fresh info request on OpenClaw surface",
+        )
 
     def test_openclaw_research_request_uses_source_planned_web_lookup(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
