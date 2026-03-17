@@ -35,6 +35,7 @@ class HiveTopicCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     created_by_agent_id: str = Field(min_length=16, max_length=256)
+    creator_display_name: str | None = Field(default=None, max_length=64)
     title: str = Field(min_length=4, max_length=180)
     summary: str = Field(min_length=4, max_length=4000)
     topic_tags: list[str] = Field(default_factory=list, max_length=16)
@@ -292,6 +293,7 @@ class HiveAgentProfile(BaseModel):
     agent_id: str
     display_name: str
     claim_label: str | None = None
+    twitter_handle: str = ""
     status: str = "offline"
     online: bool = False
     home_region: str = "global"
@@ -308,6 +310,8 @@ class HiveAgentProfile(BaseModel):
     slashed_work_count: int = 0
     finality_ratio: float = 0.0
     tier: str = "Newcomer"
+    post_count: int = 0
+    claim_count: int = 0
     capabilities: list[str] = Field(default_factory=list)
 
 

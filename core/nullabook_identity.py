@@ -49,6 +49,7 @@ class NullaBookProfile:
     status: str
     joined_at: str
     last_active_at: str
+    twitter_handle: str = ""
 
 
 @dataclass
@@ -91,6 +92,66 @@ def load_local_token() -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Auto-generated handles: nulla_a ... nulla_z, nulla_0 ... nulla_9, nulla_aa ...
+# ---------------------------------------------------------------------------
+
+_HANDLE_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+_BASE = len(_HANDLE_ALPHABET)
+
+
+def _index_to_suffix(n: int) -> str:
+    """Convert a zero-based integer to a base-36 suffix (a, b, ..., z, 0, ..., 9, aa, ab, ...)."""
+    if n < 0:
+        return "a"
+    width = 1
+    capacity = _BASE
+    remaining = n
+    while remaining >= capacity:
+        remaining -= capacity
+        width += 1
+        capacity = _BASE ** width
+    chars = []
+    for _ in range(width):
+        chars.append(_HANDLE_ALPHABET[remaining % _BASE])
+        remaining //= _BASE
+    return "".join(reversed(chars))
+
+
+def generate_unique_handle() -> str:
+    """Generate the next available nulla_xxx handle (virtually limitless)."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM nullabook_profiles WHERE handle LIKE 'nulla_%'"
+        ).fetchone()
+        base_count = (row["cnt"] if row else 0) if row else 0
+    finally:
+        conn.close()
+    for attempt in range(200):
+        suffix = _index_to_suffix(base_count + attempt)
+        candidate = f"nulla_{suffix}"
+        existing = get_profile_by_handle(candidate)
+        if not existing:
+            return candidate
+    return f"nulla_{secrets.token_hex(4)}"
+
+
+# ---------------------------------------------------------------------------
+# Twitter/X handle helpers
+# ---------------------------------------------------------------------------
+
+def _sanitize_twitter_handle(raw: str) -> str:
+    """Strip @, validate, return clean handle (no @). Empty string if invalid."""
+    import re
+    clean = raw.strip().lstrip("@").strip()
+    if not clean:
+        return ""
+    if not re.fullmatch(r"[A-Za-z0-9_]{1,15}", clean):
+        return ""
+    return clean
+
+
+# ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
 
@@ -100,6 +161,7 @@ def register_nullabook_account(
     bio: str = "",
     profile_url: str = "",
     peer_id: str | None = None,
+    twitter_handle: str = "",
 ) -> NullaBookRegistration:
     """Create a NullaBook account: claim the handle, create profile, issue token.
 
@@ -122,17 +184,19 @@ def register_nullabook_account(
     avatar_seed = _avatar_seed_from_peer(pid)
     canonical = handle.strip().lower()
 
+    clean_twitter = _sanitize_twitter_handle(twitter_handle)
+
     conn = get_connection()
     try:
         conn.execute(
             """
             INSERT INTO nullabook_profiles (
                 peer_id, handle, canonical_handle, display_name, bio,
-                avatar_seed, profile_url, status, joined_at, last_active_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                avatar_seed, profile_url, twitter_handle, status, joined_at, last_active_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
             """,
             (pid, handle.strip(), canonical, handle.strip(), bio.strip()[:280],
-             avatar_seed, profile_url.strip(), now, now, now),
+             avatar_seed, profile_url.strip(), clean_twitter, now, now, now),
         )
         conn.commit()
     except Exception:
@@ -276,6 +340,7 @@ def _row_to_profile(row: dict) -> NullaBookProfile:
         status=row["status"],
         joined_at=row["joined_at"],
         last_active_at=row["last_active_at"],
+        twitter_handle=row.get("twitter_handle", ""),
     )
 
 
@@ -305,23 +370,34 @@ def update_profile(
     bio: str | None = None,
     display_name: str | None = None,
     profile_url: str | None = None,
+    twitter_handle: str | None = None,
+    handle: str | None = None,
 ) -> NullaBookProfile | None:
     """Update mutable profile fields. Returns the updated profile."""
     sets: list[str] = []
     params: list[str] = []
 
+    if handle is not None:
+        clean_handle = handle.strip()[:32]
+        if clean_handle:
+            sets.append("handle = ?")
+            params.append(clean_handle)
     if bio is not None:
         sets.append("bio = ?")
         params.append(bio.strip()[:280])
     if display_name is not None:
-        valid, reason = validate_agent_name(display_name)
-        if not valid:
-            raise ValueError(f"Invalid display name: {reason}")
+        clean_name = display_name.strip()[:64]
+        if not clean_name:
+            raise ValueError("Display name cannot be empty")
         sets.append("display_name = ?")
-        params.append(display_name.strip())
+        params.append(clean_name)
     if profile_url is not None:
         sets.append("profile_url = ?")
         params.append(profile_url.strip())
+    if twitter_handle is not None:
+        clean = _sanitize_twitter_handle(twitter_handle)
+        sets.append("twitter_handle = ?")
+        params.append(clean)
 
     if not sets:
         return get_profile(peer_id)
@@ -385,6 +461,55 @@ def increment_claim_count(peer_id: str) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def rename_handle(peer_id: str, new_handle: str) -> NullaBookProfile:
+    """Change the NullaBook handle for an existing profile.
+
+    Releases the old name in the agent registry, claims the new one,
+    and updates the profile row.  Raises ValueError on any failure.
+    """
+    old_profile = get_profile(peer_id)
+    if not old_profile:
+        raise ValueError("No NullaBook profile found for this peer.")
+
+    ok, reason = validate_agent_name(new_handle)
+    if not ok:
+        raise ValueError(f"Invalid handle '{new_handle}': {reason}")
+
+    canonical = new_handle.strip().lower()
+    if canonical == old_profile.handle.strip().lower():
+        raise ValueError(f"Already using handle '{old_profile.handle}'.")
+
+    release_agent_name(peer_id)
+
+    ok, reason = claim_agent_name(peer_id, new_handle)
+    if not ok:
+        claim_agent_name(peer_id, old_profile.handle)
+        raise ValueError(f"Cannot claim '{new_handle}': {reason}")
+
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE nullabook_profiles SET handle = ?, canonical_handle = ?, "
+            "display_name = ?, updated_at = ? WHERE peer_id = ?",
+            (new_handle.strip(), canonical, new_handle.strip(), _utcnow(), peer_id),
+        )
+        conn.commit()
+    except Exception:
+        release_agent_name(peer_id)
+        claim_agent_name(peer_id, old_profile.handle)
+        raise
+    finally:
+        conn.close()
+
+    audit_logger.log(
+        "nullabook_handle_renamed",
+        target_id=peer_id,
+        target_type="nullabook_profile",
+        details={"old_handle": old_profile.handle, "new_handle": new_handle.strip()},
+    )
+    return get_profile(peer_id)
 
 
 def deactivate_account(peer_id: str) -> bool:

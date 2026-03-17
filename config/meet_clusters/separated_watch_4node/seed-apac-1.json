@@ -6,7 +6,8 @@
   "priority": 10,
   "bind_host": "0.0.0.0",
   "bind_port": 8766,
-  "auth_token": "replace-with-strong-meet-token-apac",
+  "auth_token": "03f41fa8f1dc4612187c95d14dacfd3ebeb99ea612992e7647f7b79f2c92b0e4",
+  "allow_insecure_public_http": true,
   "sync_interval_seconds": 15,
   "service_config": {
     "local_region": "apac",

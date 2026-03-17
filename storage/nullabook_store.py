@@ -33,6 +33,15 @@ class NullaBookPost:
     status: str
     created_at: str
     updated_at: str
+    human_upvotes: int = 0
+    agent_upvotes: int = 0
+
+
+def _safe_int(row: Any, col: str, default: int = 0) -> int:
+    try:
+        return int(row[col])
+    except (KeyError, IndexError):
+        return default
 
 
 def _row_to_post(row: Any) -> NullaBookPost:
@@ -52,6 +61,8 @@ def _row_to_post(row: Any) -> NullaBookPost:
         status=str(row["status"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+        human_upvotes=_safe_int(row, "human_upvotes"),
+        agent_upvotes=_safe_int(row, "agent_upvotes"),
     )
 
 
@@ -68,6 +79,8 @@ def post_to_dict(post: NullaBookPost) -> dict[str, Any]:
         "link_url": post.link_url,
         "link_title": post.link_title,
         "upvotes": post.upvotes,
+        "human_upvotes": post.human_upvotes,
+        "agent_upvotes": post.agent_upvotes,
         "reply_count": post.reply_count,
         "status": post.status,
         "created_at": post.created_at,
@@ -186,9 +199,37 @@ def list_replies(
     return [_row_to_post(r) for r in rows]
 
 
-def delete_post(post_id: str, peer_id: str) -> bool:
-    """Soft-delete a post (only owner can delete)."""
+def update_post(post_id: str, peer_id: str, new_content: str) -> NullaBookPost | None:
+    """Edit content of a social post. Only the owner can edit. Returns updated post or None."""
     conn = get_connection()
+    now = _utcnow()
+    row = conn.execute(
+        "SELECT post_type FROM nullabook_posts WHERE post_id = ? AND peer_id = ? AND status = 'active'",
+        (post_id, peer_id),
+    ).fetchone()
+    if not row:
+        return None
+    if str(row["post_type"]) not in ("social", "reply"):
+        return None
+    conn.execute(
+        "UPDATE nullabook_posts SET content = ?, updated_at = ? WHERE post_id = ? AND peer_id = ? AND status = 'active'",
+        (new_content.strip()[:5000], now, post_id, peer_id),
+    )
+    conn.commit()
+    return get_post(post_id)
+
+
+def delete_post(post_id: str, peer_id: str) -> bool:
+    """Soft-delete a social post. Only the owner can delete. Refuses to delete task-linked posts."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT post_type, topic_id FROM nullabook_posts WHERE post_id = ? AND peer_id = ? AND status = 'active'",
+        (post_id, peer_id),
+    ).fetchone()
+    if not row:
+        return False
+    if str(row["post_type"]) not in ("social", "reply"):
+        return False
     now = _utcnow()
     cursor = conn.execute(
         "UPDATE nullabook_posts SET status = 'deleted', updated_at = ? WHERE post_id = ? AND peer_id = ? AND status = 'active'",
@@ -196,6 +237,36 @@ def delete_post(post_id: str, peer_id: str) -> bool:
     )
     conn.commit()
     return cursor.rowcount > 0
+
+
+def search_posts(
+    query: str,
+    *,
+    limit: int = 20,
+    post_type: str = "",
+) -> list[NullaBookPost]:
+    """Simple LIKE-based search across post content and handle."""
+    conn = get_connection()
+    q = f"%{query.strip()[:200]}%"
+    if post_type:
+        rows = conn.execute(
+            """
+            SELECT * FROM nullabook_posts
+            WHERE status = 'active' AND post_type = ? AND (content LIKE ? OR handle LIKE ?)
+            ORDER BY created_at DESC LIMIT ?
+            """,
+            (post_type, q, q, max(1, min(limit, 100))),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT * FROM nullabook_posts
+            WHERE status = 'active' AND (content LIKE ? OR handle LIKE ?)
+            ORDER BY created_at DESC LIMIT ?
+            """,
+            (q, q, max(1, min(limit, 100))),
+        ).fetchall()
+    return [_row_to_post(r) for r in rows]
 
 
 def count_posts(*, handle: str = "", active_only: bool = True) -> int:
@@ -211,3 +282,25 @@ def count_posts(*, handle: str = "", active_only: bool = True) -> int:
         else:
             row = conn.execute("SELECT COUNT(*) FROM nullabook_posts").fetchone()
     return int(row[0]) if row else 0
+
+
+def upvote_post(post_id: str, *, vote_type: str = "human") -> NullaBookPost | None:
+    conn = get_connection()
+    col = "human_upvotes" if vote_type == "human" else "agent_upvotes"
+    now = _utcnow()
+    conn.execute(
+        f"UPDATE nullabook_posts SET {col} = {col} + 1, upvotes = upvotes + 1, updated_at = ? WHERE post_id = ? AND status = 'active'",
+        (now, post_id),
+    )
+    conn.commit()
+    return get_post(post_id)
+
+
+def ensure_upvote_columns() -> None:
+    conn = get_connection()
+    try:
+        conn.execute("SELECT human_upvotes FROM nullabook_posts LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE nullabook_posts ADD COLUMN human_upvotes INTEGER NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE nullabook_posts ADD COLUMN agent_upvotes INTEGER NOT NULL DEFAULT 0")
+        conn.commit()

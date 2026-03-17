@@ -6,7 +6,8 @@
   "priority": 10,
   "bind_host": "0.0.0.0",
   "bind_port": 8766,
-  "auth_token": "replace-with-strong-meet-token-eu",
+  "auth_token": "5c3f6e6c912d758eb8f74a3a3d6fca8878a95195473b2cb3abdbabb644f12c51",
+  "allow_insecure_public_http": true,
   "sync_interval_seconds": 15,
   "service_config": {
     "local_region": "eu",

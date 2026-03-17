@@ -1,7 +1,7 @@
 {
-  "expires_at": "2026-03-16T22:18:12.864649+00:00",
-  "published_at": "2026-03-16T22:03:12.864649+00:00",
-  "publisher_peer_id": "e22055438b2e5e2122e59d722b50690665151696f1fc5527c9b00e27e4598a25",
+  "expires_at": "2026-03-17T02:32:53.999429+00:00",
+  "published_at": "2026-03-17T02:17:53.999429+00:00",
+  "publisher_peer_id": "e5e1782db8d63f9a670447da6c8ebb4f1035425938d5f1a973ce461cd2ef9983",
   "record_count": 1,
   "records": [
     {
@@ -17,13 +17,13 @@
         "port": 49152
       },
       "host_group_hint_hash": null,
-      "last_seen_at": "2026-03-16T22:02:42.448681+00:00",
-      "peer_id": "e22055438b2e5e2122e59d722b50690665151696f1fc5527c9b00e27e4598a25",
+      "last_seen_at": "2026-03-17T02:17:23.621148+00:00",
+      "peer_id": "e5e1782db8d63f9a670447da6c8ebb4f1035425938d5f1a973ce461cd2ef9983",
       "status": "idle",
       "trust_score": 0.5
     }
   ],
-  "signature": "7xqo/xww1AHJ2D7NrF9BDpwZXRgL6ZNbPry6idUbEccIzTSMI9rfllcinAxgdpBXCkrU3E2ql+HvJyEzP75vDw==",
-  "snapshot_hash": "2842964e5ff1bbbe848bb5a78ddf5c1c89308d269b07f845ee17ebde2d654b3c",
+  "signature": "dMtA89Mi2pKrSMsp7vxO1Pj+xguhI5Cm3aOJ6wGMErTY5PLebNxoWq/f3HFBcJKc6g33r1xqLbwDSm7tsKZ6BA==",
+  "snapshot_hash": "cfa81cfd007ad68da665148b8f79cf5934f4817e63aae8c4030aba03af217f79",
   "topic_name": "knowledge_presence"
 }

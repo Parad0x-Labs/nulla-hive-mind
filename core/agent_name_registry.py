@@ -168,3 +168,15 @@ def get_peer_by_name(name: str) -> str | None:
         return row["peer_id"] if row else None
     finally:
         conn.close()
+
+
+def list_agent_names(*, limit: int = 200) -> list[dict[str, str]]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT peer_id, display_name FROM agent_names ORDER BY display_name LIMIT ?",
+            (max(1, min(limit, 1000)),),
+        ).fetchall()
+        return [{"peer_id": row["peer_id"], "display_name": row["display_name"]} for row in rows]
+    finally:
+        conn.close()

@@ -379,8 +379,24 @@ class PublicHiveBridge:
         if text_privacy_risks(f"{clean_title}\n{clean_summary}"):
             return {"ok": False, "status": "privacy_blocked_topic"}
 
+        display_name: str | None = None
+        try:
+            from core.nullabook_identity import get_profile
+            profile = get_profile(get_local_peer_id())
+            if profile and profile.handle:
+                display_name = profile.handle.strip()[:64] or None
+        except Exception:
+            pass
+        if not display_name:
+            try:
+                from core.agent_name_registry import get_agent_name
+                display_name = (get_agent_name(get_local_peer_id()) or "")[:64] or None
+            except Exception:
+                pass
+
         request = HiveTopicCreateRequest(
             created_by_agent_id=get_local_peer_id(),
+            creator_display_name=display_name,
             title=clean_title,
             summary=clean_summary,
             topic_tags=[str(item).strip()[:64] for item in list(topic_tags or []) if str(item).strip()][:16],
@@ -670,6 +686,64 @@ class PublicHiveBridge:
             }
 
         return {"ok": True, "status": "topic_only", "topic_id": topic_id, "topic_result": topic_result}
+
+    def sync_nullabook_profile(
+        self,
+        *,
+        peer_id: str,
+        handle: str,
+        bio: str = "",
+        display_name: str = "",
+        twitter_handle: str = "",
+    ) -> dict[str, Any]:
+        """Push NullaBook profile updates to the meet node."""
+        if not self.enabled() or not self.config.topic_target_url:
+            return {"ok": False, "status": "disabled"}
+        base = str(self.config.topic_target_url)
+        reg_payload: dict[str, Any] = {"peer_id": peer_id, "handle": handle, "bio": bio or ""}
+        if twitter_handle:
+            reg_payload["twitter_handle"] = twitter_handle
+        if display_name:
+            reg_payload["display_name"] = display_name
+        try:
+            result = self._post_json(base, "/v1/nullabook/register", reg_payload)
+            return {"ok": True, "status": "synced", **result}
+        except Exception as exc:
+            return {"ok": False, "status": "sync_failed", "error": str(exc)}
+
+    def sync_nullabook_post(
+        self,
+        *,
+        peer_id: str,
+        handle: str,
+        bio: str,
+        content: str,
+        post_type: str = "social",
+        twitter_handle: str = "",
+        display_name: str = "",
+    ) -> dict[str, Any]:
+        """Push a NullaBook social post to the meet node so it appears in the public feed."""
+        if not self.enabled() or not self.config.topic_target_url:
+            return {"ok": False, "status": "disabled"}
+        base = str(self.config.topic_target_url)
+        reg_payload: dict[str, Any] = {"peer_id": peer_id, "handle": handle, "bio": bio or ""}
+        if twitter_handle:
+            reg_payload["twitter_handle"] = twitter_handle
+        if display_name:
+            reg_payload["display_name"] = display_name
+        try:
+            self._post_json(base, "/v1/nullabook/register", reg_payload)
+        except Exception:
+            pass
+        try:
+            result = self._post_json(base, "/v1/nullabook/post", {
+                "nullabook_peer_id": peer_id,
+                "content": content,
+                "post_type": post_type,
+            })
+            return {"ok": True, "status": "synced", **result}
+        except Exception as exc:
+            return {"ok": False, "status": "sync_failed", "error": str(exc)}
 
     def publish_agent_commons_update(
         self,

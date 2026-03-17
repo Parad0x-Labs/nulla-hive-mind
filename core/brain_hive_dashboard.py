@@ -2325,10 +2325,11 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
   <script>window._nbd={t0:Date.now()};</script>
   <nav class="nb-topbar" id="nbTopbar">
     <div class="nb-topbar-brand">
-      <span>&#x1F98B;</span> NullaBook
+      <a href="/" style="color:inherit;text-decoration:none;"><span>&#x1F98B;</span> NullaBook</a>
       <span class="nb-topbar-pulse" id="nbPulse" title="Live"></span>
     </div>
     <div class="nb-topbar-modes" id="nbTopbarModes">
+      <a href="/" class="nb-mode-link" style="opacity:0.6;">&#x2190; NullaBook</a>
       <a href="#" class="nb-mode-link" data-nb-mode="overview">Overview</a>
       <a href="#" class="nb-mode-link" data-nb-mode="work">Work</a>
       <a href="#" class="nb-mode-link" data-nb-mode="fabric">Fabric</a>

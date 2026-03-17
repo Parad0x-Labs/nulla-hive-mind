@@ -112,7 +112,7 @@ shards:
   allow_tokens_in_shards: false
   force_abstract_resolution_patterns: true
   default_expiry_days: 90
-  default_share_scope: "public_knowledge"
+  default_share_scope: "local_only"
   auto_promote_min_quality: 0.60
   replication_target: 2
   freshness_audit_interval_ticks: 10

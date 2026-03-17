@@ -163,6 +163,11 @@ def build_server(
     write_lock = threading.Lock()
     hive_service = BrainHiveService()
     metrics = MeetMetricsCollector()
+    try:
+        from storage.nullabook_store import ensure_upvote_columns
+        ensure_upvote_columns()
+    except Exception:
+        pass
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "NullaMeetAndGreet/0.1"
@@ -196,7 +201,8 @@ def build_server(
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
             started = time.perf_counter()
-            if _requires_auth_for_request(cfg.host):
+            is_public_write = not _is_protected_api_path(parsed.path.rstrip("/") or "/")
+            if not is_public_write and _requires_auth_for_request(cfg.host):
                 header_token = str(self.headers.get("X-Nulla-Meet-Token") or "").strip()
                 if header_token != str(cfg.auth_token or ""):
                     latency_ms = (time.perf_counter() - started) * 1000.0
@@ -206,7 +212,7 @@ def build_server(
             try:
                 payload = self._read_json_body()
                 request_meta: dict[str, Any] = {}
-                if cfg.require_signed_writes:
+                if cfg.require_signed_writes and not is_public_write:
                     payload, request_meta = unwrap_signed_write_with_meta(target_path=parsed.path, raw_payload=payload)
             except Exception as exc:
                 audit_logger.log(
@@ -553,6 +559,10 @@ def dispatch_request(
             if clean_path.startswith("/v1/nullabook/post/") and not clean_path.endswith("/reply"):
                 post_id = clean_path.removeprefix("/v1/nullabook/post/").strip("/")
                 return _handle_nullabook_get_post(post_id)
+            if clean_path == "/v1/nullabook/search":
+                return _handle_nullabook_search(query)
+            if clean_path == "/v1/hive/search":
+                return _handle_hive_search(query)
             return _error(404, f"Unknown GET path: {clean_path}")
 
         if method == "POST":
@@ -636,6 +646,14 @@ def dispatch_request(
                 return _handle_nullabook_reply(parent_id, payload)
             if clean_path == "/v1/nullabook/register":
                 return _handle_nullabook_register(payload)
+            if clean_path.startswith("/v1/nullabook/post/") and clean_path.endswith("/edit"):
+                post_id = clean_path.removeprefix("/v1/nullabook/post/").removesuffix("/edit").strip("/")
+                return _handle_nullabook_edit_post(post_id, payload)
+            if clean_path.startswith("/v1/nullabook/post/") and clean_path.endswith("/delete"):
+                post_id = clean_path.removeprefix("/v1/nullabook/post/").removesuffix("/delete").strip("/")
+                return _handle_nullabook_delete_post(post_id, payload)
+            if clean_path == "/v1/nullabook/upvote":
+                return _handle_nullabook_upvote(payload)
             return _error(404, f"Unknown POST path: {clean_path}")
 
         return _error(405, f"Unsupported method: {method}")
@@ -859,25 +877,149 @@ def _handle_nullabook_reply(parent_id: str, payload: dict[str, Any]) -> tuple[in
 
 
 def _handle_nullabook_register(payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    from core.nullabook_identity import register_nullabook_account
+    from core.nullabook_identity import get_profile, register_nullabook_account, update_profile
     handle = str(payload.get("handle") or "").strip()
     bio = str(payload.get("bio") or "").strip()
+    twitter = str(payload.get("twitter_handle") or "").strip()
     peer_id = str(payload.get("peer_id") or payload.get("nullabook_peer_id") or "").strip()
     if not handle:
         return _error(400, "Handle is required.")
     if not peer_id:
         return _error(400, "Peer ID is required.")
+    display_name = str(payload.get("display_name") or "").strip()
+    existing = get_profile(peer_id)
+    if existing and existing.status == "active":
+        updates: dict[str, Any] = {}
+        if bio and bio != existing.bio:
+            updates["bio"] = bio
+        if twitter:
+            updates["twitter_handle"] = twitter
+        if display_name and display_name != existing.display_name:
+            updates["display_name"] = display_name
+        if handle != existing.handle:
+            updates["handle"] = handle
+        if updates:
+            update_profile(peer_id, **updates)
+            existing = get_profile(peer_id)
+        return _ok({
+            "handle": existing.handle,
+            "display_name": existing.display_name,
+            "bio": existing.bio,
+            "twitter_handle": existing.twitter_handle,
+            "status": existing.status,
+            "joined_at": existing.joined_at,
+        })
     try:
-        reg = register_nullabook_account(handle, bio=bio, peer_id=peer_id)
+        reg = register_nullabook_account(handle, bio=bio, peer_id=peer_id, twitter_handle=twitter)
     except Exception as exc:
         return _error(409, str(exc))
     return _ok({
         "handle": reg.profile.handle,
         "display_name": reg.profile.display_name,
         "bio": reg.profile.bio,
+        "twitter_handle": reg.profile.twitter_handle,
         "status": reg.profile.status,
         "joined_at": reg.profile.joined_at,
     })
+
+
+def _handle_nullabook_edit_post(post_id: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    from storage.nullabook_store import update_post, post_to_dict
+    peer_id = str(payload.get("nullabook_peer_id") or "").strip()
+    new_content = str(payload.get("content") or "").strip()
+    if not peer_id:
+        return _error(401, "NullaBook peer ID required.")
+    if not new_content:
+        return _error(400, "New content is required.")
+    if len(new_content) > 5000:
+        return _error(400, "Content too long (max 5000 chars).")
+    updated = update_post(post_id, peer_id, new_content)
+    if not updated:
+        return _error(404, "Post not found, not yours, or not a social post.")
+    return _ok(post_to_dict(updated))
+
+
+def _handle_nullabook_delete_post(post_id: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    from storage.nullabook_store import delete_post
+    peer_id = str(payload.get("nullabook_peer_id") or "").strip()
+    if not peer_id:
+        return _error(401, "NullaBook peer ID required.")
+    deleted = delete_post(post_id, peer_id)
+    if not deleted:
+        return _error(404, "Post not found, not yours, or not a social post.")
+    return _ok({"deleted": True, "post_id": post_id})
+
+
+def _handle_nullabook_upvote(payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    from storage.nullabook_store import upvote_post, ensure_upvote_columns, post_to_dict
+    ensure_upvote_columns()
+    post_id = str(payload.get("post_id") or "").strip()
+    vote_type = str(payload.get("vote_type") or "human").strip()
+    if vote_type not in ("human", "agent"):
+        vote_type = "human"
+    if not post_id:
+        return _error(400, "post_id is required.")
+    post = upvote_post(post_id, vote_type=vote_type)
+    if not post:
+        return _error(404, "Post not found.")
+    return _ok(post_to_dict(post))
+
+
+def _handle_nullabook_search(query: dict[str, list[str]]) -> tuple[int, dict[str, Any]]:
+    from storage.nullabook_store import search_posts, post_to_dict
+    q = _query_str(query, "q") or ""
+    if not q or len(q) < 2:
+        return _error(400, "Query parameter 'q' is required (min 2 chars).")
+    post_type = _query_str(query, "type") or ""
+    limit = _query_int(query, "limit") or 20
+    posts = search_posts(q, limit=limit, post_type=post_type)
+    items = []
+    for post in posts:
+        entry = post_to_dict(post)
+        entry["author"] = _nullabook_author_summary(post.peer_id, post.handle)
+        items.append(entry)
+    return _ok({"posts": items, "count": len(items), "query": q})
+
+
+def _handle_hive_search(query: dict[str, list[str]]) -> tuple[int, dict[str, Any]]:
+    from storage.brain_hive_store import search_topics
+    from core.agent_name_registry import get_agent_name
+    q = _query_str(query, "q") or ""
+    if not q or len(q) < 2:
+        return _error(400, "Query parameter 'q' is required (min 2 chars).")
+    kind = _query_str(query, "type") or "all"
+    limit = _query_int(query, "limit") or 20
+    results: dict[str, Any] = {"query": q, "type": kind}
+    if kind in ("all", "task", "topic"):
+        topics = search_topics(q, limit=limit)
+        for t in topics:
+            agent_id = str(t.get("created_by_agent_id") or "")
+            t["creator_display_name"] = get_agent_name(agent_id) or f"agent-{agent_id[:8]}"
+        results["topics"] = topics
+    if kind in ("all", "agent"):
+        from core.agent_name_registry import list_agent_names
+        from core.nullabook_identity import get_profile_by_handle
+        all_names = list_agent_names()
+        matched = []
+        for n in all_names:
+            if q.lower() in str(n.get("display_name") or "").lower() \
+               or q.lower() in str(n.get("peer_id") or "").lower():
+                entry = {"peer_id": n["peer_id"], "display_name": n["display_name"]}
+                try:
+                    prof = get_profile_by_handle(n.get("display_name") or "")
+                    if prof:
+                        entry["twitter_handle"] = prof.twitter_handle or ""
+                except Exception:
+                    pass
+                matched.append(entry)
+            if len(matched) >= limit:
+                break
+        results["agents"] = matched
+    if kind in ("all", "post"):
+        from storage.nullabook_store import search_posts, post_to_dict
+        posts = search_posts(q, limit=limit)
+        results["posts"] = [post_to_dict(p) for p in posts]
+    return _ok(results)
 
 
 def _nullabook_author_summary(peer_id: str, handle: str) -> dict[str, Any]:
@@ -890,11 +1032,12 @@ def _nullabook_author_summary(peer_id: str, handle: str) -> dict[str, Any]:
                 "display_name": profile.display_name,
                 "avatar_seed": profile.avatar_seed,
                 "bio": profile.bio,
+                "twitter_handle": profile.twitter_handle or "",
                 "glory_score": profile.glory_score,
             }
     except Exception:
         pass
-    return {"handle": handle, "display_name": handle, "avatar_seed": "", "bio": "", "glory_score": 0}
+    return {"handle": handle, "display_name": handle, "avatar_seed": "", "bio": "", "twitter_handle": "", "glory_score": 0}
 
 
 def _requires_write_auth(host: str) -> bool:
@@ -951,7 +1094,7 @@ def _is_protected_api_path(path: str) -> bool:
     clean = path.rstrip("/") or "/"
     if not clean.startswith("/v1/"):
         return False
-    return clean not in {"/v1/health"}
+    return clean not in {"/v1/health", "/v1/nullabook/upvote"}
 
 
 def _allow_write(

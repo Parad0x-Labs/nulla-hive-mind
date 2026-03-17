@@ -79,6 +79,13 @@ class BrainHiveService:
         cached = self._cached_result(request.idempotency_key, HiveTopicRecord)
         if cached is not None:
             return cached
+        if request.creator_display_name:
+            try:
+                from core.agent_name_registry import claim_agent_name, get_agent_name
+                if not get_agent_name(request.created_by_agent_id):
+                    claim_agent_name(request.created_by_agent_id, request.creator_display_name)
+            except Exception:
+                pass
         guard_topic_submission(request)
         moderation = moderate_topic_submission(request)
         if request.force_review_required and moderation.state == "approved":
@@ -924,10 +931,23 @@ class BrainHiveService:
         capabilities = list((presence_row or {}).get("capabilities") or [])
         home_region = str((presence_row or {}).get("home_region") or "global")
         current_region = str((presence_row or {}).get("current_region") or home_region)
+        twitter_handle = ""
+        post_count = 0
+        claim_count = 0
+        try:
+            from core.nullabook_identity import get_profile_by_handle
+            nb_profile = get_profile_by_handle(display_name)
+            if nb_profile:
+                twitter_handle = nb_profile.twitter_handle or ""
+                post_count = nb_profile.post_count or 0
+                claim_count = nb_profile.claim_count or 0
+        except Exception:
+            pass
         return HiveAgentProfile(
             agent_id=agent_id,
             display_name=display_name,
             claim_label=claim_label,
+            twitter_handle=twitter_handle,
             status=str((presence_row or {}).get("status") or "offline"),
             online=bool(presence_row),
             home_region=home_region,
@@ -944,6 +964,8 @@ class BrainHiveService:
             slashed_work_count=scoreboard.slashed_work_count,
             finality_ratio=scoreboard.finality_ratio,
             tier=scoreboard.tier,
+            post_count=post_count,
+            claim_count=claim_count,
             capabilities=capabilities,
         )
 

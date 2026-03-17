@@ -127,6 +127,25 @@ def list_topics(*, status: str | None = None, limit: int = 100, visible_only: bo
         conn.close()
 
 
+def search_topics(query: str, *, limit: int = 20) -> list[dict[str, Any]]:
+    """LIKE-based search across topic title and summary. Only approved topics."""
+    _init_moderation_tables()
+    conn = get_connection()
+    try:
+        q = f"%{query.strip()[:200]}%"
+        rows = conn.execute(
+            """
+            SELECT * FROM hive_topics
+            WHERE moderation_state = 'approved' AND (title LIKE ? OR summary LIKE ?)
+            ORDER BY updated_at DESC LIMIT ?
+            """,
+            (q, q, max(1, min(limit, 100))),
+        ).fetchall()
+        return [_row_to_topic(dict(row)) for row in rows]
+    finally:
+        conn.close()
+
+
 def list_recent_topics(*, limit: int = 250) -> list[dict[str, Any]]:
     _init_moderation_tables()
     conn = get_connection()

@@ -202,6 +202,7 @@ class NullaAgent:
         self._last_idle_commons_ts = 0.0
         self._last_idle_hive_research_ts = 0.0
         self._idle_commons_seed_index = 0
+        self._hive_create_pending: dict[str, dict[str, Any]] = {}
 
     def start(self) -> AgentRuntime:
         setup_logging(
@@ -650,6 +651,12 @@ class NullaAgent:
                     learned_plan=dispatch.learned_plan,
                     workflow_summary=workflow_summary,
                 )
+
+            hive_confirm = self._maybe_handle_hive_create_confirmation(
+                effective_input, task=task, session_id=session_id, source_context=source_context,
+            )
+            if hive_confirm is not None:
+                return hive_confirm
 
             hive_topic_create = self._maybe_handle_hive_topic_create_request(
                 effective_input,
@@ -3342,14 +3349,46 @@ class NullaAgent:
             return f'I tried the live web lane for "{query}", but no current news results came back.'
         return f'I tried the live web lane for "{query}", but no grounded live results came back.'
 
-    _NULLABOOK_TRIGGERS = (
-        "nullabook", "nulla book", "nulla-book",
-        "my profile", "create profile", "update profile",
-        "my account", "create account",
-        "post to nullabook", "post on nullabook", "nullabook post",
-    )
-
     _nullabook_pending: dict[str, dict[str, str]] = {}
+
+    @staticmethod
+    def _classify_nullabook_intent(lowered: str) -> str | None:
+        """Return a specific intent string only when the user clearly wants a NullaBook action.
+        Returns None for casual mentions — those should fall through to the LLM."""
+        import re
+        if re.search(r'(?:post\s+(?:to|on)\s+(?:nullabook|nulla\s*book)|(?:nullabook|nulla\s*book)\s+post|do\s+(?:a\s+)?(?:first\s+)?post|let.s\s+(?:do\s+)?(?:a\s+|first\s+|our\s+)?post)', lowered):
+            return "post"
+        if re.search(r'(?:delete|remove)\s+(?:my\s+)?(?:nullabook\s+)?post', lowered):
+            return "delete"
+        if re.search(r'(?:edit|update|change)\s+(?:my\s+)?(?:nullabook\s+)?post\b', lowered):
+            return "edit"
+        if re.search(r'(?:create|make|set\s*up|start|open|get|register|sign\s*up)\s+(?:a\s+|my\s+|an?\s+|our\s+)?(?:nullabook\s+|nulla\s*book\s+)?(?:profile|account)', lowered):
+            return "create"
+        if "sign up" in lowered and ("nullabook" in lowered or "nulla book" in lowered):
+            return "create"
+        if re.search(r'(?:do\s+(?:we|i)\s+have|(?:is|check|what\s*(?:is|\'s))\s+(?:my|our))\s+(?:\w+\s+)?(?:(?:nullabook|nulla\s*book)\s+)?(?:name|handle|profile|account)', lowered):
+            return "check_profile"
+        if re.search(r'(?:what|who)\s+(?:is|am)\s+(?:my|i)\s+(?:on\s+)?(?:nullabook|nulla\s*book)', lowered):
+            return "check_profile"
+        if re.search(r'(?:my|our)\s+(?:nullabook|nulla\s*book)\s+(?:name|handle|profile)', lowered):
+            return "check_profile"
+
+        has_bio = bool(re.search(r'(?:(?:set|update|change)\s+(?:my\s+)?bio\b|^bio\s*:)', lowered))
+        has_twitter = bool(re.search(r'(?:(?:set|update|change|add)\s+(?:my\s+)?(?:twitter|x)\s*(?:handle)?|(?:my\s+)?(?:twitter|x)\s*(?:handle)?\s*(?:is|:))', lowered))
+        if has_bio and has_twitter:
+            return "compound_bio_twitter"
+        if has_twitter:
+            return "twitter"
+        if has_bio:
+            return "bio"
+
+        if re.search(r'(?:change|rename|switch|set|update)\s+(?:my\s+)?(?:(?:nullabook|nulla\s*book)\s+)?(?:name|handle|display)', lowered):
+            return "rename"
+        if re.search(r'(?:set\s+)?(?:my\s+)?(?:name|handle)\s*[:=]', lowered):
+            return "rename"
+        if re.search(r'(?:can\s+we\s+)?chang\w*\s+(?:it|this|that|\w+)\s+to\s+', lowered):
+            return "rename"
+        return None
 
     def _maybe_handle_nullabook_fast_path(
         self,
@@ -3367,7 +3406,11 @@ class NullaAgent:
                 source_context=source_context, pending=pending,
             )
 
-        if not any(trigger in lowered for trigger in self._NULLABOOK_TRIGGERS):
+        intent = self._classify_nullabook_intent(lowered)
+        if intent is None:
+            compound = self._try_compound_nullabook_message(user_input, session_id=session_id, source_context=source_context)
+            if compound is not None:
+                return compound
             return None
 
         try:
@@ -3377,40 +3420,221 @@ class NullaAgent:
         except Exception:
             profile = None
 
-        if self._is_nullabook_post_request(lowered):
+        if intent == "post":
             return self._handle_nullabook_post(user_input, lowered, profile, session_id=session_id, source_context=source_context)
 
-        if self._is_nullabook_create_request(lowered):
+        if intent == "delete":
+            return self._handle_nullabook_delete(user_input, lowered, profile, session_id=session_id, source_context=source_context)
+
+        if intent == "edit":
+            return self._handle_nullabook_edit(user_input, lowered, profile, session_id=session_id, source_context=source_context)
+
+        if intent == "twitter":
+            if not profile:
+                return self._nullabook_result(session_id, user_input, source_context, "You need a NullaBook profile first.")
+            twitter_update = self._extract_twitter_handle(user_input)
+            if twitter_update:
+                try:
+                    update_profile(profile.peer_id, twitter_handle=twitter_update)
+                    profile = get_profile(profile.peer_id)
+                    self._sync_profile_to_hive(profile)
+                    return self._nullabook_result(session_id, user_input, source_context,
+                        f"Twitter/X handle set to **@{twitter_update}**\n"
+                        f"Visible on your NullaBook profile. Links to https://x.com/{twitter_update}")
+                except Exception as exc:
+                    return self._nullabook_result(session_id, user_input, source_context, f"Failed to set Twitter handle: {exc}")
+            return self._nullabook_result(session_id, user_input, source_context,
+                "What's the Twitter/X handle? Just the username, no @ needed.")
+
+        if intent == "bio":
+            if not profile:
+                return self._nullabook_result(session_id, user_input, source_context, "You need a NullaBook profile first.")
+            bio_update = self._extract_nullabook_bio_update(user_input)
+            if not bio_update:
+                bio_update = re.sub(r'^bio\s*:\s*', '', user_input.strip(), flags=re.IGNORECASE).strip()
+            if bio_update:
+                try:
+                    update_profile(profile.peer_id, bio=bio_update)
+                    profile = get_profile(profile.peer_id)
+                    self._sync_profile_to_hive(profile)
+                    return self._nullabook_result(session_id, user_input, source_context, f"Bio updated: {bio_update}")
+                except Exception as exc:
+                    return self._nullabook_result(session_id, user_input, source_context, f"Failed to update bio: {exc}")
+            return self._nullabook_result(session_id, user_input, source_context,
+                "What do you want the bio to say?")
+
+        if intent == "compound_bio_twitter":
+            if not profile:
+                return self._nullabook_result(session_id, user_input, source_context, "You need a NullaBook profile first.")
+            results = []
+            bio_update = self._extract_nullabook_bio_update(user_input)
+            if bio_update:
+                try:
+                    update_profile(profile.peer_id, bio=bio_update)
+                    results.append(f"Bio updated: {bio_update}")
+                except Exception as exc:
+                    results.append(f"Bio update failed: {exc}")
+            twitter_update = self._extract_twitter_handle(user_input)
+            if twitter_update:
+                try:
+                    update_profile(profile.peer_id, twitter_handle=twitter_update)
+                    results.append(f"Twitter/X set to @{twitter_update}")
+                except Exception as exc:
+                    results.append(f"Twitter update failed: {exc}")
+            profile = get_profile(profile.peer_id)
+            self._sync_profile_to_hive(profile)
+            return self._nullabook_result(session_id, user_input, source_context,
+                "\n".join(results) if results else "Couldn't extract bio or twitter from your message.")
+
+        if intent == "rename":
+            if not profile:
+                return self._nullabook_result(session_id, user_input, source_context, "You need a NullaBook profile first.")
+            desired_handle = self._extract_handle_from_text(user_input)
+            display_name = self._extract_display_name(user_input)
+            if display_name:
+                try:
+                    update_profile(profile.peer_id, display_name=display_name)
+                    profile = get_profile(profile.peer_id)
+                    self._sync_profile_to_hive(profile)
+                    return self._nullabook_result(session_id, user_input, source_context,
+                        f"Display name set to: {display_name}")
+                except Exception as exc:
+                    return self._nullabook_result(session_id, user_input, source_context,
+                        f"Failed to set display name: {exc}")
+            if desired_handle and desired_handle.lower() != profile.handle.lower():
+                return self._handle_nullabook_rename(
+                    desired_handle, profile,
+                    session_id=session_id, user_input=user_input, source_context=source_context)
+            self._nullabook_pending[session_id] = {"step": "awaiting_rename"}
+            return self._nullabook_result(session_id, user_input, source_context,
+                f"Current handle: **{profile.handle}**. What do you want to change it to?")
+
+        if intent in ("create", "check_profile"):
+            desired_handle = self._extract_handle_from_text(user_input)
             if profile:
+                if desired_handle and desired_handle.lower() != profile.handle.lower():
+                    return self._handle_nullabook_rename(
+                        desired_handle, profile,
+                        session_id=session_id, user_input=user_input, source_context=source_context)
+                display_info = f"\nDisplay name: {profile.display_name}" if profile.display_name and profile.display_name != profile.handle else ""
+                twitter_display = f"\nTwitter/X: @{profile.twitter_handle}" if profile.twitter_handle else ""
                 return self._nullabook_result(session_id, user_input, source_context,
-                    f"You already have a NullaBook profile: **{profile.handle}**\n"
-                    f"Bio: {profile.bio or '(not set)'}\n"
+                    f"NullaBook profile active — handle: **{profile.handle}**{display_info}\n"
+                    f"Bio: {profile.bio or '(not set)'}{twitter_display}\n"
                     f"Stats: {profile.post_count} posts, {profile.claim_count} topic claims.")
+            if desired_handle:
+                self._nullabook_pending[session_id] = {"step": "awaiting_handle"}
+                return self._nullabook_step_handle(
+                    desired_handle, desired_handle.lower(),
+                    session_id=session_id, source_context=source_context)
             self._nullabook_pending[session_id] = {"step": "awaiting_handle"}
             return self._nullabook_result(session_id, user_input, source_context,
                 "Let's set up your NullaBook profile.\n"
                 "What handle would you like? Rules: 3-32 characters, letters, numbers, underscores, or hyphens.")
 
-        if not profile:
-            self._nullabook_pending[session_id] = {"step": "awaiting_handle"}
-            return self._nullabook_result(session_id, user_input, source_context,
-                "You don't have a NullaBook profile yet. Let's create one.\n"
-                "What handle would you like? Rules: 3-32 characters, letters, numbers, underscores, or hyphens.")
+        return None
 
-        bio_update = self._extract_nullabook_bio_update(lowered)
-        if bio_update:
+    def _try_compound_nullabook_message(
+        self,
+        user_input: str,
+        *,
+        session_id: str,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, Any] | None:
+        """Detect compound messages that contain multiple NullaBook actions in one message,
+        e.g. 'set name: X Bio: Y First post: Z'. Execute all found actions."""
+        import re
+        results: list[str] = []
+
+        try:
+            from core.nullabook_identity import get_profile, update_profile
+            from network.signer import get_local_peer_id
+            peer_id = get_local_peer_id()
+            profile = get_profile(peer_id)
+        except Exception:
+            profile = None
+
+        handle_m = re.search(r'(?:set\s+)?(?:my\s+)?(?:name|handle)\s*[:=]\s*(\S+)', user_input, re.IGNORECASE)
+        bio_m = re.search(r'bio\s*[:=]\s*(.+?)(?=\s+(?:first|post|twitter)|$)', user_input, re.IGNORECASE)
+        post_m = re.search(r'(?:first\s+(?:our\s+)?post|our\s+first\s+post|post\s*it?)\s*[:=]\s*(.+?)$', user_input, re.IGNORECASE)
+        twitter_m = re.search(r'(?:twitter|x)\s*(?:handle)?\s*[:=]\s*@?([A-Za-z0-9_]{1,15})', user_input, re.IGNORECASE)
+
+        if not any([handle_m, bio_m, post_m, twitter_m]):
+            return None
+
+        if handle_m:
+            desired = handle_m.group(1).strip().strip("\"'.,!?")
+            if profile and desired.lower() != profile.handle.lower():
+                try:
+                    from core.nullabook_identity import rename_handle
+                    rename_handle(peer_id, desired)
+                    profile = get_profile(peer_id)
+                    results.append(f"Handle changed to **{desired}**")
+                except Exception as exc:
+                    results.append(f"Handle change failed: {exc}")
+            elif not profile:
+                try:
+                    from core.nullabook_identity import register_nullabook_account
+                    reg = register_nullabook_account(desired, peer_id=peer_id)
+                    profile = reg.profile
+                    results.append(f"Registered as **{desired}** on NullaBook")
+                except Exception as exc:
+                    results.append(f"Registration failed: {exc}")
+
+        if bio_m and profile:
+            bio_text = bio_m.group(1).strip().strip("\"'").strip()[:280]
+            if bio_text:
+                try:
+                    update_profile(profile.peer_id, bio=bio_text)
+                    results.append(f"Bio set to: {bio_text}")
+                except Exception:
+                    pass
+
+        if twitter_m and profile:
+            tw = twitter_m.group(1)
             try:
-                update_profile(profile.peer_id, bio=bio_update)
-                return self._nullabook_result(session_id, user_input, source_context, f"Updated NullaBook bio to: {bio_update}")
+                update_profile(profile.peer_id, twitter_handle=tw)
+                results.append(f"Twitter set to @{tw}")
             except Exception:
                 pass
 
-        return self._nullabook_result(session_id, user_input, source_context,
-            f"NullaBook profile active — handle: **{profile.handle}**\n"
-            f"Bio: {profile.bio or '(not set)'}\n"
-            f"Stats: {profile.post_count} posts, {profile.claim_count} topic claims.\n"
-            f"NullaBook is the decentralized social network for AI agents in the NULLA hive.\n"
-            f"You can post with: 'post to NullaBook: <your message>'")
+        if profile and (bio_m or twitter_m or handle_m):
+            profile = get_profile(profile.peer_id)
+            self._sync_profile_to_hive(profile)
+
+        if post_m and profile:
+            content = post_m.group(1).strip().strip("\"'").strip()
+            if content:
+                try:
+                    profile = get_profile(profile.peer_id)
+                    from core.nullabook_identity import increment_post_count
+                    from storage.nullabook_store import create_post
+                    post = create_post(
+                        peer_id=profile.peer_id,
+                        handle=profile.handle,
+                        content=content,
+                        post_type="social",
+                    )
+                    increment_post_count(profile.peer_id)
+                    try:
+                        self.public_hive_bridge.sync_nullabook_post(
+                            peer_id=profile.peer_id,
+                            handle=profile.handle,
+                            bio=profile.bio or "",
+                            content=content,
+                            post_type="social",
+                            twitter_handle=profile.twitter_handle or "",
+                            display_name=profile.display_name or "",
+                        )
+                    except Exception:
+                        pass
+                    results.append(f"Posted: {content[:100]}")
+                except Exception as exc:
+                    results.append(f"Post failed: {exc}")
+
+        if results:
+            return self._nullabook_result(session_id, user_input, source_context, "\n".join(results))
+        return None
 
     def _handle_nullabook_pending_step(
         self,
@@ -3432,6 +3656,51 @@ class NullaAgent:
 
         if step == "awaiting_bio":
             return self._nullabook_step_bio(user_input, session_id=session_id, source_context=source_context, pending=pending)
+
+        if step == "awaiting_post_content":
+            self._nullabook_pending.pop(session_id, None)
+            content = user_input.strip()
+            if not content:
+                return self._nullabook_result(session_id, user_input, source_context, "Post can't be empty.")
+            try:
+                from core.nullabook_identity import get_profile
+                from network.signer import get_local_peer_id
+                profile = get_profile(get_local_peer_id())
+            except Exception:
+                profile = None
+            if not profile:
+                return self._nullabook_result(session_id, user_input, source_context, "No NullaBook profile found.")
+            return self._execute_nullabook_post(
+                content, profile, session_id=session_id, source_context=source_context)
+
+        if step == "awaiting_rename":
+            self._nullabook_pending.pop(session_id, None)
+            new_name = user_input.strip()
+            if not new_name:
+                return self._nullabook_result(session_id, user_input, source_context, "Name can't be empty.")
+            try:
+                from core.nullabook_identity import get_profile, update_profile
+                from network.signer import get_local_peer_id
+                profile = get_profile(get_local_peer_id())
+            except Exception:
+                profile = None
+            if not profile:
+                return self._nullabook_result(session_id, user_input, source_context, "No NullaBook profile found.")
+            import re as _re
+            is_ascii_handle = bool(_re.fullmatch(r'[A-Za-z0-9_\-]{3,32}', new_name))
+            if is_ascii_handle:
+                return self._handle_nullabook_rename(
+                    new_name, profile,
+                    session_id=session_id, user_input=user_input, source_context=source_context)
+            try:
+                update_profile(profile.peer_id, display_name=new_name[:64])
+                profile = get_profile(profile.peer_id)
+                self._sync_profile_to_hive(profile)
+                return self._nullabook_result(session_id, user_input, source_context,
+                    f"Display name set to: {new_name[:64]}")
+            except Exception as exc:
+                return self._nullabook_result(session_id, user_input, source_context,
+                    f"Failed to set name: {exc}")
 
         self._nullabook_pending.pop(session_id, None)
         return None
@@ -3459,9 +3728,13 @@ class NullaAgent:
                 f"'{handle}' is already taken. Try a different handle:")
 
         try:
-            from core.nullabook_identity import register_nullabook_account
+            from core.nullabook_identity import register_nullabook_account, get_profile
             from network.signer import get_local_peer_id
-            register_nullabook_account(handle, peer_id=get_local_peer_id())
+            peer_id = get_local_peer_id()
+            register_nullabook_account(handle, peer_id=peer_id)
+            profile = get_profile(peer_id)
+            if profile:
+                self._sync_profile_to_hive(profile)
         except Exception as exc:
             self._nullabook_pending.pop(session_id, None)
             return self._nullabook_result(session_id, user_input, source_context, f"Registration failed: {exc}")
@@ -3486,6 +3759,8 @@ class NullaAgent:
             profile = get_profile_by_handle(handle)
             if profile:
                 update_profile(profile.peer_id, bio=user_input.strip()[:500])
+                profile = get_profile_by_handle(handle)
+                self._sync_profile_to_hive(profile)
         except Exception:
             pass
         return self._nullabook_result(session_id, user_input, source_context,
@@ -3500,17 +3775,17 @@ class NullaAgent:
             return self._nullabook_result(session_id, user_input, source_context,
                 "You need a NullaBook profile first. What handle would you like?")
 
-        content = user_input.strip()
-        for prefix in ("post to nullabook:", "post on nullabook:", "nullabook post:", "post to nulla book:",
-                        "post to nullabook", "post on nullabook", "nullabook post", "post to nulla book"):
-            if lowered.startswith(prefix):
-                content = user_input.strip()[len(prefix):].strip()
-                break
-        content = content.strip().strip("\"'").strip()
+        content = self._extract_post_content(user_input)
         if not content:
+            self._nullabook_pending[session_id] = {"step": "awaiting_post_content"}
             return self._nullabook_result(session_id, user_input, source_context,
-                "What would you like to post? Include your message after 'post to NullaBook:'")
+                "What would you like to post?")
 
+        return self._execute_nullabook_post(content, profile, session_id=session_id, source_context=source_context)
+
+    def _execute_nullabook_post(
+        self, content: str, profile: Any, *, session_id: str, source_context: dict[str, object] | None,
+    ) -> dict[str, Any]:
         try:
             from core.nullabook_identity import increment_post_count
             from storage.nullabook_store import create_post
@@ -3521,12 +3796,27 @@ class NullaAgent:
                 post_type="social",
             )
             increment_post_count(profile.peer_id)
-            return self._nullabook_result(session_id, user_input, source_context,
-                f"Posted to NullaBook as **{profile.handle}**:\n"
+            sync_result = {"ok": False}
+            try:
+                sync_result = self.public_hive_bridge.sync_nullabook_post(
+                    peer_id=profile.peer_id,
+                    handle=profile.handle,
+                    bio=profile.bio or "",
+                    content=content[:5000],
+                    post_type="social",
+                    twitter_handle=profile.twitter_handle or "",
+                    display_name=profile.display_name or "",
+                )
+            except Exception:
+                pass
+            display = profile.display_name or profile.handle
+            sync_status = " (live on nullabook.com)" if sync_result.get("ok") else ""
+            return self._nullabook_result(session_id, content, source_context,
+                f"Posted to NullaBook as **{display}**{sync_status}:\n"
                 f"> {content[:200]}\n\n"
                 f"Post ID: {post.post_id}")
         except Exception as exc:
-            return self._nullabook_result(session_id, user_input, source_context, f"Failed to post: {exc}")
+            return self._nullabook_result(session_id, content, source_context, f"Failed to post: {exc}")
 
     def _nullabook_result(
         self, session_id: str, user_input: str, source_context: dict[str, object] | None, response: str,
@@ -3536,25 +3826,257 @@ class NullaAgent:
             confidence=0.95, source_context=source_context, reason="nullabook_fast_path",
         )
 
+    def _sync_profile_to_hive(self, profile) -> None:
+        """Push current profile state to the public hive (meet node)."""
+        try:
+            bridge = getattr(self, "public_hive_bridge", None)
+            if bridge is None:
+                return
+            bridge.sync_nullabook_profile(
+                peer_id=profile.peer_id,
+                handle=profile.handle,
+                bio=profile.bio or "",
+                display_name=profile.display_name or "",
+                twitter_handle=profile.twitter_handle or "",
+            )
+        except Exception:
+            pass
+
     @staticmethod
     def _is_nullabook_post_request(lowered: str) -> bool:
-        return any(lowered.startswith(p) for p in (
-            "post to nullabook", "post on nullabook", "nullabook post", "post to nulla book",
+        return bool(re.search(
+            r'(?:post\s+(?:to|on)\s+(?:nullabook|nulla\s*book)|(?:nullabook|nulla\s*book)\s+post|do\s+(?:a\s+)?(?:first\s+|our\s+)?post|let.s\s+(?:do\s+)?(?:a\s+|first\s+|our\s+)?post)',
+            lowered,
         ))
 
     @staticmethod
-    def _is_nullabook_create_request(lowered: str) -> bool:
-        return any(p in lowered for p in ("create profile", "create account", "register", "sign up", "set up"))
+    def _is_nullabook_delete_request(lowered: str) -> bool:
+        return bool(re.search(r'(?:delete|remove)\s+(?:my\s+)?(?:nullabook\s+)?post', lowered))
 
     @staticmethod
-    def _extract_nullabook_bio_update(lowered_text: str) -> str:
+    def _is_nullabook_edit_request(lowered: str) -> bool:
+        return bool(re.search(r'(?:edit|update|change)\s+(?:my\s+)?(?:nullabook\s+)?post', lowered))
+
+    def _handle_nullabook_delete(
+        self, user_input: str, lowered: str, profile: Any,
+        *, session_id: str, source_context: dict[str, object] | None,
+    ) -> dict[str, Any]:
+        if not profile:
+            return self._nullabook_result(session_id, user_input, source_context, "You need a NullaBook profile first.")
+        post_id = self._extract_post_id(user_input)
+        if not post_id:
+            try:
+                from storage.nullabook_store import list_user_posts
+                recent = list_user_posts(profile.handle, limit=5)
+                social = [p for p in recent if p.post_type == "social"]
+                if not social:
+                    return self._nullabook_result(session_id, user_input, source_context, "You don't have any social posts to delete.")
+                if len(social) == 1:
+                    post_id = social[0].post_id
+                else:
+                    lines = ["Which post do you want to delete?\n"]
+                    for p in social:
+                        lines.append(f"- `{p.post_id}`: {p.content[:60]}...")
+                    lines.append("\nSay: delete post <post_id>")
+                    return self._nullabook_result(session_id, user_input, source_context, "\n".join(lines))
+            except Exception:
+                return self._nullabook_result(session_id, user_input, source_context, "Couldn't list your posts. Try: delete post <post_id>")
+        try:
+            from storage.nullabook_store import delete_post
+            ok = delete_post(post_id, profile.peer_id)
+            if ok:
+                try:
+                    self.public_hive_bridge._post_json(
+                        str(self.public_hive_bridge.config.topic_target_url),
+                        f"/v1/nullabook/post/{post_id}/delete",
+                        {"nullabook_peer_id": profile.peer_id},
+                    )
+                except Exception:
+                    pass
+                return self._nullabook_result(session_id, user_input, source_context, f"Deleted post `{post_id}`.")
+            return self._nullabook_result(session_id, user_input, source_context,
+                "Couldn't delete that post. Either it doesn't exist, isn't yours, or is a task-linked post (tasks can't be deleted).")
+        except Exception as exc:
+            return self._nullabook_result(session_id, user_input, source_context, f"Delete failed: {exc}")
+
+    def _handle_nullabook_edit(
+        self, user_input: str, lowered: str, profile: Any,
+        *, session_id: str, source_context: dict[str, object] | None,
+    ) -> dict[str, Any]:
+        if not profile:
+            return self._nullabook_result(session_id, user_input, source_context, "You need a NullaBook profile first.")
+        post_id = self._extract_post_id(user_input)
+        new_content = self._extract_edit_content(user_input)
+        if not post_id or not new_content:
+            try:
+                from storage.nullabook_store import list_user_posts
+                recent = list_user_posts(profile.handle, limit=5)
+                social = [p for p in recent if p.post_type == "social"]
+                if not social:
+                    return self._nullabook_result(session_id, user_input, source_context, "You don't have any social posts to edit.")
+                lines = ["Specify the post and new content:\n"]
+                for p in social:
+                    lines.append(f"- `{p.post_id}`: {p.content[:60]}...")
+                lines.append('\nSay: edit post <post_id> to: <new content>')
+                return self._nullabook_result(session_id, user_input, source_context, "\n".join(lines))
+            except Exception:
+                return self._nullabook_result(session_id, user_input, source_context,
+                    'Try: edit post <post_id> to: <new content>')
+        try:
+            from storage.nullabook_store import update_post, post_to_dict
+            updated = update_post(post_id, profile.peer_id, new_content)
+            if updated:
+                try:
+                    self.public_hive_bridge._post_json(
+                        str(self.public_hive_bridge.config.topic_target_url),
+                        f"/v1/nullabook/post/{post_id}/edit",
+                        {"nullabook_peer_id": profile.peer_id, "content": new_content},
+                    )
+                except Exception:
+                    pass
+                return self._nullabook_result(session_id, user_input, source_context,
+                    f"Updated post `{post_id}`:\n> {new_content[:200]}")
+            return self._nullabook_result(session_id, user_input, source_context,
+                "Couldn't edit that post. Either it doesn't exist, isn't yours, or is a task-linked post (tasks can't be edited).")
+        except Exception as exc:
+            return self._nullabook_result(session_id, user_input, source_context, f"Edit failed: {exc}")
+
+    @staticmethod
+    def _extract_post_id(text: str) -> str:
+        match = re.search(r'\b([a-f0-9]{12,16})\b', text)
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _extract_edit_content(text: str) -> str:
+        match = re.search(r'(?:to|with|new\s*content)\s*:\s*(.+)', text, re.IGNORECASE | re.DOTALL)
+        return match.group(1).strip()[:5000] if match else ""
+
+    @staticmethod
+    def _is_nullabook_create_request(lowered: str) -> bool:
         import re
-        for pattern in (r"(?:set|update|change)\s+(?:my\s+)?bio\s+(?:to\s+)?[\"'](.+?)[\"']",
-                        r"(?:set|update|change)\s+(?:my\s+)?bio\s+(?:to\s+)?(.+)$"):
-            match = re.search(pattern, lowered_text)
+        if "sign up" in lowered:
+            return True
+        return bool(re.search(
+            r'(?:create|make|set\s*up|start|open|get)\s+(?:a\s+|my\s+|an?\s+)?(?:nullabook\s+)?(?:profile|account)',
+            lowered,
+        )) or bool(re.search(
+            r'(?:register|sign\s*up)\s+(?:on|for|to|with)?\s*(?:nullabook|nulla\s*book)',
+            lowered,
+        ))
+
+    @staticmethod
+    def _extract_nullabook_bio_update(text: str) -> str:
+        """Extract bio content. Accepts 'bio: X', 'set bio X', 'update bio to X', etc.
+        Works on original-case text to preserve the user's formatting."""
+        import re
+        for pattern in (
+            r"(?:set|update|change)\s+(?:my\s+)?bio\s+(?:to\s+)?[\"'](.+?)[\"']",
+            r"(?:set|update|change)\s+(?:my\s+)?bio\s*(?:to\s+)?[:\s]\s*(.+?)(?:\s+(?:and\s+|\.?\s*(?:first|twitter|add\s+|set\s+)))",
+            r"^bio\s*[:=]\s*(.+?)(?:\s+(?:and\s+|\.?\s*(?:first|twitter|add\s+|set\s+)))",
+            r"(?:set|update|change)\s+(?:my\s+)?bio\s*(?:to\s+)?[:\s]\s*(.+?)$",
+            r"^bio\s*[:=]\s*(.+)$",
+        ):
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1).strip().strip("\"'").strip()
+        return ""
+
+    @staticmethod
+    def _extract_twitter_handle(text: str) -> str:
+        import re
+        for pattern in (
+            r'(?:set|update|add|change)\s+(?:my\s+)?(?:twitter|x)\s*(?:handle)?\s*(?:to|:)?\s*@?([A-Za-z0-9_]{1,15})',
+            r'(?:my\s+)?(?:twitter|x)\s*(?:handle)?\s*(?:is|:)\s*@?([A-Za-z0-9_]{1,15})',
+        ):
+            match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 return match.group(1).strip()
         return ""
+
+    @staticmethod
+    def _extract_handle_from_text(text: str) -> str | None:
+        import re
+        for pattern in (
+            r'(?:set\s+)?(?:my\s+)?(?:profile\s+)?(?:name|handle)\s*[:=]\s*(\S+)',
+            r'(?:my\s+)?(?:profile\s+)?(?:name|handle)\s+(?:there\s+)?(?:will\s+be|should\s+be|is|be)\s+(\S+)',
+            r'(?:call|name)\s+me\s+(\S+)',
+            r'(?:i\s+want\s+to\s+be|i\'?ll?\s+be|i\'?m)\s+(\S+)',
+            r'(?:register|sign\s*up)\s+(?:as|with)\s+(\S+)',
+            r'(?:change|rename|switch|set)\s+(?:my\s+)?(?:name|handle)\s+(?:to\s+)?(\S+)',
+            r'(?:use|pick|choose)\s+(\S+)\s+(?:as\s+)?(?:my\s+)?(?:name|handle)',
+        ):
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                candidate = match.group(1).strip().strip("\"'.,!?")
+                if len(candidate) >= 3:
+                    return candidate
+        return None
+
+    @staticmethod
+    def _extract_post_content(text: str) -> str:
+        """Pull post content from natural phrasing like 'post on nulla book: hello' or
+        'let's do first post: hello world'."""
+        import re
+        for pattern in (
+            r'(?:post\s+(?:to|on)\s+(?:nullabook|nulla\s*book)|(?:nullabook|nulla\s*book)\s+post)\s*[:\-]\s*(.+)',
+            r'(?:let.s|do)\s+(?:(?:do|a)\s+)?(?:a\s+|first\s+|our\s+)?post\s*[:\-]\s*(.+)',
+            r'(?:first\s+(?:our\s+)?post|our\s+first\s+post)\s*[:\-]\s*(.+)',
+            r'post\s+(?:it|this)\s*[:\-]\s*(.+)',
+        ):
+            m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            if m:
+                return m.group(1).strip().strip("\"'").strip()
+        for prefix in ("post to nullabook", "post on nullabook", "nullabook post",
+                        "post to nulla book", "post on nulla book", "nulla book post"):
+            lw = text.lower()
+            idx = lw.find(prefix)
+            if idx >= 0:
+                after = text[idx + len(prefix):].strip()
+                if after and after[0] in ":- ":
+                    after = after[1:].strip()
+                if after:
+                    return after.strip("\"'").strip()
+        return ""
+
+    @staticmethod
+    def _extract_display_name(text: str) -> str:
+        """Extract a display name (supports emoji and unicode) from text like
+        'update my nulla book name to 🦋NULLA🦋' or 'set display name: X'."""
+        import re
+        for pattern in (
+            r'(?:change|rename|switch|set|update)\s+(?:my\s+)?(?:(?:nullabook|nulla\s*book)\s+)?(?:display\s+)?(?:name|handle)\s+(?:to\s+)(.+)',
+            r'(?:change|rename|switch|set|update)\s+(?:my\s+)?(?:(?:nullabook|nulla\s*book)\s+)?(?:display\s+)?(?:name|handle)\s*[:=]\s*(.+)',
+            r'(?:can\s+we\s+)?(?:change|set|update)\s+(?:it|this|that)\s+to\s+(.+)',
+            r'(?:chang\w*|switch|set)\s+(?:\w+\s+)?to\s+(.+)',
+        ):
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                candidate = m.group(1).strip().strip("\"'.,!?").strip()
+                if candidate:
+                    return candidate[:64]
+        return ""
+
+    def _handle_nullabook_rename(
+        self, new_handle: str, profile: Any, *,
+        session_id: str, user_input: str, source_context: dict[str, object] | None,
+    ) -> dict[str, Any]:
+        from core.agent_name_registry import validate_agent_name
+        valid, reason = validate_agent_name(new_handle)
+        if not valid:
+            return self._nullabook_result(session_id, user_input, source_context,
+                f"'{new_handle}' isn't valid: {reason}\nTry another handle (3-32 chars, alphanumeric with _ or -).")
+
+        try:
+            from core.nullabook_identity import rename_handle
+            updated = rename_handle(profile.peer_id, new_handle)
+        except ValueError as exc:
+            return self._nullabook_result(session_id, user_input, source_context, str(exc))
+        except Exception as exc:
+            return self._nullabook_result(session_id, user_input, source_context, f"Rename failed: {exc}")
+
+        return self._nullabook_result(session_id, user_input, source_context,
+            f"Done! Handle changed: **{profile.handle}** → **{updated.handle}**\n"
+            f"You can post with: 'post to NullaBook: <your message>'")
 
     def _maybe_handle_capability_truth_request(
         self,
@@ -7414,7 +7936,7 @@ class NullaAgent:
                 ),
             )
 
-        title = str(draft.get("title") or "").strip()
+        title = self._clean_hive_title(str(draft.get("title") or "").strip())
         summary = str(draft.get("summary") or "").strip() or title
         topic_tags = [
             str(item).strip()
@@ -7444,12 +7966,127 @@ class NullaAgent:
                 ),
             )
 
+        dup = self._check_hive_duplicate(title, summary)
+
+        self._hive_create_pending[session_id] = {
+            "title": title,
+            "summary": summary,
+            "topic_tags": topic_tags,
+            "task_id": task.task_id,
+        }
+        tag_line = f"\nTags: {', '.join(topic_tags[:6])}" if topic_tags else ""
+        dup_warning = ""
+        if dup:
+            dup_title = dup.get("title", "")
+            dup_id = str(dup.get("topic_id") or "")[:8]
+            dup_warning = (
+                f"\n\nHeads up -- a similar topic already exists: "
+                f"**{dup_title}** (#{dup_id}). Still want to create a new one?"
+            )
+        preview = (
+            f"Ready to post this to the public Hive:\n\n"
+            f"**{title}**{tag_line}{dup_warning}\n\n"
+            f"Confirm? (yes / no)"
+        )
+        return self._action_fast_path_result(
+            task_id=task.task_id,
+            session_id=session_id,
+            user_input=user_input,
+            response=preview,
+            confidence=0.95,
+            source_context=source_context,
+            reason="hive_topic_create_awaiting_confirmation",
+            success=True,
+            details={"status": "awaiting_confirmation", "title": title, "topic_tags": topic_tags},
+            mode_override="tool_preview",
+            task_outcome="pending_approval",
+            workflow_summary=self._action_workflow_summary(
+                operator_kind="hive.create_topic",
+                dispatch_status="awaiting_confirmation",
+                details={"action_id": ""},
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Hive create confirmation gate
+    # ------------------------------------------------------------------
+
+    _HIVE_CONFIRM_POSITIVE = re.compile(
+        r"^\s*(?:yes|yea|yeah|yep|yup|ok(?:ay)?|sure|do\s*it|go\s*(?:ahead|for\s*it)|"
+        r"lets?\s*(?:go|do\s*it)|for\s*sure|absolutely|confirmed?|lgtm|send\s*it|"
+        r"post\s*it|create\s*it|ship\s*it|proceed|affirmative|y)\s*[.!]*\s*$",
+        re.IGNORECASE,
+    )
+    _HIVE_CONFIRM_NEGATIVE = re.compile(
+        r"^\s*(?:no|nah|nope|not?\s*now|later|meh|cancel|stop|skip|forget\s*it|"
+        r"never\s*mind|nevermind|don'?t|nay|negative|n)\s*[.!]*\s*$",
+        re.IGNORECASE,
+    )
+
+    def _maybe_handle_hive_create_confirmation(
+        self,
+        user_input: str,
+        *,
+        task: Any,
+        session_id: str,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, Any] | None:
+        pending = self._hive_create_pending.get(session_id)
+        if pending is None:
+            return None
+
+        lowered = user_input.strip()
+        if self._HIVE_CONFIRM_POSITIVE.match(lowered):
+            del self._hive_create_pending[session_id]
+            return self._execute_confirmed_hive_create(
+                pending, task=task, session_id=session_id, source_context=source_context,
+                user_input=user_input,
+            )
+
+        if self._HIVE_CONFIRM_NEGATIVE.match(lowered):
+            del self._hive_create_pending[session_id]
+            return self._action_fast_path_result(
+                task_id=task.task_id,
+                session_id=session_id,
+                user_input=user_input,
+                response="Got it -- Hive task discarded. What's next?",
+                confidence=0.95,
+                source_context=source_context,
+                reason="hive_topic_create_cancelled",
+                success=True,
+                details={"status": "cancelled"},
+                mode_override="tool_executed",
+                task_outcome="cancelled",
+                workflow_summary=self._action_workflow_summary(
+                    operator_kind="hive.create_topic",
+                    dispatch_status="cancelled",
+                    details={"action_id": ""},
+                ),
+            )
+
+        del self._hive_create_pending[session_id]
+        return None
+
+    def _execute_confirmed_hive_create(
+        self,
+        pending: dict[str, Any],
+        *,
+        task: Any,
+        session_id: str,
+        source_context: dict[str, object] | None,
+        user_input: str,
+    ) -> dict[str, Any]:
+        title = pending["title"]
+        summary = pending["summary"]
+        topic_tags = pending["topic_tags"]
+        linked_task_id = pending.get("task_id") or task.task_id
+
         result = self.public_hive_bridge.create_public_topic(
             title=title,
             summary=summary,
             topic_tags=topic_tags,
-            linked_task_id=task.task_id,
-            idempotency_key=f"{task.task_id}:hive_create",
+            linked_task_id=linked_task_id,
+            idempotency_key=f"{linked_task_id}:hive_create",
         )
         topic_id = str(result.get("topic_id") or "").strip()
         if not result.get("ok") or not topic_id:
@@ -7495,6 +8132,44 @@ class NullaAgent:
                 details={"action_id": topic_id},
             ),
         )
+
+    def _check_hive_duplicate(self, title: str, summary: str) -> dict[str, Any] | None:
+        """Check if a similar hive topic exists within the last 3 days."""
+        try:
+            from datetime import datetime, timedelta, timezone
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%S")
+            topics = self.public_hive_bridge.list_public_topics(limit=50)
+            title_tokens = set(title.lower().split())
+            summary_tokens = set(summary.lower().split()[:30])
+            all_tokens = title_tokens | summary_tokens
+            stop_words = {"the", "a", "an", "is", "to", "for", "on", "in", "of", "and", "or", "how", "what", "why", "create", "task", "new", "hive"}
+            meaningful = all_tokens - stop_words
+            if not meaningful:
+                return None
+            for topic in topics:
+                topic_date = str(topic.get("updated_at") or topic.get("created_at") or "")
+                if topic_date and topic_date < cutoff:
+                    continue
+                t_title = str(topic.get("title") or "").lower()
+                t_summary = str(topic.get("summary") or "").lower()
+                t_tokens = set(t_title.split()) | set(t_summary.split()[:30])
+                overlap = meaningful & t_tokens
+                if len(overlap) >= max(2, len(meaningful) * 0.5):
+                    return topic
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _clean_hive_title(raw: str) -> str:
+        """Basic cleanup: strip command prefixes, fix common doubled chars, capitalize."""
+        title = re.sub(
+            r"^(?:create\s+(?:a\s+)?(?:hive\s+)?task\s*[-:—]*\s*)", "", raw, flags=re.IGNORECASE,
+        ).strip()
+        title = re.sub(r"^[-:—]+\s*", "", title).strip()
+        if title and title[0].islower():
+            title = title[0].upper() + title[1:]
+        return title or raw
 
     def _extract_hive_topic_create_draft(self, text: str) -> dict[str, Any] | None:
         clean = " ".join(str(text or "").split()).strip()

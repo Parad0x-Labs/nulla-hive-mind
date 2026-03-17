@@ -367,6 +367,12 @@ def build_server(config: BrainHiveWatchServerConfig | None = None) -> ThreadingH
             parsed = urlparse(self.path)
             clean_path = parsed.path.rstrip("/") or "/"
             if clean_path in {"/", "/brain-hive"}:
+                req_host = (self.headers.get("Host") or "").split(":")[0].lower()
+                if "nullabook" in req_host and clean_path == "/":
+                    from core.nullabook_feed_page import render_nullabook_page_html
+                    html = render_nullabook_page_html()
+                    self._write_bytes(200, "text/html; charset=utf-8", html.encode("utf-8"))
+                    return
                 html = render_dashboard_html(api_endpoint="/api/dashboard", topic_base_path="/brain-hive/topic")
                 self._write_bytes(
                     200,
@@ -448,10 +454,13 @@ def build_server(config: BrainHiveWatchServerConfig | None = None) -> ThreadingH
                 html = render_nullabook_page_html()
                 self._write_bytes(200, "text/html; charset=utf-8", html.encode("utf-8"))
                 return
-            if clean_path.startswith("/v1/nullabook/"):
+            if clean_path.startswith("/v1/nullabook/") or clean_path == "/v1/hive/search":
+                proxy_path = clean_path
+                if "?" not in proxy_path and self.path and "?" in self.path:
+                    proxy_path += "?" + self.path.split("?", 1)[1]
                 try:
                     result = _proxy_nullabook_get(
-                        cfg.upstream_base_urls, clean_path,
+                        cfg.upstream_base_urls, proxy_path,
                         timeout_seconds=cfg.request_timeout_seconds,
                         auth_token=cfg.auth_token,
                         auth_tokens_by_base_url=cfg.auth_tokens_by_base_url,
@@ -476,6 +485,30 @@ def build_server(config: BrainHiveWatchServerConfig | None = None) -> ThreadingH
                 )
                 return
             self._write_bytes(404, "text/html; charset=utf-8", render_not_found_html(parsed.path).encode("utf-8"))
+
+        def do_POST(self) -> None:
+            parsed = urlparse(self.path)
+            clean_path = parsed.path.rstrip("/") or "/"
+            if clean_path == "/v1/nullabook/upvote":
+                try:
+                    length = int(self.headers.get("Content-Length") or "0")
+                    raw_body = self.rfile.read(length) if length > 0 else b""
+                    for base in cfg.upstream_base_urls:
+                        url = f"{str(base).rstrip('/')}/v1/nullabook/upvote"
+                        req = request.Request(url, data=raw_body, method="POST")
+                        req.add_header("Content-Type", "application/json")
+                        try:
+                            with request.urlopen(req, timeout=cfg.request_timeout_seconds) as resp:
+                                result = json.loads(resp.read().decode("utf-8"))
+                                self._write_json(200, result)
+                                return
+                        except Exception:
+                            continue
+                    self._write_json(502, {"ok": False, "error": "All upstreams failed"})
+                except Exception as exc:
+                    self._write_json(500, {"ok": False, "error": str(exc)})
+                return
+            self._write_json(404, {"ok": False, "error": f"Unknown POST path: {clean_path}"})
 
         def log_message(self, format: str, *args):
             return

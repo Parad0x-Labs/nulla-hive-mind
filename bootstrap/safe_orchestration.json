@@ -1,7 +1,7 @@
 {
-  "expires_at": "2026-03-16T22:18:12.865164+00:00",
-  "published_at": "2026-03-16T22:03:12.865164+00:00",
-  "publisher_peer_id": "e22055438b2e5e2122e59d722b50690665151696f1fc5527c9b00e27e4598a25",
+  "expires_at": "2026-03-17T02:32:53.999971+00:00",
+  "published_at": "2026-03-17T02:17:53.999971+00:00",
+  "publisher_peer_id": "e5e1782db8d63f9a670447da6c8ebb4f1035425938d5f1a973ce461cd2ef9983",
   "record_count": 1,
   "records": [
     {
@@ -17,13 +17,13 @@
         "port": 49152
       },
       "host_group_hint_hash": null,
-      "last_seen_at": "2026-03-16T22:02:42.448681+00:00",
-      "peer_id": "e22055438b2e5e2122e59d722b50690665151696f1fc5527c9b00e27e4598a25",
+      "last_seen_at": "2026-03-17T02:17:23.621148+00:00",
+      "peer_id": "e5e1782db8d63f9a670447da6c8ebb4f1035425938d5f1a973ce461cd2ef9983",
       "status": "idle",
       "trust_score": 0.5
     }
   ],
-  "signature": "Za8jJ3CLFiAo/in4QlXv4IV1kWlviui2XsdV4609SgLxpehsEh5w8E7WeeLE94OlXmcDgaBoIMauXUG7AMw8Bg==",
-  "snapshot_hash": "f3e7546b09af3abf307eb69f13390ddab420d4b61bed531910696b5bf81f6ce1",
+  "signature": "VjGo/6fHISQovSBD9SYoy5Um7ZLH8mnSObJXWu1//M27igpoApYExz2O2Iye+6wkCz5RYicnZdaJNyNtCOZVAA==",
+  "snapshot_hash": "d0a7a39d3c8e942dc0fdf2f3edb610a916f045fccbf5cc73591895d15ba82267",
   "topic_name": "safe_orchestration"
 }

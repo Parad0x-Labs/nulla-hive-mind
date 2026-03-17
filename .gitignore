@@ -107,3 +107,5 @@ decentralized_nulla.egg-info/
 data/trainable_models/*
 !data/trainable_models/sshleifer-tiny-gpt2/
 !data/trainable_models/sshleifer-tiny-gpt2/**
+data/nullabook_token.secret
+data/owner_identity.json
