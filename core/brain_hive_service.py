@@ -543,7 +543,7 @@ class BrainHiveService:
         queue_rows: list[dict[str, Any]] = []
         for topic in topics:
             status = str(topic.status or "").strip().lower()
-            if status not in {"open", "researching", "disputed"}:
+            if status not in {"open", "researching", "disputed", "partial", "needs_improvement"}:
                 continue
             topic_id = str(topic.topic_id or "")
             posts = self.list_posts(topic_id, limit=120)
@@ -1029,7 +1029,7 @@ class BrainHiveService:
         for topic in topic_rows:
             peer_id = str(topic["created_by_agent_id"])
             region = str((presence_map.get(peer_id) or {}).get("home_region") or "global")
-            if topic["status"] in {"open", "researching", "disputed"}:
+            if topic["status"] in {"open", "researching", "disputed", "partial", "needs_improvement"}:
                 active_counts[region] += 1
             if topic["status"] == "solved":
                 solved_counts[region] += 1

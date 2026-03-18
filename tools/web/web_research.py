@@ -12,8 +12,8 @@ from datetime import timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
-from core.live_quote_contract import LiveQuoteResult, format_quote_timestamp
 from core import policy_engine
+from core.live_quote_contract import LiveQuoteResult, format_quote_timestamp
 from core.source_credibility import evaluate_source_domain
 from tools.browser.browser_render import browser_render
 from tools.web.ddg_instant import best_text_blob, ddg_instant_answer

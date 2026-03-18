@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import tempfile
 import unittest
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
-
-import pytest
 
 from apps.nulla_agent import ChatTurnResult, NullaAgent, ResponseClass
 from core.autonomous_topic_research import AutonomousResearchResult
@@ -29,6 +28,18 @@ from storage.migrations import run_migrations
 class OpenClawToolingContextTests(unittest.TestCase):
     def setUp(self) -> None:
         run_migrations()
+
+    def _clear_nullabook_state(self) -> None:
+        from storage.db import get_connection
+
+        conn = get_connection()
+        try:
+            for table in ("nullabook_posts", "nullabook_tokens", "nullabook_profiles", "agent_names"):
+                with contextlib.suppress(Exception):
+                    conn.execute(f"DELETE FROM {table}")
+            conn.commit()
+        finally:
+            conn.close()
 
     def test_bootstrap_context_includes_openclaw_doctrine(self) -> None:
         persona = load_active_persona("default")
@@ -1492,6 +1503,147 @@ class OpenClawToolingContextTests(unittest.TestCase):
         self.assertIn("<path>", create_public_topic.call_args.kwargs["summary"])
         self.assertIn("<email>", create_public_topic.call_args.kwargs["summary"])
 
+    def test_openclaw_nullabook_profile_setup_uses_raw_handle_and_strips_bio_prefix(self) -> None:
+        self._clear_nullabook_state()
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        peer_id = "ab" * 32
+        with mock.patch("network.signer.get_local_peer_id", return_value=peer_id), mock.patch(
+            "core.nullabook_identity.get_local_peer_id", return_value=peer_id
+        ), mock.patch.object(
+            agent.public_hive_bridge,
+            "sync_nullabook_profile",
+            return_value={"ok": True},
+        ):
+            prompt = agent.run_once(
+                "ok make a profile first, do you know if I can add emojis next to the name? or text only?",
+                session_id_override="openclaw:nullabook-profile-setup",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+            handle_turn = agent.run_once(
+                "ok setup this name sls_0x",
+                session_id_override="openclaw:nullabook-profile-setup",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+            bio_turn = agent.run_once(
+                "bio: Chaos-typed systems founder & product engineer with bad typing discipline",
+                session_id_override="openclaw:nullabook-profile-setup",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        from core.nullabook_identity import get_profile_by_handle
+
+        profile = get_profile_by_handle("sls_0x")
+        self.assertIsNotNone(profile)
+        self.assertIn("Handles are text-only", prompt["response"])
+        self.assertIn("emoji", prompt["response"].lower())
+        self.assertIn("Registered as **sls_0x** on NullaBook!", handle_turn["response"])
+        self.assertNotIn("Context subject", handle_turn["response"])
+        self.assertIn(
+            "Bio: Chaos-typed systems founder & product engineer with bad typing discipline",
+            bio_turn["response"],
+        )
+        self.assertNotIn("Bio: bio:", bio_turn["response"])
+        self.assertEqual(
+            getattr(profile, "bio", ""),
+            "Chaos-typed systems founder & product engineer with bad typing discipline",
+        )
+
+    def test_openclaw_nullabook_post_keeps_raw_content_and_is_visible_locally(self) -> None:
+        self._clear_nullabook_state()
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        from core.nullabook_identity import register_nullabook_account
+        from storage.nullabook_store import list_feed, list_user_posts
+
+        peer_id = "cd" * 32
+        register_nullabook_account("sls_0x", peer_id=peer_id)
+        with mock.patch("network.signer.get_local_peer_id", return_value=peer_id), mock.patch(
+            "core.nullabook_identity.get_local_peer_id", return_value=peer_id
+        ), mock.patch.object(
+            agent.public_hive_bridge,
+            "sync_nullabook_post",
+            return_value={"ok": True},
+        ):
+            result = agent.run_once(
+                "post to NullaBook: Hello everyone, this is not automated post - only testing :P",
+                session_id_override="openclaw:nullabook-post-raw",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        feed_posts = list_feed(limit=5)
+        user_posts = list_user_posts("sls_0x", limit=5)
+        self.assertIn("Posted to NullaBook as **sls_0x**", result["response"])
+        self.assertIn("only testing :P", result["response"])
+        self.assertNotIn("only testing: P", result["response"])
+        self.assertNotIn("Context subject", result["response"])
+        self.assertEqual(user_posts[0].content, "Hello everyone, this is not automated post - only testing :P")
+        self.assertTrue(any(post.content == user_posts[0].content for post in feed_posts))
+
+    def test_openclaw_twitter_handle_update_uses_actual_requested_handle(self) -> None:
+        self._clear_nullabook_state()
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        from core.nullabook_identity import get_profile, register_nullabook_account
+
+        peer_id = "ef" * 32
+        register_nullabook_account("sls_0x", peer_id=peer_id)
+        with mock.patch("network.signer.get_local_peer_id", return_value=peer_id), mock.patch(
+            "core.nullabook_identity.get_local_peer_id", return_value=peer_id
+        ), mock.patch.object(
+            agent.public_hive_bridge,
+            "sync_nullabook_profile",
+            return_value={"ok": True},
+        ):
+            result = agent.run_once(
+                "update my twitter handle in nullabook profile to sls_0x",
+                session_id_override="openclaw:nullabook-twitter-handle",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        profile = get_profile(peer_id)
+        self.assertIn("Twitter/X handle set to **@sls_0x**", result["response"])
+        self.assertNotIn("@in", result["response"])
+        self.assertEqual(getattr(profile, "twitter_handle", ""), "sls_0x")
+
+    def test_openclaw_hive_task_preview_beats_twitter_route_and_stays_clean(self) -> None:
+        self._clear_nullabook_state()
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        from core.nullabook_identity import register_nullabook_account
+
+        register_nullabook_account("sls_0x", peer_id="01" * 32)
+        request_text = (
+            "create hive mind task: Task: Research and design a local-first X/Twitter assistant for OpenClaw / NULLA Hive Mind. "
+            "Goal: Design a serious AI-assisted social posting system that runs locally on the user's machine."
+        )
+
+        with mock.patch.object(agent.public_hive_bridge, "enabled", return_value=True), mock.patch.object(
+            agent.public_hive_bridge, "write_enabled", return_value=True
+        ), mock.patch.object(
+            agent.hive_activity_tracker,
+            "build_chat_footer",
+            return_value="Hive heartbeat noise",
+        ):
+            result = agent.run_once(
+                request_text,
+                session_id_override="openclaw:create-hive-task-clean-preview",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("Ready to post this to the public Hive", result["response"])
+        self.assertIn(
+            "**Research and design a local-first X/Twitter assistant for OpenClaw / NULLA Hive Mind**",
+            result["response"],
+        )
+        self.assertNotIn("**Task:", result["response"])
+        self.assertNotIn("Twitter/X handle set", result["response"])
+        self.assertNotIn("Hive heartbeat noise", result["response"])
+
     def test_openclaw_hive_create_confirm_beats_stale_active_task_state(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
         agent.start()
@@ -1546,10 +1698,129 @@ class OpenClawToolingContextTests(unittest.TestCase):
             "Review local-first X assistant rollout",
         )
 
+    def test_openclaw_hive_create_prompt_with_credit_language_beats_credit_status_fast_path(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        request_text = (
+            "create new task in hive. "
+            "Task: Credit settlement audit trail for Hive results. "
+            "Goal: Make sure credits escrow cleanly, receipts are visible, and partial payouts stay auditable."
+        )
+
+        with mock.patch.object(agent.public_hive_bridge, "enabled", return_value=True), mock.patch.object(
+            agent.public_hive_bridge, "write_enabled", return_value=True
+        ), mock.patch.object(
+            agent,
+            "_check_hive_duplicate",
+            return_value=None,
+        ):
+            result = agent.run_once(
+                request_text,
+                session_id_override="openclaw:hive-create-credit-language",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("Ready to post this to the public Hive", result["response"])
+        self.assertIn("Estimated reward pool:", result["response"])
+        self.assertNotIn("You currently have", result["response"])
+
     def test_redact_text_keeps_x_twitter_label_but_redacts_real_paths(self) -> None:
         self.assertEqual(redact_text("X/Twitter assistant"), "X/Twitter assistant")
         self.assertEqual(redact_text("/tmp/mock-private-notes"), "<path>")
         self.assertEqual(redact_text("~/mock-private-notes"), "<path>")
+
+    def test_openclaw_hive_review_queue_lists_pending_items(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        with mock.patch.object(agent.public_hive_bridge, "enabled", return_value=True), mock.patch.object(
+            agent.public_hive_bridge,
+            "list_public_review_queue",
+            return_value=[
+                {
+                    "object_type": "post",
+                    "object_id": "post-1",
+                    "preview": "Low-trust social lead that still needs bounded review.",
+                    "moderation_state": "review_required",
+                    "review_summary": {
+                        "current_state": "review_required",
+                        "total_reviews": 1,
+                    },
+                }
+            ],
+        ):
+            result = agent.run_once(
+                "check hive review queue",
+                session_id_override="openclaw:hive-review-queue",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("Hive review queue:", result["response"])
+        self.assertIn("post-1", result["response"])
+        self.assertIn("review_required", result["response"])
+
+    def test_openclaw_hive_review_action_submits_moderation_decision(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        with mock.patch.object(agent.public_hive_bridge, "enabled", return_value=True), mock.patch.object(
+            agent.public_hive_bridge, "write_enabled", return_value=True
+        ), mock.patch.object(
+            agent.public_hive_bridge,
+            "submit_public_moderation_review",
+            return_value={"ok": True, "current_state": "approved", "quorum_reached": True},
+        ) as submit_review:
+            result = agent.run_once(
+                "approve post post-1",
+                session_id_override="openclaw:hive-review-action",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("Submitted Hive moderation review for post `post-1`", result["response"])
+        self.assertIn("Current state `approved`", result["response"])
+        self.assertIn("Review quorum is reached", result["response"])
+        self.assertEqual(submit_review.call_args.kwargs["decision"], "approve")
+        self.assertEqual(submit_review.call_args.kwargs["object_type"], "post")
+
+    def test_openclaw_hive_cleanup_closes_disposable_smoke_topics(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        with mock.patch.object(agent.public_hive_bridge, "enabled", return_value=True), mock.patch.object(
+            agent.public_hive_bridge, "write_enabled", return_value=True
+        ), mock.patch.object(
+            agent.public_hive_bridge,
+            "list_public_topics",
+            return_value=[
+                {
+                    "topic_id": "topic-smoke-1",
+                    "title": "[NULLA_SMOKE] Disposable cleanup topic",
+                    "summary": "Temporary smoke artifact for cleanup verification.",
+                    "topic_tags": ["smoke"],
+                    "status": "researching",
+                },
+                {
+                    "topic_id": "topic-real-1",
+                    "title": "Real public task",
+                    "summary": "Legit research topic that must stay open.",
+                    "topic_tags": ["research"],
+                    "status": "open",
+                },
+            ],
+        ), mock.patch.object(
+            agent.public_hive_bridge,
+            "update_public_topic_status",
+            return_value={"ok": True, "status": "closed"},
+        ) as close_topic:
+            result = agent.run_once(
+                "clean up hive smoke topics",
+                session_id_override="openclaw:hive-cleanup-smoke",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("Closed 1 disposable Hive smoke topic", result["response"])
+        self.assertEqual(close_topic.call_count, 1)
+        self.assertEqual(close_topic.call_args.kwargs["topic_id"], "topic-smoke-1")
 
     def test_openclaw_hive_task_create_blocks_raw_transcript_dump(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
@@ -1801,6 +2072,66 @@ class OpenClawToolingContextTests(unittest.TestCase):
             f"Expected task context in response, got: {result['response'][:300]}"
         )
         get_public_research_packet.assert_called_once_with("7d33994f-dd40-4a7e-b78a-f8e2d94fb702")
+
+    def test_openclaw_hive_status_followup_reports_partial_state(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        packet = {
+            "topic": {
+                "topic_id": "5fd57ce7-dd40-4a7e-b78a-f8e2d94fb799",
+                "title": "Human-visible Hive cleanup UX",
+                "status": "partial",
+            },
+            "execution_state": {
+                "topic_status": "partial",
+                "execution_state": "partial",
+                "active_claim_count": 0,
+                "artifact_count": 1,
+            },
+            "counts": {
+                "post_count": 2,
+                "active_claim_count": 0,
+            },
+            "posts": [
+                {
+                    "post_kind": "summary",
+                    "body": "Useful first pass landed, but more cleanup work is still needed.",
+                }
+            ],
+        }
+        with mock.patch("apps.nulla_agent.session_hive_state", return_value={"watched_topic_ids": []}), mock.patch.object(
+            agent.public_hive_bridge, "enabled", return_value=True
+        ), mock.patch.object(
+            agent.public_hive_bridge, "get_public_research_packet", return_value=packet
+        ), mock.patch.object(
+            agent.public_hive_bridge,
+            "list_public_topics",
+            return_value=[
+                {
+                    "topic_id": "5fd57ce7-dd40-4a7e-b78a-f8e2d94fb799",
+                    "title": "Human-visible Hive cleanup UX",
+                    "status": "partial",
+                }
+            ],
+        ):
+            result = agent.run_once(
+                "did it finish?",
+                session_id_override="openclaw:status-partial",
+                source_context={
+                    "surface": "openclaw",
+                    "platform": "openclaw",
+                    "conversation_history": [
+                        {
+                            "role": "assistant",
+                            "content": "Started Hive research on `Human-visible Hive cleanup UX` (#5fd57ce7).",
+                        }
+                    ],
+                },
+            )
+
+        lowered = result["response"].lower()
+        self.assertIn("partial", lowered)
+        self.assertIn("still needs follow-up", lowered)
 
     def test_openclaw_ambiguous_hive_selection_relists_real_tasks(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")

@@ -128,7 +128,7 @@ class PublicHiveBridge:
         self,
         *,
         limit: int = 24,
-        statuses: tuple[str, ...] = ("open", "researching", "disputed"),
+        statuses: tuple[str, ...] = ("open", "researching", "disputed", "partial", "needs_improvement"),
     ) -> list[dict[str, Any]]:
         if not self.enabled() or not self.config.topic_target_url:
             return []
@@ -205,7 +205,7 @@ class PublicHiveBridge:
         queue_rows: list[dict[str, Any]] = []
         for topic in topics:
             status = str(topic.get("status") or "").strip().lower()
-            if status not in {"open", "researching", "disputed"}:
+            if status not in {"open", "researching", "disputed", "partial", "needs_improvement"}:
                 continue
             topic_id = str(topic.get("topic_id") or "").strip()
             if not topic_id:
@@ -311,6 +311,34 @@ class PublicHiveBridge:
             return []
         return [dict(item or {}) for item in list(result or [])]
 
+    def _topic_result_settlement_helpers(
+        self,
+        *,
+        topic_id: str,
+        claim_id: str,
+    ) -> list[str]:
+        claim_rows = self._list_public_topic_claims(topic_id, limit=200)
+        clean_claim_id = str(claim_id or "").strip()
+        if clean_claim_id:
+            for row in claim_rows:
+                if str(row.get("claim_id") or "").strip() != clean_claim_id:
+                    continue
+                agent_id = str(row.get("agent_id") or "").strip()
+                if agent_id:
+                    return [agent_id]
+        helper_peer_ids: list[str] = []
+        seen_helpers: set[str] = set()
+        for row in claim_rows:
+            claim_status = str(row.get("status") or "").strip().lower()
+            if claim_status not in {"active", "completed"}:
+                continue
+            agent_id = str(row.get("agent_id") or "").strip()
+            if not agent_id or agent_id in seen_helpers:
+                continue
+            seen_helpers.add(agent_id)
+            helper_peer_ids.append(agent_id)
+        return helper_peer_ids
+
     def search_public_artifacts(
         self,
         *,
@@ -352,6 +380,51 @@ class PublicHiveBridge:
             "note": " ".join(str(note or "").split()).strip()[:512] or None,
         }
         result = self._post_json(str(self.config.topic_target_url), "/v1/hive/moderation/reviews", payload)
+        return {"ok": True, **result}
+
+    def get_public_review_summary(
+        self,
+        *,
+        object_type: str,
+        object_id: str,
+    ) -> dict[str, Any]:
+        if not self.enabled() or not self.config.topic_target_url:
+            return {}
+        clean_type = str(object_type or "").strip()
+        clean_id = str(object_id or "").strip()
+        if not clean_type or not clean_id:
+            return {}
+        route = (
+            "/v1/hive/moderation/reviews"
+            f"?object_type={quote(clean_type)}"
+            f"&object_id={quote(clean_id)}"
+        )
+        try:
+            result = self._get_json(str(self.config.topic_target_url), route)
+        except Exception:
+            return {}
+        return dict(result or {})
+
+    def update_public_topic_status(
+        self,
+        *,
+        topic_id: str,
+        status: str,
+        note: str | None = None,
+        claim_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        if not self.enabled() or not self.config.topic_target_url:
+            return {"ok": False, "status": "disabled"}
+        if not self.write_enabled():
+            return {"ok": False, "status": "missing_auth"}
+        result = self._update_topic_status(
+            topic_id=topic_id,
+            status=status,
+            note=note,
+            claim_id=claim_id,
+            idempotency_key=idempotency_key,
+        )
         return {"ok": True, **result}
 
     def create_public_topic(
@@ -566,6 +639,25 @@ class PublicHiveBridge:
             claim_id=claim_id,
             idempotency_key=(str(idempotency_key or "").strip() + ":status")[:128] if idempotency_key else None,
         )
+        credit_settlement: dict[str, Any] = {
+            "ok": False,
+            "status": "not_applicable",
+            "topic_id": clean_topic_id,
+            "settlements": [],
+            "refunded_amount": 0.0,
+        }
+        if clean_status in {"solved", "partial"}:
+            from core.credit_ledger import settle_hive_task_escrow
+
+            credit_settlement = settle_hive_task_escrow(
+                clean_topic_id,
+                self._topic_result_settlement_helpers(
+                    topic_id=clean_topic_id,
+                    claim_id=str(claim_id or "").strip(),
+                ),
+                result_status=clean_status,
+                receipt_prefix=f"hive_topic_settlement:{clean_topic_id}:{clean_status}",
+            )
         return {
             "ok": bool(post_result.get("post_id")),
             "status": "result_submitted" if post_result.get("post_id") else "result_failed",
@@ -573,6 +665,7 @@ class PublicHiveBridge:
             "post_id": str(post_result.get("post_id") or ""),
             "post_result": post_result,
             "topic_result": status_result,
+            "credit_settlement": credit_settlement,
         }
 
     def publish_public_task(

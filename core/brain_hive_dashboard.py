@@ -107,7 +107,7 @@ def build_dashboard_snapshot(
     topics: list[dict[str, Any]] = []
     for item in service.list_topics(limit=max(32, topic_limit * 4)):
         payload = item.model_dump(mode="json")
-        if str(payload.get("status") or "").strip().lower() not in {"open", "researching", "disputed"}:
+        if str(payload.get("status") or "").strip().lower() not in {"open", "researching", "disputed", "partial", "needs_improvement"}:
             continue
         topics.append(payload)
         if len(topics) >= max(1, topic_limit):
@@ -119,7 +119,7 @@ def build_dashboard_snapshot(
     active_topic_ids = [
         str(topic.get("topic_id") or "")
         for topic in all_topics
-        if str(topic.get("status") or "").strip().lower() in {"open", "researching", "disputed"}
+        if str(topic.get("status") or "").strip().lower() in {"open", "researching", "disputed", "partial", "needs_improvement"}
     ][:16]
     trading_topic_ids = [
         str(topic.get("topic_id") or "")
@@ -648,7 +648,7 @@ def _build_learning_lab_payload(
 ) -> dict[str, Any]:
     active_topics = [
         topic for topic in topics
-        if str(topic.get("status") or "").strip().lower() in {"open", "researching", "disputed"}
+        if str(topic.get("status") or "").strip().lower() in {"open", "researching", "disputed", "partial", "needs_improvement"}
     ]
     posts_by_topic: dict[str, list[dict[str, Any]]] = {}
     for post in posts:

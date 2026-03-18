@@ -12,6 +12,7 @@ from core.persistent_memory import (
     ensure_memory_files,
     memory_entries_path,
     memory_path,
+    operator_dense_profile_path,
     session_summaries_path,
     user_heuristics_path,
 )
@@ -122,6 +123,7 @@ def runtime_storage_reset() -> None:
     memory_entries_path().write_text("", encoding="utf-8")
     session_summaries_path().write_text("", encoding="utf-8")
     user_heuristics_path().write_text("", encoding="utf-8")
+    operator_dense_profile_path().write_text("{}", encoding="utf-8")
     save_preferences(default_preferences())
 
 

@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from storage.db import get_connection
+
+_LIVE_SMOKE_TAG_RE = re.compile(r"\[NULLA_SMOKE:[^\]]+\]", re.IGNORECASE)
+_PUBLIC_JUNK_MARKERS: tuple[str, ...] = (
+    "disposable smoke",
+    "cleanup artifact",
+)
 
 
 def _utcnow() -> str:
@@ -64,6 +71,39 @@ def _row_to_post(row: Any) -> NullaBookPost:
         human_upvotes=_safe_int(row, "human_upvotes"),
         agent_upvotes=_safe_int(row, "agent_upvotes"),
     )
+
+
+def _public_surface_text(row: Any) -> str:
+    parts = (
+        str(row["content"] or ""),
+        str(row["link_title"] or ""),
+        str(row["link_url"] or ""),
+        str(row["topic_id"] or ""),
+        str(row["hive_post_id"] or ""),
+    )
+    return " ".join(part for part in parts if part).strip()
+
+
+def _is_public_junk_row(row: Any) -> bool:
+    surface = _public_surface_text(row)
+    if not surface:
+        return True
+    lowered = surface.lower()
+    if _LIVE_SMOKE_TAG_RE.search(surface):
+        return True
+    if any(marker in lowered for marker in _PUBLIC_JUNK_MARKERS):
+        return True
+    content_alnum = re.sub(r"[^a-z0-9]+", "", str(row["content"] or "").lower())
+    return not content_alnum
+
+
+def _rows_to_public_posts(rows: list[Any]) -> list[NullaBookPost]:
+    posts: list[NullaBookPost] = []
+    for row in list(rows or []):
+        if _is_public_junk_row(row):
+            continue
+        posts.append(_row_to_post(row))
+    return posts
 
 
 def post_to_dict(post: NullaBookPost) -> dict[str, Any]:
@@ -165,7 +205,7 @@ def list_feed(
             """,
             (max(1, min(limit, 100)),),
         ).fetchall()
-    return [_row_to_post(r) for r in rows]
+    return _rows_to_public_posts(rows)
 
 
 def list_user_posts(
@@ -177,12 +217,12 @@ def list_user_posts(
     rows = conn.execute(
         """
         SELECT * FROM nullabook_posts
-        WHERE handle = ? AND status = 'active'
+        WHERE lower(handle) = lower(?) AND status = 'active'
         ORDER BY created_at DESC LIMIT ?
         """,
         (handle, max(1, min(limit, 100))),
     ).fetchall()
-    return [_row_to_post(r) for r in rows]
+    return _rows_to_public_posts(rows)
 
 
 def list_replies(
@@ -199,7 +239,7 @@ def list_replies(
         """,
         (parent_post_id, max(1, min(limit, 200))),
     ).fetchall()
-    return [_row_to_post(r) for r in rows]
+    return _rows_to_public_posts(rows)
 
 
 def update_post(post_id: str, peer_id: str, new_content: str) -> NullaBookPost | None:
@@ -269,16 +309,22 @@ def search_posts(
             """,
             (q, q, max(1, min(limit, 100))),
         ).fetchall()
-    return [_row_to_post(r) for r in rows]
+    return _rows_to_public_posts(rows)
 
 
 def count_posts(*, handle: str = "", active_only: bool = True) -> int:
     conn = get_connection()
     if handle:
         if active_only:
-            row = conn.execute("SELECT COUNT(*) FROM nullabook_posts WHERE handle = ? AND status = 'active'", (handle,)).fetchone()
+            row = conn.execute(
+                "SELECT COUNT(*) FROM nullabook_posts WHERE lower(handle) = lower(?) AND status = 'active'",
+                (handle,),
+            ).fetchone()
         else:
-            row = conn.execute("SELECT COUNT(*) FROM nullabook_posts WHERE handle = ?", (handle,)).fetchone()
+            row = conn.execute(
+                "SELECT COUNT(*) FROM nullabook_posts WHERE lower(handle) = lower(?)",
+                (handle,),
+            ).fetchone()
     else:
         if active_only:
             row = conn.execute("SELECT COUNT(*) FROM nullabook_posts WHERE status = 'active'").fetchone()

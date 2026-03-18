@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from apps.nulla_agent import NullaAgent
+from core.credit_ledger import award_credits, escrow_credits_for_task, get_credit_balance, get_escrow_for_task
 from core.hive_write_grants import build_hive_write_grant
 from core.public_hive_bridge import (
     PublicHiveBridge,
@@ -19,6 +20,7 @@ from core.public_hive_bridge import (
     write_public_hive_agent_bootstrap,
 )
 from network.signer import get_local_peer_id
+from storage.migrations import run_migrations
 
 
 class _FakeResponse:
@@ -617,6 +619,147 @@ def test_public_hive_bridge_claims_posts_progress_and_submits_result() -> None:
     assert any(url.endswith("/v1/hive/topic-status") for _method, url, _payload in seen)
 
 
+def test_public_hive_bridge_submit_result_settles_solved_escrow() -> None:
+    import uuid
+
+    run_migrations()
+    tag = uuid.uuid4().hex[:8]
+    topic_id = f"topic-{uuid.uuid4().hex}"
+    poster_peer_id = f"poster-{tag}"
+    helper_peer_id = f"helper-{tag}"
+
+    assert award_credits(poster_peer_id, 40.0, "seed", receipt_id=f"seed-{tag}")
+    assert escrow_credits_for_task(
+        poster_peer_id,
+        topic_id,
+        24.0,
+        receipt_id=f"escrow:{tag}",
+    )
+
+    def fake_urlopen(req, timeout=0, context=None):
+        del timeout, context
+        method = req.get_method()
+        payload = json.loads(req.data.decode("utf-8")) if getattr(req, "data", None) else {}
+        if method == "GET" and req.full_url.endswith(f"/v1/hive/topics/{topic_id}/claims?limit=200"):
+            return _FakeResponse(
+                {
+                    "ok": True,
+                    "result": [{"claim_id": "claim-1", "agent_id": helper_peer_id, "status": "active"}],
+                    "error": None,
+                }
+            )
+        if method == "POST" and req.full_url.endswith("/v1/hive/posts"):
+            return _FakeResponse({"ok": True, "result": {"post_id": "post-result-1"}, "error": None})
+        if method == "POST" and req.full_url.endswith("/v1/hive/topic-status"):
+            assert payload["payload"]["status"] == "solved"
+            assert payload["payload"]["claim_id"] == "claim-1"
+            return _FakeResponse({"ok": True, "result": {"topic_id": topic_id, "status": "solved"}, "error": None})
+        raise AssertionError(f"Unexpected request: {method} {req.full_url}")
+
+    bridge = PublicHiveBridge(
+        PublicHiveBridgeConfig(
+            enabled=True,
+            meet_seed_urls=("http://seed-eu.example.test:8766",),
+            topic_target_url="http://seed-eu.example.test:8766",
+            home_region="eu",
+            auth_token="cluster-token",
+        ),
+        urlopen=fake_urlopen,
+    )
+
+    result = bridge.submit_public_topic_result(
+        topic_id=topic_id,
+        body="Result: solved cleanly with accepted evidence and settlement.",
+        result_status="solved",
+        claim_id="claim-1",
+    )
+
+    assert result["ok"] is True
+    assert result["credit_settlement"]["ok"] is True
+    assert result["credit_settlement"]["status"] == "settled"
+    assert result["credit_settlement"]["released_amount"] == 24.0
+    assert result["credit_settlement"]["refunded_amount"] == 0.0
+    assert result["credit_settlement"]["settlements"] == [
+        {
+            "helper_peer_id": helper_peer_id,
+            "amount": 24.0,
+            "receipt_id": f"hive_topic_settlement:{topic_id}:solved:0",
+        }
+    ]
+    assert get_credit_balance(helper_peer_id) == 24.0
+    escrow = get_escrow_for_task(topic_id)
+    assert escrow is not None
+    assert escrow["remaining"] == 0.0
+    assert escrow["status"] == "settled"
+
+
+def test_public_hive_bridge_submit_result_partially_settles_partial_escrow() -> None:
+    import uuid
+
+    run_migrations()
+    tag = uuid.uuid4().hex[:8]
+    topic_id = f"topic-{uuid.uuid4().hex}"
+    poster_peer_id = f"poster-{tag}"
+    helper_peer_id = f"helper-{tag}"
+
+    assert award_credits(poster_peer_id, 30.0, "seed", receipt_id=f"partial-seed-{tag}")
+    assert escrow_credits_for_task(
+        poster_peer_id,
+        topic_id,
+        20.0,
+        receipt_id=f"partial-escrow:{tag}",
+    )
+
+    def fake_urlopen(req, timeout=0, context=None):
+        del timeout, context
+        method = req.get_method()
+        payload = json.loads(req.data.decode("utf-8")) if getattr(req, "data", None) else {}
+        if method == "GET" and req.full_url.endswith(f"/v1/hive/topics/{topic_id}/claims?limit=200"):
+            return _FakeResponse(
+                {
+                    "ok": True,
+                    "result": [{"claim_id": "claim-1", "agent_id": helper_peer_id, "status": "active"}],
+                    "error": None,
+                }
+            )
+        if method == "POST" and req.full_url.endswith("/v1/hive/posts"):
+            return _FakeResponse({"ok": True, "result": {"post_id": "post-result-1"}, "error": None})
+        if method == "POST" and req.full_url.endswith("/v1/hive/topic-status"):
+            assert payload["payload"]["status"] == "partial"
+            return _FakeResponse({"ok": True, "result": {"topic_id": topic_id, "status": "partial"}, "error": None})
+        raise AssertionError(f"Unexpected request: {method} {req.full_url}")
+
+    bridge = PublicHiveBridge(
+        PublicHiveBridgeConfig(
+            enabled=True,
+            meet_seed_urls=("http://seed-eu.example.test:8766",),
+            topic_target_url="http://seed-eu.example.test:8766",
+            home_region="eu",
+            auth_token="cluster-token",
+        ),
+        urlopen=fake_urlopen,
+    )
+
+    result = bridge.submit_public_topic_result(
+        topic_id=topic_id,
+        body="Result: partial progress landed, but more work is still needed.",
+        result_status="partial",
+        claim_id="claim-1",
+    )
+
+    assert result["ok"] is True
+    assert result["credit_settlement"]["ok"] is True
+    assert result["credit_settlement"]["status"] == "partially_settled"
+    assert result["credit_settlement"]["released_amount"] == 10.0
+    assert result["credit_settlement"]["refunded_amount"] == 0.0
+    assert result["credit_settlement"]["remaining"] == 10.0
+    assert get_credit_balance(helper_peer_id) == 10.0
+    escrow = get_escrow_for_task(topic_id)
+    assert escrow is not None
+    assert escrow["remaining"] == 10.0
+    assert escrow["status"] == "active"
+
+
 def test_public_hive_bridge_attaches_route_scoped_write_grant() -> None:
     local_peer_id = get_local_peer_id()
     post_grant = build_hive_write_grant(
@@ -695,6 +838,84 @@ def test_public_hive_bridge_reads_review_queue_and_submits_review() -> None:
     assert queue[0]["object_id"] == "post-1"
     assert review["quorum_reached"] is True
     assert seen[-1][2]["payload"]["decision"] == "approve"
+
+
+def test_public_hive_bridge_reads_review_summary_and_updates_topic_status() -> None:
+    seen: list[tuple[str, str, dict[str, object]]] = []
+
+    def fake_urlopen(req, timeout=0, context=None):
+        del timeout, context
+        method = req.get_method()
+        payload = json.loads(req.data.decode("utf-8")) if getattr(req, "data", None) else {}
+        seen.append((method, req.full_url, payload))
+        if method == "GET" and "/v1/hive/moderation/reviews?object_type=post&object_id=post-1" in req.full_url:
+            return _FakeResponse(
+                {
+                    "ok": True,
+                    "result": {
+                        "object_type": "post",
+                        "object_id": "post-1",
+                        "current_state": "review_required",
+                        "quorum_reached": False,
+                        "total_reviews": 1,
+                    },
+                    "error": None,
+                }
+            )
+        if method == "POST" and req.full_url.endswith("/v1/hive/topic-status"):
+            return _FakeResponse({"ok": True, "result": {"topic_id": "topic-smoke-123456", "status": "closed"}, "error": None})
+        raise AssertionError(f"Unexpected request: {method} {req.full_url}")
+
+    bridge = PublicHiveBridge(
+        PublicHiveBridgeConfig(
+            enabled=True,
+            meet_seed_urls=("http://seed-eu.example.test:8766",),
+            topic_target_url="http://seed-eu.example.test:8766",
+            home_region="eu",
+            auth_token="cluster-token",
+        ),
+        urlopen=fake_urlopen,
+    )
+
+    summary = bridge.get_public_review_summary(object_type="post", object_id="post-1")
+    status = bridge.update_public_topic_status(topic_id="topic-smoke-123456", status="closed", note="cleanup")
+
+    assert summary["current_state"] == "review_required"
+    assert status["ok"] is True
+    assert seen[-1][2]["payload"]["status"] == "closed"
+
+
+def test_public_hive_bridge_default_topic_filter_keeps_partial_and_needs_improvement() -> None:
+    def fake_urlopen(req, timeout=0, context=None):
+        del timeout, context
+        if req.get_method() == "GET" and req.full_url.endswith("/v1/hive/topics?limit=24"):
+            return _FakeResponse(
+                {
+                    "ok": True,
+                    "result": [
+                        {"topic_id": "topic-partial-123456", "title": "Partial pass", "status": "partial"},
+                        {"topic_id": "topic-needs-123456", "title": "Needs more work", "status": "needs_improvement"},
+                        {"topic_id": "topic-closed-123456", "title": "Closed task", "status": "closed"},
+                    ],
+                    "error": None,
+                }
+            )
+        raise AssertionError(f"Unexpected request: {req.get_method()} {req.full_url}")
+
+    bridge = PublicHiveBridge(
+        PublicHiveBridgeConfig(
+            enabled=True,
+            meet_seed_urls=("http://seed-eu.example.test:8766",),
+            topic_target_url="http://seed-eu.example.test:8766",
+            home_region="eu",
+            auth_token="cluster-token",
+        ),
+        urlopen=fake_urlopen,
+    )
+
+    topics = bridge.list_public_topics()
+
+    assert [topic["status"] for topic in topics] == ["partial", "needs_improvement"]
 
 
 def test_public_hive_bridge_reads_research_queue_packet_and_artifacts() -> None:
@@ -990,6 +1211,25 @@ def test_agent_start_uses_limited_presence_when_hive_task_intake_is_disabled() -
         agent.start()
 
     assert sync_presence.call_args.kwargs["status"] == "limited"
+
+
+def test_agent_start_skips_background_threads_for_test_runtime() -> None:
+    agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
+
+    with mock.patch.object(
+        agent.public_hive_bridge,
+        "sync_presence",
+        return_value={"ok": True, "status": "posted"},
+    ) as sync_presence, mock.patch.object(
+        agent, "_start_public_presence_heartbeat"
+    ) as start_presence, mock.patch.object(
+        agent, "_start_idle_commons_loop"
+    ) as start_idle:
+        agent.start()
+
+    assert sync_presence.called
+    start_presence.assert_not_called()
+    start_idle.assert_not_called()
 
 
 def test_agent_only_exports_public_tasks_to_public_hive() -> None:

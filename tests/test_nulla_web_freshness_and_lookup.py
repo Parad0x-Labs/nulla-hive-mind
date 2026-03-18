@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from unittest import mock
 
-import pytest
-
 from core.curiosity_roamer import CuriosityResult
 from core.memory_first_router import ModelExecutionDecision
 

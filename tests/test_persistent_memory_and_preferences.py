@@ -6,9 +6,11 @@ from core.persistent_memory import (
     append_conversation_event,
     conversation_log_path,
     describe_session_memory_policy,
+    load_operator_dense_profile,
     maybe_handle_memory_command,
     memory_entries_path,
     memory_path,
+    operator_dense_profile_path,
     search_relevant_memory,
     search_session_summaries,
     search_user_heuristics,
@@ -23,7 +25,14 @@ from storage.db import get_connection
 
 
 def setup_function() -> None:
-    for path in (memory_path(), conversation_log_path(), memory_entries_path(), session_summaries_path(), user_heuristics_path()):
+    for path in (
+        memory_path(),
+        conversation_log_path(),
+        memory_entries_path(),
+        session_summaries_path(),
+        user_heuristics_path(),
+        operator_dense_profile_path(),
+    ):
         if path.exists():
             path.unlink()
     prefs_path = data_path("user_preferences.json")
@@ -195,6 +204,28 @@ def test_user_heuristics_capture_stack_sources_and_autonomy_preferences() -> Non
     assert ("source_preference", "official_docs") in categories
     assert ("source_preference", "github_repos") in categories
     assert ("autonomy_preference", "hands_off") in categories
+
+
+def test_dense_operator_profile_stays_local_and_tracks_project_focus() -> None:
+    append_conversation_event(
+        session_id="openclaw:dense-profile",
+        user_input=(
+            "I am building a Telegram bot in Python. Use official docs and GitHub repos first. "
+            "Keep answers concise and brutally honest."
+        ),
+        assistant_output="Stored.",
+        source_context={"surface": "channel", "platform": "openclaw"},
+    )
+
+    profile = load_operator_dense_profile()
+
+    assert profile["share_scope"] == "local_only"
+    assert "LOCAL_ONLY" in list(profile.get("policy_tags") or [])
+    assert "Telegram bot build" in list(profile.get("active_projects") or [])
+    assert "official_docs_first" in list(profile.get("source_preferences") or [])
+    assert "python" in list(profile.get("preferred_stacks") or [])
+    assert "concise_direct" in list(profile.get("response_style") or [])
+    assert "telegram bot build" in str(profile.get("dense_summary") or "").lower()
 
 
 def test_new_name_replaces_old_name_memory() -> None:

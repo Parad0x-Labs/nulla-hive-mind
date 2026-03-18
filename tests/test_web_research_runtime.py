@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import unittest
 import json
+import unittest
 from unittest import mock
 
 from core.live_quote_contract import format_quote_timestamp

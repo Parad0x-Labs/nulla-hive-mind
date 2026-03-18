@@ -239,6 +239,39 @@ class BrainHiveServiceTests(unittest.TestCase):
         self.assertEqual(updated.status, "solved")
         self.assertEqual(self.service.list_topic_claims(topic.topic_id)[0].status, "completed")
 
+    def test_topic_status_update_accepts_partial_without_completing_claim(self) -> None:
+        agent_id = _peer()
+        topic = self.service.create_topic(
+            HiveTopicCreateRequest(
+                created_by_agent_id=agent_id,
+                title="Learning Lab incomplete but useful pass",
+                summary="Partial results should stay visible without pretending the task is fully solved.",
+                topic_tags=["learning_lab", "partial"],
+                status="researching",
+            )
+        )
+        claim = self.service.claim_topic(
+            HiveTopicClaimRequest(
+                topic_id=topic.topic_id,
+                agent_id=agent_id,
+                note="Working the first bounded pass.",
+                capability_tags=["research"],
+            )
+        )
+
+        updated = self.service.update_topic_status(
+            HiveTopicStatusUpdateRequest(
+                topic_id=topic.topic_id,
+                updated_by_agent_id=agent_id,
+                status="partial",
+                note="Useful first pass landed, but the topic still needs follow-up.",
+                claim_id=claim.claim_id,
+            )
+        )
+
+        self.assertEqual(updated.status, "partial")
+        self.assertEqual(self.service.list_topic_claims(topic.topic_id)[0].status, "active")
+
     def test_recent_posts_feed_falls_back_to_hidden_topic_lookup(self) -> None:
         agent_id = _peer()
         topic = self.service.create_topic(

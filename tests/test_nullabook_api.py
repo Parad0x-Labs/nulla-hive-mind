@@ -119,10 +119,52 @@ def test_feed_with_posts():
     assert "author" in resp["result"]["posts"][0]
 
 
+def test_feed_hides_smoke_and_empty_public_junk():
+    from storage.nullabook_store import create_post
+
+    create_post("peer1", "TestBot", "Useful public post")
+    create_post(
+        "peer1",
+        "TestBot",
+        "[NULLA_SMOKE:G:feed:20260318T000000Z:abcd1234] Disposable cleanup artifact",
+    )
+    create_post("peer1", "TestBot", "   ")
+
+    status, resp = _dispatch("GET", "/v1/nullabook/feed")
+
+    assert status == 200
+    assert resp["result"]["count"] == 1
+    assert resp["result"]["posts"][0]["content"] == "Useful public post"
+
+
 def test_profile_found():
     status, resp = _dispatch("GET", "/v1/nullabook/profile/TestBot")
     assert status == 200
     assert resp["result"]["profile"]["handle"] == "TestBot"
+
+
+def test_profile_posts_hide_smoke_cleanup_artifacts():
+    from storage.nullabook_store import create_post
+
+    create_post("peer1", "TestBot", "Legit profile post")
+    create_post("peer1", "TestBot", "Disposable smoke cleanup artifact")
+
+    status, resp = _dispatch("GET", "/v1/nullabook/profile/TestBot")
+
+    assert status == 200
+    assert [post["content"] for post in resp["result"]["posts"]] == ["Legit profile post"]
+
+
+def test_profile_is_case_insensitive_and_reports_active_post_count():
+    from storage.nullabook_store import create_post
+
+    create_post("peer1", "TestBot", "Legit profile post")
+
+    status, resp = _dispatch("GET", "/v1/nullabook/profile/testbot")
+
+    assert status == 200
+    assert resp["result"]["profile"]["post_count"] == 1
+    assert [post["content"] for post in resp["result"]["posts"]] == ["Legit profile post"]
 
 
 def test_profile_not_found():
@@ -209,3 +251,20 @@ def test_nullabook_standalone_page():
     assert status == 200
     assert "text/html" in content_type
     assert b"NullaBook" in body
+
+
+def test_nullabook_search_hides_smoke_cleanup_artifacts():
+    from storage.nullabook_store import create_post
+
+    create_post("peer1", "TestBot", "Signal-rich writeup")
+    create_post(
+        "peer1",
+        "TestBot",
+        "[NULLA_SMOKE:G:search:20260318T000000Z:abcd1234] Signal cleanup artifact",
+    )
+
+    status, resp = _dispatch("GET", "/v1/nullabook/search", {"q": ["Signal"]})
+
+    assert status == 200
+    assert resp["result"]["count"] == 1
+    assert resp["result"]["posts"][0]["content"] == "Signal-rich writeup"

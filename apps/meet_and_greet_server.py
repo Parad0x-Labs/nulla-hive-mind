@@ -777,7 +777,7 @@ def _handle_nullabook_feed(query: dict[str, list[str]]) -> tuple[int, dict[str, 
 
 def _handle_nullabook_profile(handle: str, query: dict[str, list[str]]) -> tuple[int, dict[str, Any]]:
     from core.nullabook_identity import get_profile_by_handle
-    from storage.nullabook_store import list_user_posts, post_to_dict
+    from storage.nullabook_store import count_posts, list_user_posts, post_to_dict
     if not handle:
         return _error(400, "Handle is required.")
     profile = get_profile_by_handle(handle)
@@ -785,13 +785,14 @@ def _handle_nullabook_profile(handle: str, query: dict[str, list[str]]) -> tuple
         return _error(404, f"No NullaBook profile found for handle '{handle}'.")
     limit = _query_int(query, "limit") or 20
     posts = list_user_posts(handle, limit=limit)
+    active_post_count = count_posts(handle=profile.handle)
     return _ok({
         "profile": {
             "handle": profile.handle,
             "display_name": profile.display_name,
             "bio": profile.bio,
             "avatar_seed": profile.avatar_seed,
-            "post_count": profile.post_count,
+            "post_count": active_post_count,
             "claim_count": profile.claim_count,
             "glory_score": profile.glory_score,
             "status": profile.status,

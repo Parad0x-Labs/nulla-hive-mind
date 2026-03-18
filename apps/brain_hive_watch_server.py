@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import ssl
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -26,6 +28,7 @@ class BrainHiveWatchServerConfig:
     tls_keyfile: str | None = None
     tls_ca_file: str | None = None
     tls_insecure_skip_verify: bool = False
+    dashboard_cache_ttl_seconds: float = 5.0
 
 
 def _agent_is_online(agent: dict[str, object]) -> bool:
@@ -369,6 +372,35 @@ def fetch_topic_posts_from_upstreams(
 def build_server(config: BrainHiveWatchServerConfig | None = None) -> ThreadingHTTPServer:
     cfg = config or BrainHiveWatchServerConfig()
     _validate_tls_config(cfg)
+    if _requires_public_tls(cfg.host) and not _watch_tls_enabled(cfg):
+        raise ValueError("Public or non-loopback Brain Hive watch bindings require TLS.")
+    dashboard_cache_lock = threading.Lock()
+    dashboard_cache: dict[str, object] = {"fetched_at": 0.0, "snapshot": None}
+
+    def _dashboard_cache_hit() -> dict | None:
+        ttl = max(0.0, float(cfg.dashboard_cache_ttl_seconds or 0.0))
+        if ttl <= 0:
+            return None
+        with dashboard_cache_lock:
+            snapshot = dashboard_cache.get("snapshot")
+            fetched_at = float(dashboard_cache.get("fetched_at") or 0.0)
+        if not isinstance(snapshot, dict):
+            return None
+        if (time.monotonic() - fetched_at) > ttl:
+            return None
+        return dict(snapshot)
+
+    def _dashboard_cache_snapshot() -> dict | None:
+        with dashboard_cache_lock:
+            snapshot = dashboard_cache.get("snapshot")
+        if not isinstance(snapshot, dict):
+            return None
+        return dict(snapshot)
+
+    def _store_dashboard_cache(snapshot: dict) -> None:
+        with dashboard_cache_lock:
+            dashboard_cache["snapshot"] = dict(snapshot)
+            dashboard_cache["fetched_at"] = time.monotonic()
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "NullaBrainHiveWatch/0.1"
@@ -437,6 +469,10 @@ def build_server(config: BrainHiveWatchServerConfig | None = None) -> ThreadingH
                     )
                     return
             if clean_path == "/api/dashboard":
+                cached_snapshot = _dashboard_cache_hit()
+                if cached_snapshot is not None:
+                    self._write_json(200, {"ok": True, "result": cached_snapshot, "error": None, "cache_state": "hit"})
+                    return
                 try:
                     snapshot = fetch_dashboard_from_upstreams(
                         cfg.upstream_base_urls,
@@ -446,9 +482,14 @@ def build_server(config: BrainHiveWatchServerConfig | None = None) -> ThreadingH
                         tls_ca_file=cfg.tls_ca_file,
                         tls_insecure_skip_verify=cfg.tls_insecure_skip_verify,
                     )
-                    self._write_json(200, {"ok": True, "result": snapshot, "error": None})
+                    _store_dashboard_cache(snapshot)
+                    self._write_json(200, {"ok": True, "result": snapshot, "error": None, "cache_state": "miss"})
                 except Exception as exc:
-                    self._write_json(502, {"ok": False, "result": None, "error": str(exc)})
+                    stale_snapshot = _dashboard_cache_snapshot()
+                    if stale_snapshot is not None:
+                        self._write_json(200, {"ok": True, "result": stale_snapshot, "error": None, "cache_state": "stale_fallback"})
+                    else:
+                        self._write_json(502, {"ok": False, "result": None, "error": str(exc)})
                 return
             if clean_path.startswith("/api/topic/") and clean_path.endswith("/posts"):
                 topic_id = unquote(clean_path.removeprefix("/api/topic/").removesuffix("/posts").strip("/"))
@@ -606,6 +647,14 @@ def _normalize_base_url(url: str) -> str:
     if not parsed.scheme or not parsed.netloc:
         return str(url or "").rstrip("/")
     return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), "", "", "")).rstrip("/")
+
+
+def _requires_public_tls(host: str) -> bool:
+    return str(host or "").strip().lower() not in {"127.0.0.1", "localhost", "::1"}
+
+
+def _watch_tls_enabled(cfg: BrainHiveWatchServerConfig) -> bool:
+    return bool(str(cfg.tls_certfile or "").strip() and str(cfg.tls_keyfile or "").strip())
 
 
 def _ssl_context_for_url(

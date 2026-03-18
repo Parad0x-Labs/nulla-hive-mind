@@ -426,7 +426,7 @@ class HiveActivityTracker:
     def _available_topics(self, dashboard: dict[str, Any]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for topic in list(dashboard.get("topics") or []):
-            if str(topic.get("status") or "") not in {"open", "researching", "disputed"}:
+            if str(topic.get("status") or "") not in {"open", "researching", "disputed", "partial", "needs_improvement"}:
                 continue
             out.append(dict(topic))
         return out

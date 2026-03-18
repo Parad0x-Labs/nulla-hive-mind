@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -850,3 +851,124 @@ class BrainHiveWatchServerTests(unittest.TestCase):
                     tls_keyfile=None,
                 )
             )
+
+    def test_public_watch_bind_requires_tls(self) -> None:
+        with self.assertRaisesRegex(ValueError, "require TLS"):
+            build_server(
+                BrainHiveWatchServerConfig(
+                    host="0.0.0.0",
+                    port=8788,
+                    upstream_base_urls=("http://127.0.0.1:8766",),
+                )
+            )
+
+    def test_public_watch_bind_with_tls_is_allowed(self) -> None:
+        class FakeTlsContext:
+            def wrap_socket(self, socket_obj, *, server_side: bool = False):
+                return ("wrapped", socket_obj, server_side)
+
+        class FakeServer:
+            def __init__(self) -> None:
+                self.socket = object()
+
+        fake_server = FakeServer()
+        with patch("apps.brain_hive_watch_server.ThreadingHTTPServer", return_value=fake_server), patch(
+            "apps.brain_hive_watch_server._build_tls_context",
+            return_value=FakeTlsContext(),
+        ):
+            server = build_server(
+                BrainHiveWatchServerConfig(
+                    host="0.0.0.0",
+                    port=8788,
+                    upstream_base_urls=("http://127.0.0.1:8766",),
+                    tls_certfile="/tmp/fake-cert.pem",
+                    tls_keyfile="/tmp/fake-key.pem",
+                )
+            )
+
+        self.assertIs(server, fake_server)
+        self.assertEqual(fake_server.socket[0], "wrapped")
+        self.assertTrue(fake_server.socket[2])
+
+    def test_dashboard_endpoint_reuses_short_cache(self) -> None:
+        calls = {"count": 0}
+
+        def fake_fetch(*_args, **_kwargs):
+            calls["count"] += 1
+            return {
+                "stats": {"active_agents": 2},
+                "topics": [{"topic_id": "topic-1", "title": "Fresh cache topic"}],
+            }
+
+        try:
+            server = build_server(
+                BrainHiveWatchServerConfig(
+                    host="127.0.0.1",
+                    port=0,
+                    upstream_base_urls=("http://127.0.0.1:8766",),
+                    dashboard_cache_ttl_seconds=60.0,
+                )
+            )
+        except PermissionError:
+            self.skipTest("Local socket binds are not permitted in this sandbox.")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        with patch("apps.brain_hive_watch_server.fetch_dashboard_from_upstreams", side_effect=fake_fetch):
+            thread.start()
+            try:
+                port = int(server.server_address[1])
+                with request.urlopen(f"http://127.0.0.1:{port}/api/dashboard", timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                with request.urlopen(f"http://127.0.0.1:{port}/api/dashboard", timeout=5) as response:
+                    cached_payload = json.loads(response.read().decode("utf-8"))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=1)
+
+        self.assertEqual(calls["count"], 1)
+        self.assertEqual(payload["cache_state"], "miss")
+        self.assertEqual(cached_payload["cache_state"], "hit")
+        self.assertEqual(cached_payload["result"]["topics"][0]["title"], "Fresh cache topic")
+
+    def test_dashboard_endpoint_serves_stale_cache_when_upstream_fails(self) -> None:
+        calls = {"count": 0}
+
+        def fake_fetch(*_args, **_kwargs):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return {
+                    "stats": {"active_agents": 1},
+                    "topics": [{"topic_id": "topic-1", "title": "Cached topic"}],
+                }
+            raise ValueError("upstream unavailable")
+
+        try:
+            server = build_server(
+                BrainHiveWatchServerConfig(
+                    host="127.0.0.1",
+                    port=0,
+                    upstream_base_urls=("http://127.0.0.1:8766",),
+                    dashboard_cache_ttl_seconds=0.01,
+                )
+            )
+        except PermissionError:
+            self.skipTest("Local socket binds are not permitted in this sandbox.")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        with patch("apps.brain_hive_watch_server.fetch_dashboard_from_upstreams", side_effect=fake_fetch):
+            thread.start()
+            try:
+                port = int(server.server_address[1])
+                with request.urlopen(f"http://127.0.0.1:{port}/api/dashboard", timeout=5) as response:
+                    first_payload = json.loads(response.read().decode("utf-8"))
+                time.sleep(0.03)
+                with request.urlopen(f"http://127.0.0.1:{port}/api/dashboard", timeout=5) as response:
+                    stale_payload = json.loads(response.read().decode("utf-8"))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=1)
+
+        self.assertEqual(calls["count"], 2)
+        self.assertEqual(first_payload["cache_state"], "miss")
+        self.assertEqual(stale_payload["cache_state"], "stale_fallback")
+        self.assertEqual(stale_payload["result"]["topics"][0]["title"], "Cached topic")

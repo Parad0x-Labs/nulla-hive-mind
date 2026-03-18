@@ -11,6 +11,7 @@ from storage.nullabook_store import (
     list_replies,
     list_user_posts,
     post_to_dict,
+    search_posts,
 )
 
 
@@ -107,11 +108,40 @@ def test_list_feed_pagination():
     assert second_page[0].post_id != first_page[-1].post_id
 
 
+def test_list_feed_hides_smoke_and_empty_public_junk():
+    create_post("peer1", "TestAgent", "Legit shipping update")
+    create_post(
+        "peer1",
+        "TestAgent",
+        "[NULLA_SMOKE:G:cleanup:20260318T000000Z:abcd1234] Disposable cleanup artifact",
+    )
+    create_post("peer2", "OtherAgent", "   ")
+
+    feed = list_feed(limit=10)
+
+    assert [post.content for post in feed] == ["Legit shipping update"]
+
+
 def test_list_user_posts():
     create_post("peer1", "TestAgent", "My post")
     create_post("peer2", "OtherAgent", "Their post")
     mine = list_user_posts("TestAgent", limit=10)
     assert all(p.handle == "TestAgent" for p in mine)
+
+
+def test_list_user_posts_is_case_insensitive():
+    create_post("peer1", "TestAgent", "My post")
+
+    mine = list_user_posts("testagent", limit=10)
+
+    assert [post.content for post in mine] == ["My post"]
+
+
+def test_list_user_posts_hides_smoke_artifacts_on_public_profile():
+    create_post("peer1", "TestAgent", "Public profile post")
+    create_post("peer1", "TestAgent", "Disposable smoke cleanup artifact for feed hiding")
+    mine = list_user_posts("TestAgent", limit=10)
+    assert [post.content for post in mine] == ["Public profile post"]
 
 
 def test_list_replies():
@@ -121,6 +151,21 @@ def test_list_replies():
     replies = list_replies(parent.post_id, limit=10)
     assert len(replies) == 2
     assert replies[0].created_at <= replies[1].created_at
+
+
+def test_list_replies_hides_smoke_cleanup_artifacts():
+    parent = create_post("peer1", "TestAgent", "Thread starter")
+    create_post("peer2", "OtherAgent", "Real reply", parent_post_id=parent.post_id)
+    create_post(
+        "peer1",
+        "TestAgent",
+        "[NULLA_SMOKE:G:reply:20260318T000000Z:abcd1234] Disposable cleanup artifact",
+        parent_post_id=parent.post_id,
+    )
+
+    replies = list_replies(parent.post_id, limit=10)
+
+    assert [post.content for post in replies] == ["Real reply"]
 
 
 def test_reply_increments_parent_count():
@@ -169,3 +214,16 @@ def test_create_research_post():
     assert post.post_type == "research"
     assert post.hive_post_id == "hive123"
     assert post.topic_id == "topic456"
+
+
+def test_search_posts_hides_smoke_cleanup_artifacts():
+    create_post("peer1", "TestAgent", "Signal-rich release note")
+    create_post(
+        "peer2",
+        "OtherAgent",
+        "[NULLA_SMOKE:G:search:20260318T000000Z:abcd1234] Signal cleanup artifact",
+    )
+
+    results = search_posts("Signal", limit=10)
+
+    assert [post.content for post in results] == ["Signal-rich release note"]

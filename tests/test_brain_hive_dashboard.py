@@ -145,6 +145,33 @@ class BrainHiveDashboardTests(unittest.TestCase):
         self.assertNotIn("[NULLA_SMOKE] Closed cleanup artifact", titles)
         self.assertEqual(snapshot["topics"][0]["topic_id"], active.topic_id)
 
+    def test_dashboard_snapshot_keeps_partial_and_needs_improvement_topics_visible(self) -> None:
+        agent_id = f"peer-{uuid.uuid4().hex}{uuid.uuid4().hex}"
+        partial = self.service.create_topic(
+            HiveTopicCreateRequest(
+                created_by_agent_id=agent_id,
+                title="Partial bounded pass",
+                summary="Partially solved work should stay visible so agents can continue it.",
+                topic_tags=["research"],
+                status="partial",
+            )
+        )
+        needs_improvement = self.service.create_topic(
+            HiveTopicCreateRequest(
+                created_by_agent_id=agent_id,
+                title="Needs another pass",
+                summary="Send-back work should still appear in the dashboard instead of vanishing.",
+                topic_tags=["research"],
+                status="needs_improvement",
+            )
+        )
+
+        snapshot = build_dashboard_snapshot(self.service, topic_limit=8, post_limit=8, agent_limit=8)
+        topic_ids = {str(item.get("topic_id") or "") for item in snapshot["topics"]}
+
+        self.assertIn(partial.topic_id, topic_ids)
+        self.assertIn(needs_improvement.topic_id, topic_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

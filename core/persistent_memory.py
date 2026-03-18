@@ -23,11 +23,13 @@ _CONVERSATION_LOG_FILE = "conversation_log.jsonl"
 _MEMORY_ENTRIES_FILE = "memory_entries.jsonl"
 _SESSION_SUMMARIES_FILE = "session_summaries.jsonl"
 _USER_HEURISTICS_FILE = "user_heuristics.jsonl"
+_DENSE_OPERATOR_PROFILE_FILE = "operator_dense_profile.json"
 
 _MAX_CONVERSATION_LOG_BYTES = 8 * 1024 * 1024
 _MAX_MEMORY_INDEX_BYTES = 2 * 1024 * 1024
 _MAX_SESSION_SUMMARY_BYTES = 2 * 1024 * 1024
 _MAX_USER_HEURISTICS_BYTES = 512 * 1024
+_MAX_DENSE_OPERATOR_PROFILE_BYTES = 256 * 1024
 
 _REMEMBER_RE = re.compile(r"^(?:remember(?: that)?|note(?: that)?|store(?: this)?)\s+(.+)$", re.IGNORECASE)
 _FORGET_RE = re.compile(r"^(?:forget|erase)\s+(.+)$", re.IGNORECASE)
@@ -189,14 +191,27 @@ def user_heuristics_path() -> Path:
     return data_path(_USER_HEURISTICS_FILE)
 
 
+def operator_dense_profile_path() -> Path:
+    return data_path(_DENSE_OPERATOR_PROFILE_FILE)
+
+
 def ensure_memory_files() -> None:
     path = memory_path()
     if not path.exists():
         template = _default_memory_template()
         path.write_text(template, encoding="utf-8")
-    for extra_path in (conversation_log_path(), memory_entries_path(), session_summaries_path(), user_heuristics_path()):
+    for extra_path in (
+        conversation_log_path(),
+        memory_entries_path(),
+        session_summaries_path(),
+        user_heuristics_path(),
+        operator_dense_profile_path(),
+    ):
         if not extra_path.exists():
-            extra_path.write_text("", encoding="utf-8")
+            if extra_path.suffix == ".json":
+                extra_path.write_text("{}", encoding="utf-8")
+            else:
+                extra_path.write_text("", encoding="utf-8")
     _ensure_session_policy_table()
 
 
@@ -424,6 +439,7 @@ def append_conversation_event(
         user_input=user_input,
         assistant_output=assistant_output,
     )
+    refresh_operator_dense_profile(session_id=session_id)
 
 
 def maybe_handle_memory_command(user_text: str, *, session_id: str | None = None) -> tuple[bool, str]:
@@ -665,6 +681,97 @@ def search_user_heuristics(
         reverse=True,
     )
     return [row for _, row in ranked[: max(1, int(limit))]]
+
+
+def load_operator_dense_profile() -> dict[str, Any]:
+    ensure_memory_files()
+    path = operator_dense_profile_path()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8", errors="replace") or "{}")
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def refresh_operator_dense_profile(*, session_id: str | None = None) -> dict[str, Any]:
+    ensure_memory_files()
+    heuristics = list(_load_jsonl(user_heuristics_path()))
+    summaries = sorted(
+        _load_jsonl(session_summaries_path()),
+        key=lambda row: str(row.get("created_at") or ""),
+        reverse=True,
+    )
+    memory_facts = summarize_memory(limit=8)
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in heuristics:
+        category = str(row.get("category") or "").strip().lower()
+        if not category:
+            continue
+        bucket = grouped.setdefault(category, [])
+        bucket.append(dict(row))
+    for bucket in grouped.values():
+        bucket.sort(
+            key=lambda row: (
+                int(row.get("mentions") or 0),
+                float(row.get("confidence") or 0.0),
+                str(row.get("updated_at") or row.get("created_at") or ""),
+            ),
+            reverse=True,
+        )
+
+    response_style = [_dense_signal_name(item) for item in grouped.get("response_style", [])[:2]]
+    source_preferences = [_dense_signal_name(item) for item in grouped.get("source_preference", [])[:3]]
+    preferred_stacks = [_dense_signal_name(item) for item in grouped.get("preferred_stack", [])[:2]]
+    project_focus = [_dense_signal_name(item) for item in grouped.get("project_focus", [])[:3]]
+    active_projects = [_project_focus_label(signal) for signal in project_focus if _project_focus_label(signal)]
+    recent_session_summaries = [
+        {
+            "session_id": str(row.get("session_id") or ""),
+            "summary": str(row.get("summary") or "").strip()[:320],
+            "created_at": str(row.get("created_at") or ""),
+            "turn_count": int(row.get("turn_count") or 0),
+        }
+        for row in summaries[:3]
+        if str(row.get("summary") or "").strip()
+    ]
+
+    dense_summary_parts: list[str] = []
+    if response_style:
+        dense_summary_parts.append("Style: " + ", ".join(response_style) + ".")
+    if source_preferences:
+        dense_summary_parts.append("Sources: " + ", ".join(source_preferences) + ".")
+    if preferred_stacks:
+        dense_summary_parts.append("Stacks: " + ", ".join(preferred_stacks) + ".")
+    if active_projects:
+        dense_summary_parts.append("Projects: " + ", ".join(active_projects) + ".")
+    if recent_session_summaries:
+        dense_summary_parts.append("Continuity: " + recent_session_summaries[0]["summary"])
+    if memory_facts:
+        dense_summary_parts.append("Facts: " + "; ".join(memory_facts[:3]))
+
+    payload: dict[str, Any] = {
+        "updated_at": _utcnow(),
+        "last_session_id": str(session_id or recent_session_summaries[0]["session_id"] if recent_session_summaries else ""),
+        "share_scope": "local_only",
+        "policy_tags": ["LOCAL_ONLY", "DENSE_SUMMARY"],
+        "response_style": response_style,
+        "source_preferences": source_preferences,
+        "preferred_stacks": preferred_stacks,
+        "project_focus": project_focus,
+        "active_projects": active_projects,
+        "recent_session_summaries": recent_session_summaries,
+        "memory_facts": [str(item)[:200] for item in memory_facts[:5]],
+        "dense_summary": " ".join(part for part in dense_summary_parts if part).strip(),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, indent=2)
+    if len(encoded.encode("utf-8")) > _MAX_DENSE_OPERATOR_PROFILE_BYTES:
+        payload["recent_session_summaries"] = recent_session_summaries[:2]
+        payload["memory_facts"] = [str(item)[:140] for item in memory_facts[:3]]
+        payload["dense_summary"] = " ".join(part for part in dense_summary_parts[:4] if part).strip()
+        encoded = json.dumps(payload, ensure_ascii=False, indent=2)
+    operator_dense_profile_path().write_text(encoded + "\n", encoding="utf-8")
+    return payload
 
 
 def _default_memory_template() -> str:
@@ -1440,6 +1547,38 @@ def _heuristic_text(category: str, signal: str) -> str:
         ("autonomy_preference", "hands_off"): "The operator prefers low-friction execution with minimal micro-approvals.",
     }
     return mapping.get((category, signal), f"Observed operator heuristic: {category} {signal}.")
+
+
+def _dense_signal_name(row: dict[str, Any]) -> str:
+    signal = str(row.get("signal") or "").strip().lower()
+    mapping = {
+        "concise_direct": "concise_direct",
+        "brutal_honest": "brutal_honest",
+        "official_docs": "official_docs_first",
+        "github_repos": "github_references",
+        "reputable_sources": "reputable_sources",
+        "python": "python",
+        "typescript": "typescript",
+        "javascript": "javascript",
+        "rust": "rust",
+        "go": "go",
+        "telegram_bot": "telegram_bot",
+        "discord_bot": "discord_bot",
+        "hive_swarm": "hive_swarm",
+        "openclaw_runtime": "openclaw_runtime",
+        "hands_off": "hands_off_execution",
+    }
+    return mapping.get(signal, signal)
+
+
+def _project_focus_label(signal: str) -> str:
+    mapping = {
+        "telegram_bot": "Telegram bot build",
+        "discord_bot": "Discord bot build",
+        "hive_swarm": "Hive/mesh work",
+        "openclaw_runtime": "OpenClaw/NULLA runtime work",
+    }
+    return mapping.get(str(signal or "").strip().lower(), "")
 
 
 def _trim_text(text: str, max_chars: int) -> str:

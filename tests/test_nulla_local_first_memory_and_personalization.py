@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import pytest
-
 from core.persistent_memory import (
     append_conversation_event,
+    load_operator_dense_profile,
     maybe_handle_memory_command,
     recent_conversation_events,
     search_session_summaries,
@@ -69,7 +68,6 @@ def test_session_summary_recall_handles_light_paraphrase_current_contract():
     assert summaries
 
 
-@pytest.mark.xfail(strict=False, reason="The runtime captures heuristics, but it does not yet adapt strongly from long-horizon behavior without explicit markers.")
 def test_future_personalization_can_infer_user_style_from_behavior_without_direct_commands(make_agent):
     agent = make_agent()
     for prompt in (
@@ -93,3 +91,32 @@ def test_future_personalization_can_infer_user_style_from_behavior_without_direc
 
     assert "official docs first" in result["response"].lower()
     assert len(result["response"].splitlines()) <= 4
+
+
+def test_dense_operator_profile_and_continuity_drive_companion_followup(make_agent):
+    agent = make_agent()
+    append_conversation_event(
+        session_id="openclaw:prior-companion",
+        user_input="We are building a Telegram bot in Python. Use official docs first and keep it blunt.",
+        assistant_output="Stored.",
+        source_context={"surface": "openclaw", "platform": "openclaw", "conversation_history": []},
+    )
+    append_conversation_event(
+        session_id="openclaw:prior-companion",
+        user_input="Next we need moderation controls and an end-to-end smoke run.",
+        assistant_output="Stored.",
+        source_context={"surface": "openclaw", "platform": "openclaw", "conversation_history": []},
+    )
+
+    profile = load_operator_dense_profile()
+    result = agent.run_once(
+        "you know the project, just continue from where we left off",
+        session_id_override="openclaw:new-companion",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    lowered = result["response"].lower()
+    assert "telegram bot build" in str(profile.get("dense_summary") or "").lower()
+    assert "continuing the telegram bot build" in lowered
+    assert "official docs first" in lowered
+    assert "next step" in lowered

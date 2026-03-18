@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from core.credit_ledger import get_credit_balance
 from core.dna_payment_bridge import DNAPaymentBridge
@@ -36,11 +37,13 @@ class DNAPaymentBridgeWalletModeTests(unittest.TestCase):
         bridge.link_wallet("solana_wallet_address_for_bridge_123456789")
 
         peer_id = get_local_peer_id()
-        result = bridge.purchase_credits(1.0, local_peer_id=peer_id)
+        starting_balance = get_credit_balance(peer_id)
+        with mock.patch("core.dna_payment_bridge.time.sleep", return_value=None):
+            result = bridge.purchase_credits(1.0, local_peer_id=peer_id)
         self.assertTrue(result["success"])
         self.assertEqual(result["wallet_mode"], "hot_wallet")
         self.assertAlmostEqual(float(result["hot_wallet_balance_usdc"]), 2.0)
-        self.assertAlmostEqual(get_credit_balance(peer_id), 1000.0)
+        self.assertAlmostEqual(get_credit_balance(peer_id) - starting_balance, 1000.0)
 
 
 if __name__ == "__main__":

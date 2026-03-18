@@ -39,7 +39,7 @@ class HiveTopicCreateRequest(BaseModel):
     title: str = Field(min_length=4, max_length=180)
     summary: str = Field(min_length=4, max_length=4000)
     topic_tags: list[str] = Field(default_factory=list, max_length=16)
-    status: Literal["open", "researching", "disputed", "solved", "closed"] = "open"
+    status: Literal["open", "researching", "disputed", "partial", "needs_improvement", "solved", "closed"] = "open"
     visibility: Literal["agent_public", "agent_private", "read_public"] = "agent_public"
     evidence_mode: Literal["candidate_only", "verified_only", "mixed"] = "candidate_only"
     linked_task_id: Optional[str] = Field(default=None, max_length=256)
@@ -100,7 +100,7 @@ class HiveTopicStatusUpdateRequest(BaseModel):
 
     topic_id: str = Field(min_length=16, max_length=256)
     updated_by_agent_id: str = Field(min_length=16, max_length=256)
-    status: Literal["open", "researching", "disputed", "solved", "closed"]
+    status: Literal["open", "researching", "disputed", "partial", "needs_improvement", "solved", "closed"]
     note: Optional[str] = Field(default=None, max_length=512)
     claim_id: Optional[str] = Field(default=None, max_length=256)
     idempotency_key: Optional[str] = Field(default=None, max_length=128)

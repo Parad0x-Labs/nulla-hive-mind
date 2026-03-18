@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
 from unittest import mock
 
 import pytest
 
-from core.credit_ledger import award_credits, get_credit_balance
+from core.credit_ledger import award_credits, get_credit_balance, get_escrow_for_task
+from core.hive_activity_tracker import set_hive_interaction_state
 from core.memory_first_router import ModelExecutionDecision
 from network.signer import get_local_peer_id
 
@@ -65,23 +67,33 @@ def test_credit_status_explains_current_reward_contract(make_agent):
     assert "rewarded assist tasks and accepted results" in lowered
 
 
-@pytest.mark.xfail(reason="Pooled connection state not reliably visible inside agent.run_once; credit logic verified by standalone tests below")
 def test_chat_can_spend_credits_to_prioritize_hive_task(make_agent):
     agent = make_agent()
     peer_id = get_local_peer_id()
     assert award_credits(peer_id, 50.0, "priority_seed", receipt_id="priority-seed")
     assert get_credit_balance(peer_id) >= 50.0
+    session_id = "openclaw:credit-priority-task"
+    topic_id = "7d33994f-dd40-4a7e-b78a-f8e2d94fb702"
+    set_hive_interaction_state(
+        session_id,
+        mode="hive_task_active",
+        payload={"active_topic_id": topic_id, "active_title": "Priority task"},
+    )
 
     result = agent.run_once(
         "spend 10 credits to prioritize the current Hive task",
+        session_id_override=session_id,
         source_context={"surface": "openclaw", "platform": "openclaw"},
     )
 
     assert result["response_class"] == "task_status"
     assert "reserved 10.00 credits" in result["response"].lower()
+    assert topic_id[:8] in result["response"]
+    escrow = get_escrow_for_task(topic_id)
+    assert escrow is not None
+    assert escrow["total_escrowed"] >= 10.0
 
 
-@pytest.mark.xfail(reason="Pooled connection state not reliably visible inside agent.run_once; credit logic verified by standalone tests below")
 def test_chat_can_transfer_credits_to_another_peer(make_agent):
     agent = make_agent()
     peer_id = get_local_peer_id()
@@ -95,6 +107,95 @@ def test_chat_can_transfer_credits_to_another_peer(make_agent):
 
     assert result["response_class"] == "task_status"
     assert "sent 5.00 credits" in result["response"].lower()
+
+
+def test_credit_status_reports_glory_score_and_tier(make_agent):
+    agent = make_agent()
+    peer_id = get_local_peer_id()
+    award_credits(peer_id, 3.0, "score-glance", receipt_id="score-glance")
+
+    result = agent.run_once(
+        "what is my glory score and tier?",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    lowered = result["response"].lower()
+    assert result["response_class"] == "utility_answer"
+    assert "glory score" in lowered
+    assert "tier" in lowered
+
+
+def test_credit_status_can_list_recent_credit_receipts(make_agent):
+    import uuid
+
+    agent = make_agent()
+    peer_id = get_local_peer_id()
+    tag = uuid.uuid4().hex[:8]
+    receipt_id = f"recent-receipt-{tag}"
+    assert award_credits(peer_id, 4.25, "recent_receipt_seed", receipt_id=receipt_id)
+
+    result = agent.run_once(
+        "show my recent credit receipts",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    lowered = result["response"].lower()
+    assert result["response_class"] == "utility_answer"
+    assert "recent credit receipts" in lowered
+    assert receipt_id[:24] in result["response"]
+    assert "+4.25" in result["response"]
+
+
+def test_hive_task_create_reserves_estimated_reward_pool(make_agent):
+    import uuid
+
+    agent = make_agent()
+    peer_id = get_local_peer_id()
+    session_id = f"openclaw:hive-credit-create-{uuid.uuid4().hex[:8]}"
+    topic_id = f"topic-{uuid.uuid4().hex}"
+    seed_receipt = f"hive-create-seed-{uuid.uuid4().hex[:8]}"
+    assert award_credits(peer_id, 80.0, "hive_create_seed", receipt_id=seed_receipt)
+
+    request_text = (
+        "create new task in hive. "
+        "Task: Design safer Hive payout receipts. "
+        "Goal: Prove escrow and settlement work end to end for accepted tasks."
+    )
+
+    with mock.patch.object(agent.public_hive_bridge, "enabled", return_value=True), mock.patch.object(
+        agent.public_hive_bridge, "write_enabled", return_value=True
+    ), mock.patch.object(
+        agent.public_hive_bridge,
+        "create_public_topic",
+        return_value={"ok": True, "status": "created", "topic_id": topic_id},
+    ), mock.patch.object(
+        agent.hive_activity_tracker,
+        "note_watched_topic",
+        return_value=None,
+    ), mock.patch.object(
+        agent,
+        "_check_hive_duplicate",
+        return_value=None,
+    ):
+        preview = agent.run_once(
+            request_text,
+            session_id_override=session_id,
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+        confirm = agent.run_once(
+            "yes",
+            session_id_override=session_id,
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+    reward_match = re.search(r"Estimated reward pool:\s*([0-9]+(?:\.[0-9])?) credits", preview["response"])
+    assert reward_match, preview["response"]
+    reserved_amount = float(reward_match.group(1))
+    escrow = get_escrow_for_task(topic_id)
+    assert escrow is not None
+    assert escrow["total_escrowed"] == pytest.approx(reserved_amount)
+    assert f"Reserved {reserved_amount:.1f} credits" in confirm["response"]
+    assert topic_id[:8] in confirm["response"]
 
 
 def test_escrow_lifecycle_poster_to_helper():

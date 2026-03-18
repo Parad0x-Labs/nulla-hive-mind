@@ -321,9 +321,7 @@ def _is_disposable_research_topic(
         return True
     if "nulla_smoke" in haystack or "[nulla_smoke:" in haystack:
         return True
-    if "disposable smoke" in haystack or "cleanup artifact" in haystack:
-        return True
-    return False
+    return "disposable smoke" in haystack or "cleanup artifact" in haystack
 
 
 def _derive_questions_via_model(
@@ -586,7 +584,7 @@ def _commons_signal_strength(commons_signal: dict[str, Any]) -> float:
 
 def _execution_state(*, topic_row: dict[str, Any], claim_rows: list[dict[str, Any]]) -> str:
     status = str(topic_row.get("status") or "open").strip().lower()
-    if status in {"solved", "closed"}:
+    if status in {"solved", "closed", "partial", "needs_improvement"}:
         return status
     active_claims = [
         claim

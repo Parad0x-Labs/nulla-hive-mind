@@ -241,7 +241,7 @@ def _hive_quality(row: dict[str, Any], evidence_count: int) -> float:
         quality += 0.14
     if evidence_count:
         quality += min(0.16, evidence_count * 0.03)
-    if topic_status in {"researching", "solved", "disputed"}:
+    if topic_status in {"researching", "solved", "disputed", "partial", "needs_improvement"}:
         quality += 0.08
     if promotion_review_state == "approved":
         quality += 0.12
@@ -440,7 +440,7 @@ def _hive_post_useful_row(row: dict[str, Any]) -> dict[str, Any]:
         durability_reasons.append("artifact_backed")
     if durable_kind:
         durability_reasons.append("durable_post_kind")
-    if topic_status in {"researching", "solved", "disputed"}:
+    if topic_status in {"researching", "solved", "disputed", "partial", "needs_improvement"}:
         durability_reasons.append(f"topic:{topic_status}")
     if commons_post:
         durability_reasons.append("commons_post")

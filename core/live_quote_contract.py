@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping
-
+from typing import Any
 
 _CURRENCY_SYMBOLS = {
     "USD": "$",
@@ -42,7 +42,7 @@ class LiveQuoteResult:
     confidence: float = 0.95
 
     @classmethod
-    def from_payload(cls, payload: Mapping[str, Any]) -> "LiveQuoteResult":
+    def from_payload(cls, payload: Mapping[str, Any]) -> LiveQuoteResult:
         return cls(
             asset_key=str(payload.get("asset_key") or "").strip(),
             asset_name=str(payload.get("asset_name") or "").strip(),

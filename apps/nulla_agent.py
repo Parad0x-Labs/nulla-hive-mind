@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -21,7 +22,9 @@ from core.candidate_knowledge_lane import get_candidate_by_id
 from core.channel_actions import dispatch_outbound_post_intent, parse_channel_post_intent
 from core.credit_ledger import (
     escrow_credits_for_task,
+    estimate_hive_task_credit_cost,
     get_credit_balance,
+    list_credit_ledger_entries,
     transfer_credits,
 )
 from core.curiosity_roamer import AdaptiveResearchResult, CuriosityRoamer
@@ -49,12 +52,14 @@ from core.parent_orchestrator import orchestrate_parent_task
 from core.persistent_memory import (
     append_conversation_event,
     ensure_memory_files,
+    load_operator_dense_profile,
     maybe_handle_memory_command,
+    search_session_summaries,
     search_user_heuristics,
     session_memory_policy,
 )
-from core.public_hive_bridge import PublicHiveBridge
 from core.privacy_guard import text_privacy_risks
+from core.public_hive_bridge import PublicHiveBridge
 from core.reasoning_engine import (
     Plan,
     build_plan,
@@ -226,8 +231,9 @@ class NullaAgent:
         ensure_memory_files()
         _ = load_active_persona(self.persona_id)
         self._sync_public_presence(status=self._idle_public_presence_status())
-        self._start_public_presence_heartbeat()
-        self._start_idle_commons_loop()
+        if self._background_runtime_threads_enabled():
+            self._start_public_presence_heartbeat()
+            self._start_idle_commons_loop()
 
         return AgentRuntime(
             backend_name=self.backend_name,
@@ -235,6 +241,13 @@ class NullaAgent:
             persona_id=self.persona_id,
             swarm_enabled=self.swarm_enabled,
         )
+
+    def _background_runtime_threads_enabled(self) -> bool:
+        if str(self.backend_name or "").strip().lower().startswith("test-"):
+            return False
+        if str(self.device or "").strip().lower().endswith("-test"):
+            return False
+        return not os.environ.get("PYTEST_CURRENT_TEST")
 
     def run_once(
         self,
@@ -316,9 +329,21 @@ class NullaAgent:
                 reason="user_preference_command",
             )
 
-        credit_result = self._maybe_handle_credit_command(effective_input, source_context=source_context)
+        credit_result = self._maybe_handle_credit_command(
+            effective_input,
+            session_id=session_id,
+            source_context=source_context,
+        )
         if credit_result is not None:
             return credit_result
+
+        hive_review_result = self._maybe_handle_hive_review_command(
+            effective_input,
+            session_id=session_id,
+            source_context=source_context,
+        )
+        if hive_review_result is not None:
+            return hive_review_result
 
         pending_hive_create_confirmation = self._is_pending_hive_create_confirmation_input(
             effective_input,
@@ -395,6 +420,14 @@ class NullaAgent:
                 reason="memory_command",
             )
 
+        companion_memory = self._maybe_handle_companion_memory_fast_path(
+            effective_input,
+            session_id=session_id,
+            source_context=source_context,
+        )
+        if companion_memory is not None:
+            return companion_memory
+
         ui_command = self._ui_command_fast_path(normalized_input, source_surface=source_surface)
         if ui_command:
             return self._fast_path_result(
@@ -406,9 +439,22 @@ class NullaAgent:
                 reason="ui_command_fast_path",
             )
 
-        credit_status = self._credit_status_fast_path(normalized_input, source_surface=source_surface)
+        credit_status = None
+        if effective_hive_create_draft is None:
+            credit_status = self._credit_status_fast_path(normalized_input, source_surface=source_surface)
         if credit_status:
-            if self._is_chat_truth_surface(source_context):
+            receipt_like_credit_query = any(
+                marker in str(normalized_input or "").lower()
+                for marker in (
+                    "receipt",
+                    "receipts",
+                    "ledger",
+                    "payout",
+                    "payouts",
+                    "recent credits",
+                )
+            )
+            if self._is_chat_truth_surface(source_context) and not receipt_like_credit_query:
                 return self._chat_surface_model_wording_result(
                     session_id=session_id,
                     user_input=effective_input,
@@ -492,6 +538,7 @@ class NullaAgent:
 
         nullabook_fast = self._maybe_handle_nullabook_fast_path(
             effective_input,
+            raw_user_input=user_input,
             session_id=session_id,
             source_context=source_context,
         )
@@ -1185,6 +1232,7 @@ class NullaAgent:
         self,
         user_input: str,
         *,
+        session_id: str,
         source_context: dict[str, object] | None = None,
     ) -> dict | None:
         from network.signer import get_local_peer_id
@@ -1216,14 +1264,38 @@ class NullaAgent:
         if spend_match:
             amount = float(spend_match.group(1))
             peer_id = get_local_peer_id()
-            task_id = str(uuid.uuid4())
+            hive_state = session_hive_state(session_id)
+            interaction_payload = dict(hive_state.get("interaction_payload") or {})
+            active_topic_id = str(interaction_payload.get("active_topic_id") or "").strip()
+            wants_current_hive_task = any(
+                marker in " ".join(str(user_input or "").strip().lower().split())
+                for marker in ("current hive task", "this hive task", "active hive task")
+            )
+            task_id = active_topic_id or str(uuid.uuid4())
+            if wants_current_hive_task and not active_topic_id:
+                response = "I don't have an active Hive task selected in this session, so I can't attach credits to a real task yet."
+                return {
+                    "task_id": str(uuid.uuid4()),
+                    "response": response,
+                    "response_class": "task_status",
+                    "confidence": 0.9,
+                    "mode": "fast_path",
+                    "model_execution": {"used_model": False, "source": "credit_ledger"},
+                    "session_id": session_id,
+                    "source_context": source_context or {},
+                }
             ok = escrow_credits_for_task(peer_id, task_id, amount)
             if ok:
-                response = f"Reserved {amount:.2f} credits to prioritize your Hive task. Remaining balance: {get_credit_balance(peer_id):.2f}."
+                if active_topic_id:
+                    response = (
+                        f"Reserved {amount:.2f} credits to prioritize Hive task `{active_topic_id[:8]}`. "
+                        f"Remaining balance: {get_credit_balance(peer_id):.2f}."
+                    )
+                else:
+                    response = f"Reserved {amount:.2f} credits to prioritize your Hive task. Remaining balance: {get_credit_balance(peer_id):.2f}."
             else:
                 balance = get_credit_balance(peer_id)
                 response = f"Could not reserve credits. Your balance is {balance:.2f} (need {amount:.2f})."
-            session_id = runtime_session_id(device=self.device, persona_id=self.persona_id)
             return {
                 "task_id": task_id,
                 "response": response,
@@ -2864,15 +2936,180 @@ class NullaAgent:
             "credits",
             "credit balance",
             "compute credits",
+            "credit receipt",
+            "credit receipts",
+            "credit ledger",
+            "recent payout",
+            "recent payouts",
+            "recent credits",
+            "my score",
+            "credit score",
+            "glory score",
+            "hive score",
+            "social score",
             "provider score",
             "validator score",
             "trust score",
+            "tier",
             "wallet balance",
             "dna wallet",
         )
         if not any(marker in phrase for marker in credit_markers):
             return None
         return self._render_credit_status(phrase)
+
+    def _maybe_handle_companion_memory_fast_path(
+        self,
+        user_input: str,
+        *,
+        session_id: str,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, Any] | None:
+        source_surface = str((source_context or {}).get("surface", "cli")).lower()
+        if source_surface not in {"channel", "openclaw", "api"}:
+            return None
+        clean = " ".join(str(user_input or "").split()).strip()
+        if not clean:
+            return None
+        lowered = clean.lower()
+        profile = load_operator_dense_profile()
+        if not profile:
+            return None
+
+        if self._looks_like_companion_continuation_request(lowered):
+            response = self._render_companion_continuation_response(
+                session_id=session_id,
+                query_text=clean,
+                profile=profile,
+            )
+            if response:
+                return self._fast_path_result(
+                    session_id=session_id,
+                    user_input=clean,
+                    response=response,
+                    confidence=0.86,
+                    source_context=source_context,
+                    reason="companion_memory_continuation",
+                )
+
+        if self._looks_like_personalized_plan_request(lowered):
+            response = self._render_personalized_plan_response(
+                query_text=clean,
+                profile=profile,
+            )
+            if response:
+                return self._fast_path_result(
+                    session_id=session_id,
+                    user_input=clean,
+                    response=response,
+                    confidence=0.83,
+                    source_context=source_context,
+                    reason="companion_memory_personalization",
+                )
+        return None
+
+    @staticmethod
+    def _looks_like_companion_continuation_request(lowered: str) -> bool:
+        markers = (
+            "where we left off",
+            "where we left it",
+            "pick up where",
+            "you know the project",
+            "continue from",
+        )
+        return sum(1 for marker in markers if marker in str(lowered or "")) >= 1
+
+    @staticmethod
+    def _looks_like_personalized_plan_request(lowered: str) -> bool:
+        text = str(lowered or "")
+        if "bot" not in text and "agent" not in text and "service" not in text:
+            return False
+        return any(marker in text for marker in ("sketch", "outline", "plan", "approach"))
+
+    def _render_companion_continuation_response(
+        self,
+        *,
+        session_id: str,
+        query_text: str,
+        profile: dict[str, Any],
+    ) -> str:
+        active_projects = [str(item).strip() for item in list(profile.get("active_projects") or []) if str(item).strip()]
+        source_prefs = {str(item).strip().lower() for item in list(profile.get("source_preferences") or [])}
+        preferred_stacks = [str(item).strip() for item in list(profile.get("preferred_stacks") or []) if str(item).strip()]
+        topic_hints = [project.replace(" build", "").lower() for project in active_projects[:2]]
+        query_seed = " ".join([query_text, *active_projects, *preferred_stacks]).strip()
+        summaries = search_session_summaries(
+            query_seed or query_text,
+            topic_hints=topic_hints,
+            limit=2,
+            exclude_session_id=session_id,
+        )
+        summary_text = str((summaries[0] if summaries else {}).get("summary") or "").strip()
+        project_label = active_projects[0] if active_projects else "current project"
+        if project_label == "Telegram bot build":
+            lead = "Continuing the Telegram bot build."
+        elif project_label == "OpenClaw/NULLA runtime work":
+            lead = "Continuing the OpenClaw/NULLA runtime work."
+        else:
+            lead = f"Continuing the {project_label.lower()}."
+        preference_bits: list[str] = []
+        if preferred_stacks:
+            preference_bits.append(preferred_stacks[0].upper() if len(preferred_stacks[0]) <= 4 else preferred_stacks[0])
+        if "official_docs_first" in source_prefs:
+            preference_bits.append("official docs first")
+        if "github_references" in source_prefs:
+            preference_bits.append("strong GitHub references after the docs")
+        middle = ""
+        if preference_bits:
+            middle = "Working memory says: " + ", ".join(preference_bits) + "."
+        if not summary_text and not active_projects:
+            return ""
+        next_step = self._dense_memory_next_step(
+            project_label=project_label,
+            summary_text=summary_text,
+            preferred_stack=preferred_stacks[0] if preferred_stacks else "",
+        )
+        parts = [lead]
+        if middle:
+            parts.append(middle)
+        if summary_text:
+            parts.append(f"Latest carried context: {summary_text[:220]}.")
+        if next_step:
+            parts.append(f"Next step: {next_step}")
+        return " ".join(part.strip() for part in parts if part.strip())
+
+    def _render_personalized_plan_response(self, *, query_text: str, profile: dict[str, Any]) -> str:
+        heuristics = search_user_heuristics(query_text, topic_hints=[], limit=6)
+        source_prefs = {str(item.get("signal") or "").strip().lower() for item in heuristics if str(item.get("category") or "") == "source_preference"}
+        stacks = [str(item.get("signal") or "").strip().lower() for item in heuristics if str(item.get("category") or "") == "preferred_stack"]
+        style_signals = {str(item.get("signal") or "").strip().lower() for item in heuristics if str(item.get("category") or "") == "response_style"}
+        if not source_prefs and not stacks and not style_signals:
+            return ""
+        lines: list[str] = []
+        if "official_docs" in source_prefs:
+            lines.append("Official docs first.")
+        if stacks:
+            lines.append(f"Use {stacks[0]} as the baseline stack.")
+        if "github_repos" in source_prefs:
+            lines.append("Pull 1-2 strong GitHub repos only after the docs, as implementation references.")
+        lines.append("Build the smallest working bot loop, then test the core flow end to end.")
+        if "concise_direct" not in style_signals and "brutal_honest" not in style_signals:
+            return " ".join(lines)
+        return "\n".join(lines[:4])
+
+    @staticmethod
+    def _dense_memory_next_step(*, project_label: str, summary_text: str, preferred_stack: str) -> str:
+        lowered_project = str(project_label or "").lower()
+        lowered_summary = str(summary_text or "").lower()
+        stack = str(preferred_stack or "").strip().lower()
+        if "telegram" in lowered_project or "telegram" in lowered_summary or "bot" in lowered_summary:
+            stack_text = f"{stack} " if stack else ""
+            return f"lock the {stack_text}bot skeleton, verify the command flow against the official docs, then run an end-to-end smoke."
+        if "runtime" in lowered_project or "openclaw" in lowered_project or "nulla" in lowered_project:
+            return "inspect the current failing runtime surface, verify it against live state, then patch and retest."
+        if summary_text:
+            return summary_text[:180]
+        return ""
 
     def _maybe_handle_live_info_fast_path(
         self,
@@ -3531,7 +3768,12 @@ class NullaAgent:
             return "check_profile"
 
         has_bio = bool(re.search(r'(?:(?:set|update|change)\s+(?:my\s+)?bio\b|^bio\s*:)', lowered))
-        has_twitter = bool(re.search(r'(?:(?:set|update|change|add)\s+(?:my\s+)?(?:twitter|x)\s*(?:handle)?|(?:my\s+)?(?:twitter|x)\s*(?:handle)?\s*(?:is|:))', lowered))
+        has_twitter = bool(
+            re.search(
+                r'(?:(?:set|update|change|add)\s+(?:my\s+)?(?:twitter|x)\b(?:\s+handle)?|(?:my\s+)?(?:twitter|x)\b(?:\s+handle)?\s*(?:is|:))',
+                lowered,
+            )
+        )
         if has_bio and has_twitter:
             return "compound_bio_twitter"
         if has_twitter:
@@ -3551,21 +3793,28 @@ class NullaAgent:
         self,
         user_input: str,
         *,
+        raw_user_input: str | None = None,
         session_id: str,
         source_context: dict[str, object] | None,
     ) -> dict[str, Any] | None:
-        lowered = " ".join(str(user_input or "").lower().split())
+        raw_text = str(raw_user_input if raw_user_input is not None else user_input or "")
+        lowered = " ".join(raw_text.lower().split())
+        effective_lowered = " ".join(str(user_input or "").lower().split())
 
         pending = self._nullabook_pending.get(session_id)
         if pending:
             return self._handle_nullabook_pending_step(
-                user_input, lowered, session_id=session_id,
+                raw_text, lowered, session_id=session_id,
                 source_context=source_context, pending=pending,
             )
 
         intent = self._classify_nullabook_intent(lowered)
+        if intent is None and effective_lowered != lowered:
+            intent = self._classify_nullabook_intent(effective_lowered)
         if intent is None:
-            compound = self._try_compound_nullabook_message(user_input, session_id=session_id, source_context=source_context)
+            compound = self._try_compound_nullabook_message(raw_text, session_id=session_id, source_context=source_context)
+            if compound is None and raw_text != str(user_input or ""):
+                compound = self._try_compound_nullabook_message(user_input, session_id=session_id, source_context=source_context)
             if compound is not None:
                 return compound
             return None
@@ -3578,60 +3827,60 @@ class NullaAgent:
             profile = None
 
         if intent == "post":
-            return self._handle_nullabook_post(user_input, lowered, profile, session_id=session_id, source_context=source_context)
+            return self._handle_nullabook_post(raw_text, lowered, profile, session_id=session_id, source_context=source_context)
 
         if intent == "delete":
-            return self._handle_nullabook_delete(user_input, lowered, profile, session_id=session_id, source_context=source_context)
+            return self._handle_nullabook_delete(raw_text, lowered, profile, session_id=session_id, source_context=source_context)
 
         if intent == "edit":
-            return self._handle_nullabook_edit(user_input, lowered, profile, session_id=session_id, source_context=source_context)
+            return self._handle_nullabook_edit(raw_text, lowered, profile, session_id=session_id, source_context=source_context)
 
         if intent == "twitter":
             if not profile:
-                return self._nullabook_result(session_id, user_input, source_context, "You need a NullaBook profile first.")
-            twitter_update = self._extract_twitter_handle(user_input)
+                return self._nullabook_result(session_id, raw_text, source_context, "You need a NullaBook profile first.")
+            twitter_update = self._extract_twitter_handle(raw_text)
             if twitter_update:
                 try:
                     update_profile(profile.peer_id, twitter_handle=twitter_update)
                     profile = get_profile(profile.peer_id)
                     self._sync_profile_to_hive(profile)
-                    return self._nullabook_result(session_id, user_input, source_context,
+                    return self._nullabook_result(session_id, raw_text, source_context,
                         f"Twitter/X handle set to **@{twitter_update}**\n"
                         f"Visible on your NullaBook profile. Links to https://x.com/{twitter_update}")
                 except Exception as exc:
-                    return self._nullabook_result(session_id, user_input, source_context, f"Failed to set Twitter handle: {exc}")
-            return self._nullabook_result(session_id, user_input, source_context,
+                    return self._nullabook_result(session_id, raw_text, source_context, f"Failed to set Twitter handle: {exc}")
+            return self._nullabook_result(session_id, raw_text, source_context,
                 "What's the Twitter/X handle? Just the username, no @ needed.")
 
         if intent == "bio":
             if not profile:
-                return self._nullabook_result(session_id, user_input, source_context, "You need a NullaBook profile first.")
-            bio_update = self._extract_nullabook_bio_update(user_input)
+                return self._nullabook_result(session_id, raw_text, source_context, "You need a NullaBook profile first.")
+            bio_update = self._extract_nullabook_bio_update(raw_text)
             if not bio_update:
-                bio_update = re.sub(r'^bio\s*:\s*', '', user_input.strip(), flags=re.IGNORECASE).strip()
+                bio_update = re.sub(r'^bio\s*:\s*', '', raw_text.strip(), flags=re.IGNORECASE).strip()
             if bio_update:
                 try:
                     update_profile(profile.peer_id, bio=bio_update)
                     profile = get_profile(profile.peer_id)
                     self._sync_profile_to_hive(profile)
-                    return self._nullabook_result(session_id, user_input, source_context, f"Bio updated: {bio_update}")
+                    return self._nullabook_result(session_id, raw_text, source_context, f"Bio updated: {bio_update}")
                 except Exception as exc:
-                    return self._nullabook_result(session_id, user_input, source_context, f"Failed to update bio: {exc}")
-            return self._nullabook_result(session_id, user_input, source_context,
+                    return self._nullabook_result(session_id, raw_text, source_context, f"Failed to update bio: {exc}")
+            return self._nullabook_result(session_id, raw_text, source_context,
                 "What do you want the bio to say?")
 
         if intent == "compound_bio_twitter":
             if not profile:
-                return self._nullabook_result(session_id, user_input, source_context, "You need a NullaBook profile first.")
+                return self._nullabook_result(session_id, raw_text, source_context, "You need a NullaBook profile first.")
             results = []
-            bio_update = self._extract_nullabook_bio_update(user_input)
+            bio_update = self._extract_nullabook_bio_update(raw_text)
             if bio_update:
                 try:
                     update_profile(profile.peer_id, bio=bio_update)
                     results.append(f"Bio updated: {bio_update}")
                 except Exception as exc:
                     results.append(f"Bio update failed: {exc}")
-            twitter_update = self._extract_twitter_handle(user_input)
+            twitter_update = self._extract_twitter_handle(raw_text)
             if twitter_update:
                 try:
                     update_profile(profile.peer_id, twitter_handle=twitter_update)
@@ -3640,42 +3889,42 @@ class NullaAgent:
                     results.append(f"Twitter update failed: {exc}")
             profile = get_profile(profile.peer_id)
             self._sync_profile_to_hive(profile)
-            return self._nullabook_result(session_id, user_input, source_context,
+            return self._nullabook_result(session_id, raw_text, source_context,
                 "\n".join(results) if results else "Couldn't extract bio or twitter from your message.")
 
         if intent == "rename":
             if not profile:
-                return self._nullabook_result(session_id, user_input, source_context, "You need a NullaBook profile first.")
-            desired_handle = self._extract_handle_from_text(user_input)
-            display_name = self._extract_display_name(user_input)
+                return self._nullabook_result(session_id, raw_text, source_context, "You need a NullaBook profile first.")
+            desired_handle = self._extract_handle_from_text(raw_text)
+            display_name = self._extract_display_name(raw_text)
             if display_name:
                 try:
                     update_profile(profile.peer_id, display_name=display_name)
                     profile = get_profile(profile.peer_id)
                     self._sync_profile_to_hive(profile)
-                    return self._nullabook_result(session_id, user_input, source_context,
+                    return self._nullabook_result(session_id, raw_text, source_context,
                         f"Display name set to: {display_name}")
                 except Exception as exc:
-                    return self._nullabook_result(session_id, user_input, source_context,
+                    return self._nullabook_result(session_id, raw_text, source_context,
                         f"Failed to set display name: {exc}")
             if desired_handle and desired_handle.lower() != profile.handle.lower():
                 return self._handle_nullabook_rename(
                     desired_handle, profile,
-                    session_id=session_id, user_input=user_input, source_context=source_context)
+                    session_id=session_id, user_input=raw_text, source_context=source_context)
             self._nullabook_pending[session_id] = {"step": "awaiting_rename"}
-            return self._nullabook_result(session_id, user_input, source_context,
+            return self._nullabook_result(session_id, raw_text, source_context,
                 f"Current handle: **{profile.handle}**. What do you want to change it to?")
 
         if intent in ("create", "check_profile"):
-            desired_handle = self._extract_handle_from_text(user_input)
+            desired_handle = self._extract_handle_from_text(raw_text)
             if profile:
                 if desired_handle and desired_handle.lower() != profile.handle.lower():
                     return self._handle_nullabook_rename(
                         desired_handle, profile,
-                        session_id=session_id, user_input=user_input, source_context=source_context)
+                        session_id=session_id, user_input=raw_text, source_context=source_context)
                 display_info = f"\nDisplay name: {profile.display_name}" if profile.display_name and profile.display_name != profile.handle else ""
                 twitter_display = f"\nTwitter/X: @{profile.twitter_handle}" if profile.twitter_handle else ""
-                return self._nullabook_result(session_id, user_input, source_context,
+                return self._nullabook_result(session_id, raw_text, source_context,
                     f"NullaBook profile active — handle: **{profile.handle}**{display_info}\n"
                     f"Bio: {profile.bio or '(not set)'}{twitter_display}\n"
                     f"Stats: {profile.post_count} posts, {profile.claim_count} topic claims.")
@@ -3685,8 +3934,12 @@ class NullaAgent:
                     desired_handle, desired_handle.lower(),
                     session_id=session_id, source_context=source_context)
             self._nullabook_pending[session_id] = {"step": "awaiting_handle"}
-            return self._nullabook_result(session_id, user_input, source_context,
+            emoji_note = ""
+            if "emoji" in lowered or "emojis" in lowered:
+                emoji_note = "Handles are text-only. You can add emoji in the display name later.\n"
+            return self._nullabook_result(session_id, raw_text, source_context,
                 "Let's set up your NullaBook profile.\n"
+                f"{emoji_note}"
                 "What handle would you like? Rules: 3-32 characters, letters, numbers, underscores, or hyphens.")
 
         return None
@@ -3863,11 +4116,26 @@ class NullaAgent:
     def _nullabook_step_handle(
         self, user_input: str, lowered: str, *, session_id: str, source_context: dict[str, object] | None,
     ) -> dict[str, Any]:
-        handle = user_input.strip()
-        for prefix in ("name it ", "name is ", "call me ", "register ", "handle ", "name ", "use "):
-            if lowered.startswith(prefix):
-                handle = user_input.strip()[len(prefix):].strip()
-                break
+        handle = self._extract_handle_from_text(user_input) or ""
+        if not handle:
+            handle = self._strip_context_subject_suffix(user_input).strip()
+            for prefix in (
+                "name it ",
+                "name is ",
+                "call me ",
+                "register ",
+                "handle ",
+                "name ",
+                "use ",
+                "set up this name ",
+                "setup this name ",
+                "set this name ",
+                "setup name ",
+                "set up name ",
+            ):
+                if lowered.startswith(prefix):
+                    handle = self._strip_context_subject_suffix(user_input).strip()[len(prefix):].strip()
+                    break
         handle = handle.strip().strip("\"'").strip()
 
         from core.agent_name_registry import validate_agent_name
@@ -3909,17 +4177,23 @@ class NullaAgent:
             return self._nullabook_result(session_id, user_input, source_context,
                 f"Profile ready! Handle: **{handle}**\n"
                 f"You can post with: 'post to NullaBook: <your message>'")
+        bio_text = self._extract_nullabook_bio_update(user_input) or re.sub(
+            r"^bio\s*[:=]\s*",
+            "",
+            self._strip_context_subject_suffix(user_input).strip(),
+            flags=re.IGNORECASE,
+        ).strip()
         try:
             from core.nullabook_identity import get_profile_by_handle, update_profile
             profile = get_profile_by_handle(handle)
             if profile:
-                update_profile(profile.peer_id, bio=user_input.strip()[:500])
+                update_profile(profile.peer_id, bio=bio_text[:500])
                 profile = get_profile_by_handle(handle)
                 self._sync_profile_to_hive(profile)
         except Exception:
             pass
         return self._nullabook_result(session_id, user_input, source_context,
-            f"Profile ready! Handle: **{handle}**\nBio: {user_input.strip()[:500]}\n"
+            f"Profile ready! Handle: **{handle}**\nBio: {bio_text[:500]}\n"
             f"You can post with: 'post to NullaBook: <your message>'")
 
     def _handle_nullabook_post(
@@ -3941,13 +4215,14 @@ class NullaAgent:
     def _execute_nullabook_post(
         self, content: str, profile: Any, *, session_id: str, source_context: dict[str, object] | None,
     ) -> dict[str, Any]:
+        clean_content = self._strip_context_subject_suffix(content).strip()
         try:
             from core.nullabook_identity import increment_post_count
             from storage.nullabook_store import create_post
             post = create_post(
                 peer_id=profile.peer_id,
                 handle=profile.handle,
-                content=content[:5000],
+                content=clean_content[:5000],
                 post_type="social",
             )
             increment_post_count(profile.peer_id)
@@ -3957,19 +4232,19 @@ class NullaAgent:
                     peer_id=profile.peer_id,
                     handle=profile.handle,
                     bio=profile.bio or "",
-                    content=content[:5000],
+                    content=clean_content[:5000],
                     post_type="social",
                     twitter_handle=profile.twitter_handle or "",
                     display_name=profile.display_name or "",
                 )
             display = profile.display_name or profile.handle
             sync_status = " (live on nullabook.com)" if sync_result.get("ok") else ""
-            return self._nullabook_result(session_id, content, source_context,
+            return self._nullabook_result(session_id, clean_content, source_context,
                 f"Posted to NullaBook as **{display}**{sync_status}:\n"
-                f"> {content[:200]}\n\n"
+                f"> {clean_content[:200]}\n\n"
                 f"Post ID: {post.post_id}")
         except Exception as exc:
-            return self._nullabook_result(session_id, content, source_context, f"Failed to post: {exc}")
+            return self._nullabook_result(session_id, clean_content, source_context, f"Failed to post: {exc}")
 
     def _nullabook_result(
         self, session_id: str, user_input: str, source_context: dict[str, object] | None, response: str,
@@ -4134,8 +4409,8 @@ class NullaAgent:
     def _extract_twitter_handle(text: str) -> str:
         import re
         for pattern in (
-            r'(?:set|update|add|change)\s+(?:my\s+)?(?:twitter|x)\s*(?:handle)?\s*(?:to|:)?\s*@?([A-Za-z0-9_]{1,15})',
-            r'(?:my\s+)?(?:twitter|x)\s*(?:handle)?\s*(?:is|:)\s*@?([A-Za-z0-9_]{1,15})',
+            r'(?:set|update|add|change)\s+(?:my\s+)?(?:twitter|x)\b(?:\s+handle)?(?:\s+(?:in|on)\s+(?:my\s+)?(?:nullabook|nulla\s*book)\s+profile)?\s*(?:to|as|:)\s*@?([A-Za-z0-9_]{1,15})\b',
+            r'(?:my\s+)?(?:twitter|x)\b(?:\s+handle)?\s*(?:is|:)\s*@?([A-Za-z0-9_]{1,15})\b',
         ):
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
@@ -4152,6 +4427,7 @@ class NullaAgent:
             r'(?:i\s+want\s+to\s+be|i\'?ll?\s+be|i\'?m)\s+(\S+)',
             r'(?:register|sign\s*up)\s+(?:as|with)\s+(\S+)',
             r'(?:change|rename|switch|set)\s+(?:my\s+)?(?:name|handle)\s+(?:to\s+)?(\S+)',
+            r'(?:ok\s+)?(?:set\s*up|setup)\s+(?:this\s+)?(?:name|handle)\s+(?:to\s+)?(\S+)',
             r'(?:use|pick|choose)\s+(\S+)\s+(?:as\s+)?(?:my\s+)?(?:name|handle)',
         ):
             match = re.search(pattern, text, re.IGNORECASE)
@@ -4166,26 +4442,37 @@ class NullaAgent:
         """Pull post content from natural phrasing like 'post on nulla book: hello' or
         'let's do first post: hello world'."""
         import re
+        raw = NullaAgent._strip_context_subject_suffix(text)
         for pattern in (
             r'(?:post\s+(?:to|on)\s+(?:nullabook|nulla\s*book)|(?:nullabook|nulla\s*book)\s+post)\s*[:\-]\s*(.+)',
             r'(?:let.s|do)\s+(?:(?:do|a)\s+)?(?:a\s+|first\s+|our\s+)?post\s*[:\-]\s*(.+)',
             r'(?:first\s+(?:our\s+)?post|our\s+first\s+post)\s*[:\-]\s*(.+)',
             r'post\s+(?:it|this)\s*[:\-]\s*(.+)',
         ):
-            m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            m = re.search(pattern, raw, re.IGNORECASE | re.DOTALL)
             if m:
                 return m.group(1).strip().strip("\"'").strip()
         for prefix in ("post to nullabook", "post on nullabook", "nullabook post",
                         "post to nulla book", "post on nulla book", "nulla book post"):
-            lw = text.lower()
+            lw = raw.lower()
             idx = lw.find(prefix)
             if idx >= 0:
-                after = text[idx + len(prefix):].strip()
+                after = raw[idx + len(prefix):].strip()
                 if after and after[0] in ":- ":
                     after = after[1:].strip()
                 if after:
                     return after.strip("\"'").strip()
         return ""
+
+    @staticmethod
+    def _strip_context_subject_suffix(text: str) -> str:
+        raw = str(text or "")
+        return re.sub(
+            r"\s+Context subject:\s*[^.\n]+\.?\s*$",
+            "",
+            raw,
+            flags=re.IGNORECASE,
+        ).strip()
 
     @staticmethod
     def _extract_display_name(text: str) -> str:
@@ -4297,12 +4584,18 @@ class NullaAgent:
         wallet_status = DNAWalletManager().get_status()
         mention_wallet = any(token in normalized_input for token in ("wallet", "usdc", "dna"))
         mention_rewards = any(token in normalized_input for token in ("earn", "earned", "reward", "share", "hive", "task"))
+        mention_receipts = any(token in normalized_input for token in ("receipt", "receipts", "ledger", "payout", "payouts"))
+        provider_score = float(getattr(scoreboard, "provider", 0.0) or 0.0)
+        validator_score = float(getattr(scoreboard, "validator", 0.0) or 0.0)
+        trust_score = float(getattr(scoreboard, "trust", 0.0) or 0.0)
+        glory_score = float(getattr(scoreboard, "glory_score", 0.0) or 0.0)
+        tier_label = str(getattr(scoreboard, "tier", "Newcomer") or "Newcomer")
 
         parts = [
             f"You currently have {ledger.balance:.2f} compute credits.",
             (
-                f"Provider score {scoreboard.provider:.1f}, validator score {scoreboard.validator:.1f}, "
-                f"trust {scoreboard.trust:.1f}, tier {scoreboard.tier}."
+                f"Provider score {provider_score:.1f}, validator score {validator_score:.1f}, "
+                f"trust {trust_score:.1f}, glory score {glory_score:.1f}, tier {tier_label}."
             ),
         ]
         if wallet_status is None:
@@ -4316,6 +4609,22 @@ class NullaAgent:
             parts.append(
                 "Plain public Hive posts do not mint credits by themselves. Credits and provider score come from rewarded assist tasks and accepted results."
             )
+        if mention_receipts:
+            entries = list_credit_ledger_entries(peer_id, limit=4)
+            if not entries:
+                parts.append("No credit receipts are recorded for this peer yet.")
+            else:
+                receipt_lines = ["Recent credit receipts:"]
+                for entry in entries:
+                    amount = float(entry.get("amount") or 0.0)
+                    sign = "+" if amount >= 0 else ""
+                    receipt_id = str(entry.get("receipt_id") or "").strip() or "no-receipt"
+                    reason = str(entry.get("reason") or "").strip() or "unknown"
+                    timestamp = str(entry.get("timestamp") or "").strip() or "unknown time"
+                    receipt_lines.append(
+                        f"- {sign}{amount:.2f} for `{reason}` ({receipt_id[:24]}) at {timestamp}."
+                    )
+                parts.append("\n".join(receipt_lines))
         if ledger.mode:
             parts.append(f"Ledger mode is {ledger.mode}.")
         return " ".join(part.strip() for part in parts if part.strip())
@@ -6712,9 +7021,9 @@ class NullaAgent:
         if result.response_class != ResponseClass.APPROVAL_REQUIRED:
             return False
         lowered = str(result.text or "").strip().lower()
-        if "reply with:" in lowered and "approve " in lowered:
+        if "ready to post this to the public hive" in lowered or "confirm? (yes / no)" in lowered:
             return False
-        return True
+        return not ("reply with:" in lowered and "approve " in lowered)
 
     def _fast_path_response_class(self, *, reason: str, response: str) -> ResponseClass:
         if reason in {"smalltalk_fast_path", "startup_sequence_fast_path"}:
@@ -7633,6 +7942,13 @@ class NullaAgent:
         "yes pls", "yes please", "all good carry on", "proceed with next steps",
         "proceed with that", "all good", "no proceed",
     })
+    _HIVE_REVIEW_ACTION_RE = re.compile(
+        r"\b(?P<decision>approve|approved|reject|rejected|needs?\s+more\s+evidence|needs?\s+improvement|send\s+back|quarantine|void)\b"
+        r"(?:\s+(?:the\s+)?)?"
+        r"(?:(?P<object_type>post|topic)\s+)?"
+        r"(?:#)?(?P<object_id>[a-z0-9][a-z0-9-]{5,255})\b",
+        re.IGNORECASE,
+    )
 
     def _is_proceed_message(self, text: str) -> bool:
         compact = " ".join(str(text or "").strip().lower().split()).strip(" \t\n\r?!.,")
@@ -7645,6 +7961,290 @@ class NullaAgent:
         )):
             return True
         return bool(any(marker in compact for marker in ("do research", "start research", "run research", "deliver to hive", "deliver to the hive", "deliver it to hive", "deliver it to the hive", "submit to hive", "submit to the hive", "post to hive", "research and deliver", "research it", "do it properly")))
+
+    def _maybe_handle_hive_review_command(
+        self,
+        user_input: str,
+        *,
+        session_id: str,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, Any] | None:
+        clean = " ".join(str(user_input or "").split()).strip()
+        lowered = clean.lower()
+        if not clean:
+            return None
+        if self._looks_like_hive_review_queue_command(lowered):
+            return self._handle_hive_review_queue_command(
+                clean,
+                session_id=session_id,
+                source_context=source_context,
+            )
+        review_action = self._parse_hive_review_action(clean)
+        if review_action is not None:
+            return self._handle_hive_review_action(
+                clean,
+                session_id=session_id,
+                source_context=source_context,
+                review_action=review_action,
+            )
+        if self._looks_like_hive_cleanup_command(lowered):
+            return self._handle_hive_cleanup_command(
+                clean,
+                session_id=session_id,
+                source_context=source_context,
+            )
+        return None
+
+    def _looks_like_hive_review_queue_command(self, lowered: str) -> bool:
+        compact = " ".join(str(lowered or "").split()).strip().lower()
+        if not compact:
+            return False
+        if "hive" not in compact and "review" not in compact:
+            return False
+        return any(
+            marker in compact
+            for marker in (
+                "review queue",
+                "what needs review",
+                "what is in review",
+                "show review queue",
+                "check review queue",
+                "moderation queue",
+                "review items",
+                "pending reviews",
+            )
+        )
+
+    def _parse_hive_review_action(self, user_input: str) -> dict[str, str] | None:
+        match = self._HIVE_REVIEW_ACTION_RE.search(user_input)
+        if match is None:
+            return None
+        decision_phrase = " ".join(str(match.group("decision") or "").split()).strip().lower()
+        object_type = str(match.group("object_type") or "").strip().lower()
+        object_id = str(match.group("object_id") or "").strip()
+        if not object_id:
+            return None
+        decision = {
+            "approve": "approve",
+            "approved": "approve",
+            "reject": "void",
+            "rejected": "void",
+            "needs more evidence": "review_required",
+            "needs improvement": "review_required",
+            "send back": "review_required",
+            "quarantine": "quarantine",
+            "void": "void",
+        }.get(decision_phrase)
+        if not decision:
+            return None
+        if object_type not in {"post", "topic"}:
+            object_type = "post" if object_id.startswith("post-") else "topic" if object_id.startswith("topic-") else "post"
+        return {
+            "decision": decision,
+            "decision_phrase": decision_phrase,
+            "object_type": object_type,
+            "object_id": object_id,
+        }
+
+    def _looks_like_hive_cleanup_command(self, lowered: str) -> bool:
+        compact = " ".join(str(lowered or "").split()).strip().lower()
+        if "hive" not in compact and "nulla_smoke" not in compact and "smoke topic" not in compact:
+            return False
+        if "cleanup" not in compact and "clean up" not in compact and "remove" not in compact and "close" not in compact:
+            return False
+        return any(marker in compact for marker in ("smoke", "junk", "test artifact", "test topic", "noise"))
+
+    def _handle_hive_review_queue_command(
+        self,
+        user_input: str,
+        *,
+        session_id: str,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, Any]:
+        if not self.public_hive_bridge.enabled():
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=user_input,
+                response="Public Hive is not enabled on this runtime, so I can't inspect the live review queue.",
+                confidence=0.9,
+                source_context=source_context,
+                reason="hive_review_queue_disabled",
+            )
+        rows = self.public_hive_bridge.list_public_review_queue(limit=8)
+        if not rows:
+            response = "Hive review queue is empty right now."
+        else:
+            lines = ["Hive review queue:"]
+            for row in rows[:6]:
+                object_type = str(row.get("object_type") or "object").strip()
+                object_id = str(row.get("object_id") or "").strip()
+                preview = " ".join(str(row.get("preview") or "").split()).strip()
+                moderation_state = str(row.get("moderation_state") or "review_required").strip()
+                summary = dict(row.get("review_summary") or {})
+                total_reviews = int(summary.get("total_reviews") or 0)
+                current_state = str(summary.get("current_state") or moderation_state).strip()
+                applied_state = str(summary.get("applied_state") or "").strip()
+                state_suffix = f" -> {applied_state}" if applied_state and applied_state != current_state else ""
+                snippet = preview[:120] + ("..." if len(preview) > 120 else "")
+                lines.append(
+                    f"- [{object_type}] {object_id}: {current_state}{state_suffix}; reviews={total_reviews}; {snippet or 'No preview'}"
+                )
+            response = "\n".join(lines)
+        return self._fast_path_result(
+            session_id=session_id,
+            user_input=user_input,
+            response=response,
+            confidence=0.93,
+            source_context=source_context,
+            reason="hive_review_queue",
+        )
+
+    def _handle_hive_review_action(
+        self,
+        user_input: str,
+        *,
+        session_id: str,
+        source_context: dict[str, object] | None,
+        review_action: dict[str, str],
+    ) -> dict[str, Any]:
+        if not self.public_hive_bridge.enabled():
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=user_input,
+                response="Public Hive is not enabled on this runtime, so I can't submit a moderation review.",
+                confidence=0.9,
+                source_context=source_context,
+                reason="hive_review_action_disabled",
+            )
+        if not self.public_hive_bridge.write_enabled():
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=user_input,
+                response="Public Hive moderation writes are disabled here because live write auth is not configured.",
+                confidence=0.9,
+                source_context=source_context,
+                reason="hive_review_action_write_disabled",
+            )
+        result = self.public_hive_bridge.submit_public_moderation_review(
+            object_type=review_action["object_type"],
+            object_id=review_action["object_id"],
+            decision=review_action["decision"],
+            note=f"NULLA operator review via chat: {review_action['decision_phrase']}",
+        )
+        if not result.get("ok"):
+            response = f"Failed to submit Hive moderation review for {review_action['object_type']} `{review_action['object_id']}`."
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=user_input,
+                response=response,
+                confidence=0.82,
+                source_context=source_context,
+                reason="hive_review_action_failed",
+            )
+        current_state = str(result.get("current_state") or "").strip() or review_action["decision"]
+        quorum_reached = bool(result.get("quorum_reached"))
+        response = (
+            f"Submitted Hive moderation review for {review_action['object_type']} `{review_action['object_id']}`: "
+            f"{review_action['decision']}. Current state `{current_state}`."
+        )
+        if quorum_reached:
+            response = f"{response} Review quorum is reached."
+        return self._fast_path_result(
+            session_id=session_id,
+            user_input=user_input,
+            response=response,
+            confidence=0.95,
+            source_context=source_context,
+            reason="hive_review_action",
+        )
+
+    def _handle_hive_cleanup_command(
+        self,
+        user_input: str,
+        *,
+        session_id: str,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, Any]:
+        if not self.public_hive_bridge.enabled():
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=user_input,
+                response="Public Hive is not enabled on this runtime, so I can't clean live smoke topics.",
+                confidence=0.9,
+                source_context=source_context,
+                reason="hive_cleanup_disabled",
+            )
+        if not self.public_hive_bridge.write_enabled():
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=user_input,
+                response="Public Hive cleanup writes are disabled here because live write auth is not configured.",
+                confidence=0.9,
+                source_context=source_context,
+                reason="hive_cleanup_write_disabled",
+            )
+        topics = self.public_hive_bridge.list_public_topics(
+            limit=64,
+            statuses=("open", "researching", "disputed", "partial", "needs_improvement", "solved", "closed"),
+        )
+        candidates = [
+            topic
+            for topic in topics
+            if self._looks_like_disposable_hive_cleanup_topic(topic)
+            and str(topic.get("status") or "").strip().lower() != "closed"
+        ]
+        if not candidates:
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=user_input,
+                response="I didn't find any live disposable smoke topics to close.",
+                confidence=0.92,
+                source_context=source_context,
+                reason="hive_cleanup_noop",
+            )
+        closed_count = 0
+        failed_ids: list[str] = []
+        for topic in candidates[:16]:
+            topic_id = str(topic.get("topic_id") or "").strip()
+            if not topic_id:
+                continue
+            result = self.public_hive_bridge.update_public_topic_status(
+                topic_id=topic_id,
+                status="closed",
+                note="Disposable smoke cleanup from NULLA operator surface.",
+                idempotency_key=f"{topic_id}:cleanup:{uuid.uuid4().hex[:8]}",
+            )
+            if result.get("ok"):
+                closed_count += 1
+            else:
+                failed_ids.append(topic_id[:8])
+        response = f"Closed {closed_count} disposable Hive smoke topic{'s' if closed_count != 1 else ''}."
+        if failed_ids:
+            response = f"{response} Failed: {', '.join(failed_ids[:6])}."
+        return self._fast_path_result(
+            session_id=session_id,
+            user_input=user_input,
+            response=response,
+            confidence=0.94,
+            source_context=source_context,
+            reason="hive_cleanup_smoke_topics",
+        )
+
+    def _looks_like_disposable_hive_cleanup_topic(self, topic: dict[str, Any]) -> bool:
+        title = str(topic.get("title") or "").strip()
+        summary = str(topic.get("summary") or "").strip()
+        tags = {
+            str(item or "").strip().lower()
+            for item in list(topic.get("topic_tags") or [])
+            if str(item or "").strip()
+        }
+        combined = f"{title} {summary}".lower()
+        return (
+            "[nulla_smoke:" in combined
+            or title.startswith("[NULLA_SMOKE]")
+            or "nulla_smoke" in combined
+            or ("smoke" in tags and any(marker in combined for marker in ("cleanup", "smoke", "test artifact", "disposable")))
+        )
 
     def _maybe_handle_hive_research_followup(
         self,
@@ -8152,7 +8752,14 @@ class NullaAgent:
             "auto_start_research": bool(draft.get("auto_start_research")),
         }
         self._remember_hive_create_pending(session_id, pending)
+        estimated_cost = estimate_hive_task_credit_cost(
+            title,
+            summary,
+            topic_tags=topic_tags,
+            auto_start_research=bool(draft.get("auto_start_research")),
+        )
         tag_line = f"\nTags: {', '.join(topic_tags[:6])}" if topic_tags else ""
+        cost_line = f"\nEstimated reward pool: {estimated_cost:.1f} credits." if estimated_cost > 0 else ""
         dup_warning = ""
         if dup:
             dup_title = dup.get("title", "")
@@ -8163,7 +8770,7 @@ class NullaAgent:
             )
         preview = (
             f"Ready to post this to the public Hive:\n\n"
-            f"**{title}**{tag_line}{dup_warning}{preview_note}\n\n"
+            f"**{title}**{tag_line}{cost_line}{dup_warning}{preview_note}\n\n"
             f"Confirm? (yes / no)"
         )
         return self._action_fast_path_result(
@@ -8320,6 +8927,12 @@ class NullaAgent:
         topic_tags = pending["topic_tags"]
         linked_task_id = pending.get("task_id") or task.task_id
         auto_start_research = bool(pending.get("auto_start_research")) or self._wants_hive_create_auto_start(user_input)
+        estimated_cost = estimate_hive_task_credit_cost(
+            title,
+            summary,
+            topic_tags=topic_tags,
+            auto_start_research=auto_start_research,
+        )
 
         try:
             result = self.public_hive_bridge.create_public_topic(
@@ -8376,6 +8989,25 @@ class NullaAgent:
             self.hive_activity_tracker.note_watched_topic(session_id=session_id, topic_id=topic_id)
         tag_suffix = f" Tags: {', '.join(topic_tags[:6])}." if topic_tags else ""
         response = f"Created Hive task `{title}` (#{topic_id[:8]}).{tag_suffix}"
+        if estimated_cost > 0:
+            from network.signer import get_local_peer_id
+
+            peer_id = get_local_peer_id()
+            if escrow_credits_for_task(
+                peer_id,
+                topic_id,
+                estimated_cost,
+                receipt_id=f"hive_task_escrow:{topic_id}",
+            ):
+                response = (
+                    f"{response} Reserved {estimated_cost:.1f} credits for Hive payouts. "
+                    f"Remaining balance: {get_credit_balance(peer_id):.2f}."
+                )
+            else:
+                response = (
+                    f"{response} No credits were reserved because your current balance is "
+                    f"{get_credit_balance(peer_id):.2f}."
+                )
         if auto_start_research:
             signal = {"topic_id": topic_id, "title": title}
             self._sync_public_presence(status="busy", source_context=source_context)
@@ -8501,6 +9133,7 @@ class NullaAgent:
             title = re.sub(r"^.{0,30}---+\s*", "", title).strip()
         if " - " in title and len(title.split(" - ", 1)[1].strip()) > 15:
             title = title.split(" - ", 1)[1].strip()
+        title = re.sub(r"^(?:task|goal|summary)\s*[:=-]\s*", "", title, flags=re.IGNORECASE).strip()
         title = self._strip_wrapping_quotes(" ".join(title.split()).strip().strip("."))
 
         summary = ""
@@ -8907,6 +9540,10 @@ class NullaAgent:
 
         if status in {"solved", "closed"}:
             lead = f"Yes. `{title}` (#{resolved_topic_id[:8]}) is `{status}`."
+        elif status == "partial":
+            lead = f"No. `{title}` (#{resolved_topic_id[:8]}) is `partial` and still needs follow-up work."
+        elif status == "needs_improvement":
+            lead = f"No. `{title}` (#{resolved_topic_id[:8]}) is `needs_improvement` and has been sent back for more work."
         elif status:
             lead = f"No. `{title}` (#{resolved_topic_id[:8]}) is still `{status}`."
         else:
@@ -8929,7 +9566,8 @@ class NullaAgent:
             if latest_post_body:
                 summary.append(f"Latest {label}: {latest_post_body[:220]}.")
         response = " ".join(part for part in summary if part)
-        if self._is_chat_truth_surface(source_context):
+        deterministic_review_statuses = {"partial", "needs_improvement"}
+        if self._is_chat_truth_surface(source_context) and status not in deterministic_review_statuses:
             return self._chat_surface_hive_wording_result(
                 session_id=session_id,
                 user_input=clean,
@@ -8948,9 +9586,7 @@ class NullaAgent:
                     latest_post_body=latest_post_body,
                     truth_payload=packet,
                 ),
-                fallback_response=(
-                    f"I pulled current Hive status for `{title}` in this run, but I couldn't produce a clean final summary."
-                ),
+                fallback_response=response,
             )
         return self._fast_path_result(
             session_id=session_id,
@@ -8991,7 +9627,7 @@ class NullaAgent:
 
         lookup_rows = self.public_hive_bridge.list_public_topics(
             limit=32,
-            statuses=("open", "researching", "disputed", "solved", "closed"),
+            statuses=("open", "researching", "disputed", "partial", "needs_improvement", "solved", "closed"),
         )
         for hint in [topic_hint, *history_hints]:
             clean_hint = str(hint or "").strip().lower()

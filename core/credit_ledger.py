@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Lock
+from typing import Any
 
 from core import policy_engine
 from storage.db import get_connection
@@ -165,6 +166,63 @@ def get_credit_balance(peer_id: str) -> float:
         return float(row["total"]) if row else 0.0
     finally:
         conn.close()
+
+
+def list_credit_ledger_entries(peer_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
+    _init_ledger_table()
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT peer_id, amount, reason, receipt_id, settlement_mode, timestamp
+            FROM compute_credit_ledger
+            WHERE peer_id = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (peer_id, max(1, min(int(limit), 50))),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def estimate_hive_task_credit_cost(
+    title: str,
+    summary: str,
+    *,
+    topic_tags: list[str] | None = None,
+    auto_start_research: bool = False,
+) -> float:
+    clean_title = " ".join(str(title or "").split()).strip().lower()
+    clean_summary = " ".join(str(summary or "").split()).strip().lower()
+    title_tokens = len(clean_title.split())
+    summary_tokens = len(clean_summary.split())
+    tag_set = {str(item or "").strip().lower() for item in list(topic_tags or []) if str(item).strip()}
+    complexity_hits = sum(
+        1
+        for marker in (
+            "research",
+            "security",
+            "privacy",
+            "architecture",
+            "integration",
+            "migration",
+            "design",
+            "economy",
+            "credits",
+        )
+        if marker in clean_title or marker in clean_summary or marker in tag_set
+    )
+    estimate = 4.0
+    estimate += min(2.0, title_tokens / 8.0)
+    estimate += min(8.0, summary_tokens / 24.0)
+    estimate += min(3.0, len(tag_set) * 0.5)
+    estimate += min(3.0, complexity_hits * 0.6)
+    if auto_start_research:
+        estimate += 2.0
+    rounded = round(max(2.0, min(24.0, estimate)) * 2.0) / 2.0
+    return float(rounded)
 
 
 def get_free_tier_dispatch_usage(peer_id: str, *, day_bucket: str | None = None) -> float:
@@ -626,6 +684,118 @@ def get_escrow_for_task(parent_task_id: str) -> dict | None:
         }
     finally:
         conn.close()
+
+
+def settle_hive_task_escrow(
+    parent_task_id: str,
+    helper_peer_ids: list[str],
+    *,
+    result_status: str,
+    receipt_prefix: str | None = None,
+) -> dict[str, Any]:
+    clean_task_id = str(parent_task_id or "").strip()
+    normalized_status = str(result_status or "").strip().lower()
+    unique_helpers: list[str] = []
+    seen_helpers: set[str] = set()
+    for helper_peer_id in list(helper_peer_ids or []):
+        clean_helper = str(helper_peer_id or "").strip()
+        if not clean_helper or clean_helper in seen_helpers:
+            continue
+        seen_helpers.add(clean_helper)
+        unique_helpers.append(clean_helper)
+
+    escrow_before = get_escrow_for_task(clean_task_id)
+    if not clean_task_id or not escrow_before:
+        return {
+            "ok": False,
+            "status": "no_active_escrow",
+            "topic_id": clean_task_id,
+            "settlements": [],
+            "refunded_amount": 0.0,
+        }
+
+    if normalized_status == "solved":
+        payout_fraction = 1.0
+    elif normalized_status == "partial":
+        payout_fraction = 0.5
+    else:
+        return {
+            "ok": False,
+            "status": "no_payout_for_status",
+            "topic_id": clean_task_id,
+            "settlements": [],
+            "refunded_amount": 0.0,
+            "remaining": float(escrow_before.get("remaining") or 0.0),
+        }
+
+    remaining_before = float(escrow_before.get("remaining") or 0.0)
+    if remaining_before <= 0.0:
+        return {
+            "ok": False,
+            "status": "empty_escrow",
+            "topic_id": clean_task_id,
+            "settlements": [],
+            "refunded_amount": 0.0,
+            "remaining": 0.0,
+        }
+
+    if not unique_helpers:
+        refunded_amount = refund_escrow_remainder(clean_task_id) if normalized_status == "solved" else 0.0
+        escrow_after = get_escrow_for_task(clean_task_id)
+        return {
+            "ok": normalized_status == "solved",
+            "status": "refunded_without_helpers" if normalized_status == "solved" else "no_helpers",
+            "topic_id": clean_task_id,
+            "settlements": [],
+            "refunded_amount": refunded_amount,
+            "remaining": float((escrow_after or {}).get("remaining") or 0.0),
+        }
+
+    payout_pool = round(remaining_before * payout_fraction, 4)
+    helper_count = len(unique_helpers)
+    per_helper = round(payout_pool / helper_count, 4)
+    allocations = [per_helper for _ in unique_helpers]
+    if allocations:
+        allocations[-1] = round(payout_pool - sum(allocations[:-1]), 4)
+
+    settlements: list[dict[str, Any]] = []
+    total_released = 0.0
+    prefix = str(receipt_prefix or f"hive_settlement:{clean_task_id}:{normalized_status}").strip()
+    for index, helper_peer_id in enumerate(unique_helpers):
+        allocation = allocations[index]
+        payout_amount = max(0.0, float(allocation or 0.0))
+        if payout_amount <= 0.0:
+            continue
+        receipt_id = f"{prefix}:{index}"
+        ok = release_escrow_to_helper(
+            clean_task_id,
+            helper_peer_id,
+            payout_amount,
+            receipt_id=receipt_id,
+        )
+        if not ok:
+            continue
+        total_released += payout_amount
+        settlements.append(
+            {
+                "helper_peer_id": helper_peer_id,
+                "amount": payout_amount,
+                "receipt_id": receipt_id,
+            }
+        )
+
+    refunded_amount = refund_escrow_remainder(clean_task_id) if normalized_status == "solved" else 0.0
+    escrow_after = get_escrow_for_task(clean_task_id)
+    return {
+        "ok": bool(settlements) or refunded_amount > 0.0,
+        "status": "settled" if normalized_status == "solved" else "partially_settled",
+        "topic_id": clean_task_id,
+        "result_status": normalized_status,
+        "settlements": settlements,
+        "released_amount": round(total_released, 4),
+        "refunded_amount": round(refunded_amount, 4),
+        "remaining": float((escrow_after or {}).get("remaining") or 0.0),
+    }
 
 
 def transfer_credits(
