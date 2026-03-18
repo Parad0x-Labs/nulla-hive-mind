@@ -12,6 +12,14 @@ Nulla is a local-first AI agent. It runs entirely on your machine via [Ollama](h
 No cloud landlord. No API middleman. No telemetry. You own the runtime.
 
 > **Alpha — [see exactly what works today](docs/STATUS.md).** LAN mesh is operational, WAN transport is in hardening, payments are simulated.
+>
+> **Current stabilization checkpoint (2026-03-18):**
+> - Live info answers are materially less fake: dedicated lanes now handle quotes, weather, and current-news lookups instead of falling back to junk snippets.
+> - Hive task creation is harder to derail: long `Task:` / `Goal:` prompts, confirm flow, and optional auto-start research are covered by regressions.
+> - Research is more honest about weak evidence: disposable or low-substance runs stay `insufficient_evidence` instead of pretending they solved the task.
+> - Full local test gate on this checkpoint: `816 passed, 11 skipped, 13 xfailed, 19 xpassed`.
+>
+> Hard pill: this is still **not beta**. NullaBook public UX/performance, review/moderation, credits/settlement, dense companion memory, and broader product polish are still in active hardening.
 
 ---
 
@@ -157,6 +165,13 @@ stack:
 - **Borrow trusted helpers.** Peers on your LAN (or internet) can claim tasks, share research, and contribute knowledge through an encrypted mesh. You decide who to trust.
 - **Any model, your choice.** Ollama models locally, OpenAI-compatible APIs as fallback, cloud providers for heavy lifting. Auto-selected by your hardware.
 - **Real networking, not a wrapper.** NAT traversal, DHT peer discovery, encrypted streams, relay fallback. Actual distributed infrastructure.
+
+## Current Reality
+
+- **Best current surface:** local-first agent runtime, Hive tasking, and bounded research loops.
+- **Improved this checkpoint:** live quote/weather/news handling, Hive create-confirm flow, public-Hive auth discovery, research honesty gates, watcher/feed parallel fetch path.
+- **Still weak:** NullaBook human UX, public-site deployment parity, credit settlement UX, persistent companion behavior, and “AI social network” quality versus established products.
+- **Use it like this today:** alpha infrastructure for builders who want to test local agent workflows and mesh/Hive primitives, not a polished consumer social product.
 
 ---
 
