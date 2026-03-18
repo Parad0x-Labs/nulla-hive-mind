@@ -1053,7 +1053,7 @@ class PublicHiveBridge:
 def load_public_hive_bridge_config() -> PublicHiveBridgeConfig:
     ensure_public_hive_agent_bootstrap()
     raw = _load_agent_bootstrap()
-    discovered = _discover_local_cluster_bootstrap()
+    discovered = _discover_local_cluster_bootstrap(project_root=PROJECT_ROOT)
     env_urls = _split_csv(os.environ.get("NULLA_MEET_SEED_URLS", ""))
     raw_seed_urls = [str(url).strip() for url in list(raw.get("meet_seed_urls") or []) if str(url).strip()]
     seed_urls = tuple(env_urls or raw_seed_urls or list(discovered.get("meet_seed_urls") or []))
@@ -1100,7 +1100,7 @@ def ensure_public_hive_agent_bootstrap() -> Path | None:
     auth_tokens_by_base_url = _json_env_object(os.environ.get("NULLA_MEET_AUTH_TOKENS_JSON", ""))
     write_grants_by_base_url = _json_env_write_grants(os.environ.get("NULLA_MEET_WRITE_GRANTS_JSON", ""))
     raw = _load_agent_bootstrap(include_runtime=False)
-    discovered = _discover_local_cluster_bootstrap()
+    discovered = _discover_local_cluster_bootstrap(project_root=PROJECT_ROOT)
     raw_seed_urls = [str(url).strip() for url in list(raw.get("meet_seed_urls") or []) if str(url).strip()]
     resolved_seed_urls = seed_urls or raw_seed_urls or list(discovered.get("meet_seed_urls") or [])
     if not resolved_seed_urls:
@@ -1197,7 +1197,7 @@ def write_public_hive_agent_bootstrap(
     destination = (target_path or config_path("agent-bootstrap.json")).resolve()
     root = Path(project_root).expanduser().resolve() if project_root else PROJECT_ROOT.resolve()
     existing = _load_json_file(destination) if destination.exists() else _load_agent_bootstrap(include_runtime=False)
-    discovered = _discover_local_cluster_bootstrap()
+    discovered = _discover_local_cluster_bootstrap(project_root=root)
     payload: dict[str, Any] = dict(existing or {})
 
     resolved_urls = [
@@ -1538,7 +1538,7 @@ def ensure_public_hive_auth(
     destination = (target_path or (CONFIG_HOME_DIR / "agent-bootstrap.json")).expanduser().resolve()
     existing = _load_json_file(destination) if destination.exists() else {}
     bundled = _load_json_file(root / "config" / "agent-bootstrap.json")
-    discovered = _discover_local_cluster_bootstrap()
+    discovered = _discover_local_cluster_bootstrap(project_root=root)
     sample = _load_agent_bootstrap(include_runtime=False)
 
     seed_urls = [
@@ -1666,62 +1666,95 @@ def ensure_public_hive_auth(
     return sync_result
 
 
-def _discover_local_cluster_bootstrap() -> dict[str, Any]:
-    watch_paths = [
-        config_path("meet_clusters/do_ip_first_4node/watch-edge-1.json"),
-        config_path("meet_clusters/separated_watch_4node/watch-edge-1.json"),
-    ]
-    for path in watch_paths:
-        raw = _load_json_file(path)
-        auth_token = _clean_token(str(raw.get("auth_token") or "").strip())
-        upstream = [str(url).strip() for url in list(raw.get("upstream_base_urls") or []) if str(url).strip()]
-        tls_ca_file = str(raw.get("tls_ca_file") or "").strip()
-        tls_insecure_skip_verify = bool(raw.get("tls_insecure_skip_verify", False))
-        if auth_token or upstream:
-            payload: dict[str, Any] = {}
-            if auth_token:
-                payload["auth_token"] = auth_token
-            if upstream:
-                payload["meet_seed_urls"] = upstream
-            if tls_ca_file:
-                payload["tls_ca_file"] = tls_ca_file
-            if tls_insecure_skip_verify:
-                payload["tls_insecure_skip_verify"] = True
-            return payload
-
+def _discover_local_cluster_bootstrap(*, project_root: str | Path | None = None) -> dict[str, Any]:
+    root = Path(project_root).expanduser().resolve() if project_root else PROJECT_ROOT.resolve()
+    cluster_dirs = ("do_ip_first_4node", "separated_watch_4node")
     region_map = {
         "seed-eu-1.json": "eu",
         "seed-us-1.json": "us",
         "seed-apac-1.json": "apac",
     }
+    selected_cluster = ""
+    selected_watch_urls: list[str] = []
+    selected_watch_auth_token = ""
     discovered_urls: list[str] = []
     discovered_tokens: dict[str, str] = {}
+    selected_urls_by_region: dict[str, str] = {}
+    region_token_candidates: dict[str, str] = {}
     discovered_home_region = ""
     discovered_tls_ca_file = ""
     discovered_tls_insecure_skip_verify = False
-    for filename, region in region_map.items():
-        raw = _load_json_file(config_path("meet_clusters/do_ip_first_4node", filename))
-        public_base_url = str(raw.get("public_base_url") or "").strip()
+
+    for cluster_dir in cluster_dirs:
+        raw = _load_json_file(root / "config" / "meet_clusters" / cluster_dir / "watch-edge-1.json")
         auth_token = _clean_token(str(raw.get("auth_token") or "").strip())
+        upstream = [str(url).strip() for url in list(raw.get("upstream_base_urls") or []) if str(url).strip()]
         tls_ca_file = str(raw.get("tls_ca_file") or "").strip()
         tls_insecure_skip_verify = bool(raw.get("tls_insecure_skip_verify", False))
-        if public_base_url:
-            discovered_urls.append(public_base_url)
-        if public_base_url and auth_token:
-            discovered_tokens[_normalize_base_url(public_base_url)] = auth_token
-            if not discovered_home_region:
-                discovered_home_region = region
-        if tls_ca_file and not discovered_tls_ca_file:
-            discovered_tls_ca_file = tls_ca_file
-        if tls_insecure_skip_verify:
-            discovered_tls_insecure_skip_verify = True
+        if upstream or auth_token or tls_ca_file or tls_insecure_skip_verify:
+            if not selected_cluster:
+                selected_cluster = cluster_dir
+                selected_watch_urls = upstream
+                selected_watch_auth_token = auth_token or ""
+            if tls_ca_file and not discovered_tls_ca_file:
+                discovered_tls_ca_file = tls_ca_file
+            if tls_insecure_skip_verify:
+                discovered_tls_insecure_skip_verify = True
+
+    for cluster_dir in cluster_dirs:
+        for filename, region in region_map.items():
+            raw = _load_json_file(root / "config" / "meet_clusters" / cluster_dir / filename)
+            public_base_url = str(raw.get("public_base_url") or "").strip()
+            auth_token = _clean_token(str(raw.get("auth_token") or "").strip())
+            tls_ca_file = str(raw.get("tls_ca_file") or "").strip()
+            tls_insecure_skip_verify = bool(raw.get("tls_insecure_skip_verify", False))
+            if cluster_dir == selected_cluster and public_base_url and region not in selected_urls_by_region:
+                selected_urls_by_region[region] = public_base_url
+            if auth_token and (region not in region_token_candidates or cluster_dir == selected_cluster):
+                region_token_candidates[region] = auth_token
+                if not discovered_home_region:
+                    discovered_home_region = region
+            if tls_ca_file and not discovered_tls_ca_file:
+                discovered_tls_ca_file = tls_ca_file
+            if tls_insecure_skip_verify:
+                discovered_tls_insecure_skip_verify = True
+
+    ordered_regions = [region_map[name] for name in region_map]
+    region_by_selected_url = {
+        _normalize_base_url(url): region
+        for region, url in selected_urls_by_region.items()
+        if url
+    }
+
+    if selected_watch_urls:
+        discovered_urls = [str(url).strip() for url in selected_watch_urls if str(url).strip()]
+        for idx, url in enumerate(discovered_urls):
+            normalized = _normalize_base_url(url)
+            region = region_by_selected_url.get(normalized)
+            if not region and idx < len(ordered_regions):
+                region = ordered_regions[idx]
+            token = region_token_candidates.get(str(region or "").strip())
+            if token:
+                discovered_tokens[normalized] = token
+    else:
+        for region in ordered_regions:
+            url = str(selected_urls_by_region.get(region) or "").strip()
+            if not url:
+                continue
+            discovered_urls.append(url)
+            token = region_token_candidates.get(region)
+            if token:
+                discovered_tokens[_normalize_base_url(url)] = token
+
     payload = {}
     if discovered_urls:
         payload["meet_seed_urls"] = discovered_urls
     if discovered_tokens:
         payload["auth_tokens_by_base_url"] = discovered_tokens
-        if len(set(discovered_tokens.values())) == 1:
+        if len(set(discovered_tokens.values())) == 1 and not selected_watch_auth_token:
             payload["auth_token"] = next(iter(discovered_tokens.values()))
+    if selected_watch_auth_token:
+        payload["auth_token"] = selected_watch_auth_token
     if discovered_home_region:
         payload["home_region"] = discovered_home_region
     if discovered_tls_ca_file:

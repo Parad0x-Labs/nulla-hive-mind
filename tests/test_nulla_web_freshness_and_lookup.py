@@ -24,6 +24,7 @@ def test_wants_fresh_info_detects_live_queries_and_ignores_builder_language(make
     assert agent._wants_fresh_info("check Toly on X", interpretation=mock.Mock(topic_hints=["solana"]))
     assert agent._live_info_mode("latest qwen release notes", interpretation=mock.Mock(topic_hints=["web"])) == "fresh_lookup"
     assert agent._live_info_mode("check Toly on X", interpretation=mock.Mock(topic_hints=["solana"])) == "fresh_lookup"
+    assert agent._live_info_mode("What's the latest on Iran war?", interpretation=mock.Mock(topic_hints=[])) == "news"
     assert agent._live_info_mode("build a telegram bot from docs and github", interpretation=mock.Mock(topic_hints=["telegram", "github"])) == ""
 
 
@@ -131,6 +132,61 @@ def test_live_info_chat_surface_routes_model_wording_through_chat_research(make_
     assert classification["planner_style_requested"] is False
 
 
+def test_brent_quote_fast_path_returns_grounded_structured_answer(make_agent):
+    agent = make_agent()
+
+    with mock.patch.object(
+        agent,
+        "_try_live_quote_note",
+        return_value={
+            "result_title": "Brent crude quote",
+            "result_url": "https://finance.yahoo.com/quote/BZ=F",
+            "origin_domain": "finance.yahoo.com",
+            "summary": "Brent crude: $102.36 USD per barrel | session change: +2.15% | as of 2026-03-17 16:36 UTC",
+            "confidence": 0.95,
+            "source_profile_label": "Yahoo Finance",
+            "page_text": "Brent crude: $102.36 USD per barrel | session change: +2.15% | as of 2026-03-17 16:36 UTC",
+            "live_quote": {
+                "asset_key": "brent_crude",
+                "asset_name": "Brent crude",
+                "symbol": "BZ=F",
+                "value": 102.36,
+                "currency": "USD",
+                "as_of": "2026-03-17 16:36 UTC",
+                "source_label": "Yahoo Finance",
+                "source_url": "https://finance.yahoo.com/quote/BZ=F",
+                "kind": "market",
+                "unit_label": "per barrel",
+                "change_percent": 2.15,
+                "change_window": "session",
+                "market_cap": None,
+                "timestamp_utc": 1773765360,
+                "exchange": "NYM",
+                "confidence": 0.95,
+            },
+        },
+    ), mock.patch(
+        "apps.nulla_agent.WebAdapter.planned_search_query",
+        side_effect=AssertionError("structured quote path should not fall back to generic planned search"),
+    ), mock.patch(
+        "apps.nulla_agent.WebAdapter.search_query",
+        side_effect=AssertionError("structured quote path should not use generic search"),
+    ):
+        result = agent.run_once(
+            "Brent crude price now?",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+    assert result["response_class"] == "utility_answer"
+    lowered = result["response"].lower()
+    assert "brent crude is $102.36 usd per barrel" in lowered
+    assert "session change: +2.15%" in lowered
+    assert "as of 2026-03-17 16:36 utc" in lowered
+    assert "[yahoo finance](https://finance.yahoo.com/quote/bz=f)" in lowered
+    assert "live web results for" not in lowered
+    assert "wikipedia" not in lowered
+
+
 def test_evaluative_turn_does_not_hit_web_lookup(make_agent):
     agent = make_agent()
 
@@ -147,8 +203,7 @@ def test_evaluative_turn_does_not_hit_web_lookup(make_agent):
     planned_search.assert_not_called()
 
 
-@pytest.mark.xfail(reason="Pre-existing: weather response format changed")
-def test_weather_live_lookup_uses_model_final_wording(make_agent, context_result_factory):
+def test_weather_live_lookup_uses_structured_weather_wording(make_agent, context_result_factory):
     agent = make_agent()
     agent.context_loader.load = mock.Mock(return_value=context_result_factory())  # type: ignore[assignment]
     agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
@@ -167,11 +222,11 @@ def test_weather_live_lookup_uses_model_final_wording(make_agent, context_result
         "apps.nulla_agent.WebAdapter.search_query",
         return_value=[
             {
-                "summary": "Cloudy with light rain, around 11C, with breezy afternoon conditions.",
-                "source_label": "duckduckgo.com",
-                "origin_domain": "bbc.com",
-                "result_title": "BBC Weather - London",
-                "result_url": "https://www.bbc.com/weather/2643743",
+                "summary": "London, United Kingdom: Cloudy with light rain, 11 C (feels like 9 C), humidity 82%, wind 14 km/h. Observed 09:00 AM.",
+                "source_label": "wttr.in",
+                "origin_domain": "wttr.in",
+                "result_title": "wttr.in weather for London",
+                "result_url": "https://wttr.in/London",
                 "used_browser": False,
             }
         ],
@@ -183,11 +238,89 @@ def test_weather_live_lookup_uses_model_final_wording(make_agent, context_result
 
     assert search_query.called
     assert result["response_class"] == "utility_answer"
-    assert "light rain" in result["response"].lower() or "11c" in result["response"].lower()
-    assert "bbc weather" in result["response"].lower()
+    lowered = result["response"].lower()
+    assert "cloudy with light rain" in lowered
+    assert "source: [wttr.in](https://wttr.in/london)" in lowered
+    assert "live weather results" not in lowered
+    assert "weather in london" not in lowered
     assert "hive:" not in result["response"].lower()
     for marker in FORBIDDEN_CHAT_WRAPPERS:
         assert marker not in result["response"].lower()
+
+
+def test_news_live_lookup_uses_structured_headline_wording(make_agent, context_result_factory):
+    agent = make_agent()
+    agent.context_loader.load = mock.Mock(return_value=context_result_factory())  # type: ignore[assignment]
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="provider",
+            task_hash="iran-news",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text="This should not be used when structured live news notes are available.",
+            confidence=0.83,
+            trust_score=0.83,
+        )
+    )
+
+    with mock.patch(
+        "apps.nulla_agent.WebAdapter.search_query",
+        return_value=[
+            {
+                "summary": "Reuters | 2026-03-17 | Tanker near Strait of Hormuz hit by projectile",
+                "origin_domain": "reuters.com",
+                "result_title": "Tanker near Strait of Hormuz hit by projectile",
+                "result_url": "https://www.reuters.com/world/middle-east/demo",
+                "used_browser": False,
+            },
+            {
+                "summary": "Al Jazeera | 2026-03-17 | Regional tensions remain high after new maritime incident",
+                "origin_domain": "aljazeera.com",
+                "result_title": "Regional tensions remain high after new maritime incident",
+                "result_url": "https://www.aljazeera.com/news/demo",
+                "used_browser": False,
+            },
+        ],
+    ) as search_query:
+        result = agent.run_once(
+            "What's the latest on Iran war?",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+    assert search_query.called
+    assert result["response_class"] == "utility_answer"
+    lowered = result["response"].lower()
+    assert "latest coverage on iran war" in lowered
+    assert "2026-03-17 | reuters: tanker near strait of hormuz hit by projectile" in lowered
+    assert "recent developments include" not in lowered
+    for marker in FORBIDDEN_CHAT_WRAPPERS:
+        assert marker not in lowered
+
+
+def test_ambiguous_price_lookup_fails_honestly_instead_of_answering_biography(make_agent):
+    agent = make_agent()
+
+    with mock.patch.object(
+        agent,
+        "_live_info_search_notes",
+        return_value=[
+            {
+                "summary": "Seth Price is a New York City-based multi-disciplinary post-conceptual artist.",
+                "origin_domain": "wikipedia.org",
+                "result_title": "Seth Price",
+                "result_url": "https://en.wikipedia.org/wiki/Seth_Price",
+            }
+        ],
+    ):
+        result = agent.run_once(
+            "what is Seth price?",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+    assert result["response_class"] == "utility_answer"
+    lowered = result["response"].lower()
+    assert "couldn't map `seth` to a known traded asset or commodity quote" in lowered
+    assert "exact ticker or full name" in lowered
 
 
 def test_workflow_planner_does_not_hijack_live_info_chat_when_fast_path_has_no_notes(make_agent, context_result_factory):

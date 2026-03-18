@@ -12,6 +12,7 @@ from datetime import timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
+from core.live_quote_contract import LiveQuoteResult, format_quote_timestamp
 from core import policy_engine
 from core.source_credibility import evaluate_source_domain
 from tools.browser.browser_render import browser_render
@@ -92,7 +93,22 @@ def _looks_like_weather_query(query: str) -> bool:
 
 def _looks_like_news_query(query: str) -> bool:
     lowered = str(query or "").lower()
-    return any(token in lowered for token in ("latest news", "breaking news", "headlines", "news on", "news about", "what happened today"))
+    return any(
+        token in lowered
+        for token in (
+            "latest news",
+            "breaking news",
+            "headlines",
+            "news on",
+            "news about",
+            "what happened today",
+            "what's the latest on",
+            "what is the latest on",
+            "whats the latest on",
+            "latest on ",
+            "latest about ",
+        )
+    )
 
 
 def _extract_weather_location(query: str) -> str:
@@ -135,21 +151,35 @@ def _extract_weather_location(query: str) -> str:
 
 
 def _extract_news_topic(query: str) -> str:
-    clean = re.sub(r"\s+", " ", str(query or "").strip())
+    clean = re.sub(r"\s+", " ", str(query or "").strip()).strip(" ?!.,")
     lowered = clean.lower()
     for prefix in (
+        "what's the latest on ",
+        "what is the latest on ",
+        "whats the latest on ",
         "latest news on ",
         "latest news about ",
         "breaking news on ",
         "breaking news about ",
+        "latest on ",
+        "latest about ",
         "news on ",
         "news about ",
         "headlines on ",
         "headlines about ",
     ):
         if lowered.startswith(prefix):
-            return clean[len(prefix):].strip() or clean
+            return clean[len(prefix):].strip(" ?!.,") or clean
     return clean
+
+
+def _prefer_specialized_live_research(query: str) -> bool:
+    return bool(
+        _looks_like_weather_query(query)
+        or _looks_like_news_query(query)
+        or _looks_like_price_query(query)
+        or _looks_like_market_quote_query(query) is not None
+    )
 
 
 def _compact_pub_date(raw_value: str) -> str:
@@ -189,7 +219,48 @@ _CRYPTO_ALIASES: dict[str, str] = {
 
 _PRICE_KEYWORDS = (
     "price", "cost", "worth", "value", "rate",
-    "how much", "trading at", "market cap",
+    "how much", "trading at", "market cap", "quote",
+)
+
+
+@dataclass(frozen=True)
+class MarketQuoteTarget:
+    asset_key: str
+    asset_name: str
+    symbol: str
+    unit_label: str
+    aliases: tuple[str, ...]
+
+
+_MARKET_QUOTE_TARGETS: tuple[MarketQuoteTarget, ...] = (
+    MarketQuoteTarget(
+        asset_key="brent_crude",
+        asset_name="Brent crude",
+        symbol="BZ=F",
+        unit_label="per barrel",
+        aliases=("brent crude oil", "brent crude", "brent oil", "brent"),
+    ),
+    MarketQuoteTarget(
+        asset_key="wti_crude",
+        asset_name="WTI crude",
+        symbol="CL=F",
+        unit_label="per barrel",
+        aliases=("wti crude oil", "wti crude", "wti oil", "wti"),
+    ),
+    MarketQuoteTarget(
+        asset_key="gold",
+        asset_name="Gold",
+        symbol="GC=F",
+        unit_label="per troy ounce",
+        aliases=("gold spot", "gold price", "gold", "xau"),
+    ),
+    MarketQuoteTarget(
+        asset_key="silver",
+        asset_name="Silver",
+        symbol="SI=F",
+        unit_label="per troy ounce",
+        aliases=("silver spot", "silver price", "silver", "xag"),
+    ),
 )
 
 
@@ -199,9 +270,25 @@ def _looks_like_price_query(query: str) -> str:
     if not any(kw in lowered for kw in _PRICE_KEYWORDS):
         return ""
     for alias, cg_id in _CRYPTO_ALIASES.items():
-        if alias in lowered:
+        if re.search(rf"\b{re.escape(alias)}\b", lowered):
             return cg_id
     return ""
+
+
+def _looks_like_market_quote_query(query: str) -> MarketQuoteTarget | None:
+    lowered = " ".join(str(query or "").strip().lower().split())
+    if not lowered:
+        return None
+    wants_quote = any(kw in lowered for kw in _PRICE_KEYWORDS) or any(
+        marker in lowered for marker in ("latest", "current", "right now", "today", "now")
+    )
+    if not wants_quote:
+        return None
+    for target in _MARKET_QUOTE_TARGETS:
+        for alias in target.aliases:
+            if re.search(rf"\b{re.escape(alias)}\b", lowered):
+                return target
+    return None
 
 
 def _crypto_price_fallback(
@@ -214,7 +301,7 @@ def _crypto_price_fallback(
         f"https://api.coingecko.com/api/v3/simple/price"
         f"?ids={urllib.parse.quote(coin_id)}"
         f"&vs_currencies=usd,eur,btc"
-        f"&include_24hr_change=true&include_market_cap=true"
+        f"&include_24hr_change=true&include_market_cap=true&include_last_updated_at=true"
     )
     req = urllib.request.Request(api_url, headers={"User-Agent": "NULLA-PRICE/1.0"})
     with urllib.request.urlopen(req, timeout=min(max(timeout_s, 3.0), 12.0)) as resp:
@@ -229,21 +316,184 @@ def _crypto_price_fallback(
     eur = data.get("eur", "?")
     change_24h = data.get("usd_24h_change")
     mcap = data.get("usd_market_cap")
+    last_updated_at = data.get("last_updated_at")
     name = coin_id.replace("-", " ").title()
-
-    parts = [f"{name}: ${usd:,.2f} USD"]
-    if eur != "?":
-        parts.append(f"€{eur:,.2f} EUR")
-    if change_24h is not None:
-        parts.append(f"24h change: {change_24h:+.2f}%")
-    if mcap:
-        parts.append(f"market cap: ${mcap:,.0f}")
-    summary = " | ".join(parts)
-
     cg_url = f"https://www.coingecko.com/en/coins/{coin_id}"
-    hit = WebHit(title=f"{name} Price", url=cg_url, snippet=summary, engine="coingecko_api", score=None)
+    quote = LiveQuoteResult(
+        asset_key=coin_id,
+        asset_name=name,
+        symbol=coin_id.replace("-", "_").upper(),
+        value=float(usd),
+        currency="USD",
+        as_of=format_quote_timestamp(last_updated_at),
+        source_label="CoinGecko",
+        source_url=cg_url,
+        kind="crypto",
+        change_percent=None if change_24h is None else float(change_24h),
+        change_window="24h",
+        market_cap=None if not mcap else float(mcap),
+        timestamp_utc=None if last_updated_at in {None, ""} else int(float(last_updated_at)),
+    )
+    summary = quote.summary_text()
+    if eur != "?":
+        summary = f"{summary} | EUR: {eur:,.2f}"
+    hit = WebHit(title=f"{name} quote", url=cg_url, snippet=summary, engine="coingecko_api", score=None)
     page = PageEvidence(url=cg_url, final_url=cg_url, status="ok", title=hit.title, text=summary)
-    return ("coingecko_api", [hit], [page], ["live_price_fallback:coingecko_api"])
+    return ("coingecko_api", [hit], [page], [f"live_price_fallback:coingecko_api:{coin_id}"])
+
+
+def lookup_live_quote(query: str, *, timeout_s: float = 8.0) -> LiveQuoteResult | None:
+    coin_id = _looks_like_price_query(query)
+    if coin_id:
+        try:
+            result = _crypto_price_fallback(query, coin_id, timeout_s=timeout_s)
+            if result:
+                _provider, hits, _pages, _notes = result
+                if hits:
+                    return _live_quote_from_summary(
+                        asset_key=coin_id,
+                        asset_name=coin_id.replace("-", " ").title(),
+                        symbol=coin_id.replace("-", "_").upper(),
+                        summary=hits[0].snippet,
+                        source_label="CoinGecko",
+                        source_url=hits[0].url,
+                        kind="crypto",
+                    )
+        except Exception:
+            pass
+    target = _looks_like_market_quote_query(query)
+    if not target:
+        return None
+    try:
+        result = _market_quote_fallback(query, target, timeout_s=timeout_s)
+    except Exception:
+        return None
+    if not result:
+        return None
+    _provider, hits, _pages, _notes = result
+    if not hits:
+        return None
+    return _live_quote_from_summary(
+        asset_key=target.asset_key,
+        asset_name=target.asset_name,
+        symbol=target.symbol,
+        summary=hits[0].snippet,
+        source_label="Yahoo Finance",
+        source_url=hits[0].url,
+        kind="market",
+        unit_label=target.unit_label,
+    )
+
+
+def _live_quote_from_summary(
+    *,
+    asset_key: str,
+    asset_name: str,
+    symbol: str,
+    summary: str,
+    source_label: str,
+    source_url: str,
+    kind: str,
+    unit_label: str = "",
+) -> LiveQuoteResult | None:
+    price_match = re.search(r"(?P<value>\d[\d,]*\.?\d*)", summary or "")
+    if not price_match:
+        return None
+    try:
+        value = float(price_match.group("value").replace(",", ""))
+    except Exception:
+        return None
+    as_of_match = re.search(r"\bas of (?P<as_of>[^|]+)", summary or "", re.IGNORECASE)
+    change_match = re.search(r"\b(?:24h|session) change: (?P<change>[+-]?\d+(?:\.\d+)?)%", summary or "", re.IGNORECASE)
+    change_window_match = re.search(r"\b(?P<label>24h|session) change:", summary or "", re.IGNORECASE)
+    return LiveQuoteResult(
+        asset_key=asset_key,
+        asset_name=asset_name,
+        symbol=symbol,
+        value=value,
+        currency="USD",
+        as_of=str(as_of_match.group("as_of") if as_of_match else "").strip(),
+        source_label=source_label,
+        source_url=source_url,
+        kind=kind,
+        unit_label=unit_label,
+        change_percent=None if not change_match else float(change_match.group("change")),
+        change_window=str(change_window_match.group("label") if change_window_match else "").strip(),
+    )
+
+
+def _last_numeric(items: Any) -> float | None:
+    for item in reversed(list(items or [])):
+        if item in {None, ""}:
+            continue
+        try:
+            return float(item)
+        except Exception:
+            continue
+    return None
+
+
+def _market_quote_fallback(
+    query: str,
+    target: MarketQuoteTarget,
+    *,
+    timeout_s: float,
+) -> tuple[str, list[WebHit], list[PageEvidence], list[str]] | None:
+    api_url = (
+        "https://query1.finance.yahoo.com/v8/finance/chart/"
+        + urllib.parse.quote(target.symbol, safe="=")
+        + "?interval=1m&range=1d"
+    )
+    req = urllib.request.Request(api_url, headers={"User-Agent": "NULLA-MARKETS/1.0"})
+    with urllib.request.urlopen(req, timeout=min(max(timeout_s, 3.0), 12.0)) as resp:
+        payload = json.loads(resp.read(300000).decode("utf-8", errors="ignore"))
+
+    chart = dict(payload.get("chart") or {})
+    results = list(chart.get("result") or [])
+    if not results:
+        return None
+    result = dict(results[0] or {})
+    meta = dict(result.get("meta") or {})
+    quote_block = dict((result.get("indicators") or {}).get("quote", [{}])[0] or {})
+    price = meta.get("regularMarketPrice")
+    if price in {None, ""}:
+        price = _last_numeric(quote_block.get("close"))
+    if price in {None, ""}:
+        return None
+    previous_close = meta.get("previousClose")
+    if previous_close in {None, ""}:
+        previous_close = meta.get("chartPreviousClose")
+    change_percent: float | None = None
+    try:
+        previous_value = float(previous_close)
+        if previous_value:
+            change_percent = ((float(price) - previous_value) / previous_value) * 100.0
+    except Exception:
+        change_percent = None
+    timestamp = meta.get("regularMarketTime")
+    if timestamp in {None, ""}:
+        timestamps = list(result.get("timestamp") or [])
+        timestamp = timestamps[-1] if timestamps else None
+    quote = LiveQuoteResult(
+        asset_key=target.asset_key,
+        asset_name=target.asset_name,
+        symbol=target.symbol,
+        value=float(price),
+        currency=str(meta.get("currency") or "USD").strip().upper(),
+        as_of=format_quote_timestamp(None if timestamp in {None, ""} else float(timestamp)),
+        source_label="Yahoo Finance",
+        source_url="https://finance.yahoo.com/quote/" + urllib.parse.quote(target.symbol, safe="="),
+        kind="market",
+        unit_label=target.unit_label,
+        change_percent=change_percent,
+        change_window="session",
+        timestamp_utc=None if timestamp in {None, ""} else int(float(timestamp)),
+        exchange=str(meta.get("exchangeName") or "").strip(),
+    )
+    summary = quote.summary_text()
+    hit = WebHit(title=f"{target.asset_name} quote", url=quote.source_url, snippet=summary, engine="yahoo_finance", score=None)
+    page = PageEvidence(url=quote.source_url, final_url=quote.source_url, status="ok", title=hit.title, text=summary)
+    return ("yahoo_finance", [hit], [page], [f"live_price_fallback:yahoo_finance:{target.asset_key}"])
 
 
 def _specialized_live_research(
@@ -262,6 +512,12 @@ def _specialized_live_research(
             return _crypto_price_fallback(query, coin_id, timeout_s=fetch_timeout_s)
         except Exception:
             pass
+    market_target = _looks_like_market_quote_query(query)
+    if market_target:
+        try:
+            return _market_quote_fallback(query, market_target, timeout_s=fetch_timeout_s)
+        except Exception:
+            pass
     return None
 
 
@@ -277,8 +533,9 @@ def _weather_fallback(
     with urllib.request.urlopen(request, timeout=min(max(timeout_s, 3.0), 12.0)) as response:
         payload = json.loads(response.read(300000).decode("utf-8", errors="ignore"))
 
-    current_items = list(payload.get("current_condition") or [])
-    nearest_items = list(payload.get("nearest_area") or [])
+    root_payload = dict((payload.get("data") or payload) if isinstance(payload, dict) else {})
+    current_items = list(root_payload.get("current_condition") or [])
+    nearest_items = list(root_payload.get("nearest_area") or [])
     if not current_items:
         return None
 
@@ -410,64 +667,81 @@ def web_research(
     hits: list[WebHit] = []
     pages: list[PageEvidence] = []
     provider_used = "none"
+    specialized_attempted = False
 
-    for provider in _provider_order():
-        if provider == "searxng":
-            try:
-                client = SearXNGClient()
-                results: list[SearchResult] = client.search(
-                    query,
-                    language=language,
-                    safesearch=safesearch,
-                    max_results=max_hits,
-                )
-                hits = [WebHit(r.title, r.url, r.snippet, r.engine, r.score) for r in results if r.url]
-                if hits:
-                    provider_used = "searxng"
-                    break
-            except Exception as exc:
-                notes.append(f"searxng_failed:{type(exc).__name__}")
-                continue
-
-        if provider in {"ddg", "ddg_instant"}:
-            try:
-                payload = ddg_instant_answer(query, timeout_s=10.0)
-                blob = best_text_blob(payload) or ""
-                url = str(payload.get("AbstractURL") or "").strip()
-                title = str(payload.get("Heading") or "DuckDuckGo Instant Answer").strip()
-                if not url:
-                    url = "https://duckduckgo.com/?q=" + urllib.parse.quote_plus(query)
-                if not blob and url.startswith("https://duckduckgo.com/?q="):
-                    notes.append("ddg_instant_empty")
-                    continue
-                hits = [WebHit(title=title, url=url, snippet=blob, engine="ddg_instant", score=None)]
-                provider_used = "ddg_instant"
-                break
-            except Exception as exc:
-                notes.append(f"ddg_failed:{type(exc).__name__}")
-                continue
-
-        if provider == "duckduckgo_html":
-            try:
-                hits = _duckduckgo_html_hits(query, max_hits=max_hits)
-                if hits:
-                    provider_used = "duckduckgo_html"
-                    break
-            except Exception as exc:
-                notes.append(f"duckduckgo_html_failed:{type(exc).__name__}")
-                continue
-
-        if provider == "google_html":
-            try:
-                hits = _google_html_hits(query, max_hits=max_hits)
-                if hits:
-                    provider_used = "google_html"
-                    break
-            except Exception as exc:
-                notes.append(f"google_html_failed:{type(exc).__name__}")
-                continue
+    if _prefer_specialized_live_research(query):
+        specialized_attempted = True
+        try:
+            specialized = _specialized_live_research(
+                query,
+                max_hits=max_hits,
+                fetch_timeout_s=fetch_timeout_s,
+            )
+        except Exception as exc:
+            notes.append(f"specialized_live_failed:{type(exc).__name__}")
+            specialized = None
+        if specialized is not None:
+            provider_used, hits, pages, extra_notes = specialized
+            notes.extend(extra_notes)
 
     if not hits:
+        for provider in _provider_order():
+            if provider == "searxng":
+                try:
+                    client = SearXNGClient()
+                    results: list[SearchResult] = client.search(
+                        query,
+                        language=language,
+                        safesearch=safesearch,
+                        max_results=max_hits,
+                    )
+                    hits = [WebHit(r.title, r.url, r.snippet, r.engine, r.score) for r in results if r.url]
+                    if hits:
+                        provider_used = "searxng"
+                        break
+                except Exception as exc:
+                    notes.append(f"searxng_failed:{type(exc).__name__}")
+                    continue
+
+            if provider in {"ddg", "ddg_instant"}:
+                try:
+                    payload = ddg_instant_answer(query, timeout_s=10.0)
+                    blob = best_text_blob(payload) or ""
+                    url = str(payload.get("AbstractURL") or "").strip()
+                    title = str(payload.get("Heading") or "DuckDuckGo Instant Answer").strip()
+                    if not url:
+                        url = "https://duckduckgo.com/?q=" + urllib.parse.quote_plus(query)
+                    if not blob and url.startswith("https://duckduckgo.com/?q="):
+                        notes.append("ddg_instant_empty")
+                        continue
+                    hits = [WebHit(title=title, url=url, snippet=blob, engine="ddg_instant", score=None)]
+                    provider_used = "ddg_instant"
+                    break
+                except Exception as exc:
+                    notes.append(f"ddg_failed:{type(exc).__name__}")
+                    continue
+
+            if provider == "duckduckgo_html":
+                try:
+                    hits = _duckduckgo_html_hits(query, max_hits=max_hits)
+                    if hits:
+                        provider_used = "duckduckgo_html"
+                        break
+                except Exception as exc:
+                    notes.append(f"duckduckgo_html_failed:{type(exc).__name__}")
+                    continue
+
+            if provider == "google_html":
+                try:
+                    hits = _google_html_hits(query, max_hits=max_hits)
+                    if hits:
+                        provider_used = "google_html"
+                        break
+                except Exception as exc:
+                    notes.append(f"google_html_failed:{type(exc).__name__}")
+                    continue
+
+    if not hits and not specialized_attempted:
         try:
             specialized = _specialized_live_research(
                 query,

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
 
 from core.brain_hive_artifacts import store_artifact_manifest
-from core.brain_hive_research import build_research_queue_entry, build_topic_research_packet
+from core.brain_hive_research import build_research_queue_entry, build_topic_research_packet, derive_research_questions
 from storage.db import get_connection
 from storage.migrations import run_migrations
 
@@ -121,6 +122,36 @@ class BrainHiveResearchPacketTests(unittest.TestCase):
         self.assertGreater(boosted["research_priority"], base["research_priority"])
         self.assertGreater(boosted["commons_signal_strength"], 0.0)
         self.assertIn("commons_review_pressure", boosted["steering_reasons"])
+
+    def test_derive_research_questions_strips_runtime_ids_from_regular_topics(self) -> None:
+        questions = derive_research_questions(
+            topic_row={
+                "title": "Watcher UX audit 407552d4-dd85-4e33-ad9f-edf0282657a5",
+                "summary": "Improve human-visible task flow cards and queue drill-downs.",
+                "topic_tags": ["design", "ux"],
+            },
+            claim_rows=[],
+            evidence_kind_counts=Counter(),
+            trading_feature_export={},
+        )
+
+        self.assertTrue(questions)
+        self.assertFalse(any("407552d4" in item for item in questions))
+        self.assertTrue(any(("watcher" in item.lower()) or ("task flow" in item.lower()) for item in questions))
+
+    def test_derive_research_questions_skips_disposable_smoke_topics(self) -> None:
+        questions = derive_research_questions(
+            topic_row={
+                "title": "[NULLA_SMOKE:B:public-hive-task:20260317T231537Z:21f6faf1] Public Hive lifecycle smoke verification",
+                "summary": "Verify create, visibility, pickup, and safe cleanup for a disposable public-safe smoke task.",
+                "topic_tags": ["nulla", "smoke", "public", "hive"],
+            },
+            claim_rows=[],
+            evidence_kind_counts=Counter(),
+            trading_feature_export={},
+        )
+
+        self.assertEqual(questions, [])
 
     def test_build_topic_research_packet_surfaces_missing_artifact_refs_instead_of_empty_silence(self) -> None:
         packet = build_topic_research_packet(

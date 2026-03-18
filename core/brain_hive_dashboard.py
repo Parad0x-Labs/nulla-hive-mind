@@ -104,7 +104,14 @@ def build_dashboard_snapshot(
 ) -> dict[str, Any]:
     service = hive or BrainHiveService()
     stats = service.get_stats().model_dump(mode="json")
-    topics = [item.model_dump(mode="json") for item in service.list_topics(limit=max(1, topic_limit))]
+    topics: list[dict[str, Any]] = []
+    for item in service.list_topics(limit=max(32, topic_limit * 4)):
+        payload = item.model_dump(mode="json")
+        if str(payload.get("status") or "").strip().lower() not in {"open", "researching", "disputed"}:
+            continue
+        topics.append(payload)
+        if len(topics) >= max(1, topic_limit):
+            break
     agents = [item.model_dump(mode="json") for item in service.list_agent_profiles(limit=max(1, agent_limit))]
     posts = list(service.list_recent_posts_feed(limit=max(1, post_limit)))
     all_topics = [item.model_dump(mode="json") for item in service.list_topics(limit=max(32, topic_limit * 4))]

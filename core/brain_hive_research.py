@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,11 @@ from core.brain_hive_artifacts import (
 from core.hardware_tier import recommended_ollama_model
 
 _log = logging.getLogger(__name__)
+
+_LIVE_SMOKE_TAG_RE = re.compile(r"\[NULLA_SMOKE:[^\]]+\]\s*", re.IGNORECASE)
+_UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.IGNORECASE)
+_STAMP_TOKEN_RE = re.compile(r"\b20\d{6}T\d{6}Z\b", re.IGNORECASE)
+_HEX_TOKEN_RE = re.compile(r"\b[0-9a-f]{12,}\b", re.IGNORECASE)
 
 
 def build_topic_research_packet(
@@ -245,19 +251,79 @@ def derive_research_questions(
     title = str(topic_row.get("title") or "this topic").strip()
     summary = str(topic_row.get("summary") or "").strip()
     tags = [str(item).strip().lower() for item in list(topic_row.get("topic_tags") or []) if str(item).strip()]
+    normalized_title = _normalize_research_subject(title)
+    normalized_summary = _normalize_research_subject(summary)
+
+    if _is_disposable_research_topic(
+        raw_title=title,
+        raw_summary=summary,
+        normalized_title=normalized_title,
+        normalized_summary=normalized_summary,
+        tags=tags,
+    ):
+        return []
 
     model_questions = _derive_questions_via_model(
-        title=title, summary=summary, tags=tags,
+        title=normalized_title or title,
+        summary=normalized_summary or summary,
+        tags=tags,
         trading_feature_export=trading_feature_export,
     )
     if model_questions:
         return model_questions
 
     return _derive_questions_template(
-        title=title, summary=summary, tags=tags,
+        title=normalized_title or title,
+        summary=normalized_summary or summary,
+        tags=tags,
         trading_feature_export=trading_feature_export,
         evidence_kind_counts=evidence_kind_counts,
     )
+
+
+def is_disposable_research_topic(
+    *,
+    title: str,
+    summary: str,
+    tags: list[str] | None = None,
+) -> bool:
+    return _is_disposable_research_topic(
+        raw_title=title,
+        raw_summary=summary,
+        normalized_title=_normalize_research_subject(title),
+        normalized_summary=_normalize_research_subject(summary),
+        tags=[str(item).strip().lower() for item in list(tags or []) if str(item).strip()],
+    )
+
+
+def _normalize_research_subject(text: str) -> str:
+    cleaned = str(text or "")
+    cleaned = _LIVE_SMOKE_TAG_RE.sub("", cleaned)
+    cleaned = _UUID_RE.sub(" ", cleaned)
+    cleaned = _STAMP_TOKEN_RE.sub(" ", cleaned)
+    cleaned = _HEX_TOKEN_RE.sub(" ", cleaned)
+    cleaned = " ".join(cleaned.replace("_", " ").split()).strip()
+    return cleaned
+
+
+def _is_disposable_research_topic(
+    *,
+    raw_title: str,
+    raw_summary: str,
+    normalized_title: str,
+    normalized_summary: str,
+    tags: list[str],
+) -> bool:
+    del normalized_title, normalized_summary
+    tag_set = {str(item or "").strip().lower() for item in list(tags or []) if str(item).strip()}
+    haystack = f"{raw_title} {raw_summary}".lower()
+    if "smoke" in tag_set and any(marker in haystack for marker in ("nulla_smoke", "smoke verification", "disposable")):
+        return True
+    if "nulla_smoke" in haystack or "[nulla_smoke:" in haystack:
+        return True
+    if "disposable smoke" in haystack or "cleanup artifact" in haystack:
+        return True
+    return False
 
 
 def _derive_questions_via_model(

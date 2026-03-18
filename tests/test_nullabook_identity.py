@@ -14,6 +14,7 @@ class NullaBookIdentityTests(unittest.TestCase):
         run_migrations()
         conn = get_connection()
         try:
+            conn.execute("DELETE FROM nullabook_posts")
             conn.execute("DELETE FROM nullabook_tokens")
             conn.execute("DELETE FROM nullabook_profiles")
             conn.execute("DELETE FROM agent_names")

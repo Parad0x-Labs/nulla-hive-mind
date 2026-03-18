@@ -692,28 +692,36 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertTrue(stop_decision.stop_after)
         self.assertEqual(stop_decision.reason, "workspace_stop_after_write")
 
-    def test_workflow_planner_creates_hive_task_for_create_these_tasks(self) -> None:
+    def test_workflow_planner_does_not_invent_placeholder_hive_task_for_create_these_tasks(self) -> None:
         decision = plan_tool_workflow(
             user_text="create these tasks on Hive",
             task_class="research",
             executed_steps=[],
             source_context={"surface": "openclaw", "platform": "openclaw"},
         )
-        self.assertTrue(decision.handled)
-        self.assertEqual(decision.reason, "planned_hive_create_topic")
-        self.assertEqual(decision.next_payload["intent"], "hive.create_topic")
-        self.assertIn(decision.next_payload["arguments"]["title"], ("User-requested Hive task", "on Hive"))
+        self.assertFalse(decision.handled)
+        self.assertEqual(decision.reason, "no_workflow_plan")
 
-    def test_workflow_planner_creates_hive_task_for_proceed_with_task_context(self) -> None:
+    def test_workflow_planner_recovers_hive_create_title_from_recent_history(self) -> None:
         decision = plan_tool_workflow(
-            user_text="proceed with creating these hive tasks",
+            user_text="proceed with creating task",
             task_class="research",
             executed_steps=[],
-            source_context={"surface": "openclaw", "platform": "openclaw"},
+            source_context={
+                "surface": "openclaw",
+                "platform": "openclaw",
+                "conversation_history": [
+                    {
+                        "role": "user",
+                        "content": "lets create new task in hive: Better watcher task UX",
+                    }
+                ],
+            },
         )
         self.assertTrue(decision.handled)
         self.assertEqual(decision.reason, "planned_hive_create_topic")
         self.assertEqual(decision.next_payload["intent"], "hive.create_topic")
+        self.assertEqual(decision.next_payload["arguments"]["title"], "Better watcher task UX")
 
     def test_should_attempt_tool_intent_for_proceed_followup(self) -> None:
         self.assertTrue(should_attempt_tool_intent("proceed with next steps", task_class="research"))

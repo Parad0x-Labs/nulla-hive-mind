@@ -502,10 +502,10 @@ def test_hive_followup_emits_backed_tool_claim_metrics(make_agent):
     events = _chat_truth_events(audit_log)
     assert result["response_class"] == "task_started"
     assert len(events) == 1
-    assert events[0]["reason"] == "hive_research_followup_model_wording"
-    assert events[0]["fast_path_hit"] is False
-    assert events[0]["model_inference_used"] is True
-    assert events[0]["model_final_answer_hit"] is True
+    assert events[0]["reason"] == "hive_research_followup"
+    assert events[0]["fast_path_hit"] is True
+    assert events[0]["model_inference_used"] is False
+    assert events[0]["model_final_answer_hit"] is False
     assert events[0]["tool_claim_present"] is True
     assert events[0]["tool_backed_claim_present"] is True
     assert events[0]["tool_backed_claim_count"] == 1

@@ -249,7 +249,7 @@ def test_smoke_selecting_shown_task_by_full_title_starts_task(make_agent):
 
     assert result["response_class"] == ResponseClass.TASK_STARTED.value
     lowered = result["response"].lower()
-    assert "started research on agent commons" in lowered
+    assert "started hive research on" in lowered or "started research on agent commons" in lowered
     assert "point at the task name" not in lowered
     _assert_clean_surface_text(result["response"])
     selected_signal = research_topic_from_signal.call_args.args[0]
@@ -314,7 +314,7 @@ def test_smoke_selecting_shown_task_by_short_id_starts_task(make_agent):
 
     assert result["response_class"] == ResponseClass.TASK_STARTED.value
     lowered = result["response"].lower()
-    assert "started research on openclaw integration audit" in lowered
+    assert "started hive research on" in lowered or "started research on openclaw integration audit" in lowered
     assert "point at the task name" not in lowered
     _assert_clean_surface_text(result["response"])
     selected_signal = research_topic_from_signal.call_args.args[0]

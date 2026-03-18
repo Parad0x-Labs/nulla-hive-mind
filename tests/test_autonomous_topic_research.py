@@ -377,6 +377,55 @@ class AutonomousTopicResearchTests(unittest.TestCase):
         self.assertEqual(len(synthesis_refs), 1)
         self.assertEqual(synthesis_refs[0]["confidence"], "grounded")
 
+    def test_research_topic_from_signal_skips_external_research_for_disposable_smoke_topic(self) -> None:
+        bridge = mock.Mock()
+        bridge.enabled.return_value = True
+        bridge.get_public_research_packet.return_value = {
+            "packet_schema": "brain_hive.research_packet.v1",
+            "topic": {
+                "topic_id": "topic-smoke",
+                "title": "[NULLA_SMOKE:B:public-hive-task:20260317T231537Z:21f6faf1] Public Hive lifecycle smoke verification",
+                "summary": "Verify create, visibility, pickup, and safe cleanup for a disposable public-safe smoke task.",
+                "status": "researching",
+                "topic_tags": ["nulla", "smoke", "public", "hive"],
+                "evidence_mode": "candidate_only",
+            },
+            "claims": [],
+            "counts": {"post_count": 0, "claim_count": 0, "active_claim_count": 0, "evidence_count": 0, "source_domain_count": 0},
+            "execution_state": {"execution_state": "open"},
+            "derived_research_questions": [],
+            "trading_feature_export": {},
+        }
+        bridge.claim_public_topic.return_value = {"ok": True, "claim_id": "claim-smoke", "topic_id": "topic-smoke"}
+        bridge.post_public_topic_progress.return_value = {"ok": True, "post_id": "post-progress-smoke"}
+        bridge.submit_public_topic_result.return_value = {"ok": True, "post_id": "post-result-smoke", "topic_id": "topic-smoke"}
+
+        curiosity = mock.Mock()
+
+        with tempfile.TemporaryDirectory() as tmp_dir, mock.patch("core.liquefy_bridge._NULLA_VAULT", Path(tmp_dir)), mock.patch(
+            "core.autonomous_topic_research.get_local_peer_id",
+            return_value="peer-local-1234567890",
+        ):
+            result = research_topic_from_signal(
+                {"topic_id": "topic-smoke"},
+                public_hive_bridge=bridge,
+                curiosity=curiosity,
+                session_id="auto-research:topic-smoke",
+                auto_claim=True,
+            )
+
+        curiosity.run_external_topic.assert_not_called()
+        self.assertTrue(result.ok)
+        self.assertEqual(result.result_status, "researching")
+        self.assertEqual(result.details["quality_summary"]["research_quality_status"], "insufficient_evidence")
+        self.assertIn(
+            "Disposable smoke topic detected; external research skipped by policy.",
+            result.details["quality_summary"]["research_quality_reasons"],
+        )
+        submit_kwargs = bridge.submit_public_topic_result.call_args.kwargs
+        self.assertIn("Confidence: insufficient_evidence", submit_kwargs["body"])
+        self.assertIn("external research skipped by policy", submit_kwargs["body"])
+
 
 if __name__ == "__main__":
     unittest.main()

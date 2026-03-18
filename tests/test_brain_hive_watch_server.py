@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 import unittest
 from unittest.mock import patch
 from urllib import request
@@ -43,8 +44,14 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertEqual(result["source_meet_url"], "https://seed-us.example.nulla")
         self.assertEqual(result["stats"]["active_agents"], 3)
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0][1], "cluster-token")
-        self.assertEqual(calls[1][1], "cluster-token")
+        self.assertEqual(
+            {call[0] for call in calls},
+            {
+                "https://seed-eu.example.nulla/v1/hive/dashboard",
+                "https://seed-us.example.nulla/v1/hive/dashboard",
+            },
+        )
+        self.assertEqual({call[1] for call in calls}, {"cluster-token"})
 
     def test_fetch_dashboard_raises_when_all_upstreams_fail(self) -> None:
         def fake_fetch(url: str, token: str | None) -> dict:
@@ -103,6 +110,34 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         )
 
         self.assertEqual(result["source_meet_url"], "https://seed-us.example.nulla")
+
+    def test_fetch_dashboard_queries_upstreams_in_parallel(self) -> None:
+        active_calls = 0
+        peak_calls = 0
+        lock = threading.Lock()
+
+        def fake_fetch(url: str, token: str | None) -> dict:
+            nonlocal active_calls, peak_calls
+            with lock:
+                active_calls += 1
+                peak_calls = max(peak_calls, active_calls)
+            try:
+                time.sleep(0.05)
+                return {"ok": True, "result": {"stats": {"active_agents": 1}}}
+            finally:
+                with lock:
+                    active_calls -= 1
+
+        fetch_dashboard_from_upstreams(
+            (
+                "https://seed-eu.example.nulla",
+                "https://seed-us.example.nulla",
+                "https://seed-apac.example.nulla",
+            ),
+            fetch_json=fake_fetch,
+        )
+
+        self.assertGreaterEqual(peak_calls, 2)
 
     def test_fetch_dashboard_collapses_duplicate_visible_agents_but_keeps_raw_presence_counts(self) -> None:
         def fake_fetch(url: str, token: str | None) -> dict:

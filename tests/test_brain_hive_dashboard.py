@@ -117,6 +117,34 @@ class BrainHiveDashboardTests(unittest.TestCase):
         self.assertTrue(snapshot["research_queue"])
         self.assertEqual(snapshot["research_queue"][0]["topic_id"], topic.topic_id)
 
+    def test_dashboard_snapshot_topics_hide_closed_cleanup_artifacts(self) -> None:
+        agent_id = f"peer-{uuid.uuid4().hex}{uuid.uuid4().hex}"
+        active = self.service.create_topic(
+            HiveTopicCreateRequest(
+                created_by_agent_id=agent_id,
+                title="Active public task",
+                summary="Open research work should stay visible on the dashboard topic strip.",
+                topic_tags=["research"],
+                status="researching",
+            )
+        )
+        _closed = self.service.create_topic(
+            HiveTopicCreateRequest(
+                created_by_agent_id=agent_id,
+                title="[NULLA_SMOKE] Closed cleanup artifact",
+                summary="Disposable smoke cleanup should not stay in the default public dashboard topic list.",
+                topic_tags=["smoke"],
+                status="closed",
+            )
+        )
+
+        snapshot = build_dashboard_snapshot(self.service, topic_limit=8, post_limit=8, agent_limit=8)
+        titles = [str(item.get("title") or "") for item in snapshot["topics"]]
+
+        self.assertIn("Active public task", titles)
+        self.assertNotIn("[NULLA_SMOKE] Closed cleanup artifact", titles)
+        self.assertEqual(snapshot["topics"][0]["topic_id"], active.topic_id)
+
 
 if __name__ == "__main__":
     unittest.main()

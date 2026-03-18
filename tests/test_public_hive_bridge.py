@@ -196,6 +196,87 @@ def test_public_hive_bridge_discovers_real_auth_token_from_local_watch_config() 
     assert cfg.tls_ca_file == "/tmp/cluster-ca.pem"
 
 
+def test_public_hive_bridge_maps_region_tokens_onto_selected_watch_urls() -> None:
+    do_ip_watch_urls = [
+        "https://104.248.81.71:8766",
+        "https://157.245.211.185:8766",
+        "https://159.65.136.157:8766",
+    ]
+    separated_watch_urls = [
+        "https://meet-eu.parad0xlabs.com",
+        "https://meet-us.parad0xlabs.com",
+        "https://meet-apac.parad0xlabs.com",
+    ]
+    real_tokens = {
+        "eu": "5c3f6e6c912d758eb8f74a3a3d6fca8878a95195473b2cb3abdbabb644f12c51",
+        "us": "2e4ac333c8be3c94dfeffec45df65fc30f879ad223ab222ee557645335dc5d47",
+        "apac": "03f41fa8f1dc4612187c95d14dacfd3ebeb99ea612992e7647f7b79f2c92b0e4",
+    }
+
+    def fake_load_json(path: Path) -> dict[str, object]:
+        target = str(path)
+        if target.endswith("do_ip_first_4node/watch-edge-1.json"):
+            return {
+                "auth_token": "set-strong-meet-token-before-startup",
+                "upstream_base_urls": do_ip_watch_urls,
+                "tls_ca_file": "/tmp/cluster-ca.pem",
+            }
+        if target.endswith("separated_watch_4node/watch-edge-1.json"):
+            return {
+                "auth_token": "set-strong-meet-token-before-startup",
+                "upstream_base_urls": separated_watch_urls,
+            }
+        if target.endswith("do_ip_first_4node/seed-eu-1.json"):
+            return {
+                "public_base_url": do_ip_watch_urls[0],
+                "auth_token": "replace-with-strong-meet-token-eu",
+            }
+        if target.endswith("do_ip_first_4node/seed-us-1.json"):
+            return {
+                "public_base_url": do_ip_watch_urls[1],
+                "auth_token": "replace-with-strong-meet-token-us",
+            }
+        if target.endswith("do_ip_first_4node/seed-apac-1.json"):
+            return {
+                "public_base_url": do_ip_watch_urls[2],
+                "auth_token": "replace-with-strong-meet-token-apac",
+            }
+        if target.endswith("separated_watch_4node/seed-eu-1.json"):
+            return {
+                "public_base_url": separated_watch_urls[0],
+                "auth_token": real_tokens["eu"],
+            }
+        if target.endswith("separated_watch_4node/seed-us-1.json"):
+            return {
+                "public_base_url": separated_watch_urls[1],
+                "auth_token": real_tokens["us"],
+            }
+        if target.endswith("separated_watch_4node/seed-apac-1.json"):
+            return {
+                "public_base_url": separated_watch_urls[2],
+                "auth_token": real_tokens["apac"],
+            }
+        raise AssertionError(f"unexpected config path: {target}")
+
+    with mock.patch("core.public_hive_bridge.ensure_public_hive_agent_bootstrap", return_value=None), mock.patch(
+        "core.public_hive_bridge._load_agent_bootstrap",
+        return_value={},
+    ), mock.patch(
+        "core.public_hive_bridge._load_json_file",
+        side_effect=fake_load_json,
+    ):
+        cfg = load_public_hive_bridge_config()
+
+    assert cfg.meet_seed_urls == tuple(do_ip_watch_urls)
+    assert cfg.auth_token is None
+    assert cfg.auth_tokens_by_base_url == {
+        "https://104.248.81.71:8766": real_tokens["eu"],
+        "https://157.245.211.185:8766": real_tokens["us"],
+        "https://159.65.136.157:8766": real_tokens["apac"],
+    }
+    assert cfg.tls_ca_file == "/tmp/cluster-ca.pem"
+
+
 def test_sync_public_hive_auth_from_ssh_writes_runtime_bootstrap() -> None:
     remote_payload = {
         "auth_token": "real-cluster-token",

@@ -1079,6 +1079,123 @@ def _looks_like_workspace_bootstrap_request(text: str) -> bool:
     )
 
 
+_HIVE_CREATE_PREFIXES = (
+    "create hive mind task",
+    "create hive task",
+    "create new task for research",
+    "create new task for",
+    "create new task",
+    "create task for research",
+    "create task for",
+    "create task",
+    "new task for research",
+    "new task for",
+    "new task",
+    "add to the hive a new task",
+    "add to hive a new task",
+    "add to the hive",
+    "add to hive",
+    "add task",
+    "create these tasks",
+    "create them",
+    "create these",
+    "yes create",
+    "yes create them",
+    "do all and start working",
+    "proceed with",
+    "do it",
+    "do all",
+    "start working",
+    "go ahead",
+    "carry on",
+)
+_GENERIC_HIVE_TITLE_MARKERS = {
+    "",
+    "it",
+    "them",
+    "these",
+    "this",
+    "task",
+    "tasks",
+    "topic",
+    "topics",
+    "hive task",
+    "hive tasks",
+    "hive topic",
+    "hive topics",
+    "the task",
+    "this task",
+    "these tasks",
+    "create task",
+    "create tasks",
+    "creating task",
+    "creating tasks",
+    "new task",
+    "new tasks",
+    "on hive",
+    "on the hive",
+    "on hive mind",
+}
+
+
+def _normalize_hive_title_candidate(text: str) -> str:
+    normalized = " ".join(str(text or "").split()).strip().strip("`\"'").strip().strip(".!?")
+    normalized = normalized.lstrip("-:–—/ ").strip()
+    return normalized
+
+
+def _is_generic_hive_title_candidate(text: str) -> bool:
+    normalized = _normalize_hive_title_candidate(text).lower()
+    if normalized in _GENERIC_HIVE_TITLE_MARKERS or len(normalized) < 4:
+        return True
+    tokens = [token for token in re.split(r"[^a-z0-9]+", normalized) if token]
+    if not tokens:
+        return True
+    generic_tokens = {"create", "creating", "new", "task", "tasks", "topic", "topics", "hive", "mind", "the", "this", "these"}
+    return all(token in generic_tokens for token in tokens)
+
+
+def _recover_hive_create_from_history(source_context: dict[str, Any] | None) -> tuple[str, str] | None:
+    history = [dict(item) for item in list((source_context or {}).get("conversation_history") or []) if isinstance(item, dict)]
+    for message in reversed(history[-8:]):
+        if str(message.get("role") or "").strip().lower() != "user":
+            continue
+        content = " ".join(str(message.get("content") or "").split()).strip()
+        lowered = content.lower()
+        if not any(marker in lowered for marker in _HIVE_ACTION_PATTERNS) and " task:" not in lowered:
+            continue
+        sections = {
+            "task": re.search(r"\btask\b\s*[:=-]\s*(.+?)(?=(?:\b(?:goal|summary)\b\s*[:=-])|(?:\b(?:topic tags?|tags?)\b\s*[:=-])|$)", content, re.IGNORECASE),
+            "title": re.search(r"\b(?:name it|title|call it|called)\b\s*[:=-]?\s*(.+?)(?=(?:\bsummary\b\s*[:=-])|(?:\b(?:topic tags?|tags?)\b\s*[:=-])|$)", content, re.IGNORECASE),
+            "goal": re.search(r"\bgoal\b\s*[:=-]\s*(.+?)(?=(?:\bsummary\b\s*[:=-])|(?:\b(?:topic tags?|tags?)\b\s*[:=-])|$)", content, re.IGNORECASE),
+            "summary": re.search(r"\bsummary\b\s*[:=-]\s*(.+?)(?=(?:\b(?:topic tags?|tags?)\b\s*[:=-])|$)", content, re.IGNORECASE),
+        }
+        raw_title = ""
+        if sections["title"] is not None:
+            raw_title = str(sections["title"].group(1) or "")
+        elif sections["task"] is not None:
+            raw_title = str(sections["task"].group(1) or "")
+        else:
+            raw_title = content
+            for prefix in _HIVE_CREATE_PREFIXES:
+                if raw_title.lower().startswith(prefix):
+                    raw_title = raw_title[len(prefix):].strip().lstrip("-:–").strip()
+                    break
+            if ":" in raw_title and raw_title.count(":") == 1:
+                raw_title = raw_title.split(":", 1)[-1].strip()
+        title = _normalize_hive_title_candidate(raw_title[:180])
+        if _is_generic_hive_title_candidate(title):
+            continue
+        summary = ""
+        if sections["summary"] is not None:
+            summary = _normalize_hive_title_candidate(str(sections["summary"].group(1) or "")[:4000])
+        elif sections["goal"] is not None:
+            summary = _normalize_hive_title_candidate(str(sections["goal"].group(1) or "")[:4000])
+        summary = summary or title
+        return title, summary
+    return None
+
+
 def plan_tool_workflow(
     *,
     user_text: str,
@@ -1117,14 +1234,23 @@ def plan_tool_workflow(
     if not steps:
         if any(marker in lowered for marker in _create_task_markers) or _create_task_fuzzy(lowered) or _proceed_with_task(lowered):
             raw_title = text.strip()
-            for prefix in ("create hive mind task", "create hive task", "create new task for research", "create new task for", "create new task", "create task for research", "create task for", "create task", "new task for research", "new task for", "new task", "add to the hive a new task", "add to hive a new task", "add to the hive", "add to hive", "add task", "create these tasks", "create them", "create these", "yes create", "yes create them", "do all and start working", "proceed with", "do it", "do all", "start working", "go ahead", "carry on"):
+            for prefix in _HIVE_CREATE_PREFIXES:
                 if raw_title.lower().startswith(prefix):
                     raw_title = raw_title[len(prefix):].strip().lstrip("-:–").strip()
                     break
-            title = raw_title[:180].strip()
-            _generic = title.lower() in ("these tasks", "these", "them", "it", "on hive", "") or len(title) < 4
-            title = title if not _generic else "User-requested Hive task"
-            summary = text.strip()[:4000] or title
+            if "task:" in lowered:
+                task_match = re.search(r"\btask\b\s*[:=-]\s*(.+?)(?=(?:\b(?:goal|summary)\b\s*[:=-])|(?:\b(?:topic tags?|tags?)\b\s*[:=-])|$)", text, re.IGNORECASE)
+                if task_match is not None:
+                    raw_title = str(task_match.group(1) or "").strip()
+            title = _normalize_hive_title_candidate(raw_title[:180])
+            if _is_generic_hive_title_candidate(title):
+                recovered = _recover_hive_create_from_history(source_context)
+                if recovered is None:
+                    return WorkflowPlannerDecision(handled=False, reason="no_workflow_plan")
+                title, recovered_summary = recovered
+                summary = recovered_summary[:4000] or title
+            else:
+                summary = text.strip()[:4000] or title
             return WorkflowPlannerDecision(
                 handled=True,
                 reason="planned_hive_create_topic",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import ssl
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -242,27 +243,36 @@ def fetch_dashboard_from_upstreams(
             tls_insecure_skip_verify=tls_insecure_skip_verify,
         )
     )
-    errors: list[str] = []
-    best_result: dict | None = None
-    best_key: tuple[float, float, int] | None = None
-    for base in upstream_base_urls:
+    def _fetch_one(base: str) -> tuple[bool, str, dict | str, tuple[float, float, int] | None]:
         clean = str(base).rstrip("/")
         target = f"{clean}/v1/hive/dashboard"
         token = tokens.get(_normalize_base_url(clean)) or auth_token
         try:
             payload = fetch(target, token)
         except Exception as exc:  # pragma: no cover - network errors
-            errors.append(f"{clean}: {exc}")
-            continue
+            return False, clean, str(exc), None
         if payload.get("ok"):
             result = _normalize_dashboard_presence(payload.get("result") or {})
             result["source_meet_url"] = clean
             freshness = _dashboard_freshness_key(result)
-            if best_result is None or freshness > (best_key or (0.0, 0.0, 0)):
-                best_result = result
-                best_key = freshness
-            continue
-        errors.append(f"{clean}: {payload.get('error') or 'upstream returned not ok'}")
+            return True, clean, result, freshness
+        return False, clean, str(payload.get("error") or "upstream returned not ok"), None
+
+    errors: list[str] = []
+    best_result: dict | None = None
+    best_key: tuple[float, float, int] | None = None
+    max_workers = max(1, min(len(upstream_base_urls), 8))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_fetch_one, base) for base in upstream_base_urls]
+        for future in as_completed(futures):
+            ok, clean, payload_or_error, freshness = future.result()
+            if ok:
+                result = dict(payload_or_error)
+                if best_result is None or (freshness or (0.0, 0.0, 0)) > (best_key or (0.0, 0.0, 0)):
+                    best_result = result
+                    best_key = freshness
+            else:
+                errors.append(f"{clean}: {payload_or_error}")
     if best_result is not None:
         return best_result
     raise ValueError("All upstream meet nodes failed for dashboard fetch: " + "; ".join(errors))

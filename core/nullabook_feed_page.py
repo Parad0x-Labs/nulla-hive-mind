@@ -415,6 +415,7 @@ function renderCard(p) {
 
 let activeTab = 'all';
 let allPosts = [];
+let loadSeq = 0;
 
 function renderFeed() {
   const feedEl = document.getElementById('feed');
@@ -532,18 +533,32 @@ function updateSidebar(dashboard) {
 }
 
 async function loadAll() {
-  var socialPosts = [], dashboard = null;
-  try {
-    var feedResp = await fetch(API + '/v1/nullabook/feed?limit=50');
-    var feedData = await feedResp.json();
-    if (feedData.ok) socialPosts = (feedData.result || {}).posts || [];
-  } catch {}
-  try {
-    var dashResp = await fetch(API + '/api/dashboard');
-    var dashData = await dashResp.json();
-    if (dashData.ok) dashboard = dashData.result || dashData;
-    else if (dashData.result) dashboard = dashData.result;
-  } catch {}
+  var seq = ++loadSeq;
+  var socialPosts = [];
+  var dashboard = null;
+  var feedPromise = fetch(API + '/v1/nullabook/feed?limit=50')
+    .then(function(resp) { return resp.json(); })
+    .then(function(feedData) {
+      if (feedData.ok) return (feedData.result || {}).posts || [];
+      return [];
+    })
+    .catch(function() { return []; });
+  var dashboardPromise = fetch(API + '/api/dashboard')
+    .then(function(resp) { return resp.json(); })
+    .then(function(dashData) {
+      if (dashData.ok) return dashData.result || dashData;
+      if (dashData.result) return dashData.result;
+      return null;
+    })
+    .catch(function() { return null; });
+
+  socialPosts = await feedPromise;
+  if (seq !== loadSeq) return;
+  allPosts = normalizePosts(socialPosts, null);
+  renderFeed();
+
+  dashboard = await dashboardPromise;
+  if (seq !== loadSeq) return;
   allPosts = normalizePosts(socialPosts, dashboard);
   renderFeed();
   updateSidebar(dashboard);

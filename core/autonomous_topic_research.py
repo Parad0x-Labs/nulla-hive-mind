@@ -9,6 +9,7 @@ from typing import Any
 
 from core import audit_logger
 from core.brain_hive_artifacts import store_artifact_manifest
+from core.brain_hive_research import is_disposable_research_topic
 from core.candidate_knowledge_lane import get_candidate_by_id
 from core.curiosity_roamer import CuriosityRoamer
 from core.hive_activity_tracker import HiveActivityTracker
@@ -206,20 +207,31 @@ def research_topic_from_signal(
     candidate_ids: list[str] = []
     roamer = curiosity or CuriosityRoamer()
     derived_queries = list(packet.get("derived_research_questions") or [])[:6]
+    skip_reason = _external_research_skip_reason(packet=packet, derived_queries=derived_queries)
 
-    query_results, candidate_ids = _run_research_queries(
-        queries=derived_queries,
-        roamer=roamer,
-        topic=topic,
-        topic_id=topic_id,
-        title=title,
-        packet=packet,
-        event_session=event_session,
-        pass_label="pass-1",
-    )
+    if skip_reason:
+        _event(
+            event_session,
+            "tool_started",
+            skip_reason,
+            topic_id=topic_id,
+            topic_title=title,
+            tool_name="research.skip_external_topic",
+        )
+    else:
+        query_results, candidate_ids = _run_research_queries(
+            queries=derived_queries,
+            roamer=roamer,
+            topic=topic,
+            topic_id=topic_id,
+            title=title,
+            packet=packet,
+            event_session=event_session,
+            pass_label="pass-1",
+        )
 
     nonempty_first = sum(1 for r in query_results if _query_result_has_evidence(r))
-    if nonempty_first < 2 and len(derived_queries) >= 2:
+    if not skip_reason and nonempty_first < 2 and len(derived_queries) >= 2:
         try:
             refinement_queries = _generate_refinement_queries(
                 title=title, topic=topic, first_pass_results=query_results,
@@ -278,6 +290,7 @@ def research_topic_from_signal(
         promotion_decisions=promotion_decisions,
         mined_features=miner_output,
         artifact_refs=[_artifact_ref(packet_artifact, kind="research_packet_artifact")],
+        skip_reason=skip_reason,
     )
     bundle_payload = {
         "bundle_schema": "brain_hive.autonomous_research_bundle.v1",
@@ -335,6 +348,7 @@ def research_topic_from_signal(
             _artifact_ref(packet_artifact, kind="research_packet_artifact"),
             _artifact_ref(bundle_artifact, kind="research_bundle_artifact"),
         ],
+        skip_reason=skip_reason,
     )
     result_status = "solved" if quality_summary["research_quality_status"] == "grounded" else "researching"
     synthesis_card = _build_synthesis_card(
@@ -678,6 +692,7 @@ def _summarize_research_quality(
     promotion_decisions: list[dict[str, Any]],
     mined_features: dict[str, Any],
     artifact_refs: list[dict[str, Any]],
+    skip_reason: str | None = None,
 ) -> dict[str, Any]:
     source_domains = list(
         dict.fromkeys(
@@ -706,6 +721,8 @@ def _summarize_research_quality(
     ).strip().lower() in {"mixed", "local_only", "internal_only", "candidate_only"}
 
     reasons: list[str] = []
+    if str(skip_reason or "").strip():
+        reasons.append(str(skip_reason).strip())
     if artifact_refs_unresolved > 0:
         reasons.append(f"Artifacts unresolved: {artifact_refs_unresolved}.")
     if nonempty_query_count <= 0:
@@ -723,6 +740,8 @@ def _summarize_research_quality(
 
     if artifact_refs_unresolved > 0:
         status = "artifact_missing"
+    elif str(skip_reason or "").strip():
+        status = "insufficient_evidence"
     elif nonempty_query_count <= 0:
         status = "query_failed"
     elif offtopic_hits >= max(1, nonempty_query_count):
@@ -749,6 +768,18 @@ def _summarize_research_quality(
         "research_quality_status": status,
         "research_quality_reasons": reasons[:8],
     }
+
+
+def _external_research_skip_reason(*, packet: dict[str, Any], derived_queries: list[str]) -> str:
+    topic = dict(packet.get("topic") or {})
+    title = str(topic.get("title") or "")
+    summary = str(topic.get("summary") or "")
+    tags = [str(item).strip().lower() for item in list(topic.get("topic_tags") or []) if str(item).strip()]
+    if is_disposable_research_topic(title=title, summary=summary, tags=tags):
+        return "Disposable smoke topic detected; external research skipped by policy."
+    if derived_queries:
+        return ""
+    return ""
 
 
 def _query_result_has_evidence(query_result: dict[str, Any]) -> bool:

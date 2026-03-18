@@ -13,14 +13,14 @@ from apps.nulla_agent import ChatTurnResult, NullaAgent, ResponseClass
 from core.autonomous_topic_research import AutonomousResearchResult
 from core.bootstrap_context import build_bootstrap_context
 from core.curiosity_roamer import CuriosityResult
-from core.hive_activity_tracker import session_hive_state, update_session_hive_state
+from core.hive_activity_tracker import session_hive_state, set_hive_interaction_state, update_session_hive_state
 from core.human_input_adapter import HumanInputInterpretation
 from core.identity_manager import load_active_persona
 from core.memory_first_router import ModelExecutionDecision
 from core.prompt_normalizer import normalize_prompt
 from core.public_hive_bridge import PublicHiveBridgeConfig
 from core.runtime_task_events import register_runtime_event_sink, unregister_runtime_event_sink
-from core.task_router import classify, create_task_record
+from core.task_router import classify, create_task_record, redact_text
 from core.tool_intent_executor import ToolIntentExecution
 from core.user_preferences import maybe_handle_preference_command
 from storage.migrations import run_migrations
@@ -176,7 +176,6 @@ class OpenClawToolingContextTests(unittest.TestCase):
         self.assertTrue(planned_search.called)
         self.assertIn("canonical source", result["response"].lower())
 
-    @pytest.mark.xfail(reason="Pre-existing: weather response format changed")
     def test_openclaw_weather_request_uses_live_web_fast_path(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
         agent.context_loader.load = mock.Mock(side_effect=AssertionError("context loader should not run"))  # type: ignore[assignment]
@@ -185,11 +184,11 @@ class OpenClawToolingContextTests(unittest.TestCase):
             "apps.nulla_agent.WebAdapter.search_query",
             return_value=[
                 {
-                    "summary": "Cloudy with light rain, around 11C, with breezy afternoon conditions.",
-                    "source_label": "duckduckgo.com",
-                    "origin_domain": "bbc.com",
-                    "result_title": "BBC Weather - London",
-                    "result_url": "https://www.bbc.com/weather/2643743",
+                    "summary": "London, United Kingdom: Cloudy with light rain, 11 C (feels like 9 C), humidity 82%, wind 14 km/h. Observed 09:00 AM.",
+                    "source_label": "wttr.in",
+                    "origin_domain": "wttr.in",
+                    "result_title": "wttr.in weather for London",
+                    "result_url": "https://wttr.in/London",
                     "used_browser": False,
                 }
             ],
@@ -200,8 +199,10 @@ class OpenClawToolingContextTests(unittest.TestCase):
             )
 
         self.assertTrue(search_query.called)
-        self.assertIn("Live weather results", result["response"])
-        self.assertIn("BBC Weather - London", result["response"])
+        lowered = result["response"].lower()
+        self.assertIn("cloudy with light rain", lowered)
+        self.assertIn("source: [wttr.in](https://wttr.in/london)", lowered)
+        self.assertNotIn("live weather results", lowered)
         self.assertEqual(result.get("response_class"), "utility_answer")
 
     def test_openclaw_news_request_returns_honest_live_lookup_failure(self) -> None:
@@ -440,6 +441,7 @@ class OpenClawToolingContextTests(unittest.TestCase):
 
     def test_hive_command_falls_back_to_public_bridge_when_watcher_is_unavailable(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        session_id = f"openclaw:bridge-fallback:{uuid.uuid4().hex}"
         topics = [
             {
                 "topic_id": "topic-bridge-1",
@@ -464,11 +466,11 @@ class OpenClawToolingContextTests(unittest.TestCase):
         ):
             result = agent.run_once(
                 "pull the hive tasks",
-                session_id_override="openclaw:bridge-fallback",
+                session_id_override=session_id,
                 source_context={"surface": "openclaw", "platform": "openclaw"},
             )
 
-        state = session_hive_state("openclaw:bridge-fallback")
+        state = session_hive_state(session_id)
         self.assertIn("bridge fallback task", result["response"].lower())
         self.assertEqual(result.get("response_class"), "task_list")
         self.assertEqual(state["pending_topic_ids"], ["topic-bridge-1"])
@@ -1359,6 +1361,222 @@ class OpenClawToolingContextTests(unittest.TestCase):
         self.assertIn("Confirm?", result["response"])
         self.assertNotIn("invalid tool payload", result["response"].lower())
 
+    def test_openclaw_hive_task_prompt_parses_task_and_goal_sections(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        request_text = (
+            "add this to the Hive mind for research and start working on it. "
+            "Task: Research and design a local-first X/Twitter assistant for OpenClaw / NULLA Hive Mind. "
+            "Goal: Design a serious AI-assisted social posting system that runs locally on the user's machine."
+        )
+
+        with mock.patch.object(agent.public_hive_bridge, "enabled", return_value=True), mock.patch.object(
+            agent.public_hive_bridge, "write_enabled", return_value=True
+        ):
+            result = agent.run_once(
+                request_text,
+                session_id_override="openclaw:create-hive-task-task-goal",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("Ready to post this to the public Hive", result["response"])
+        self.assertIn(
+            "Research and design a local-first",
+            result["response"],
+        )
+        self.assertIn(
+            "OpenClaw / NULLA Hive Mind",
+            result["response"],
+        )
+
+    def test_openclaw_can_recover_hive_create_from_history_and_start_work(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        original_request = (
+            "OK, here's a long but good script for you - add this to the Hive mind for research and start working on it. "
+            "Task: Research and design a local-first X/Twitter assistant for OpenClaw / NULLA Hive Mind. "
+            "Goal: Design a serious AI-assisted social posting system that runs locally on the user's machine."
+        )
+
+        with mock.patch.object(agent.public_hive_bridge, "enabled", return_value=True), mock.patch.object(
+            agent.public_hive_bridge, "write_enabled", return_value=True
+        ), mock.patch.object(
+            agent.public_hive_bridge,
+            "create_public_topic",
+            return_value={
+                "ok": True,
+                "status": "created",
+                "topic_id": "7d33994f-dd40-4a7e-b78a-f8e2d94fb702",
+            },
+        ) as create_public_topic, mock.patch(
+            "apps.nulla_agent.research_topic_from_signal",
+            return_value=AutonomousResearchResult(
+                ok=True,
+                status="completed",
+                topic_id="7d33994f-dd40-4a7e-b78a-f8e2d94fb702",
+                claim_id="claim-12345678",
+            ),
+        ) as research_topic_from_signal, mock.patch.object(
+            agent.hive_activity_tracker,
+            "note_watched_topic",
+            return_value=None,
+        ), mock.patch.object(agent, "_sync_public_presence", return_value=None):
+            result = agent.run_once(
+                "proceed, max effort!",
+                session_id_override="openclaw:recover-create-history",
+                source_context={
+                    "surface": "openclaw",
+                    "platform": "openclaw",
+                    "conversation_history": [
+                        {"role": "user", "content": original_request},
+                        {
+                            "role": "assistant",
+                            "content": "Proceeding with maximum effort to research and design the requested local-first X/Twitter assistant.",
+                        },
+                    ],
+                },
+            )
+
+        self.assertIn("Created Hive task", result["response"])
+        self.assertIn("Started Hive research on", result["response"])
+        self.assertEqual(
+            create_public_topic.call_args.kwargs["title"],
+            "Research and design a local-first X/Twitter assistant for OpenClaw / NULLA Hive Mind",
+        )
+        self.assertEqual(
+            research_topic_from_signal.call_args.args[0]["topic_id"],
+            "7d33994f-dd40-4a7e-b78a-f8e2d94fb702",
+        )
+
+    def test_openclaw_hive_task_preview_redacts_private_fields(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        request_text = (
+            "create new task in hive. "
+            "Task: Review local-first X assistant rollout. "
+            "Goal: Compare current design notes from /tmp/mock-private-notes "
+            "and email researcher@example.test before proposing the public-safe architecture."
+        )
+
+        with mock.patch.object(agent.public_hive_bridge, "enabled", return_value=True), mock.patch.object(
+            agent.public_hive_bridge, "write_enabled", return_value=True
+        ), mock.patch.object(
+            agent.public_hive_bridge,
+            "create_public_topic",
+            return_value={
+                "ok": True,
+                "status": "created",
+                "topic_id": "7d33994f-dd40-4a7e-b78a-f8e2d94fb702",
+            },
+        ) as create_public_topic, mock.patch.object(
+            agent.hive_activity_tracker,
+            "note_watched_topic",
+            return_value=None,
+        ):
+            preview = agent.run_once(
+                request_text,
+                session_id_override="openclaw:hive-redaction-preview",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+            confirm = agent.run_once(
+                "yes",
+                session_id_override="openclaw:hive-redaction-preview",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("Ready to post this to the public Hive", preview["response"])
+        self.assertIn("Safety: I redacted private-looking fields", preview["response"])
+        self.assertIn("Created Hive task", confirm["response"])
+        self.assertNotIn("/tmp/mock-private-notes", create_public_topic.call_args.kwargs["summary"])
+        self.assertNotIn("researcher@example.test", create_public_topic.call_args.kwargs["summary"])
+        self.assertIn("<path>", create_public_topic.call_args.kwargs["summary"])
+        self.assertIn("<email>", create_public_topic.call_args.kwargs["summary"])
+
+    def test_openclaw_hive_create_confirm_beats_stale_active_task_state(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        session_id = "openclaw:hive-create-confirm-priority"
+        set_hive_interaction_state(
+            session_id,
+            mode="hive_task_active",
+            payload={
+                "active_topic_id": "213070b6-29cb-4420-97bc-51ab8d9314d4",
+                "active_title": "Mind task for group research",
+                "claim_id": "stale-claim",
+            },
+        )
+        request_text = (
+            "create new task in hive. "
+            "Task: Review local-first X assistant rollout. "
+            "Goal: Compare current design notes from /tmp/mock-private-notes "
+            "and email researcher@example.test before proposing the public-safe architecture."
+        )
+
+        with mock.patch.object(agent.public_hive_bridge, "enabled", return_value=True), mock.patch.object(
+            agent.public_hive_bridge, "write_enabled", return_value=True
+        ), mock.patch.object(
+            agent.public_hive_bridge,
+            "create_public_topic",
+            return_value={
+                "ok": True,
+                "status": "created",
+                "topic_id": "7d33994f-dd40-4a7e-b78a-f8e2d94fb702",
+            },
+        ) as create_public_topic, mock.patch.object(
+            agent.hive_activity_tracker,
+            "note_watched_topic",
+            return_value=None,
+        ):
+            preview = agent.run_once(
+                request_text,
+                session_id_override=session_id,
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+            confirm = agent.run_once(
+                "yes",
+                session_id_override=session_id,
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("Ready to post this to the public Hive", preview["response"])
+        self.assertIn("Created Hive task", confirm["response"])
+        self.assertNotIn("Mind task for group research", confirm["response"])
+        self.assertEqual(
+            create_public_topic.call_args.kwargs["title"],
+            "Review local-first X assistant rollout",
+        )
+
+    def test_redact_text_keeps_x_twitter_label_but_redacts_real_paths(self) -> None:
+        self.assertEqual(redact_text("X/Twitter assistant"), "X/Twitter assistant")
+        self.assertEqual(redact_text("/tmp/mock-private-notes"), "<path>")
+        self.assertEqual(redact_text("~/mock-private-notes"), "<path>")
+
+    def test_openclaw_hive_task_create_blocks_raw_transcript_dump(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        request_text = (
+            "create new task in hive from this chat:\n"
+            "NULLA\n13:16\n"
+            "I'm NULLA. New session is clean and I'm ready.\n"
+            "You\n13:17\n"
+            "my email is researcher@example.test and here is the full private backstory\n"
+            "U\n13:18\n"
+            "/new\n"
+        )
+
+        with mock.patch.object(agent.public_hive_bridge, "enabled", return_value=True), mock.patch.object(
+            agent.public_hive_bridge, "write_enabled", return_value=True
+        ), mock.patch.object(agent.public_hive_bridge, "create_public_topic") as create_public_topic:
+            result = agent.run_once(
+                request_text,
+                session_id_override="openclaw:hive-transcript-block",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("raw chat log/transcript", result["response"].lower())
+        self.assertNotIn("Ready to post this to the public Hive", result["response"])
+        create_public_topic.assert_not_called()
+
     def test_builder_style_request_uses_curiosity_evidence_same_turn(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
         agent.start()
@@ -1440,6 +1658,37 @@ class OpenClawToolingContextTests(unittest.TestCase):
 
         self.assertIn("public Hive auth is not configured for writes", result["response"])
         create_public_topic.assert_not_called()
+
+    def test_openclaw_hive_task_confirm_reports_invalid_auth_cleanly(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        request_text = (
+            "add this to the Hive mind for research and start working on it. "
+            "Task: Research and design a local-first X/Twitter assistant for OpenClaw / NULLA Hive Mind. "
+            "Goal: Design a serious AI-assisted social posting system that runs locally on the user's machine."
+        )
+
+        with mock.patch.object(agent.public_hive_bridge, "enabled", return_value=True), mock.patch.object(
+            agent.public_hive_bridge, "write_enabled", return_value=True
+        ), mock.patch.object(
+            agent.public_hive_bridge,
+            "create_public_topic",
+            side_effect=ValueError("Unauthorized write request."),
+        ):
+            preview = agent.run_once(
+                request_text,
+                session_id_override="openclaw:create-hive-task-invalid-auth",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+            confirm = agent.run_once(
+                "yes",
+                session_id_override="openclaw:create-hive-task-invalid-auth",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("Ready to post this to the public Hive", preview["response"])
+        self.assertIn("live Hive rejected this runtime's write auth", confirm["response"])
+        self.assertNotIn("Runtime error", confirm["response"])
 
     def test_openclaw_hive_status_followup_uses_watched_topic_context(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")

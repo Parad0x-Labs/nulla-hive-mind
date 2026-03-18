@@ -9,6 +9,14 @@ from core.hive_activity_tracker import HiveActivityTracker, HiveActivityTrackerC
 from core.memory_first_router import ModelExecutionDecision
 
 
+def _assert_hive_task_started_fast_path(result: dict, *, title_fragment: str = "agent commons") -> None:
+    lowered = result["response"].lower()
+    assert result["response_class"] == "task_started"
+    assert result["model_execution"]["used_model"] is False
+    assert "started hive research on" in lowered or "started research on" in lowered
+    assert title_fragment in lowered
+
+
 def test_show_open_hive_tasks_returns_real_list_not_fake_planner_sludge(make_agent):
     agent = make_agent()
     agent.hive_activity_tracker = mock.Mock()
@@ -478,9 +486,7 @@ def test_short_yes_followup_reuses_last_shown_task_and_starts(make_agent):
             source_context={"surface": "openclaw", "platform": "openclaw"},
         )
 
-    assert result["response_class"] == "task_started"
-    assert result["model_execution"]["used_model"] is True
-    assert "started research on agent commons" in result["response"].lower()
+    _assert_hive_task_started_fast_path(result)
     assert "packed" not in result["response"].lower()
     selected_signal = research_topic_from_signal.call_args.args[0]
     assert selected_signal["topic_id"] == "7d33994f-dd40-4a7e-b78a-f8e2d94fb702"
@@ -532,9 +538,7 @@ def test_start_short_id_uses_assistant_style_summary(make_agent):
         )
 
     lowered = result["response"].lower()
-    assert result["response_class"] == "task_started"
-    assert result["model_execution"]["used_model"] is True
-    assert "started research on agent commons" in lowered
+    _assert_hive_task_started_fast_path(result)
     assert "packed 3 research queries" not in lowered
     assert "bounded queries run" not in lowered
     assert "candidate notes" not in lowered
@@ -601,8 +605,7 @@ def test_selecting_shown_task_by_exact_title_starts_that_hive_task(make_agent):
             source_context={"surface": "openclaw", "platform": "openclaw"},
         )
 
-    assert result["response_class"] == "task_started"
-    assert "started research on agent commons" in result["response"].lower()
+    _assert_hive_task_started_fast_path(result)
     selected_signal = research_topic_from_signal.call_args.args[0]
     assert selected_signal["topic_id"] == "a951bf9d-dd40-4a7e-b78a-f8e2d94fb701"
 
@@ -668,8 +671,7 @@ def test_selecting_short_id_from_shown_tasks_starts_that_hive_task(make_agent):
             source_context={"surface": "openclaw", "platform": "openclaw"},
         )
 
-    assert result["response_class"] == "task_started"
-    assert "started research on agent commons" in result["response"].lower()
+    _assert_hive_task_started_fast_path(result)
     selected_signal = research_topic_from_signal.call_args.args[0]
     assert selected_signal["topic_id"] == "a951bf9d-dd40-4a7e-b78a-f8e2d94fb701"
 
@@ -735,8 +737,7 @@ def test_selecting_shown_task_with_status_line_and_full_research_phrase_starts_t
             source_context={"surface": "openclaw", "platform": "openclaw"},
         )
 
-    assert result["response_class"] == "task_started"
-    assert "started research on agent commons" in result["response"].lower()
+    _assert_hive_task_started_fast_path(result)
     selected_signal = research_topic_from_signal.call_args.args[0]
     assert selected_signal["topic_id"] == "7d33994f-dd40-4a7e-b78a-f8e2d94fb702"
 
@@ -802,8 +803,7 @@ def test_selecting_short_id_with_full_phrase_starts_that_hive_task(make_agent):
             source_context={"surface": "openclaw", "platform": "openclaw"},
         )
 
-    assert result["response_class"] == "task_started"
-    assert "started research on agent commons" in result["response"].lower()
+    _assert_hive_task_started_fast_path(result)
     selected_signal = research_topic_from_signal.call_args.args[0]
     assert selected_signal["topic_id"] == "a951bf9d-dd40-4a7e-b78a-f8e2d94fb701"
 

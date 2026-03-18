@@ -62,6 +62,7 @@ def append_hashed_event(event_id: str, payload: dict[str, Any]) -> str:
     with _CHAIN_LOCK:
         conn = get_connection()
         try:
+            conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute(
                 "SELECT event_hash FROM event_hash_chain WHERE event_id = ? LIMIT 1",
                 (event_id,),
@@ -125,6 +126,7 @@ def repair_chain() -> int:
     with _CHAIN_LOCK:
         conn = get_connection()
         try:
+            conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 """
                 SELECT seq, event_id, payload_json

@@ -19,7 +19,8 @@ from storage.db import get_connection
 
 _PATH_PATTERNS = [
     re.compile(r"[A-Za-z]:\\[^\s]+"),         # Windows paths
-    re.compile(r"/[^\s]+"),                   # Unix-ish paths
+    re.compile(r"~/(?:[^\s)]+)"),             # Home-relative Unix paths
+    re.compile(r"/(?:Users|home|etc|var|tmp|opt|srv|private|mnt)/[^\s)]+"),  # Sensitive absolute Unix paths
 ]
 
 _URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)

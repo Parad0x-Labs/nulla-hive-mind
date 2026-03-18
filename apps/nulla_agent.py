@@ -38,6 +38,7 @@ from core.human_input_adapter import adapt_user_input, runtime_session_id
 from core.identity_manager import load_active_persona
 from core.knowledge_fetcher import request_relevant_holders
 from core.knowledge_registry import register_local_shard, sync_local_learning_shards
+from core.live_quote_contract import LiveQuoteResult, validate_live_quote_payload
 from core.local_operator_actions import dispatch_operator_action, parse_operator_action_intent
 from core.logging_config import setup_logging
 from core.media_analysis_pipeline import MediaAnalysisPipeline
@@ -53,6 +54,7 @@ from core.persistent_memory import (
     session_memory_policy,
 )
 from core.public_hive_bridge import PublicHiveBridge
+from core.privacy_guard import text_privacy_risks
 from core.reasoning_engine import (
     Plan,
     build_plan,
@@ -84,6 +86,7 @@ from core.task_router import (
     looks_like_public_entity_lookup_request,
     looks_like_semantic_hive_request,
     model_execution_profile,
+    redact_text,
 )
 from core.tiered_context_loader import TieredContextLoader
 from core.tool_intent_executor import (
@@ -136,6 +139,13 @@ _TIME_FOLLOWUP_EXCLUSION_MARKERS = (
     "queue",
     "work",
 )
+_HIVE_CREATE_HARD_PRIVACY_RISKS = {
+    "identity_marker",
+    "name_disclosure",
+    "location_disclosure",
+    "phone_number",
+    "postal_address",
+}
 
 
 @dataclass
@@ -310,52 +320,69 @@ class NullaAgent:
         if credit_result is not None:
             return credit_result
 
-        hive_followup = self._maybe_handle_hive_research_followup(
+        pending_hive_create_confirmation = self._is_pending_hive_create_confirmation_input(
             effective_input,
             session_id=session_id,
             source_context=source_context,
         )
-        if hive_followup is not None:
-            return hive_followup
+        if not pending_hive_create_confirmation:
+            hive_followup = self._maybe_handle_hive_research_followup(
+                effective_input,
+                session_id=session_id,
+                source_context=source_context,
+            )
+            if hive_followup is not None:
+                return hive_followup
 
-        handled, response, model_wording_candidate, hive_command_details = self._maybe_handle_hive_runtime_command(
-            effective_input,
-            session_id=session_id,
-        )
-        if not handled:
-            recovered_hive_input = self._recover_hive_runtime_command_input(effective_input)
-            if recovered_hive_input:
-                handled, response, model_wording_candidate, hive_command_details = self._maybe_handle_hive_runtime_command(
-                    recovered_hive_input,
-                    session_id=session_id,
-                )
-        if handled:
-            if model_wording_candidate and self._is_chat_truth_surface(source_context):
-                return self._chat_surface_hive_wording_result(
+        raw_hive_create_draft = self._extract_hive_topic_create_draft(user_input)
+        effective_hive_create_draft = raw_hive_create_draft or self._extract_hive_topic_create_draft(effective_input)
+        if effective_hive_create_draft is None and not pending_hive_create_confirmation:
+            handled, response, model_wording_candidate, hive_command_details = self._maybe_handle_hive_runtime_command(
+                effective_input,
+                session_id=session_id,
+            )
+            if not handled:
+                recovered_hive_input = self._recover_hive_runtime_command_input(effective_input)
+                if recovered_hive_input:
+                    handled, response, model_wording_candidate, hive_command_details = self._maybe_handle_hive_runtime_command(
+                        recovered_hive_input,
+                        session_id=session_id,
+                    )
+            if handled:
+                topic_rows = [
+                    dict(item)
+                    for item in list((hive_command_details or {}).get("topics") or [])
+                    if isinstance(item, dict) and str(item.get("topic_id") or "").strip()
+                ]
+                if topic_rows:
+                    self._store_hive_topic_selection_state(session_id, topic_rows)
+                if model_wording_candidate and self._is_chat_truth_surface(source_context):
+                    return self._chat_surface_hive_wording_result(
+                        session_id=session_id,
+                        user_input=effective_input,
+                        source_context=source_context,
+                        response_class=self._classify_hive_text_response(response),
+                        reason="hive_activity_model_wording",
+                        observations=self._chat_surface_hive_command_observations(hive_command_details or {}),
+                        fallback_response=self._chat_surface_hive_degraded_response(hive_command_details or {}),
+                    )
+                return self._fast_path_result(
                     session_id=session_id,
                     user_input=effective_input,
+                    response=response,
+                    confidence=0.89,
                     source_context=source_context,
-                    response_class=self._classify_hive_text_response(response),
-                    reason="hive_activity_model_wording",
-                    observations=self._chat_surface_hive_command_observations(hive_command_details or {}),
-                    fallback_response=self._chat_surface_hive_degraded_response(hive_command_details or {}),
+                    reason="hive_activity_command",
                 )
-            return self._fast_path_result(
-                session_id=session_id,
-                user_input=effective_input,
-                response=response,
-                confidence=0.89,
-                source_context=source_context,
-                reason="hive_activity_command",
-            )
 
-        hive_status = self._maybe_handle_hive_status_followup(
-            effective_input,
-            session_id=session_id,
-            source_context=source_context,
-        )
-        if hive_status is not None:
-            return hive_status
+        if not pending_hive_create_confirmation:
+            hive_status = self._maybe_handle_hive_status_followup(
+                effective_input,
+                session_id=session_id,
+                source_context=source_context,
+            )
+            if hive_status is not None:
+                return hive_status
 
         handled, response = maybe_handle_memory_command(effective_input, session_id=session_id)
         if handled:
@@ -660,7 +687,7 @@ class NullaAgent:
                 return hive_confirm
 
             hive_topic_create = self._maybe_handle_hive_topic_create_request(
-                effective_input,
+                user_input if raw_hive_create_draft is not None else effective_input,
                 task=task,
                 session_id=session_id,
                 source_context=source_context,
@@ -1575,6 +1602,8 @@ class NullaAgent:
             }
             if str(note.get("source_profile_label") or "").strip():
                 entry["source_profile"] = str(note.get("source_profile_label") or "").strip()
+            if isinstance(note.get("live_quote"), dict):
+                entry["quote"] = dict(note.get("live_quote") or {})
             if bool(note.get("used_browser")):
                 entry["used_browser"] = True
                 browser_used = True
@@ -2908,14 +2937,35 @@ class NullaAgent:
             )
             notes = []
         if not notes and live_mode == "fresh_lookup":
+            unresolved_price = self._unresolved_price_lookup_response(query=query, notes=notes, mode=live_mode)
+            if unresolved_price:
+                return self._fast_path_result(
+                    session_id=session_id,
+                    user_input=user_input,
+                    response=unresolved_price,
+                    confidence=0.84,
+                    source_context=source_context,
+                    reason="live_info_fast_path",
+                )
             return None
+        unresolved_price = self._unresolved_price_lookup_response(query=query, notes=notes, mode=live_mode)
+        if unresolved_price:
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=user_input,
+                response=unresolved_price,
+                confidence=0.84,
+                source_context=source_context,
+                reason="live_info_fast_path",
+            )
         response = (
             self._render_live_info_response(query=query, notes=notes, mode=live_mode)
             if notes
             else self._live_info_failure_text(query=query, mode=live_mode)
         )
         structured_modes = {"weather", "news"}
-        if self._is_chat_truth_surface(source_context) and live_mode not in structured_modes:
+        has_live_quote = self._first_live_quote(notes) is not None
+        if self._is_chat_truth_surface(source_context) and live_mode not in structured_modes and not has_live_quote:
             return self._chat_surface_model_wording_result(
                 session_id=session_id,
                 user_input=user_input,
@@ -2963,18 +3013,15 @@ class NullaAgent:
                 source_label="duckduckgo.com",
             )
         if live_mode == "news":
-            return WebAdapter.planned_search_query(
+            return WebAdapter.search_query(
                 query,
                 limit=3,
-                task_class="research",
-                topic_kind="news",
-                topic_hints=topic_hints,
                 source_label="duckduckgo.com",
             )
         if live_mode == "fresh_lookup":
-            crypto_note = self._try_crypto_price_note(query)
-            if crypto_note:
-                return [crypto_note]
+            quote_note = self._try_live_quote_note(query)
+            if quote_note:
+                return [quote_note]
         return WebAdapter.planned_search_query(
             query,
             limit=3,
@@ -2985,29 +3032,14 @@ class NullaAgent:
         )
 
     @staticmethod
-    def _try_crypto_price_note(query: str) -> dict[str, Any] | None:
+    def _try_live_quote_note(query: str) -> dict[str, Any] | None:
         try:
-            from tools.web.web_research import _crypto_price_fallback, _looks_like_price_query
-            coin_id = _looks_like_price_query(query)
-            if not coin_id:
+            from tools.web.web_research import lookup_live_quote
+
+            quote = lookup_live_quote(query, timeout_s=8)
+            if quote is None:
                 return None
-            result = _crypto_price_fallback(query, coin_id, timeout_s=8)
-            if not result:
-                return None
-            _provider, hits, pages, _extra = result
-            hit = hits[0] if hits else None
-            page = pages[0] if pages else None
-            if not hit:
-                return None
-            return {
-                "result_title": hit.title,
-                "result_url": hit.url,
-                "origin_domain": "coingecko.com",
-                "summary": hit.snippet,
-                "confidence": 0.95,
-                "source_profile_label": "coingecko_api",
-                "page_text": page.text if page else "",
-            }
+            return quote.to_note()
         except Exception:
             return None
 
@@ -3066,6 +3098,11 @@ class NullaAgent:
             "news on",
             "news about",
             "what happened today",
+            "what's the latest on",
+            "what is the latest on",
+            "whats the latest on",
+            "latest on ",
+            "latest about ",
         )
         if any(marker in lowered_padded for marker in weather_markers):
             return "weather"
@@ -3294,6 +3331,11 @@ class NullaAgent:
     def _render_live_info_response(self, *, query: str, notes: list[dict[str, Any]], mode: str) -> str:
         if mode == "weather":
             return self._render_weather_response(query=query, notes=notes)
+        if mode == "news":
+            return self._render_news_response(query=query, notes=notes)
+        live_quote = self._first_live_quote(notes)
+        if mode == "fresh_lookup" and live_quote is not None:
+            return live_quote.answer_text()
         label = {
             "news": "Live news results",
             "fresh_lookup": "Live web results",
@@ -3318,30 +3360,144 @@ class NullaAgent:
             lines.append("Browser rendering was used for at least one source when plain fetch was too thin.")
         return "\n".join(lines)
 
+    def _first_live_quote(self, notes: list[dict[str, Any]]) -> LiveQuoteResult | None:
+        for note in list(notes or []):
+            payload = note.get("live_quote")
+            if not isinstance(payload, dict):
+                continue
+            ok, _reason = validate_live_quote_payload(payload)
+            if not ok:
+                continue
+            try:
+                return LiveQuoteResult.from_payload(payload)
+            except Exception:
+                continue
+        return None
+
     def _render_weather_response(self, *, query: str, notes: list[dict[str, Any]]) -> str:
         location = re.sub(
             r"\b(?:what\s+is\s+(?:the\s+)?|how\s+is\s+(?:the\s+)?|weather\s+(?:like\s+)?(?:in|for|at)\s+|"
             r"weather\s+in\s+|now\??|right\s+now\??|today\??|current(?:ly)?)\b",
             "", query, flags=re.IGNORECASE,
-        ).strip(" ?.,!") or "your location"
-        snippets = []
-        sources = []
-        for note in list(notes or [])[:3]:
-            snippet = " ".join(str(note.get("summary") or "").split()).strip()
-            domain = str(note.get("origin_domain") or "").strip()
-            url = str(note.get("result_url") or "").strip()
-            if snippet:
-                snippets.append(snippet[:300])
-            if url:
-                sources.append(f"[{domain or 'source'}]({url})")
-        if snippets:
-            combined = " | ".join(snippets)
-            lines = [f"Weather in {location}: {combined}"]
+        )
+        location = re.sub(r"\bforecast\b", " ", location, flags=re.IGNORECASE)
+        location = " ".join(location.split()).strip(" ?.,!") or "your location"
+        primary = dict(next((note for note in list(notes or []) if isinstance(note, dict)), {}))
+        summary = " ".join(str(primary.get("summary") or "").split()).strip()
+        url = str(primary.get("result_url") or "").strip()
+        domain = str(primary.get("origin_domain") or "").strip()
+        if summary:
+            if location.lower() in summary.lower():
+                line = summary
+            else:
+                line = f"Weather in {location}: {summary}"
         else:
-            lines = [f"I searched for weather in {location} but couldn't extract conditions from the results."]
-        if sources:
-            lines.append(f"Sources: {', '.join(sources[:3])}")
+            line = f"I searched for weather in {location} but couldn't extract conditions from the results."
+        if url:
+            line += f" Source: [{domain or 'source'}]({url})."
+        return line
+
+    def _render_news_response(self, *, query: str, notes: list[dict[str, Any]]) -> str:
+        topic = re.sub(
+            r"^\s*(?:what's|what is|whats)\s+the\s+latest\s+on\s+|^\s*latest\s+(?:news\s+on|news\s+about|on|about)\s+",
+            "",
+            query,
+            flags=re.IGNORECASE,
+        ).strip(" ?.,!") or query.strip()
+        lines = [f"Latest coverage on {topic}:"]
+        for note in list(notes or [])[:3]:
+            summary = " ".join(str(note.get("summary") or "").split()).strip()
+            fallback_title = str(note.get("result_title") or "").strip()
+            url = str(note.get("result_url") or "").strip()
+            domain = str(note.get("origin_domain") or "").strip()
+            parts = [part.strip() for part in summary.split("|") if part.strip()]
+            source = parts[0] if len(parts) >= 1 else domain
+            published = parts[1] if len(parts) >= 2 and re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[1]) else ""
+            headline = parts[2] if len(parts) >= 3 else fallback_title or summary
+            lead_parts = [item for item in (published, source) if item]
+            lead = " | ".join(lead_parts)
+            line = f"- {headline}"
+            if lead:
+                line = f"- {lead}: {headline}"
+            if url:
+                line += f" [{url}]"
+            lines.append(line)
         return "\n".join(lines)
+
+    def _unresolved_price_lookup_response(self, *, query: str, notes: list[dict[str, Any]], mode: str) -> str:
+        if mode != "fresh_lookup":
+            return ""
+        lowered = " ".join(str(query or "").strip().lower().split())
+        if not any(
+            marker in lowered
+            for marker in (
+                "price",
+                "cost",
+                "worth",
+                "value",
+                "quote",
+                "rate",
+                "market cap",
+                "trading at",
+                "how much",
+            )
+        ):
+            return ""
+        if self._first_live_quote(notes) is not None:
+            return ""
+        if self._notes_include_grounded_price_signal(notes):
+            return ""
+        subject = self._extract_price_lookup_subject(query)
+        if not subject:
+            return ""
+        return (
+            f"I couldn't map `{subject}` to a known traded asset or commodity quote. "
+            "If you mean a stock, token, ETF, or product, give me the exact ticker or full name."
+        )
+
+    def _notes_include_grounded_price_signal(self, notes: list[dict[str, Any]]) -> bool:
+        finance_domains = (
+            "finance.yahoo.com",
+            "coingecko.com",
+            "marketwatch.com",
+            "bloomberg.com",
+            "tradingview.com",
+            "investing.com",
+        )
+        for note in list(notes or []):
+            if not isinstance(note, dict):
+                continue
+            text = " ".join(
+                str(part).strip()
+                for part in (
+                    note.get("summary"),
+                    note.get("result_title"),
+                    note.get("origin_domain"),
+                )
+                if str(part).strip()
+            )
+            lowered = text.lower()
+            domain = str(note.get("origin_domain") or "").strip().lower()
+            if any(finance_domain in domain for finance_domain in finance_domains) and re.search(r"\d", text):
+                return True
+            if re.search(r"[$€£¥]\s?\d", text):
+                return True
+            if re.search(r"\b\d[\d,]*(?:\.\d+)?\s*(?:usd|eur|gbp|jpy|btc|eth)\b", lowered):
+                return True
+            if any(marker in lowered for marker in ("price", "quote", "market cap", "session change", "24h change")) and re.search(r"\d", text):
+                return True
+        return False
+
+    def _extract_price_lookup_subject(self, query: str) -> str:
+        clean = re.sub(r"[\?\!\.,]+", " ", str(query or "")).strip()
+        clean = re.sub(
+            r"\b(?:what\s+is|what's|whats|tell\s+me|show\s+me|price|cost|worth|value|quote|rate|market\s+cap|"
+            r"trading\s+at|how\s+much|current|latest|today|now|right\s+now|for|of|the)\b",
+            " ",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        return " ".join(clean.split()).strip()
 
     def _live_info_failure_text(self, *, query: str, mode: str) -> str:
         if mode == "weather":
@@ -6551,10 +6707,14 @@ class NullaAgent:
         surface = str((source_context or {}).get("surface", "") or "").strip().lower()
         if surface not in {"channel", "openclaw", "api"}:
             return False
-        return result.response_class in {
-            ResponseClass.TASK_SELECTION_CLARIFICATION,
-            ResponseClass.APPROVAL_REQUIRED,
-        }
+        if result.response_class == ResponseClass.TASK_SELECTION_CLARIFICATION:
+            return True
+        if result.response_class != ResponseClass.APPROVAL_REQUIRED:
+            return False
+        lowered = str(result.text or "").strip().lower()
+        if "reply with:" in lowered and "approve " in lowered:
+            return False
+        return True
 
     def _fast_path_response_class(self, *, reason: str, response: str) -> ResponseClass:
         if reason in {"smalltalk_fast_path", "startup_sequence_fast_path"}:
@@ -6632,7 +6792,7 @@ class NullaAgent:
             return ResponseClass.APPROVAL_REQUIRED
         if not success:
             return ResponseClass.TASK_FAILED_USER_SAFE
-        if lowered.startswith("started hive research on") or lowered.startswith("autonomous research on"):
+        if "started hive research on" in lowered or lowered.startswith("autonomous research on"):
             return ResponseClass.TASK_STARTED
         if reason.startswith("model_tool_intent_"):
             return ResponseClass.RESEARCH_PROGRESS
@@ -7496,6 +7656,13 @@ class NullaAgent:
         clean = " ".join(str(user_input or "").split()).strip()
         lowered = clean.lower()
         hive_state = session_hive_state(session_id)
+        if self._is_pending_hive_create_confirmation_input(
+            clean,
+            session_id=session_id,
+            source_context=source_context,
+            hive_state=hive_state,
+        ):
+            return None
 
         active_resume = self._maybe_resume_active_hive_task(
             lowered, session_id=session_id, source_context=source_context, hive_state=hive_state,
@@ -7756,20 +7923,6 @@ class NullaAgent:
                 "Topic stays `researching` because NULLA still needs more evidence before it can honestly mark the task solved."
             )
         response = " ".join(summary)
-        if self._is_chat_truth_surface(source_context):
-            return self._chat_surface_hive_wording_result(
-                session_id=session_id,
-                user_input=clean,
-                source_context=source_context,
-                response_class=ResponseClass.TASK_STARTED,
-                reason="hive_research_followup_model_wording",
-                observations=self._chat_surface_hive_research_result_observations(
-                    topic_id=topic_id,
-                    title=title,
-                    result=result,
-                ),
-                fallback_response=response,
-            )
         return self._fast_path_result(
             session_id=session_id,
             user_input=clean,
@@ -7931,6 +8084,36 @@ class NullaAgent:
 
         title = self._clean_hive_title(str(draft.get("title") or "").strip())
         summary = str(draft.get("summary") or "").strip() or title
+        public_copy = self._prepare_public_hive_topic_copy(
+            raw_input=user_input,
+            title=title,
+            summary=summary,
+        )
+        if not bool(public_copy.get("ok")):
+            return self._action_fast_path_result(
+                task_id=task.task_id,
+                session_id=session_id,
+                user_input=user_input,
+                response=str(public_copy.get("response") or "I won't create that Hive task."),
+                confidence=0.9,
+                source_context=source_context,
+                reason=str(public_copy.get("reason") or "hive_topic_create_privacy_blocked"),
+                success=False,
+                details={
+                    "status": "privacy_blocked",
+                    "privacy_risks": list(public_copy.get("privacy_risks") or []),
+                },
+                mode_override="tool_failed",
+                task_outcome="failed",
+                workflow_summary=self._action_workflow_summary(
+                    operator_kind="hive.create_topic",
+                    dispatch_status="privacy_blocked",
+                    details={"action_id": ""},
+                ),
+            )
+        title = str(public_copy.get("title") or title).strip() or title
+        summary = str(public_copy.get("summary") or summary).strip() or summary
+        preview_note = str(public_copy.get("preview_note") or "")
         topic_tags = [
             str(item).strip()
             for item in list(draft.get("topic_tags") or [])
@@ -7961,12 +8144,14 @@ class NullaAgent:
 
         dup = self._check_hive_duplicate(title, summary)
 
-        self._hive_create_pending[session_id] = {
+        pending = {
             "title": title,
             "summary": summary,
             "topic_tags": topic_tags,
             "task_id": task.task_id,
+            "auto_start_research": bool(draft.get("auto_start_research")),
         }
+        self._remember_hive_create_pending(session_id, pending)
         tag_line = f"\nTags: {', '.join(topic_tags[:6])}" if topic_tags else ""
         dup_warning = ""
         if dup:
@@ -7978,7 +8163,7 @@ class NullaAgent:
             )
         preview = (
             f"Ready to post this to the public Hive:\n\n"
-            f"**{title}**{tag_line}{dup_warning}\n\n"
+            f"**{title}**{tag_line}{dup_warning}{preview_note}\n\n"
             f"Confirm? (yes / no)"
         )
         return self._action_fast_path_result(
@@ -8030,20 +8215,29 @@ class NullaAgent:
         session_id: str,
         source_context: dict[str, object] | None,
     ) -> dict[str, Any] | None:
-        pending = self._hive_create_pending.get(session_id)
+        lowered = user_input.strip()
+        is_positive = bool(
+            self._HIVE_CONFIRM_POSITIVE_STRICT.match(lowered) or self._HIVE_CONFIRM_POSITIVE_LOOSE.match(lowered)
+        )
+        is_negative = bool(self._HIVE_CONFIRM_NEGATIVE.match(lowered))
+        pending = self._load_pending_hive_create(
+            session_id=session_id,
+            source_context=source_context,
+            fallback_task_id=task.task_id,
+            allow_history_recovery=is_positive or is_negative,
+        )
         if pending is None:
             return None
 
-        lowered = user_input.strip()
-        if self._HIVE_CONFIRM_POSITIVE_STRICT.match(lowered) or self._HIVE_CONFIRM_POSITIVE_LOOSE.match(lowered):
-            del self._hive_create_pending[session_id]
+        if is_positive:
+            self._clear_hive_create_pending(session_id)
             return self._execute_confirmed_hive_create(
                 pending, task=task, session_id=session_id, source_context=source_context,
                 user_input=user_input,
             )
 
-        if self._HIVE_CONFIRM_NEGATIVE.match(lowered):
-            del self._hive_create_pending[session_id]
+        if is_negative:
+            self._clear_hive_create_pending(session_id)
             return self._action_fast_path_result(
                 task_id=task.task_id,
                 session_id=session_id,
@@ -8065,6 +8259,53 @@ class NullaAgent:
 
         return None
 
+    def _has_pending_hive_create_confirmation(
+        self,
+        *,
+        session_id: str,
+        hive_state: dict[str, Any],
+        source_context: dict[str, object] | None,
+    ) -> bool:
+        pending = self._hive_create_pending.get(session_id)
+        if pending and str(pending.get("title") or "").strip():
+            return True
+
+        payload = dict(hive_state.get("interaction_payload") or {})
+        stored = dict(payload.get("pending_hive_create") or {})
+        if str(stored.get("title") or "").strip():
+            return True
+
+        recovered = self._recover_hive_create_pending_from_history(
+            history=list((source_context or {}).get("conversation_history") or []),
+            fallback_task_id="",
+        )
+        return recovered is not None
+
+    def _is_pending_hive_create_confirmation_input(
+        self,
+        user_input: str,
+        *,
+        session_id: str,
+        source_context: dict[str, object] | None,
+        hive_state: dict[str, Any] | None = None,
+    ) -> bool:
+        clean = " ".join(str(user_input or "").split()).strip()
+        if not clean:
+            return False
+        is_confirmation = bool(
+            self._HIVE_CONFIRM_POSITIVE_STRICT.match(clean)
+            or self._HIVE_CONFIRM_POSITIVE_LOOSE.match(clean)
+            or self._HIVE_CONFIRM_NEGATIVE.match(clean)
+        )
+        if not is_confirmation:
+            return False
+        state = hive_state or session_hive_state(session_id)
+        return self._has_pending_hive_create_confirmation(
+            session_id=session_id,
+            hive_state=state,
+            source_context=source_context,
+        )
+
     def _execute_confirmed_hive_create(
         self,
         pending: dict[str, Any],
@@ -8078,14 +8319,37 @@ class NullaAgent:
         summary = pending["summary"]
         topic_tags = pending["topic_tags"]
         linked_task_id = pending.get("task_id") or task.task_id
+        auto_start_research = bool(pending.get("auto_start_research")) or self._wants_hive_create_auto_start(user_input)
 
-        result = self.public_hive_bridge.create_public_topic(
-            title=title,
-            summary=summary,
-            topic_tags=topic_tags,
-            linked_task_id=linked_task_id,
-            idempotency_key=f"{linked_task_id}:hive_create",
-        )
+        try:
+            result = self.public_hive_bridge.create_public_topic(
+                title=title,
+                summary=summary,
+                topic_tags=topic_tags,
+                linked_task_id=linked_task_id,
+                idempotency_key=f"{linked_task_id}:hive_create",
+            )
+        except Exception as exc:
+            error_text = str(exc or "").strip()
+            status = "invalid_auth" if "unauthorized" in error_text.lower() else "topic_failed"
+            return self._action_fast_path_result(
+                task_id=task.task_id,
+                session_id=session_id,
+                user_input=user_input,
+                response=self._hive_topic_create_failure_text(status),
+                confidence=0.46,
+                source_context=source_context,
+                reason=f"hive_topic_create_{status}",
+                success=False,
+                details={"status": status, "error": error_text},
+                mode_override="tool_failed",
+                task_outcome="failed",
+                workflow_summary=self._action_workflow_summary(
+                    operator_kind="hive.create_topic",
+                    dispatch_status=status,
+                    details={"action_id": ""},
+                ),
+            )
         topic_id = str(result.get("topic_id") or "").strip()
         if not result.get("ok") or not topic_id:
             status = str(result.get("status") or "topic_failed").strip() or "topic_failed"
@@ -8112,6 +8376,34 @@ class NullaAgent:
             self.hive_activity_tracker.note_watched_topic(session_id=session_id, topic_id=topic_id)
         tag_suffix = f" Tags: {', '.join(topic_tags[:6])}." if topic_tags else ""
         response = f"Created Hive task `{title}` (#{topic_id[:8]}).{tag_suffix}"
+        if auto_start_research:
+            signal = {"topic_id": topic_id, "title": title}
+            self._sync_public_presence(status="busy", source_context=source_context)
+            research_result = research_topic_from_signal(
+                signal,
+                public_hive_bridge=self.public_hive_bridge,
+                curiosity=self.curiosity,
+                hive_activity_tracker=self.hive_activity_tracker,
+                session_id=session_id,
+                auto_claim=True,
+            )
+            if research_result.ok:
+                set_hive_interaction_state(
+                    session_id,
+                    mode="hive_task_active",
+                    payload={
+                        "active_topic_id": topic_id,
+                        "active_title": title,
+                        "claim_id": str(research_result.claim_id or "").strip(),
+                    },
+                )
+                response = f"{response} Started Hive research on `{title}`."
+                if research_result.claim_id:
+                    response = f"{response} Claim `{str(research_result.claim_id)[:8]}` is active."
+            else:
+                failure_text = str(research_result.response_text or "").strip()
+                if failure_text:
+                    response = f"{response} The task is live, but starting research failed: {failure_text}"
         return self._action_fast_path_result(
             task_id=task.task_id,
             session_id=session_id,
@@ -8177,12 +8469,16 @@ class NullaAgent:
 
         sections = {
             "title": re.search(r"\b(?:name it|title|call it|called)\b\s*[:=-]?\s*(.+?)(?=(?:\bsummary\b\s*[:=-])|(?:\b(?:topic tags?|tags?)\b\s*[:=-])|$)", clean, re.IGNORECASE),
+            "task": re.search(r"\btask\b\s*[:=-]\s*(.+?)(?=(?:\b(?:goal|summary)\b\s*[:=-])|(?:\b(?:topic tags?|tags?)\b\s*[:=-])|$)", clean, re.IGNORECASE),
+            "goal": re.search(r"\bgoal\b\s*[:=-]\s*(.+?)(?=(?:\bsummary\b\s*[:=-])|(?:\b(?:topic tags?|tags?)\b\s*[:=-])|$)", clean, re.IGNORECASE),
             "summary": re.search(r"\bsummary\b\s*[:=-]\s*(.+?)(?=(?:\b(?:topic tags?|tags?)\b\s*[:=-])|$)", clean, re.IGNORECASE),
             "tags": re.search(r"\b(?:topic tags?|tags?)\b\s*[:=-]\s*(.+)$", clean, re.IGNORECASE),
         }
         title = ""
         if sections["title"] is not None:
             title = str(sections["title"].group(1) or "")
+        elif sections["task"] is not None:
+            title = str(sections["task"].group(1) or "")
         elif ":" in clean:
             title = clean.rsplit(":", 1)[-1]
         else:
@@ -8210,6 +8506,8 @@ class NullaAgent:
         summary = ""
         if sections["summary"] is not None:
             summary = self._strip_wrapping_quotes(" ".join(str(sections["summary"].group(1) or "").split()).strip().strip("."))
+        elif sections["goal"] is not None:
+            summary = self._strip_wrapping_quotes(" ".join(str(sections["goal"].group(1) or "").split()).strip().strip("."))
         if not summary and title:
             summary = title
 
@@ -8231,7 +8529,262 @@ class NullaAgent:
             "title": title[:180],
             "summary": summary[:4000],
             "topic_tags": topic_tags[:8],
+            "auto_start_research": self._wants_hive_create_auto_start(clean),
         }
+
+    def _remember_hive_create_pending(self, session_id: str, pending: dict[str, Any]) -> None:
+        payload = {
+            "title": str(pending.get("title") or "").strip(),
+            "summary": str(pending.get("summary") or "").strip(),
+            "topic_tags": [
+                str(item).strip()
+                for item in list(pending.get("topic_tags") or [])
+                if str(item).strip()
+            ][:8],
+            "task_id": str(pending.get("task_id") or "").strip(),
+            "auto_start_research": bool(pending.get("auto_start_research")),
+        }
+        self._hive_create_pending[session_id] = dict(payload)
+        set_hive_interaction_state(
+            session_id,
+            mode="hive_topic_create_pending",
+            payload={"pending_hive_create": payload},
+        )
+
+    def _clear_hive_create_pending(self, session_id: str) -> None:
+        self._hive_create_pending.pop(session_id, None)
+        hive_state = session_hive_state(session_id)
+        if str(hive_state.get("interaction_mode") or "").strip().lower() == "hive_topic_create_pending":
+            clear_hive_interaction_state(session_id)
+
+    def _load_pending_hive_create(
+        self,
+        *,
+        session_id: str,
+        source_context: dict[str, object] | None,
+        fallback_task_id: str,
+        allow_history_recovery: bool,
+    ) -> dict[str, Any] | None:
+        pending = self._hive_create_pending.get(session_id)
+        if pending:
+            return dict(pending)
+
+        hive_state = session_hive_state(session_id)
+        payload = dict(hive_state.get("interaction_payload") or {})
+        stored = dict(payload.get("pending_hive_create") or {})
+        if stored and str(stored.get("title") or "").strip():
+            recovered = {
+                "title": str(stored.get("title") or "").strip(),
+                "summary": str(stored.get("summary") or "").strip() or str(stored.get("title") or "").strip(),
+                "topic_tags": [
+                    str(item).strip()
+                    for item in list(stored.get("topic_tags") or [])
+                    if str(item).strip()
+                ][:8],
+                "task_id": str(stored.get("task_id") or "").strip() or fallback_task_id,
+                "auto_start_research": bool(stored.get("auto_start_research")),
+            }
+            self._hive_create_pending[session_id] = dict(recovered)
+            return recovered
+
+        if not allow_history_recovery:
+            return None
+        recovered = self._recover_hive_create_pending_from_history(
+            history=list((source_context or {}).get("conversation_history") or []),
+            fallback_task_id=fallback_task_id,
+        )
+        if recovered is not None:
+            self._remember_hive_create_pending(session_id, recovered)
+        return recovered
+
+    def _recover_hive_create_pending_from_history(
+        self,
+        *,
+        history: list[dict[str, Any]],
+        fallback_task_id: str,
+    ) -> dict[str, Any] | None:
+        recent_messages = [dict(item) for item in list(history or [])[-8:] if isinstance(item, dict)]
+        assistant_preview: str = ""
+        latest_user_draft: dict[str, Any] | None = None
+        for message in reversed(recent_messages):
+            role = str(message.get("role") or "").strip().lower()
+            content = str(message.get("content") or "")
+            if not content:
+                continue
+            if not assistant_preview and role == "assistant" and "ready to post this to the public hive" in content.lower():
+                assistant_preview = content
+            if latest_user_draft is None and role == "user":
+                draft = self._extract_hive_topic_create_draft(content)
+                if draft is not None and str(draft.get("title") or "").strip():
+                    latest_user_draft = draft
+            if assistant_preview and latest_user_draft is not None:
+                break
+
+        preview_title = ""
+        preview_tags: list[str] = []
+        if assistant_preview:
+            title_match = re.search(
+                r"Ready to post this to the public Hive:\s*\*\*(.+?)\*\*",
+                assistant_preview,
+                re.IGNORECASE | re.DOTALL,
+            )
+            if title_match is not None:
+                preview_title = self._clean_hive_title(self._strip_wrapping_quotes(" ".join(str(title_match.group(1) or "").split())))
+            tag_match = re.search(r"\bTags:\s*(.+?)(?:\n|$)", assistant_preview, re.IGNORECASE)
+            if tag_match is not None:
+                preview_tags = [
+                    normalized
+                    for normalized in (
+                        self._normalize_hive_topic_tag(item)
+                        for item in re.split(r"[,;|/]+", str(tag_match.group(1) or ""))
+                    )
+                    if normalized
+                ][:8]
+
+        if not preview_title and latest_user_draft is None:
+            return None
+
+        title = preview_title or str((latest_user_draft or {}).get("title") or "").strip()
+        if not title:
+            return None
+        return {
+            "title": title,
+            "summary": str((latest_user_draft or {}).get("summary") or "").strip() or title,
+            "topic_tags": preview_tags or [
+                str(item).strip()
+                for item in list((latest_user_draft or {}).get("topic_tags") or [])
+                if str(item).strip()
+            ][:8],
+            "task_id": fallback_task_id,
+            "auto_start_research": bool((latest_user_draft or {}).get("auto_start_research")),
+        }
+
+    @staticmethod
+    def _wants_hive_create_auto_start(text: str) -> bool:
+        compact = " ".join(str(text or "").split()).strip().lower()
+        if not compact:
+            return False
+        return any(
+            phrase in compact
+            for phrase in (
+                "start working on it",
+                "start working on this",
+                "start on it",
+                "start on this",
+                "start researching",
+                "start research",
+                "work on it",
+                "work on this",
+                "research it",
+                "research this",
+                "go ahead and start",
+                "create it and start",
+                "post it and start",
+                "start there",
+            )
+        )
+
+    def _prepare_public_hive_topic_copy(
+        self,
+        *,
+        raw_input: str,
+        title: str,
+        summary: str,
+    ) -> dict[str, Any]:
+        clean_title = " ".join(str(title or "").split()).strip()
+        clean_summary = " ".join(str(summary or "").split()).strip() or clean_title
+        if self._looks_like_raw_chat_transcript(raw_input) and not self._has_structured_hive_public_brief(raw_input):
+            return {
+                "ok": False,
+                "reason": "hive_topic_create_transcript_blocked",
+                "privacy_risks": ["raw_chat_transcript"],
+                "response": (
+                    "That looks like a raw chat log/transcript. I won't dump private chat into the public Hive. "
+                    "Give me a public-safe brief in plain language, or mark the shareable parts with `Task:` and optional `Goal:`. "
+                    "I can still keep the raw chat local."
+                ),
+            }
+
+        original_risks = text_privacy_risks(f"{clean_title}\n{clean_summary}")
+        sanitized_title = self._sanitize_public_hive_text(clean_title)
+        sanitized_summary = self._sanitize_public_hive_text(clean_summary) or sanitized_title
+        remaining_risks = text_privacy_risks(f"{sanitized_title}\n{sanitized_summary}")
+        hard_risks = [
+            risk
+            for risk in list(original_risks or [])
+            if risk.startswith("restricted_term:") or risk in _HIVE_CREATE_HARD_PRIVACY_RISKS
+        ]
+        unresolved_risks = [
+            risk
+            for risk in list(remaining_risks or [])
+            if risk.startswith("restricted_term:") or risk in _HIVE_CREATE_HARD_PRIVACY_RISKS or risk in {"email", "filesystem_path", "secret_assignment", "openai_key", "github_token", "aws_access_key", "slack_token"}
+        ]
+        if hard_risks or unresolved_risks:
+            risk_labels = ", ".join((hard_risks or unresolved_risks)[:4])
+            return {
+                "ok": False,
+                "reason": "hive_topic_create_privacy_blocked",
+                "privacy_risks": hard_risks or unresolved_risks,
+                "response": (
+                    "I won't create that Hive task because the public brief still looks private "
+                    f"({risk_labels}). I can help rewrite it into a public-safe research brief."
+                ),
+            }
+
+        preview_note = ""
+        if sanitized_title != clean_title or sanitized_summary != clean_summary:
+            redacted_labels = [
+                risk
+                for risk in list(original_risks or [])
+                if risk not in _HIVE_CREATE_HARD_PRIVACY_RISKS and not risk.startswith("restricted_term:")
+            ]
+            if not redacted_labels:
+                redacted_labels = ["private_fields"]
+            preview_note = (
+                "\n\nSafety: I redacted private-looking fields before preview "
+                f"({', '.join(redacted_labels[:4])})."
+            )
+
+        return {
+            "ok": True,
+            "title": sanitized_title[:180],
+            "summary": sanitized_summary[:4000],
+            "preview_note": preview_note,
+            "privacy_risks": original_risks,
+        }
+
+    @staticmethod
+    def _sanitize_public_hive_text(text: str) -> str:
+        sanitized = redact_text(str(text or ""))
+        sanitized = re.sub(r"\s+", " ", sanitized).strip()
+        return sanitized
+
+    @staticmethod
+    def _has_structured_hive_public_brief(text: str) -> bool:
+        clean = " ".join(str(text or "").split()).strip()
+        if not clean:
+            return False
+        return bool(
+            re.search(r"\b(?:task|goal|summary|title|name it|call it|called)\b\s*[:=-]", clean, re.IGNORECASE)
+        )
+
+    @staticmethod
+    def _looks_like_raw_chat_transcript(text: str) -> bool:
+        raw = str(text or "")
+        if not raw.strip():
+            return False
+        hits = 0
+        patterns = (
+            r"(?m)^\s*(?:NULLA|You|User|Assistant|U)\s*$",
+            r"\b\d{1,2}:\d{2}\b",
+            r"(?m)^\s*/new\s*$",
+            r"∅",
+            r"(?m)^\s*(?:U|A)\s*$",
+        )
+        for pattern in patterns:
+            if re.search(pattern, raw, re.IGNORECASE):
+                hits += 1
+        return hits >= 2
 
     def _looks_like_hive_topic_create_request(self, lowered: str) -> bool:
         text = str(lowered or "").strip().lower()
@@ -8303,6 +8856,8 @@ class NullaAgent:
             return "Public Hive is not enabled on this runtime, so I can't create a live Hive task. Hive truth: future/unsupported."
         if normalized == "missing_auth":
             return "Hive task creation is disabled here because public Hive auth is not configured for writes. Hive truth: future/unsupported."
+        if normalized == "invalid_auth":
+            return "Hive task creation is configured, but the live Hive rejected this runtime's write auth. I need to refresh public Hive auth before posting."
         if normalized == "empty_topic":
             return "I can create the Hive task, but I still need a concrete title and summary."
         return "I couldn't create that Hive task."
