@@ -8,6 +8,7 @@ from pathlib import Path
 from core.runtime_paths import data_path
 
 DEFAULT_DB_PATH = data_path("nulla_web0_v2.db")
+_DEFAULT_DB_PATH_OVERRIDE: str | None = None
 
 _thread_local = threading.local()
 
@@ -71,6 +72,29 @@ class _PooledConnection:
         return getattr(self._conn, name)
 
 
+def reset_default_connection() -> None:
+    """Drop the cached default SQLite connection for the current thread."""
+    cached: _PooledConnection | None = getattr(_thread_local, "default_conn", None)
+    if cached is None:
+        return
+    with contextlib.suppress(Exception):
+        if cached._conn.in_transaction:
+            cached._conn.rollback()
+    with contextlib.suppress(Exception):
+        cached._real_close()
+    _thread_local.default_conn = None
+
+
+def configure_default_db_path(db_path: str | Path | None) -> None:
+    global _DEFAULT_DB_PATH_OVERRIDE
+    reset_default_connection()
+    _DEFAULT_DB_PATH_OVERRIDE = None if db_path is None else _resolve_db_path(db_path)
+
+
+def active_default_db_path() -> str:
+    return _DEFAULT_DB_PATH_OVERRIDE or _resolve_db_path(DEFAULT_DB_PATH)
+
+
 def get_connection(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     """Return a thread-local reusable SQLite connection.
 
@@ -78,12 +102,15 @@ def get_connection(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     the overhead of re-opening and re-running PRAGMAs on every call.
     Non-default paths always get a fresh connection.
     """
-    resolved = _resolve_db_path(db_path)
-    default_resolved = _resolve_db_path(DEFAULT_DB_PATH)
+    requested_resolved = _resolve_db_path(db_path)
+    base_default_resolved = _resolve_db_path(DEFAULT_DB_PATH)
+    effective_db_path = active_default_db_path() if requested_resolved == base_default_resolved else requested_resolved
+    resolved = _resolve_db_path(effective_db_path)
+    default_resolved = active_default_db_path()
 
     # Non-default path: always fresh (used for test isolation etc.)
     if resolved != default_resolved:
-        return _make_connection(db_path)
+        return _make_connection(resolved)
 
     # Thread-local reuse for the default path
     cached: _PooledConnection | None = getattr(_thread_local, "default_conn", None)
@@ -94,8 +121,9 @@ def get_connection(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
         except Exception:
             with contextlib.suppress(Exception):
                 cached._real_close()
+            _thread_local.default_conn = None
 
-    conn = _make_connection(db_path)
+    conn = _make_connection(resolved)
     pooled = _PooledConnection(conn)
     _thread_local.default_conn = pooled
     return pooled  # type: ignore[return-value]

@@ -10,21 +10,43 @@ CONFIG_HOME_DIR = (NULLA_HOME / "config").resolve()
 DOCS_DIR = (PROJECT_ROOT / "docs").resolve()
 PROJECT_CONFIG_DIR = (PROJECT_ROOT / "config").resolve()
 WORKSPACE_DIR = (PROJECT_ROOT / "workspace").resolve()
+_NULLA_HOME_OVERRIDE: Path | None = None
+
+
+def configure_runtime_home(path: str | Path | None) -> None:
+    global _NULLA_HOME_OVERRIDE
+    _NULLA_HOME_OVERRIDE = None if path is None else Path(path).expanduser().resolve()
+
+
+def active_nulla_home() -> Path:
+    return (_NULLA_HOME_OVERRIDE or Path(os.environ.get("NULLA_HOME", NULLA_HOME))).resolve()
+
+
+def active_data_dir() -> Path:
+    return (active_nulla_home() / "data").resolve()
+
+
+def active_config_home_dir() -> Path:
+    return (active_nulla_home() / "config").resolve()
+
+
+def active_workspace_dir() -> Path:
+    return WORKSPACE_DIR.resolve()
 
 
 def ensure_runtime_dirs() -> None:
-    for path in (NULLA_HOME, DATA_DIR, CONFIG_HOME_DIR, DOCS_DIR, WORKSPACE_DIR):
+    for path in (active_nulla_home(), active_data_dir(), active_config_home_dir(), DOCS_DIR, active_workspace_dir()):
         path.mkdir(parents=True, exist_ok=True)
 
 
 def data_path(*parts: str) -> Path:
     ensure_runtime_dirs()
-    return DATA_DIR.joinpath(*parts).resolve()
+    return active_data_dir().joinpath(*parts).resolve()
 
 
 def config_path(*parts: str) -> Path:
     ensure_runtime_dirs()
-    candidate = CONFIG_HOME_DIR.joinpath(*parts)
+    candidate = active_config_home_dir().joinpath(*parts)
     if candidate.exists():
         return candidate.resolve()
     return PROJECT_CONFIG_DIR.joinpath(*parts).resolve()
@@ -41,4 +63,4 @@ def docs_path(*parts: str) -> Path:
 
 def workspace_path(*parts: str) -> Path:
     ensure_runtime_dirs()
-    return WORKSPACE_DIR.joinpath(*parts).resolve()
+    return active_workspace_dir().joinpath(*parts).resolve()

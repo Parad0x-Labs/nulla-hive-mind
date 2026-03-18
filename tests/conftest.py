@@ -18,7 +18,7 @@ from core.persistent_memory import (
 )
 from core.runtime_continuity import configure_runtime_continuity_db_path, reset_runtime_continuity_state
 from core.user_preferences import default_preferences, save_preferences
-from storage.db import DEFAULT_DB_PATH, get_connection
+from storage.db import active_default_db_path, get_connection, reset_default_connection
 from storage.migrations import run_migrations
 
 RUNTIME_TABLES = (
@@ -102,7 +102,8 @@ def memory_hit_decision(*, output_text: str = "", trust_score: float = 0.82) -> 
 
 @pytest.fixture(autouse=True)
 def runtime_storage_reset() -> None:
-    configure_runtime_continuity_db_path(DEFAULT_DB_PATH)
+    reset_default_connection()
+    configure_runtime_continuity_db_path(active_default_db_path())
     run_migrations()
     ensure_memory_files()
     reset_runtime_continuity_state()
@@ -117,6 +118,7 @@ def runtime_storage_reset() -> None:
         conn.commit()
     finally:
         conn.close()
+    reset_default_connection()
 
     memory_path().write_text(MEMORY_TEMPLATE, encoding="utf-8")
     conversation_log_path().write_text("", encoding="utf-8")

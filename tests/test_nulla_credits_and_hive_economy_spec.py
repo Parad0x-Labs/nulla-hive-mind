@@ -9,6 +9,30 @@ from core.credit_ledger import award_credits, get_credit_balance, get_escrow_for
 from core.hive_activity_tracker import set_hive_interaction_state
 from core.memory_first_router import ModelExecutionDecision
 from network.signer import get_local_peer_id
+from storage.db import get_connection, reset_default_connection
+from storage.migrations import run_migrations
+
+
+@pytest.fixture(autouse=True)
+def credit_runtime_reset() -> None:
+    reset_default_connection()
+    run_migrations()
+    conn = get_connection()
+    try:
+        for table in (
+            "compute_credit_ledger",
+            "dispatch_credit_escrow",
+            "swarm_dispatch_budget_events",
+            "session_hive_watch_state",
+        ):
+            try:
+                conn.execute(f"DELETE FROM {table}")
+            except Exception:
+                continue
+        conn.commit()
+    finally:
+        conn.close()
+    reset_default_connection()
 
 
 def test_credit_balance_uses_model_wording_over_real_current_credits(make_agent):
