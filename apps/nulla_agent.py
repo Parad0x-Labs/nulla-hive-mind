@@ -105,7 +105,7 @@ from core.tool_intent_executor import (
     supported_public_capability_tags,
 )
 from core.user_preferences import load_preferences, maybe_handle_preference_command
-from network.signer import get_local_peer_id
+from network import signer as signer_mod
 from retrieval.swarm_query import dispatch_query_shard
 from retrieval.web_adapter import WebAdapter
 from storage.db import get_connection
@@ -1235,13 +1235,11 @@ class NullaAgent:
         session_id: str,
         source_context: dict[str, object] | None = None,
     ) -> dict | None:
-        from network.signer import get_local_peer_id
-
         send_match = self._CREDIT_SEND_RE.search(user_input)
         if send_match:
             amount = float(send_match.group(1))
             target_peer = send_match.group(2).strip()
-            peer_id = get_local_peer_id()
+            peer_id = signer_mod.get_local_peer_id()
             ok = transfer_credits(peer_id, target_peer, amount, reason="chat_transfer")
             if ok:
                 response = f"Sent {amount:.2f} credits to {target_peer}. Your new balance: {get_credit_balance(peer_id):.2f}."
@@ -1263,7 +1261,7 @@ class NullaAgent:
         spend_match = self._CREDIT_SPEND_RE.search(user_input)
         if spend_match:
             amount = float(spend_match.group(1))
-            peer_id = get_local_peer_id()
+            peer_id = signer_mod.get_local_peer_id()
             hive_state = session_hive_state(session_id)
             interaction_payload = dict(hive_state.get("interaction_payload") or {})
             active_topic_id = str(interaction_payload.get("active_topic_id") or "").strip()
@@ -3821,8 +3819,7 @@ class NullaAgent:
 
         try:
             from core.nullabook_identity import get_profile, update_profile
-            from network.signer import get_local_peer_id
-            profile = get_profile(get_local_peer_id())
+            profile = get_profile(signer_mod.get_local_peer_id())
         except Exception:
             profile = None
 
@@ -3958,8 +3955,7 @@ class NullaAgent:
 
         try:
             from core.nullabook_identity import get_profile, update_profile
-            from network.signer import get_local_peer_id
-            peer_id = get_local_peer_id()
+            peer_id = signer_mod.get_local_peer_id()
             profile = get_profile(peer_id)
         except Exception:
             profile = None
@@ -4072,8 +4068,7 @@ class NullaAgent:
                 return self._nullabook_result(session_id, user_input, source_context, "Post can't be empty.")
             try:
                 from core.nullabook_identity import get_profile
-                from network.signer import get_local_peer_id
-                profile = get_profile(get_local_peer_id())
+                profile = get_profile(signer_mod.get_local_peer_id())
             except Exception:
                 profile = None
             if not profile:
@@ -4088,8 +4083,7 @@ class NullaAgent:
                 return self._nullabook_result(session_id, user_input, source_context, "Name can't be empty.")
             try:
                 from core.nullabook_identity import get_profile, update_profile
-                from network.signer import get_local_peer_id
-                profile = get_profile(get_local_peer_id())
+                profile = get_profile(signer_mod.get_local_peer_id())
             except Exception:
                 profile = None
             if not profile:
@@ -4152,8 +4146,7 @@ class NullaAgent:
 
         try:
             from core.nullabook_identity import get_profile, register_nullabook_account
-            from network.signer import get_local_peer_id
-            peer_id = get_local_peer_id()
+            peer_id = signer_mod.get_local_peer_id()
             register_nullabook_account(handle, peer_id=peer_id)
             profile = get_profile(peer_id)
             if profile:
@@ -4576,9 +4569,8 @@ class NullaAgent:
         from core.credit_ledger import reconcile_ledger
         from core.dna_wallet_manager import DNAWalletManager
         from core.scoreboard_engine import get_peer_scoreboard
-        from network.signer import get_local_peer_id
 
-        peer_id = get_local_peer_id()
+        peer_id = signer_mod.get_local_peer_id()
         ledger = reconcile_ledger(peer_id)
         scoreboard = get_peer_scoreboard(peer_id)
         wallet_status = DNAWalletManager().get_status()
@@ -7850,7 +7842,7 @@ class NullaAgent:
             self._last_user_activity_ts = time.time()
 
     def _idle_commons_session_id(self) -> str:
-        return f"agent-commons:{get_local_peer_id()}"
+        return f"agent-commons:{signer_mod.get_local_peer_id()}"
 
     def _normalize_public_presence_status(self, status: str) -> str:
         lowered = str(status or "idle").strip().lower()
@@ -8990,9 +8982,7 @@ class NullaAgent:
         tag_suffix = f" Tags: {', '.join(topic_tags[:6])}." if topic_tags else ""
         response = f"Created Hive task `{title}` (#{topic_id[:8]}).{tag_suffix}"
         if estimated_cost > 0:
-            from network.signer import get_local_peer_id
-
-            peer_id = get_local_peer_id()
+            peer_id = signer_mod.get_local_peer_id()
             if escrow_credits_for_task(
                 peer_id,
                 topic_id,

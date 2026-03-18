@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import re
+import uuid
 from unittest import mock
 
 import pytest
 
+import network.signer as signer_mod
 from core.credit_ledger import award_credits, get_credit_balance, get_escrow_for_task
 from core.hive_activity_tracker import set_hive_interaction_state
 from core.memory_first_router import ModelExecutionDecision
-from network.signer import get_local_peer_id
 from storage.db import get_connection, reset_default_connection
 from storage.migrations import run_migrations
 
@@ -35,7 +36,14 @@ def credit_runtime_reset() -> None:
     reset_default_connection()
 
 
-def test_credit_balance_uses_model_wording_over_real_current_credits(make_agent):
+@pytest.fixture
+def stable_agent_peer(monkeypatch) -> str:
+    peer_id = f"credit-peer-{uuid.uuid4().hex}"
+    monkeypatch.setattr(signer_mod, "get_local_peer_id", lambda: peer_id)
+    return peer_id
+
+
+def test_credit_balance_uses_model_wording_over_real_current_credits(make_agent, stable_agent_peer):
     agent = make_agent()
     agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
         return_value=ModelExecutionDecision(
@@ -48,7 +56,7 @@ def test_credit_balance_uses_model_wording_over_real_current_credits(make_agent)
             trust_score=0.84,
         )
     )
-    peer_id = get_local_peer_id()
+    peer_id = stable_agent_peer
     award_credits(peer_id, 12.0, "test_award", receipt_id="credit-balance-test")
 
     result = agent.run_once(
@@ -62,7 +70,8 @@ def test_credit_balance_uses_model_wording_over_real_current_credits(make_agent)
     assert "12.00 compute credits" in result["response"]
 
 
-def test_credit_status_explains_current_reward_contract(make_agent):
+def test_credit_status_explains_current_reward_contract(make_agent, stable_agent_peer):
+    del stable_agent_peer
     agent = make_agent()
     agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
         return_value=ModelExecutionDecision(
@@ -91,9 +100,9 @@ def test_credit_status_explains_current_reward_contract(make_agent):
     assert "rewarded assist tasks and accepted results" in lowered
 
 
-def test_chat_can_spend_credits_to_prioritize_hive_task(make_agent):
+def test_chat_can_spend_credits_to_prioritize_hive_task(make_agent, stable_agent_peer):
     agent = make_agent()
-    peer_id = get_local_peer_id()
+    peer_id = stable_agent_peer
     assert award_credits(peer_id, 50.0, "priority_seed", receipt_id="priority-seed")
     assert get_credit_balance(peer_id) >= 50.0
     session_id = "openclaw:credit-priority-task"
@@ -118,9 +127,9 @@ def test_chat_can_spend_credits_to_prioritize_hive_task(make_agent):
     assert escrow["total_escrowed"] >= 10.0
 
 
-def test_chat_can_transfer_credits_to_another_peer(make_agent):
+def test_chat_can_transfer_credits_to_another_peer(make_agent, stable_agent_peer):
     agent = make_agent()
-    peer_id = get_local_peer_id()
+    peer_id = stable_agent_peer
     assert award_credits(peer_id, 20.0, "transfer_seed", receipt_id="transfer-seed")
     assert get_credit_balance(peer_id) >= 20.0
 
@@ -133,9 +142,9 @@ def test_chat_can_transfer_credits_to_another_peer(make_agent):
     assert "sent 5.00 credits" in result["response"].lower()
 
 
-def test_credit_status_reports_glory_score_and_tier(make_agent):
+def test_credit_status_reports_glory_score_and_tier(make_agent, stable_agent_peer):
     agent = make_agent()
-    peer_id = get_local_peer_id()
+    peer_id = stable_agent_peer
     award_credits(peer_id, 3.0, "score-glance", receipt_id="score-glance")
 
     result = agent.run_once(
@@ -149,11 +158,9 @@ def test_credit_status_reports_glory_score_and_tier(make_agent):
     assert "tier" in lowered
 
 
-def test_credit_status_can_list_recent_credit_receipts(make_agent):
-    import uuid
-
+def test_credit_status_can_list_recent_credit_receipts(make_agent, stable_agent_peer):
     agent = make_agent()
-    peer_id = get_local_peer_id()
+    peer_id = stable_agent_peer
     tag = uuid.uuid4().hex[:8]
     receipt_id = f"recent-receipt-{tag}"
     assert award_credits(peer_id, 4.25, "recent_receipt_seed", receipt_id=receipt_id)
@@ -170,11 +177,9 @@ def test_credit_status_can_list_recent_credit_receipts(make_agent):
     assert "+4.25" in result["response"]
 
 
-def test_hive_task_create_reserves_estimated_reward_pool(make_agent):
-    import uuid
-
+def test_hive_task_create_reserves_estimated_reward_pool(make_agent, stable_agent_peer):
     agent = make_agent()
-    peer_id = get_local_peer_id()
+    peer_id = stable_agent_peer
     session_id = f"openclaw:hive-credit-create-{uuid.uuid4().hex[:8]}"
     topic_id = f"topic-{uuid.uuid4().hex}"
     seed_receipt = f"hive-create-seed-{uuid.uuid4().hex[:8]}"
