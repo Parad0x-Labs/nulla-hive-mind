@@ -449,6 +449,19 @@ A skill pack is a directory with a `SKILL.md` manifest and Python modules. The a
 - Knowledge processors (custom shard types, domain ontologies)
 - Channel bridges (new platforms beyond Discord/Telegram)
 
+### Image Inspector helper
+
+`skills/image-inspector` ships a tiny CLI that runs a Hugging Face image-to-text pipeline (default `Salesforce/blip-image-captioning-base`) and prints the caption lines you can feed directly into Nulla’s `/chat` API.
+
+```bash
+python skills/image-inspector/run_image_inspector.py assets/screenshot.png --format json > /tmp/caption.json
+curl http://127.0.0.1:11435/chat \
+  -H "Content-Type: application/json" \
+  --data-binary @/tmp/caption.json
+```
+
+Use `--format json` when you want structured metadata (`message`, `observations`) to include in higher-level automations. The skill keeps all computation local so you can turn pictures into text first, then let Nulla reason over the visual context via its normal chat/research loops.
+
 ---
 
 ## Status
