@@ -1438,6 +1438,8 @@ def _clear_meet_tables() -> None:
             "meet_nodes",
             "meet_sync_state",
             "payment_status",
+            "agent_capabilities",
+            "peers",
             "peer_endpoints",
             "identity_revocations",
             "identity_key_history",
@@ -1450,3 +1452,32 @@ def _clear_meet_tables() -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def test_clear_meet_tables_clears_peer_trust_rows() -> None:
+    run_migrations()
+    peer_id = get_local_peer_id()
+    now = _now().isoformat()
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO peers (
+                peer_id, display_alias, trust_score, successful_shards, failed_shards,
+                strike_count, status, last_seen_at, created_at, updated_at
+            ) VALUES (?, ?, ?, 0, 0, 0, 'active', ?, ?, ?)
+            """,
+            (peer_id, "local-test-peer", 0.95, now, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    _clear_meet_tables()
+
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT 1 FROM peers WHERE peer_id = ? LIMIT 1", (peer_id,)).fetchone()
+    finally:
+        conn.close()
+    assert row is None
