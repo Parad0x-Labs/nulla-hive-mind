@@ -27,6 +27,7 @@ def test_docs_home_only_points_to_curated_entry_docs() -> None:
     assert "STATUS.md" in docs_home
     assert "SYSTEM_SPINE.md" in docs_home
     assert "CONTROL_PLANE.md" in docs_home
+    assert "PLATFORM_REFACTOR_PLAN.md" in docs_home
     assert "PROOF_PATH.md" in docs_home
     assert "TRUST.md" in docs_home
     assert "archive/README.md" in docs_home
@@ -52,6 +53,7 @@ def test_docs_root_is_curated_after_archive_sweep() -> None:
         "MODEL_PROVIDER_POLICY.md",
         "NULLA_OPENCLAW_TOOL_DOCTRINE.md",
         "OVERNIGHT_SOAK_RUNBOOK.md",
+        "PLATFORM_REFACTOR_PLAN.md",
         "PROOF_PATH.md",
         "PROOF_PASS_REPORT.md",
         "PUBLIC_LAUNCH_READINESS.md",
@@ -86,6 +88,7 @@ def test_repo_map_points_to_canonical_roots_and_archive_policy() -> None:
     assert "CONTRIBUTING.md" in repo_map
     assert "docs/SYSTEM_SPINE.md" in repo_map
     assert "docs/CONTROL_PLANE.md" in repo_map
+    assert "docs/PLATFORM_REFACTOR_PLAN.md" in repo_map
     assert "docs/PROOF_PATH.md" in repo_map
     assert "apps/README.md" in repo_map
     assert "core/README.md" in repo_map
@@ -108,6 +111,22 @@ def test_package_maps_exist_and_define_boundaries() -> None:
     for relative_path, marker in package_docs.items():
         body = (REPO_ROOT / relative_path).read_text(encoding="utf-8").lower()
         assert marker in body
+
+
+def test_platform_refactor_plan_tracks_current_high_risk_modules_and_gate_order() -> None:
+    plan = (REPO_ROOT / "docs" / "PLATFORM_REFACTOR_PLAN.md").read_text(encoding="utf-8")
+
+    assert "apps/nulla_agent.py" in plan
+    assert "core/brain_hive_dashboard.py" in plan
+    assert "core/tool_intent_executor.py" in plan
+    assert "core/public_hive_bridge.py" in plan
+    assert "core/local_operator_actions.py" in plan
+    assert "core/control_plane_workspace.py" in plan
+    assert "apps/nulla_api_server.py" in plan
+    assert "apps/brain_hive_watch_server.py" in plan
+    assert "Phase 1 - Extract `core/execution/`" in plan
+    assert "Phase 6 - Split `core/control_plane_workspace.py`" in plan
+    assert "pytest tests/ -q" in plan
 
 
 def test_status_page_stays_honest_about_ci_and_proof_posture() -> None:

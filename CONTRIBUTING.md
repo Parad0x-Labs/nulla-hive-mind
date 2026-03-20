@@ -17,7 +17,9 @@ Read in this order:
 1. [`README.md`](README.md)
 2. [`docs/SYSTEM_SPINE.md`](docs/SYSTEM_SPINE.md)
 3. [`docs/STATUS.md`](docs/STATUS.md)
-4. [`docs/PROOF_PATH.md`](docs/PROOF_PATH.md)
+4. [`docs/CONTROL_PLANE.md`](docs/CONTROL_PLANE.md)
+5. [`docs/PLATFORM_REFACTOR_PLAN.md`](docs/PLATFORM_REFACTOR_PLAN.md)
+6. [`docs/PROOF_PATH.md`](docs/PROOF_PATH.md)
 
 ## Fast Repo Map
 

@@ -27,7 +27,7 @@ Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `976 passed, 11 skipped, 11 xfailed, 18 xpassed, 1 warning` |
+| Full suite result | `1011 passed, 11 skipped, 20 xfailed, 10 xpassed, 1 warning` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -52,7 +52,7 @@ Current test gate on this checkpoint:
 | **Proof-of-useful-work** | **Works** | Glory scores, receipts, evidence-based grading, and partial-result paths are present. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. |
 | **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, and build on every push. Local full gate currently `976 passed, 11 skipped, 11 xfailed, 18 xpassed, 1 warning`; check Actions for the latest branch conclusion. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, and build on every push. Local full gate currently `1011 passed, 11 skipped, 20 xfailed, 10 xpassed, 1 warning`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist. Not yet proven at scale over internet. |
 | **DHT routing** | **Partial** | Code exists. Not hardened as public routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
@@ -86,12 +86,12 @@ Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `976 passed, 11 skipped, 11 xfailed, 18 xpassed, 1 warning` |
-| Passing | 976 |
+| Full suite result | `1011 passed, 11 skipped, 20 xfailed, 10 xpassed, 1 warning` |
+| Passing | 1011 |
 | Skipped | 11 |
-| Expected failures (xfail) | 11 |
-| Unexpected passes (xpass) | 18 |
-| Test files | 133 |
+| Expected failures (xfail) | 20 |
+| Unexpected passes (xpass) | 10 |
+| Test files | 145 |
 
 Run `pytest tests/ -v` to reproduce.
 

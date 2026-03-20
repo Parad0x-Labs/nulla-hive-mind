@@ -47,3 +47,5 @@ These files currently carry too much blast radius:
 
 Do not casually grow them.
 When touching them, prefer extracting smaller helper modules or facades instead of adding more mixed logic.
+
+Use `docs/PLATFORM_REFACTOR_PLAN.md` as the current extraction order and regression gate for these files.
