@@ -490,7 +490,7 @@ def render_report(
         *wrong_before_green,
         "",
         "Notes:",
-        "- Runtime build is still dirty because the acceptance fixes and harness are not committed yet.",
+        "- Runtime build is still dirty because the local worktree still has unrelated modifications outside this acceptance pass.",
         "- Live lookup passed locally, but it only counts as final because the manual spot-check was performed separately.",
         "- Helper mesh and public Hive remain alpha surfaces; this acceptance only certifies the local runtime profile tested here.",
         "",
