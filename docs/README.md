@@ -39,6 +39,7 @@ NULLA is a local-first AI agent runtime. It starts on your machine, uses memory 
 
 ## Operations And Proof
 
+- [LOCAL_ACCEPTANCE.md](LOCAL_ACCEPTANCE.md)
 - [PUBLIC_LAUNCH_READINESS.md](PUBLIC_LAUNCH_READINESS.md)
 - [OVERNIGHT_SOAK_RUNBOOK.md](OVERNIGHT_SOAK_RUNBOOK.md)
 - [CUMULATIVE_STABILIZATION.md](CUMULATIVE_STABILIZATION.md)

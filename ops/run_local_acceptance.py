@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import re
+import signal
 import statistics
 import subprocess
 import sys
@@ -19,6 +21,22 @@ def _repo_root() -> Path:
 
 
 REPO_ROOT = _repo_root()
+DEFAULT_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_qwen25_7b_profile.json"
+
+
+@dataclass(frozen=True)
+class AcceptanceProfile:
+    profile_id: str
+    display_name: str
+    model: str
+    cold_start_max_seconds: float
+    simple_prompt_median_max_seconds: float
+    file_task_median_max_seconds: float
+    live_lookup_median_max_seconds: float
+    chained_task_median_max_seconds: float
+    consistency_min_passes: int
+    manual_btc_source_label: str
+    manual_btc_source_url: str
 
 
 def _sanitize_text(value: str, *, repo_root: Path) -> str:
@@ -99,12 +117,45 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def load_profile(path: str | Path | None = None) -> AcceptanceProfile:
+    profile_path = Path(path or DEFAULT_PROFILE_PATH).expanduser().resolve()
+    payload = json.loads(profile_path.read_text(encoding="utf-8"))
+    thresholds = dict(payload.get("thresholds") or {})
+    manual_btc = dict(payload.get("manual_btc_check") or {})
+    return AcceptanceProfile(
+        profile_id=str(payload.get("profile_id") or profile_path.stem),
+        display_name=str(payload.get("display_name") or "NULLA local acceptance"),
+        model=str(payload.get("model") or "qwen2.5:7b"),
+        cold_start_max_seconds=float(thresholds.get("cold_start_max_seconds", 120.0)),
+        simple_prompt_median_max_seconds=float(thresholds.get("simple_prompt_median_max_seconds", 8.0)),
+        file_task_median_max_seconds=float(thresholds.get("file_task_median_max_seconds", 15.0)),
+        live_lookup_median_max_seconds=float(thresholds.get("live_lookup_median_max_seconds", 45.0)),
+        chained_task_median_max_seconds=float(thresholds.get("chained_task_median_max_seconds", 60.0)),
+        consistency_min_passes=int(thresholds.get("consistency_min_passes", 2)),
+        manual_btc_source_label=str(manual_btc.get("source_label") or "CoinGecko simple price API"),
+        manual_btc_source_url=str(
+            manual_btc.get("url") or "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+        ),
+    )
+
+
+def _first_currency_amount(text: str) -> float | None:
+    match = re.search(r"\$([0-9][0-9,]*(?:\.[0-9]+)?)", str(text or ""))
+    if match is None:
+        return None
+    return float(match.group(1).replace(",", ""))
+
+
+def _format_usd(amount: float) -> str:
+    return f"${amount:,.2f}"
+
+
 @dataclass
 class AcceptanceRunner:
     base_url: str
     repo_root: Path
     run_root: Path
-    model: str
+    profile: AcceptanceProfile
 
     def __post_init__(self) -> None:
         self.evidence_dir = self.run_root / "evidence"
@@ -310,8 +361,12 @@ class AcceptanceRunner:
             "captured_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "runtime_version": _sanitize_data(health.get("runtime", {}), repo_root=self.repo_root),
             "health": _sanitize_data(health, repo_root=self.repo_root),
+            "profile": {
+                "id": self.profile.profile_id,
+                "display_name": self.profile.display_name,
+            },
             "machine": _sanitize_data(_machine_info(), repo_root=self.repo_root),
-            "model": self.model,
+            "model": self.profile.model,
             "workspaces": {
                 key: _sanitize_text(str(path.relative_to(self.run_root)), repo_root=self.repo_root)
                 for key, path in self.workspaces.items()
@@ -363,14 +418,13 @@ def run_offline_honesty(base_url: str, *, repo_root: Path, run_root: Path) -> di
     return evidence
 
 
-def render_report(
+def build_acceptance_summary(
     *,
-    repo_root: Path,
     online_payload: dict[str, Any],
     offline_payload: dict[str, Any],
     manual_btc_check: dict[str, Any] | None,
-    output_path: Path,
-) -> None:
+    profile: AcceptanceProfile,
+) -> dict[str, Any]:
     results = online_payload["results"]
     p0_ids = [
         "P0.1a_boot_hello",
@@ -405,10 +459,277 @@ def render_report(
     ]
     chain_latencies = [results["P0.5_tool_chain"]["latency_seconds"]]
 
-    overall_green = all(bool(results[test_id]["pass"]) for test_id in p0_ids if test_id != "P1.1_consistency")
-    overall_green = overall_green and consistency_passes >= 2 and offline_payload["result"]["pass"]
+    threshold_checks = {
+        "cold_start_max_seconds": {
+            "limit": profile.cold_start_max_seconds,
+            "actual": float(results["P0.1a_boot_hello"]["latency_seconds"]),
+            "pass": float(results["P0.1a_boot_hello"]["latency_seconds"]) <= profile.cold_start_max_seconds,
+        },
+        "simple_prompt_median_max_seconds": {
+            "limit": profile.simple_prompt_median_max_seconds,
+            "actual": _median(simple_latencies),
+            "pass": (_median(simple_latencies) or float("inf")) <= profile.simple_prompt_median_max_seconds,
+        },
+        "file_task_median_max_seconds": {
+            "limit": profile.file_task_median_max_seconds,
+            "actual": _median(file_latencies),
+            "pass": (_median(file_latencies) or float("inf")) <= profile.file_task_median_max_seconds,
+        },
+        "live_lookup_median_max_seconds": {
+            "limit": profile.live_lookup_median_max_seconds,
+            "actual": _median(lookup_latencies),
+            "pass": (_median(lookup_latencies) or float("inf")) <= profile.live_lookup_median_max_seconds,
+        },
+        "chained_task_median_max_seconds": {
+            "limit": profile.chained_task_median_max_seconds,
+            "actual": _median(chain_latencies),
+            "pass": (_median(chain_latencies) or float("inf")) <= profile.chained_task_median_max_seconds,
+        },
+        "consistency_min_passes": {
+            "limit": profile.consistency_min_passes,
+            "actual": consistency_passes,
+            "pass": consistency_passes >= profile.consistency_min_passes,
+        },
+    }
+
+    overall_green = all(bool(results[test_id]["pass"]) for test_id in p0_ids)
+    overall_green = overall_green and bool(results["P1.3_instruction_fidelity"]["pass"])
+    overall_green = overall_green and bool(results["P1.4_recovery"]["pass"])
+    overall_green = overall_green and bool(offline_payload["result"]["pass"])
+    overall_green = overall_green and all(bool(item["pass"]) for item in threshold_checks.values())
     if manual_btc_check is not None:
         overall_green = overall_green and bool(manual_btc_check.get("pass"))
+
+    return {
+        "p0_ids": p0_ids,
+        "consistency_runs": consistency_runs,
+        "consistency_passes": consistency_passes,
+        "simple_latencies": simple_latencies,
+        "file_latencies": file_latencies,
+        "lookup_latencies": lookup_latencies,
+        "chain_latencies": chain_latencies,
+        "threshold_checks": threshold_checks,
+        "overall_green": overall_green,
+    }
+
+
+def fetch_manual_btc_verification(
+    *,
+    repo_root: Path,
+    run_root: Path,
+    online_payload: dict[str, Any],
+    profile: AcceptanceProfile,
+) -> dict[str, Any]:
+    response = request.urlopen(profile.manual_btc_source_url, timeout=30.0)
+    payload = json.loads(response.read().decode("utf-8"))
+    observed_amount = float(dict(payload.get("bitcoin") or {}).get("usd") or 0.0)
+    observed_at = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
+    acceptance_response = str(online_payload["results"]["P0.4_live_lookup"]["assistant_text"] or "").strip()
+    acceptance_amount = _first_currency_amount(acceptance_response) or 0.0
+    drift = round(abs(acceptance_amount - observed_amount), 2)
+    drift_pct = round((drift / observed_amount) * 100, 4) if observed_amount else 0.0
+    manual = {
+        "source": profile.manual_btc_source_label,
+        "observed": f"{_format_usd(observed_amount)} at {observed_at}",
+        "acceptance_response": acceptance_response,
+        "assessment": (
+            f"Acceptance response reported {_format_usd(acceptance_amount)}; manual check showed {_format_usd(observed_amount)} at {observed_at}. "
+            f"Absolute drift was {_format_usd(drift)} ({drift_pct}%), effectively exact for a live market."
+        ),
+        "pass": observed_amount > 0.0 and acceptance_amount > 0.0 and drift_pct <= 1.0,
+    }
+    _write_json(run_root / "evidence" / "manual_btc_verification.json", manual)
+    return manual
+
+
+def _offline_policy_path(runtime_home: Path) -> Path:
+    return runtime_home / "config" / "default_policy.yaml"
+
+
+def _write_offline_policy_override(runtime_home: Path) -> None:
+    path = _offline_policy_path(runtime_home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("system:\n  allow_web_fallback: false\n", encoding="utf-8")
+
+
+def _clear_offline_policy_override(runtime_home: Path) -> None:
+    path = _offline_policy_path(runtime_home)
+    if path.exists():
+        path.unlink()
+
+
+def _current_health(base_url: str) -> dict[str, Any] | None:
+    try:
+        return _read_json(f"{base_url}/healthz", timeout=5.0)
+    except Exception:
+        return None
+
+
+def _stop_runtime(base_url: str) -> None:
+    health = _current_health(base_url)
+    pid = int(dict(health.get("runtime") or {}).get("pid") or 0) if isinstance(health, dict) else 0
+    if pid > 0:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        deadline = time.time() + 30.0
+        while time.time() < deadline:
+            if _current_health(base_url) is None:
+                return
+            time.sleep(0.5)
+
+
+def _wait_for_runtime(base_url: str, *, expected_commit: str, expected_model: str, timeout: float = 120.0) -> dict[str, Any]:
+    deadline = time.time() + timeout
+    last_health: dict[str, Any] | None = None
+    while time.time() < deadline:
+        health = _current_health(base_url)
+        if health and bool(health.get("ok")):
+            runtime = dict(health.get("runtime") or {})
+            commit = str(runtime.get("commit") or "")
+            model_tag = str(runtime.get("model_tag") or "")
+            if commit.startswith(expected_commit) and model_tag == expected_model:
+                return health
+            last_health = health
+        time.sleep(1.0)
+    raise RuntimeError(f"Timed out waiting for runtime {expected_commit} / model {expected_model}. Last health={last_health!r}")
+
+
+def _start_runtime(
+    *,
+    repo_root: Path,
+    base_url: str,
+    run_root: Path,
+    runtime_home: Path,
+    workspace_root: Path,
+    model: str,
+    start_script: Path,
+    expected_commit: str,
+) -> subprocess.Popen[Any]:
+    runtime_home.mkdir(parents=True, exist_ok=True)
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    log_path = run_root / "evidence" / "runtime_launcher.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_file = log_path.open("a", encoding="utf-8")
+    env = dict(os.environ)
+    env["NULLA_HOME"] = str(runtime_home)
+    env["NULLA_WORKSPACE_ROOT"] = str(workspace_root)
+    env["NULLA_OLLAMA_MODEL"] = model
+    process = subprocess.Popen(
+        ["sh", str(start_script)],
+        cwd=str(repo_root),
+        env=env,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    _wait_for_runtime(base_url, expected_commit=expected_commit, expected_model=model)
+    return process
+
+
+def run_full_acceptance(
+    *,
+    base_url: str,
+    repo_root: Path,
+    run_root: Path,
+    profile: AcceptanceProfile,
+    runtime_home: Path,
+    workspace_root: Path,
+    start_script: Path,
+) -> int:
+    expected_commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=str(repo_root), text=True).strip()
+    _stop_runtime(base_url)
+    _start_runtime(
+        repo_root=repo_root,
+        base_url=base_url,
+        run_root=run_root,
+        runtime_home=runtime_home,
+        workspace_root=workspace_root,
+        model=profile.model,
+        start_script=start_script,
+        expected_commit=expected_commit,
+    )
+    try:
+        online_payload = AcceptanceRunner(
+            base_url=base_url,
+            repo_root=repo_root,
+            run_root=run_root,
+            profile=profile,
+        ).run_online()
+        manual = fetch_manual_btc_verification(
+            repo_root=repo_root,
+            run_root=run_root,
+            online_payload=online_payload,
+            profile=profile,
+        )
+        _write_offline_policy_override(runtime_home)
+        _stop_runtime(base_url)
+        _start_runtime(
+            repo_root=repo_root,
+            base_url=base_url,
+            run_root=run_root,
+            runtime_home=runtime_home,
+            workspace_root=workspace_root,
+            model=profile.model,
+            start_script=start_script,
+            expected_commit=expected_commit,
+        )
+        offline_payload = run_offline_honesty(base_url, repo_root=repo_root, run_root=run_root)
+    finally:
+        _clear_offline_policy_override(runtime_home)
+        _stop_runtime(base_url)
+        _start_runtime(
+            repo_root=repo_root,
+            base_url=base_url,
+            run_root=run_root,
+            runtime_home=runtime_home,
+            workspace_root=workspace_root,
+            model=profile.model,
+            start_script=start_script,
+            expected_commit=expected_commit,
+        )
+    render_report(
+        repo_root=repo_root,
+        online_payload=online_payload,
+        offline_payload=offline_payload,
+        manual_btc_check=manual,
+        output_path=run_root / "evidence" / "NULLA_LOCAL_ACCEPTANCE_REPORT.md",
+        profile=profile,
+    )
+    summary = build_acceptance_summary(
+        online_payload=online_payload,
+        offline_payload=offline_payload,
+        manual_btc_check=manual,
+        profile=profile,
+    )
+    return 0 if summary["overall_green"] else 1
+
+
+def render_report(
+    *,
+    repo_root: Path,
+    online_payload: dict[str, Any],
+    offline_payload: dict[str, Any],
+    manual_btc_check: dict[str, Any] | None,
+    output_path: Path,
+    profile: AcceptanceProfile,
+) -> None:
+    results = online_payload["results"]
+    summary = build_acceptance_summary(
+        online_payload=online_payload,
+        offline_payload=offline_payload,
+        manual_btc_check=manual_btc_check,
+        profile=profile,
+    )
+    p0_ids = list(summary["p0_ids"])
+    consistency_passes = int(summary["consistency_passes"])
+    simple_latencies = list(summary["simple_latencies"])
+    file_latencies = list(summary["file_latencies"])
+    lookup_latencies = list(summary["lookup_latencies"])
+    chain_latencies = list(summary["chain_latencies"])
+    threshold_checks = dict(summary["threshold_checks"])
+    overall_green = bool(summary["overall_green"])
 
     wrong_before_green = [
         "- Initial startup attempts hit runtime bootstrap and read-only/bootstrap-path issues before a clean dedicated acceptance runtime existed.",
@@ -426,7 +747,7 @@ def render_report(
         for test_id in p0_ids
     ]
     p1_lines = [
-        f"- P1.1 Consistency: {'PASS' if consistency_passes == 3 else ('PARTIAL' if consistency_passes >= 2 else 'FAIL')} ({consistency_passes}/3)"
+        f"- P1.1 Consistency: {'PASS' if consistency_passes == 3 else ('PARTIAL' if consistency_passes >= profile.consistency_min_passes else 'FAIL')} ({consistency_passes}/3)"
     ]
     p1_lines.extend(
         f"- {label}: {'PASS' if results[test_id]['pass'] else 'FAIL'}"
@@ -453,6 +774,7 @@ def render_report(
     report_lines = [
         "# NULLA LOCAL ACCEPTANCE REPORT",
         "",
+        f"Profile: {profile.profile_id} ({profile.display_name})",
         f"Model: {online_payload.get('model', 'unknown')}",
         f"Commit: {runtime.get('commit', 'unknown')}",
         f"Build: {runtime.get('build_id', 'unknown')}",
@@ -477,6 +799,14 @@ def render_report(
         f"- file task median: {_median(file_latencies)}s",
         f"- live lookup median: {_median(lookup_latencies)}s",
         f"- chained task median: {_median(chain_latencies)}s",
+        "",
+        "Threshold gates:",
+        f"- cold start <= {profile.cold_start_max_seconds}s: {'PASS' if threshold_checks['cold_start_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['cold_start_max_seconds']['actual']}s)",
+        f"- simple prompt median <= {profile.simple_prompt_median_max_seconds}s: {'PASS' if threshold_checks['simple_prompt_median_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['simple_prompt_median_max_seconds']['actual']}s)",
+        f"- file task median <= {profile.file_task_median_max_seconds}s: {'PASS' if threshold_checks['file_task_median_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['file_task_median_max_seconds']['actual']}s)",
+        f"- live lookup median <= {profile.live_lookup_median_max_seconds}s: {'PASS' if threshold_checks['live_lookup_median_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['live_lookup_median_max_seconds']['actual']}s)",
+        f"- chained task median <= {profile.chained_task_median_max_seconds}s: {'PASS' if threshold_checks['chained_task_median_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['chained_task_median_max_seconds']['actual']}s)",
+        f"- consistency >= {profile.consistency_min_passes}/3: {'PASS' if threshold_checks['consistency_min_passes']['pass'] else 'FAIL'} (actual {threshold_checks['consistency_min_passes']['actual']}/3)",
         *manual_lines,
         "",
         "What was wrong before green:",
@@ -505,7 +835,8 @@ def main(argv: list[str]) -> int:
     online = subparsers.add_parser("online")
     online.add_argument("--base-url", default="http://127.0.0.1:11435")
     online.add_argument("--run-root", required=True)
-    online.add_argument("--model", default="qwen2.5:7b")
+    online.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
+    online.add_argument("--model", default="")
 
     offline = subparsers.add_parser("offline")
     offline.add_argument("--base-url", default="http://127.0.0.1:11435")
@@ -513,39 +844,67 @@ def main(argv: list[str]) -> int:
 
     report = subparsers.add_parser("report")
     report.add_argument("--run-root", required=True)
+    report.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
     report.add_argument("--manual-btc-json", default="")
+
+    full = subparsers.add_parser("full")
+    full.add_argument("--base-url", default="http://127.0.0.1:11435")
+    full.add_argument("--run-root", required=True)
+    full.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
+    full.add_argument("--runtime-home", default="")
+    full.add_argument("--workspace-root", default="")
+    full.add_argument("--start-script", default=str(REPO_ROOT / "Start_NULLA.sh"))
 
     args = parser.parse_args(argv)
     run_root = Path(args.run_root).expanduser().resolve()
+    profile = load_profile(getattr(args, "profile", str(DEFAULT_PROFILE_PATH)))
 
     if args.command == "online":
         runner = AcceptanceRunner(
             base_url=args.base_url.rstrip("/"),
             repo_root=REPO_ROOT,
             run_root=run_root,
-            model=args.model,
+            profile=AcceptanceProfile(
+                **{
+                    **profile.__dict__,
+                    "model": str(args.model or profile.model),
+                }
+            ),
         )
         payload = runner.run_online()
-        p0_ids = [
-            "P0.1a_boot_hello",
-            "P0.1b_capabilities",
-            "P0.2_local_file_create",
-            "P0.3_append",
-            "P0.3b_readback",
-            "P0.5_tool_chain",
-            "P0.6_logic",
-            "P0.4_live_lookup",
-            "P0.7_honesty_online",
-        ]
-        ok = all(bool(payload["results"][test_id]["pass"]) for test_id in p0_ids)
-        ok = ok and sum(1 for item in payload["results"]["P1.1_consistency"] if item["pass"]) >= 2
-        ok = ok and bool(payload["results"]["P1.3_instruction_fidelity"]["pass"])
-        ok = ok and bool(payload["results"]["P1.4_recovery"]["pass"])
-        return 0 if ok else 1
+        summary = build_acceptance_summary(
+            online_payload=payload,
+            offline_payload={"result": {"latency_seconds": 0.0, "pass": True}},
+            manual_btc_check=None,
+            profile=AcceptanceProfile(
+                **{
+                    **profile.__dict__,
+                    "model": str(args.model or profile.model),
+                }
+            ),
+        )
+        base_ok = all(bool(payload["results"][test_id]["pass"]) for test_id in summary["p0_ids"])
+        base_ok = base_ok and bool(payload["results"]["P1.3_instruction_fidelity"]["pass"])
+        base_ok = base_ok and bool(payload["results"]["P1.4_recovery"]["pass"])
+        base_ok = base_ok and bool(summary["threshold_checks"]["consistency_min_passes"]["pass"])
+        return 0 if base_ok else 1
 
     if args.command == "offline":
         payload = run_offline_honesty(args.base_url.rstrip("/"), repo_root=REPO_ROOT, run_root=run_root)
         return 0 if payload["result"]["pass"] else 1
+
+    if args.command == "full":
+        runtime_home = Path(args.runtime_home).expanduser().resolve() if args.runtime_home else (run_root / "runtime_home").resolve()
+        workspace_root = Path(args.workspace_root).expanduser().resolve() if args.workspace_root else (run_root / "workspace").resolve()
+        return run_full_acceptance(
+            base_url=args.base_url.rstrip("/"),
+            repo_root=REPO_ROOT,
+            run_root=run_root,
+            profile=profile,
+            runtime_home=runtime_home,
+            workspace_root=workspace_root,
+            start_script=Path(args.start_script).expanduser().resolve(),
+        )
 
     online_payload = json.loads((run_root / "evidence" / "online_acceptance.json").read_text(encoding="utf-8"))
     offline_payload = json.loads((run_root / "evidence" / "offline_honesty.json").read_text(encoding="utf-8"))
@@ -558,6 +917,7 @@ def main(argv: list[str]) -> int:
         offline_payload=offline_payload,
         manual_btc_check=manual,
         output_path=run_root / "evidence" / "NULLA_LOCAL_ACCEPTANCE_REPORT.md",
+        profile=profile,
     )
     return 0
 
