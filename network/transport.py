@@ -71,6 +71,21 @@ def _frag_timeout_seconds() -> float:
     return float(policy_engine.get("system.fragment_timeout_seconds", 30.0))
 
 
+def _udp_socket_buffer_bytes() -> int:
+    configured = int(policy_engine.get("system.udp_socket_buffer_bytes", 0) or 0)
+    if configured > 0:
+        return configured
+    return max(1_048_576, _message_limit() * 2)
+
+
+def _fragment_burst_packets() -> int:
+    return max(1, int(policy_engine.get("system.fragment_burst_packets", 8) or 8))
+
+
+def _fragment_pause_seconds() -> float:
+    return max(0.0, float(policy_engine.get("system.fragment_pause_seconds", 0.001) or 0.0))
+
+
 def _mesh_psk_bytes() -> bytes | None:
     raw = os.environ.get("NULLA_MESH_PSK_B64") or str(policy_engine.get("system.mesh_psk_b64", "") or "")
     raw = raw.strip()
@@ -201,6 +216,14 @@ def _kill_stale_udp_holder(port: int) -> bool:
     return False
 
 
+def _configure_udp_socket_buffers(sock: socket.socket) -> None:
+    buffer_bytes = _udp_socket_buffer_bytes()
+    with contextlib.suppress(OSError):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, buffer_bytes)
+    with contextlib.suppress(OSError):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, buffer_bytes)
+
+
 @dataclass
 class TransportRuntime:
     host: str
@@ -253,6 +276,7 @@ class UDPTransportServer:
             )
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        _configure_udp_socket_buffers(sock)
         try:
             sock.bind((self.host, self.port))
         except OSError as bind_err:
@@ -505,6 +529,8 @@ def _send_fragmented(host: str, port: int, payload: bytes, *, timeout_seconds: f
     if total > 65535:
         return False
     transfer_id = uuid4().hex
+    burst_packets = _fragment_burst_packets()
+    pause_seconds = _fragment_pause_seconds()
     try:
         with _get_send_socket(timeout_seconds) as sock:
             for index in range(total):
@@ -515,6 +541,8 @@ def _send_fragmented(host: str, port: int, payload: bytes, *, timeout_seconds: f
                 sent = sock.sendto(packet, (host, port))
                 if sent != len(packet):
                     return False
+                if pause_seconds > 0 and index + 1 < total and (index + 1) % burst_packets == 0:
+                    time.sleep(pause_seconds)
         return True
     except Exception:
         return False
@@ -522,5 +550,6 @@ def _send_fragmented(host: str, port: int, payload: bytes, *, timeout_seconds: f
 
 def _get_send_socket(timeout_seconds: float) -> socket.socket:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    _configure_udp_socket_buffers(sock)
     sock.settimeout(timeout_seconds)
     return sock

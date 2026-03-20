@@ -3,10 +3,10 @@ from __future__ import annotations
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from network.chunk_protocol import chunk_payload, chunk_to_dict, decode_frame, encode_frame, manifest_to_dict
-from network.transport import UDPTransportServer, send_message
+from network.transport import UDPTransportServer, _configure_udp_socket_buffers, send_message
 from storage.migrations import run_migrations
 
 
@@ -25,6 +25,9 @@ class TransportLargePayloadTests(unittest.TestCase):
             "system.enable_udp_fragmentation": True,
             "system.max_fragment_buckets": 2048,
             "system.fragment_timeout_seconds": 30.0,
+            "system.udp_socket_buffer_bytes": 524288,
+            "system.fragment_burst_packets": 4,
+            "system.fragment_pause_seconds": 0.0005,
             "system.require_mesh_encryption": False,
             "system.stream_tls_enabled": False,
             "system.stream_tls_certfile": "",
@@ -64,6 +67,41 @@ class TransportLargePayloadTests(unittest.TestCase):
             self.assertTrue(ok)
             self.assertTrue(signal.wait(timeout=5.0))
             self.assertEqual(received[-1], payload)
+        finally:
+            server.stop()
+
+    def test_fragmented_udp_delivery_survives_small_burst_sequence(self) -> None:
+        received: list[bytes] = []
+        signal = threading.Event()
+
+        def _on_message(data: bytes, _addr: tuple[str, int]) -> None:
+            received.append(data)
+            signal.set()
+
+        server = UDPTransportServer(host="127.0.0.1", port=0, on_message=_on_message)
+        try:
+            with patch("network.stun_client.discover_public_endpoint", return_value=None), patch(
+                "network.transport.policy_engine.get",
+                side_effect=self._transport_policy,
+            ):
+                runtime = server.start()
+        except PermissionError:
+            self.skipTest("Local UDP socket binds are not permitted in this sandbox.")
+
+        try:
+            payloads = [b"C" * 70000, b"D" * 71000, b"E" * 72000]
+            for payload in payloads:
+                with patch("network.transport._stream_enabled", return_value=False), patch(
+                    "network.transport.policy_engine.get",
+                    side_effect=self._transport_policy,
+                ):
+                    ok = send_message("127.0.0.1", runtime.port, payload)
+                self.assertTrue(ok)
+            deadline = time.time() + 6.0
+            while len(received) < len(payloads) and time.time() < deadline:
+                signal.wait(timeout=0.25)
+                signal.clear()
+            self.assertEqual(received, payloads)
         finally:
             server.stop()
 
@@ -144,6 +182,14 @@ class TransportLargePayloadTests(unittest.TestCase):
 
         self.assertTrue(signal.wait(timeout=1.0))
         self.assertEqual(received[-1], payload)
+
+    def test_udp_socket_buffers_are_raised_for_large_transfers(self) -> None:
+        sock = Mock()
+
+        with patch("network.transport.policy_engine.get", side_effect=self._transport_policy):
+            _configure_udp_socket_buffers(sock)
+
+        self.assertEqual(sock.setsockopt.call_count, 2)
 
 
 if __name__ == "__main__":
