@@ -1245,9 +1245,9 @@ def _extract_workspace_file_plan(
         paths = [_clean_workspace_file_path(item.strip(), base_dir=base_dir) for item in str(exact_multi.group("paths") or "").split(",")]
         contents = [item.strip() for item in str(exact_multi.group("contents") or "").split(",")]
         writes = [
-            {"path": path, "content": content, "mode": "write"}
-            for path, content in zip(paths, contents)
-            if path and content
+            {"path": path, "content": contents[index], "mode": "write"}
+            for index, path in enumerate(paths)
+            if path and index < len(contents) and contents[index]
         ]
         if writes:
             list_path = base_dir

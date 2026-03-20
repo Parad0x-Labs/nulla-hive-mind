@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import platform
 import re
 import statistics
@@ -384,12 +383,6 @@ def render_report(
         "P0.4_live_lookup",
         "P0.7_honesty_online",
     ]
-    p1_ids = [
-        "P1.1_consistency",
-        "P1.3_instruction_fidelity",
-        "P1.4_recovery",
-    ]
-
     consistency_runs = results["P1.1_consistency"]
     consistency_passes = sum(1 for item in consistency_runs if item["pass"])
     simple_latencies = [
