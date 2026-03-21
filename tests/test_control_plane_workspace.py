@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from core.control_plane import metrics_views as control_plane_metrics_views
 import core.control_plane_workspace as control_plane_workspace
 from core.control_plane import policies as control_plane_policies
 from core.control_plane import queue_views as control_plane_queue_views
@@ -38,6 +39,26 @@ class ControlPlaneWorkspaceTests(unittest.TestCase):
                 table_exists_fn=control_plane_workspace._table_exists,
             ),
         )
+
+    def test_control_plane_workspace_facade_reuses_extracted_metrics_views(self) -> None:
+        conn = mock.Mock()
+        conn.execute.return_value.fetchone.return_value = None
+        conn.execute.return_value.fetchall.return_value = []
+
+        with mock.patch("core.control_plane_workspace._utcnow", return_value="2026-03-21T00:00:00+00:00"), mock.patch(
+            "core.control_plane_workspace._utc_day_bucket",
+            return_value="2026-03-21",
+        ):
+            self.assertEqual(
+                control_plane_workspace._load_swarm_budget_summary(conn),
+                control_plane_metrics_views.load_swarm_budget_summary(
+                    conn,
+                    table_exists_fn=control_plane_workspace._table_exists,
+                    utc_day_bucket_fn=control_plane_workspace._utc_day_bucket,
+                    utcnow_fn=control_plane_workspace._utcnow,
+                    policy_getter=control_plane_workspace.policy_engine.get,
+                ),
+            )
         self.assertEqual(
             control_plane_workspace._load_runtime_checkpoints(conn, limit=5),
             control_plane_runtime_views.load_runtime_checkpoints(
