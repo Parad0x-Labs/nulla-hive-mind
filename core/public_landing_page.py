@@ -3,28 +3,30 @@ from __future__ import annotations
 from core.public_site_shell import (
     DOCS_URL,
     INSTALL_URL,
+    PUBLIC_STATUS_PATH,
     REPO_URL,
-    STATUS_URL,
+    STATUS_DOC_URL,
+    canonical_public_url,
     public_site_base_styles,
     render_landing_header,
+    render_public_canonical_meta,
+    render_public_route_index,
     render_public_site_footer,
 )
 
 
-def render_public_landing_page_html() -> str:
+def render_public_landing_page_html(*, canonical_url: str = "") -> str:
+    page_title = "NULLA · Local-first agent runtime"
+    page_description = "Run NULLA locally, check the work, and verify the proof when it matters."
+    canonical_url = canonical_url or canonical_public_url("/")
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>NULLA · Local-first agent runtime</title>
-<meta name="description" content="Run an agent locally, inspect the work, and verify the proof when it matters."/>
-<meta property="og:title" content="NULLA · Local-first agent runtime"/>
-<meta property="og:description" content="NULLA keeps execution local, shows public evidence when work matters, and stays explicit about what is already real."/>
-<meta property="og:type" content="website"/>
-<meta name="twitter:card" content="summary_large_image"/>
-<meta name="twitter:title" content="NULLA · Local-first agent runtime"/>
-<meta name="twitter:description" content="Run locally. Inspect the work. Verify the proof."/>
+<title>{page_title}</title>
+<meta name="description" content="{page_description}"/>
+{render_public_canonical_meta(canonical_url=canonical_url, og_title=page_title, og_description="NULLA keeps execution local, shows public evidence when work matters, and stays explicit about what is already real.")}
 <style>
 {public_site_base_styles()}
 .nl-page {{
@@ -32,8 +34,8 @@ def render_public_landing_page_html() -> str:
 }}
 .nl-hero {{
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
-  gap: 20px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  gap: 14px;
   align-items: stretch;
 }}
 .nl-panel,
@@ -45,60 +47,48 @@ def render_public_landing_page_html() -> str:
 .nl-final {{
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius);
 }}
 .nl-hero-main {{
-  padding: 32px;
-  position: relative;
-  overflow: hidden;
-}}
-.nl-hero-main::before {{
-  content: "";
-  position: absolute;
-  inset: 18px 18px auto auto;
-  width: 120px;
-  height: 120px;
-  border-top: 1px solid rgba(196, 125, 66, 0.2);
-  border-right: 1px solid rgba(196, 125, 66, 0.2);
-  opacity: 0.8;
+  padding: 24px;
 }}
 .nl-eyebrow {{
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(196, 125, 66, 0.22);
-  background: rgba(196, 125, 66, 0.08);
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 11px;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }}
 .nl-hero h1 {{
-  margin: 18px 0 14px;
-  max-width: 12ch;
+  margin: 14px 0 10px;
+  max-width: 13ch;
   font-family: var(--font-display);
-  font-size: clamp(42px, 7vw, 78px);
-  line-height: 0.94;
-  letter-spacing: -0.06em;
+  font-size: clamp(34px, 5vw, 56px);
+  line-height: 1;
+  letter-spacing: -0.05em;
 }}
 .nl-hero p {{
   margin: 0;
   max-width: 62ch;
   color: var(--text-muted);
-  font-size: 15px;
-  line-height: 1.72;
+  font-size: 14px;
+  line-height: 1.6;
 }}
 .nl-hero-actions {{
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 26px;
+  gap: 10px;
+  margin-top: 18px;
 }}
 .nl-mini-note {{
-  margin-top: 14px;
+  margin-top: 10px;
   color: var(--text-dim);
   font-size: 12px;
   text-transform: uppercase;
@@ -107,21 +97,21 @@ def render_public_landing_page_html() -> str:
 .nl-proof-strip {{
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 24px;
+  gap: 8px;
+  margin-top: 18px;
 }}
 .nl-proof-chip {{
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255,255,255,0.02);
-  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 10px 12px;
 }}
 .nl-proof-chip strong {{
   display: block;
   color: var(--paper-strong);
-  font-family: var(--font-display);
-  font-size: 22px;
-  letter-spacing: -0.04em;
+  font-family: var(--font-ui);
+  font-size: 18px;
+  letter-spacing: -0.02em;
 }}
 .nl-proof-chip span {{
   display: block;
@@ -133,16 +123,16 @@ def render_public_landing_page_html() -> str:
   text-transform: uppercase;
 }}
 .nl-hero-side {{
-  padding: 20px;
+  padding: 14px;
   display: grid;
-  gap: 14px;
+  gap: 10px;
   align-content: start;
 }}
 .nl-side-card {{
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px 18px;
-  background: rgba(255,255,255,0.02);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  background: transparent;
 }}
 .nl-side-title,
 .nl-label {{
@@ -154,31 +144,31 @@ def render_public_landing_page_html() -> str:
 }}
 .nl-side-card strong {{
   display: block;
-  margin-top: 8px;
+  margin-top: 6px;
   color: var(--paper-strong);
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1.2;
 }}
 .nl-side-card p {{
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: var(--text-muted);
-  line-height: 1.68;
-  font-size: 14px;
+  line-height: 1.55;
+  font-size: 13px;
 }}
 .nl-side-meta,
 .nl-inline-links,
 .nl-builder-links {{
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 16px;
+  gap: 8px;
+  margin-top: 12px;
 }}
 .nl-meta-pill {{
   display: inline-flex;
   align-items: center;
-  min-height: 30px;
-  padding: 0 10px;
-  border-radius: 8px;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   color: var(--text-muted);
   font-family: var(--font-mono);
@@ -187,11 +177,11 @@ def render_public_landing_page_html() -> str:
   text-transform: uppercase;
 }}
 .nl-terminal {{
-  margin-top: 12px;
+  margin-top: 10px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #0b0d10;
-  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 8px 10px;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-muted);
@@ -206,21 +196,21 @@ def render_public_landing_page_html() -> str:
   margin-right: 8px;
 }}
 .nl-section {{
-  margin-top: 22px;
+  margin-top: 16px;
 }}
 .nl-section-head {{
   display: grid;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 6px;
+  margin-bottom: 10px;
 }}
 .nl-section h2,
 .nl-builder h2,
 .nl-final h2 {{
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(32px, 5vw, 50px);
-  line-height: 0.98;
-  letter-spacing: -0.05em;
+  font-size: clamp(22px, 3vw, 30px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
 }}
 .nl-section-copy,
 .nl-panel p,
@@ -230,15 +220,15 @@ def render_public_landing_page_html() -> str:
 .nl-final p {{
   margin: 0;
   color: var(--text-muted);
-  font-size: 15px;
-  line-height: 1.72;
+  font-size: 14px;
+  line-height: 1.58;
 }}
 .nl-grid-2,
 .nl-grid-3,
 .nl-grid-4,
 .nl-builder {{
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }}
 .nl-grid-2 {{
   grid-template-columns: minmax(0, 1.08fr) minmax(280px, 0.92fr);
@@ -254,15 +244,15 @@ def render_public_landing_page_html() -> str:
 .nl-surface-card,
 .nl-builder,
 .nl-final {{
-  padding: 22px;
+  padding: 16px;
 }}
 .nl-panel h3,
 .nl-status-card h3,
 .nl-surface-card h3 {{
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   color: var(--paper-strong);
-  font-size: 18px;
-  letter-spacing: -0.03em;
+  font-size: 16px;
+  letter-spacing: -0.02em;
 }}
 .nl-lane {{
   display: grid;
@@ -286,8 +276,9 @@ def render_public_landing_page_html() -> str:
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: 8px;
-  background: rgba(196, 125, 66, 0.14);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid var(--border);
   color: var(--paper-strong);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -318,9 +309,9 @@ def render_public_landing_page_html() -> str:
   align-items: center;
   min-height: 32px;
   padding: 0 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: rgba(255,255,255,0.03);
+  background: transparent;
   color: var(--text);
 }}
 .nl-inline-links a:hover,
@@ -378,33 +369,33 @@ def render_public_landing_page_html() -> str:
 <main class="ns-shell nl-page">
   <section class="nl-hero">
     <div class="nl-hero-main">
-      <div class="nl-eyebrow">Local-first agent runtime</div>
-      <h1>Run an agent locally. Inspect the work. Verify the proof.</h1>
-      <p>NULLA keeps execution, memory, and tools on your machine. When work needs outside coordination, the public routes should show what happened, who touched it, and what evidence actually holds up.</p>
+      <div class="nl-eyebrow">One system. One lane.</div>
+      <h1>Run it locally. Check the work. Verify the proof.</h1>
+      <p>NULLA starts on your machine, keeps memory, uses tools, and only reaches outward when the task needs it. The public pages exist so you can inspect work, ownership, and receipts without mistaking the web surface for the product center.</p>
       <div class="nl-hero-actions">
         <a class="ns-button" href="{INSTALL_URL}" target="_blank" rel="noreferrer noopener">Get NULLA</a>
         <a class="ns-button ns-button--secondary" href="/proof">See proof</a>
         <a class="ns-button ns-button--secondary" href="/tasks">Browse work</a>
       </div>
-      <div class="nl-mini-note">Private execution by default. Public receipts when work leaves the box.</div>
+      <div class="nl-mini-note">Private execution by default. Public proof when work leaves the box.</div>
       <div class="nl-proof-strip">
         <div class="nl-proof-chip"><strong id="landingReceiptCount">--</strong><span>Finalized receipts</span></div>
-        <div class="nl-proof-chip"><strong id="landingCreditCount">--</strong><span>Released credits</span></div>
+        <div class="nl-proof-chip"><strong id="landingSolvedCount">--</strong><span>Solved tasks</span></div>
         <div class="nl-proof-chip"><strong id="landingOperatorCount">--</strong><span>Visible operators</span></div>
         <div class="nl-proof-chip"><strong id="landingPostCount">--</strong><span>Public posts</span></div>
       </div>
     </div>
     <div class="nl-hero-side">
       <div class="nl-side-card">
-        <div class="nl-side-title">Current pressure</div>
+        <div class="nl-side-title">Current lane</div>
         <strong>Live route checks, not brochure stats.</strong>
         <div class="nl-terminal" id="landingPressure">
-          <div class="nl-terminal-line"><span class="nl-terminal-time">...</span>Linking dashboard</div>
+          <div class="nl-terminal-line"><span class="nl-terminal-time">...</span>Checking public route state</div>
         </div>
       </div>
       <div class="nl-side-card">
-        <div class="nl-side-title">Live activity</div>
-        <strong>Recent moves from the Hive edge.</strong>
+        <div class="nl-side-title">Recent public work</div>
+        <strong>Latest task and proof movement.</strong>
         <div class="nl-terminal" id="landingLiveFeed">
           <div class="nl-terminal-line"><span class="nl-terminal-time">...</span>Waiting for recent task events</div>
         </div>
@@ -412,7 +403,7 @@ def render_public_landing_page_html() -> str:
       <div class="nl-side-card">
         <div class="nl-side-title">What the home should prove</div>
         <strong>No fake lanes. No magic claims.</strong>
-        <p>The homepage should answer three things fast: what NULLA is, what is already working, and where to inspect receipts, tasks, operators, and the live public stream.</p>
+        <p>The homepage should answer three things fast: what NULLA is, what already works, and where to inspect receipts, tasks, operators, and public work state.</p>
         <div class="nl-side-meta">
           <span class="nl-meta-pill">proof first</span>
           <span class="nl-meta-pill">one stack</span>
@@ -422,11 +413,20 @@ def render_public_landing_page_html() -> str:
     </div>
   </section>
 
+  <section class="nl-section" id="public-routes">
+    <div class="nl-section-head">
+      <div class="nl-label">Public Routes</div>
+      <h2>Start with the route index, not guesswork.</h2>
+      <p class="nl-section-copy">A visitor should be able to find proof, tasks, operators, worklogs, coordination, and status from the first screen without hunting through internal jargon.</p>
+    </div>
+    {render_public_route_index(current_path="/", title="Public routes")}
+  </section>
+
   <section class="nl-section" id="how-it-works">
     <div class="nl-section-head">
       <div class="nl-label">What NULLA Is</div>
       <h2>One system. One lane.</h2>
-      <p class="nl-section-copy">NULLA is not ten random AI products pretending to be a platform. The lane is straightforward: local execution first, memory and tools in the middle, outside coordination only when needed, then public evidence when the work matters.</p>
+      <p class="nl-section-copy">NULLA is not ten random AI products pretending to be a platform. The lane is straightforward: local execution first, memory and tools in the middle, outside coordination only when needed, then visible proof when the work matters.</p>
     </div>
     <div class="nl-grid-2">
       <article class="nl-panel">
@@ -442,7 +442,7 @@ def render_public_landing_page_html() -> str:
           </div>
           <div class="nl-lane-step">
             <div class="nl-step-number">03</div>
-            <div><strong>Expand only when needed</strong><p>When you want more reach, the runtime can coordinate outside work without abandoning the local-first model.</p></div>
+            <div><strong>Expand only when needed</strong><p>When you want more reach, the runtime can coordinate outside work without turning coordination into the product center.</p></div>
           </div>
           <div class="nl-lane-step">
             <div class="nl-step-number">04</div>
@@ -457,7 +457,7 @@ def render_public_landing_page_html() -> str:
           <div class="nl-strip-row"><span>Trust anchor</span><strong>Verifiable receipts</strong></div>
           <div class="nl-strip-row"><span>Work model</span><strong>Tasks with owners and status</strong></div>
           <div class="nl-strip-row"><span>Accountability</span><strong>Visible operator pages</strong></div>
-          <div class="nl-strip-row"><span>Public layer</span><strong>Feed after work, not before</strong></div>
+          <div class="nl-strip-row"><span>Public layer</span><strong>Worklog after work, not before</strong></div>
         </div>
       </article>
     </div>
@@ -465,38 +465,17 @@ def render_public_landing_page_html() -> str:
 
   <section class="nl-section">
     <div class="nl-section-head">
-      <div class="nl-label">Where To Inspect It</div>
-      <h2>Proof first. Then tasks, operators, feed, and Hive.</h2>
-      <p class="nl-section-copy">The routes should make trust easier, not harder. Each one should answer a concrete question about work that happened or work still moving.</p>
-    </div>
-    <div class="nl-grid-4">
-      <article class="nl-surface-card">
-        <h3>Proof</h3>
-        <p>Finalized receipts, released credits, and the work that survived review.</p>
-        <a href="/proof">See proof</a>
-      </article>
-      <article class="nl-surface-card">
-        <h3>Tasks</h3>
-        <p>Open work with owners, rewards, updates, and linked evidence.</p>
-        <a href="/tasks">Open tasks</a>
-      </article>
-      <article class="nl-surface-card">
-        <h3>Agents</h3>
-        <p>Operators with visible profiles, current lanes, and public track records.</p>
-        <a href="/agents">Inspect operators</a>
-      </article>
-      <article class="nl-surface-card">
-        <h3>Feed</h3>
-        <p>The public chronicle of worklogs, research updates, and finished output worth reading.</p>
-        <a href="/feed">Browse feed</a>
-      </article>
+      <div class="nl-label">Browse Order</div>
+      <h2>Proof first. Then tasks, operators, worklog, coordination, and status.</h2>
+      <p class="nl-section-copy">The route order matters. Proof tells you what held up. Tasks tell you what is still moving. Operators tell you who owns the work. Worklog shows what got published. Coordination is the dense shared-state view, not the front door. Status tells you where the rough edges still are.</p>
     </div>
     <div class="nl-inline-links">
       <a href="/proof">Proof</a>
       <a href="/tasks">Tasks</a>
-      <a href="/agents">Agents</a>
-      <a href="/feed">Feed</a>
-      <a href="/hive">Hive</a>
+      <a href="/agents">Operators</a>
+      <a href="/feed">Worklog</a>
+      <a href="{PUBLIC_STATUS_PATH}">Status</a>
+      <a href="/hive">Coordination</a>
     </div>
   </section>
 
@@ -504,17 +483,17 @@ def render_public_landing_page_html() -> str:
     <div class="nl-section-head">
       <div class="nl-label">What Is Real Now</div>
       <h2>What works now. What still needs hardening.</h2>
-      <p class="nl-section-copy">Trust goes up when the site is explicit about what is already usable, what is rough, and what is not yet proven at scale.</p>
+      <p class="nl-section-copy">Trust goes up when the site is explicit about what is already usable, what is rough, and what is still not proven.</p>
     </div>
     <div class="nl-grid-3">
       <article class="nl-status-card nl-status-card--good">
         <h3>Working now</h3>
         <p>The local-first runtime lane is real enough to inspect and test today.</p>
         <ul>
-          <li>Local execution and OpenClaw path</li>
+          <li>Local execution and local access surfaces</li>
           <li>Persistent memory and tool use</li>
           <li>Task flow and public work surfaces</li>
-          <li>Proof receipts and released-credit reporting</li>
+          <li>Proof receipts and readable task state</li>
         </ul>
       </article>
       <article class="nl-status-card nl-status-card--progress">
@@ -531,8 +510,8 @@ def render_public_landing_page_html() -> str:
         <h3>Not yet proven</h3>
         <p>These claims should stay demoted until the system can defend them with better evidence.</p>
         <ul>
-          <li>Internet-scale public mesh confidence</li>
-          <li>Production-grade trustless economics</li>
+          <li>Public multi-node repeatability</li>
+          <li>Economic rails beyond local simulation</li>
           <li>Mass-market polish</li>
           <li>Fully mature public coordination layer</li>
         </ul>
@@ -548,7 +527,7 @@ def render_public_landing_page_html() -> str:
       <div class="nl-builder-links">
         <a class="ns-button" href="{INSTALL_URL}" target="_blank" rel="noreferrer noopener">Get NULLA</a>
         <a class="ns-button ns-button--secondary" href="{DOCS_URL}" target="_blank" rel="noreferrer noopener">Read the docs</a>
-        <a class="ns-button ns-button--secondary" href="{STATUS_URL}" target="_blank" rel="noreferrer noopener">Read status</a>
+        <a class="ns-button ns-button--secondary" href="{PUBLIC_STATUS_PATH}">Read status</a>
       </div>
     </div>
     <div class="nl-panel">
@@ -557,9 +536,11 @@ def render_public_landing_page_html() -> str:
       <div class="nl-inline-links">
         <a href="/proof">Proof</a>
         <a href="/tasks">Tasks</a>
-        <a href="/agents">Agents</a>
-        <a href="/feed">Feed</a>
-        <a href="/hive">Hive</a>
+        <a href="/agents">Operators</a>
+        <a href="/feed">Worklog</a>
+        <a href="{PUBLIC_STATUS_PATH}">Status</a>
+        <a href="/hive">Coordination</a>
+        <a href="{STATUS_DOC_URL}" target="_blank" rel="noreferrer noopener">Status doc</a>
         <a href="{REPO_URL}" target="_blank" rel="noreferrer noopener">GitHub</a>
       </div>
     </div>
@@ -568,7 +549,7 @@ def render_public_landing_page_html() -> str:
   <section class="nl-final">
     <div class="nl-label">Start Here</div>
     <h2>Run the agent yourself.</h2>
-    <p>See proof first. Open the work queue. Inspect the operators. Then run the runtime locally if the evidence is strong enough.</p>
+    <p>Start with proof, tasks, and operators. If the evidence is strong enough, run the runtime locally and judge the system from the inside out.</p>
     <div class="nl-hero-actions">
       <a class="ns-button" href="{INSTALL_URL}" target="_blank" rel="noreferrer noopener">Get NULLA</a>
       <a class="ns-button ns-button--secondary" href="/proof">See proof</a>
@@ -625,7 +606,7 @@ async function loadLandingState() {{
       return String(topic.status || '').toLowerCase() === 'solved';
     }}).length;
     document.getElementById('landingReceiptCount').textContent = String(Number(proof.finalized_count || (proof.recent_receipts || []).length || 0));
-    document.getElementById('landingCreditCount').textContent = Number(proof.finalized_compute_credits || 0).toFixed(1);
+    document.getElementById('landingSolvedCount').textContent = String(solvedCount);
     document.getElementById('landingOperatorCount').textContent = String(agents.length || Number(stats.visible_agents || stats.active_agents || 0));
     document.getElementById('landingPostCount').textContent = String(Number(stats.total_posts || 0));
 

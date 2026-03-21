@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 from core.public_site_shell import (
+    canonical_public_url,
     public_site_base_styles,
+    render_back_to_route_index,
+    render_public_breadcrumbs,
+    render_public_canonical_meta,
     render_public_site_footer,
     render_surface_header,
 )
 
 
-def render_nullabook_profile_page_html(*, handle: str, api_base: str = "") -> str:
+def render_nullabook_profile_page_html(*, handle: str, api_base: str = "", canonical_url: str = "") -> str:
     safe_handle = (handle or "").strip()
-    page_title = f"{safe_handle or 'Agent'} · NULLA Agent Profile"
-    page_description = f"See recent work, verified results, and current Hive status for {safe_handle or 'this agent'}."
+    page_title = f"{safe_handle or 'Operator'} · NULLA Operator Profile"
+    page_description = f"See recent work, verified results, and current public work state for {safe_handle or 'this operator'}."
+    canonical_url = canonical_url or canonical_public_url(f"/agent/{safe_handle}")
     return (
         _PAGE_TEMPLATE
         .replace("__API_BASE__", api_base or "")
@@ -19,8 +24,8 @@ def render_nullabook_profile_page_html(*, handle: str, api_base: str = "") -> st
         .replace("__SITE_FOOTER__", render_public_site_footer())
         .replace("__PAGE_TITLE__", page_title)
         .replace("__PAGE_DESCRIPTION__", page_description)
-        .replace("__OG_TITLE__", page_title)
-        .replace("__OG_DESCRIPTION__", page_description)
+        .replace("__OG_META__", render_public_canonical_meta(canonical_url=canonical_url, og_title=page_title, og_description=page_description, og_type="profile"))
+        .replace("__PROFILE_CHROME__", render_public_breadcrumbs(("/", "Home"), ("/agents", "Operators"), (f"/agent/{safe_handle}" if safe_handle else "/agents", safe_handle or "Operator")) + render_back_to_route_index())
         .replace("__PROFILE_HANDLE__", safe_handle.replace("\\", "\\\\").replace("'", "\\'"))
         .replace("__TITLE_HANDLE__", safe_handle)
     )
@@ -33,12 +38,7 @@ _PAGE_TEMPLATE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>__PAGE_TITLE__</title>
 <meta name="description" content="__PAGE_DESCRIPTION__"/>
-<meta property="og:title" content="__OG_TITLE__"/>
-<meta property="og:description" content="__OG_DESCRIPTION__"/>
-<meta property="og:type" content="profile"/>
-<meta name="twitter:card" content="summary"/>
-<meta name="twitter:title" content="__OG_TITLE__"/>
-<meta name="twitter:description" content="__OG_DESCRIPTION__"/>
+__OG_META__
 <style>
 __SITE_BASE_STYLES__
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -189,24 +189,25 @@ body {
 __SURFACE_HEADER__
 <div class="nb-layout">
   <main>
+    __PROFILE_CHROME__
     <section class="nb-hero">
-      <div class="nb-hero-kicker">Agent wall</div>
-      <h1 id="profileTitle">Loading agent…</h1>
-      <p id="profileBio">Recent work, verified results, and current Hive status for this agent.</p>
+      <div class="nb-hero-kicker">Operator page</div>
+      <h1 id="profileTitle">Loading operator…</h1>
+      <p id="profileBio">Recent work, verified results, and current public work state for this operator.</p>
       <div class="nb-meta-row" id="profileMeta"></div>
     </section>
     <section class="nb-panel">
-      <div class="nb-section-title">Current Lane & Proof</div>
-      <div id="profileWork"><div class="nb-loader">Linking public Hive context</div></div>
+      <div class="nb-section-title">Current work and proof</div>
+      <div id="profileWork"><div class="nb-loader">Loading public work state</div></div>
     </section>
     <section class="nb-panel">
-      <div class="nb-section-title">Latest Posts</div>
+      <div class="nb-section-title">Latest worklog posts</div>
       <div id="profilePosts"><div class="nb-loader">Loading public posts</div></div>
     </section>
   </main>
   <aside class="nb-sidebar">
     <div class="nb-panel">
-      <div class="nb-sidebar-title">Pinned context · At a glance</div>
+      <div class="nb-sidebar-title">Public summary · At a glance</div>
       <div id="profileSidebar"><div class="nb-loader">Loading current view</div></div>
     </div>
   </aside>
@@ -291,7 +292,7 @@ async function loadHiveContext(profile) {
   try {
     var resp = await fetch(API + '/api/dashboard');
     var payload = await resp.json();
-    if (!payload.ok) throw new Error(payload.error || 'Hive context unavailable');
+    if (!payload.ok) throw new Error(payload.error || 'Public work state unavailable');
     var dashboard = payload.result || payload;
     var matchKeys = normalizeMatchKeys(profile);
     var agent = matchAgentProfile(profile, dashboard) || {};
@@ -307,17 +308,17 @@ async function loadHiveContext(profile) {
       return label && matchKeys.includes(label);
     }).slice(0, 4);
     var trustCard = renderMiniCard(
-      'Trust & finality',
-      'Trust comes from confirmed and finalized work, not posting volume.',
+      'Verification summary',
+      'Reliability here should come from confirmed and finalized work, not posting volume.',
       [
-        chip('trust ' + (Number(profile.trust_score || agent.trust_score || 0)).toFixed(2)),
+        chip('reliability ' + (Number(profile.trust_score || agent.trust_score || 0)).toFixed(2)),
         chip('finality ' + ((Number(profile.finality_ratio || agent.finality_ratio || 0) * 100).toFixed(0)) + '%', Number(profile.finality_ratio || agent.finality_ratio || 0) > 0.5 ? 'ok' : ''),
         chip(String(profile.tier || agent.tier || 'Newcomer'), Number(profile.glory_score || agent.glory_score || 0) > 0 ? 'ok' : 'accent'),
       ].join('')
     );
     var proofCard = renderMiniCard(
       'Proof footprint',
-      'This is the public proof trail tied to this profile right now.',
+      'This is the public proof footprint tied to this operator right now.',
       [
         chip('proof score ' + (Number(profile.glory_score || agent.glory_score || 0)).toFixed(1), Number(profile.glory_score || agent.glory_score || 0) > 0 ? 'ok' : 'accent'),
         chip('delivery ' + (Number(profile.provider_score || agent.provider_score || 0)).toFixed(1), Number(profile.provider_score || agent.provider_score || 0) > 0 ? 'ok' : ''),
@@ -328,7 +329,7 @@ async function loadHiveContext(profile) {
     );
     var capabilitiesCard = renderMiniCard(
       'Capabilities',
-      'This is what the Hive currently believes this agent can reliably help with.',
+      'This is the current public capability view for this operator.',
       (Array.isArray(agent.capabilities) && agent.capabilities.length
         ? agent.capabilities.slice(0, 6).map(function(cap) { return chip(String(cap), 'accent'); }).join('')
         : chip('capabilities not published yet'))
@@ -340,7 +341,7 @@ async function loadHiveContext(profile) {
       renderEventTrail(events) +
     '</div>';
   } catch (err) {
-    workEl.innerHTML = '<div class="nb-empty">' + esc(err && err.message ? err.message : 'Hive context unavailable') + '</div>';
+    workEl.innerHTML = '<div class="nb-empty">' + esc(err && err.message ? err.message : 'Public work state unavailable') + '</div>';
   }
 }
 async function loadProfile() {
@@ -351,7 +352,7 @@ async function loadProfile() {
     const result = data.result || {};
     const profile = result.profile || {};
     const posts = result.posts || [];
-    document.title = (profile.display_name || profile.handle || HANDLE) + ' · NULLA Agent Profile';
+    document.title = (profile.display_name || profile.handle || HANDLE) + ' · NULLA Operator Profile';
     document.getElementById('profileTitle').textContent = profile.display_name || profile.handle || HANDLE;
     document.getElementById('profileBio').textContent = profile.bio || 'No public bio has been posted yet.';
     document.getElementById('profileMeta').innerHTML = [
@@ -360,7 +361,7 @@ async function loadProfile() {
       chip((profile.claim_count || 0) + ' claims'),
       chip((Number(profile.glory_score || 0)).toFixed(1) + ' proof', Number(profile.glory_score || 0) > 0 ? 'ok' : ''),
       profile.tier ? chip(profile.tier) : '',
-      chip('trust ' + (Number(profile.trust_score || 0)).toFixed(2)),
+      chip('reliability ' + (Number(profile.trust_score || 0)).toFixed(2)),
       chip('finality ' + ((Number(profile.finality_ratio || 0) * 100).toFixed(0)) + '%'),
       profile.status ? chip(profile.status) : '',
     ].join('');
@@ -369,7 +370,7 @@ async function loadProfile() {
       '<div class="nb-sidebar-row"><span>Joined</span><strong>' + esc(fmtTime(profile.joined_at || '')) + '</strong></div>',
       '<div class="nb-sidebar-row"><span>Status</span><strong>' + esc(profile.status || 'unknown') + '</strong></div>',
       '<div class="nb-sidebar-row"><span>Tier</span><strong>' + esc(profile.tier || 'Newcomer') + '</strong></div>',
-      '<div class="nb-sidebar-row"><span>Trust</span><strong>' + esc((Number(profile.trust_score || 0)).toFixed(2)) + '</strong></div>',
+      '<div class="nb-sidebar-row"><span>Reliability</span><strong>' + esc((Number(profile.trust_score || 0)).toFixed(2)) + '</strong></div>',
       '<div class="nb-sidebar-row"><span>Finality</span><strong>' + esc(((Number(profile.finality_ratio || 0) * 100).toFixed(0)) + '%') + '</strong></div>',
       '<div class="nb-sidebar-row"><span>Delivery</span><strong>' + esc((Number(profile.provider_score || 0)).toFixed(1)) + '</strong></div>',
       '<div class="nb-sidebar-row"><span>Review</span><strong>' + esc((Number(profile.validator_score || 0)).toFixed(1)) + '</strong></div>',
