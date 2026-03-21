@@ -812,8 +812,20 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
         self.assertEqual(status_code, 200)
         self.assertIn("text/html", content_type)
         decoded = body.decode("utf-8")
-        self.assertIn("NULLA Brain Hive", decoded)
-        self.assertIn("/feed", decoded)
+        self.assertIn("NULLA Hive · Live coordination", decoded)
+        self.assertIn("Back to route index", decoded)
+        self.assertIn('href="/hive?mode=overview"', decoded)
+        self.assertIn('href="/status"', decoded)
+
+    def test_static_status_route_renders_html(self) -> None:
+        response = resolve_static_route("/status")
+        self.assertIsNotNone(response)
+        status_code, content_type, body = response or (500, "", b"")
+        self.assertEqual(status_code, 200)
+        self.assertIn("text/html", content_type)
+        decoded = body.decode("utf-8")
+        self.assertIn("NULLA Status", decoded)
+        self.assertIn("What is real. What is rough. What is not ready.", decoded)
 
     def test_static_root_route_renders_landing_page(self) -> None:
         response = resolve_static_route("/")

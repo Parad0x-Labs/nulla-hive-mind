@@ -506,10 +506,10 @@ def render_workstation_header(
       </div>
     </div>
     <nav class="wk-mode-nav" aria-label="NULLA workstation modes">
-      <a class="wk-mode-link" data-workstation-mode-link="overview" href="{escape(overview_href)}">Overview</a>
-      <a class="wk-mode-link" data-workstation-mode-link="hive" href="{escape(hive_href)}">Hive</a>
-      <a class="{trace_class}" data-workstation-mode-link="trace" data-workstation-trace-state="{escape('live' if trace_enabled else 'not-live')}" href="{escape(trace_target)}">{escape(trace_label)}</a>
-      <a class="wk-mode-link" data-workstation-mode-link="fabric" data-workstation-fabric href="{escape(fabric_href)}">Fabric</a>
+      <a class="wk-mode-link" data-workstation-mode-link="overview" data-mode-link="overview" href="{escape(overview_href)}">Overview</a>
+      <a class="wk-mode-link" data-workstation-mode-link="hive" data-mode-link="hive" href="{escape(hive_href)}">Hive</a>
+      <a class="{trace_class}" data-workstation-mode-link="trace" data-mode-link="trace" data-workstation-trace-state="{escape('live' if trace_enabled else 'not-live')}" href="{escape(trace_target)}">{escape(trace_label)}</a>
+      <a class="wk-mode-link" data-workstation-mode-link="fabric" data-mode-link="fabric" data-workstation-fabric href="{escape(fabric_href)}">Fabric</a>
     </nav>
     <div class="wk-view-toggle" aria-label="NULLA workstation rendering mode">
       <button class="wk-view-button" type="button" data-workstation-view="human">Human</button>

@@ -11,6 +11,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from core.brain_hive_dashboard import render_dashboard_html, render_not_found_html, render_topic_detail_html
 from core.public_landing_page import render_public_landing_page_html
+from core.public_site_shell import redirect_to_canonical_public_host
+from core.public_status_page import render_public_status_page_html
 
 from .config import BrainHiveWatchServerConfig
 
@@ -67,11 +69,32 @@ def build_watch_server(
     class Handler(BaseHTTPRequestHandler):
         server_version = "NullaBrainHiveWatch/0.1"
 
+        def _maybe_redirect_public_host(self, *, parsed: object, clean_path: str) -> bool:
+            target = redirect_to_canonical_public_host(
+                host_header=self.headers.get("Host"),
+                path=clean_path,
+                query=getattr(parsed, "query", "") or "",
+            )
+            if not target:
+                return False
+            self._write_bytes(
+                308,
+                "text/plain; charset=utf-8",
+                b"",
+                headers={"Location": target},
+                write_body=False,
+                content_length=0,
+            )
+            return True
+
         def do_HEAD(self) -> None:
             parsed = urlparse(self.path)
             clean_path = parsed.path.rstrip("/") or "/"
             qs = parse_qs(parsed.query or "")
             post_id = str((qs.get("post") or [""])[0]).strip()
+            mode = str((qs.get("mode") or ["overview"])[0]).strip().lower()
+            if self._maybe_redirect_public_host(parsed=parsed, clean_path=clean_path):
+                return
             nullabook_surface_by_path = {
                 "/nullabook": "feed",
                 "/feed": "feed",
@@ -92,8 +115,17 @@ def build_watch_server(
                 body = render_public_landing_page_html().encode("utf-8")
                 self._write_bytes(200, "text/html; charset=utf-8", b"", write_body=False, content_length=len(body))
                 return
+            if clean_path == "/status":
+                body = render_public_status_page_html().encode("utf-8")
+                self._write_bytes(200, "text/html; charset=utf-8", b"", write_body=False, content_length=len(body))
+                return
             if clean_path in {"/brain-hive", "/hive"}:
-                body = render_dashboard_html(api_endpoint="/api/dashboard", topic_base_path="/task").encode("utf-8")
+                body = render_dashboard_html(
+                    api_endpoint="/api/dashboard",
+                    topic_base_path="/task",
+                    initial_mode=mode,
+                    public_surface=clean_path == "/hive",
+                ).encode("utf-8")
                 self._write_bytes(
                     200,
                     "text/html; charset=utf-8",
@@ -177,6 +209,9 @@ def build_watch_server(
             clean_path = parsed.path.rstrip("/") or "/"
             qs = parse_qs(parsed.query or "")
             post_id = str((qs.get("post") or [""])[0]).strip()
+            mode = str((qs.get("mode") or ["overview"])[0]).strip().lower()
+            if self._maybe_redirect_public_host(parsed=parsed, clean_path=clean_path):
+                return
             nullabook_surface_by_path = {
                 "/nullabook": "feed",
                 "/feed": "feed",
@@ -223,8 +258,17 @@ def build_watch_server(
                 html = render_public_landing_page_html()
                 self._write_bytes(200, "text/html; charset=utf-8", html.encode("utf-8"))
                 return
+            if clean_path == "/status":
+                html = render_public_status_page_html()
+                self._write_bytes(200, "text/html; charset=utf-8", html.encode("utf-8"))
+                return
             if clean_path in {"/brain-hive", "/hive"}:
-                html = render_dashboard_html(api_endpoint="/api/dashboard", topic_base_path="/task")
+                html = render_dashboard_html(
+                    api_endpoint="/api/dashboard",
+                    topic_base_path="/task",
+                    initial_mode=mode,
+                    public_surface=clean_path == "/hive",
+                )
                 self._write_bytes(
                     200,
                     "text/html; charset=utf-8",
