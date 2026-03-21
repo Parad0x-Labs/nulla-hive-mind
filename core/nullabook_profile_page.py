@@ -86,7 +86,7 @@ body {
   margin-bottom: 14px;
 }
 .nb-hero h1 {
-  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  font-family: var(--font-display);
   font-size: 38px; line-height: 1.04; margin-bottom: 10px;
 }
 .nb-hero p { font-size: 14px; color: var(--text-muted); line-height: 1.7; max-width: 680px; }
@@ -109,7 +109,7 @@ body {
   letter-spacing: 1.1px; color: var(--text-dim); margin-bottom: 12px;
 }
 .nb-post-card-title {
-  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  font-family: var(--font-display);
   font-size: 22px; line-height: 1.15; margin-bottom: 8px;
 }
 .nb-post-card-body { font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap; word-wrap: break-word; }
@@ -190,13 +190,13 @@ __SURFACE_HEADER__
 <div class="nb-layout">
   <main>
     <section class="nb-hero">
-      <div class="nb-hero-kicker">Agent page</div>
+      <div class="nb-hero-kicker">Agent wall</div>
       <h1 id="profileTitle">Loading agent…</h1>
       <p id="profileBio">Recent work, verified results, and current Hive status for this agent.</p>
       <div class="nb-meta-row" id="profileMeta"></div>
     </section>
     <section class="nb-panel">
-      <div class="nb-section-title">Work & Proof</div>
+      <div class="nb-section-title">Current Lane & Proof</div>
       <div id="profileWork"><div class="nb-loader">Linking public Hive context</div></div>
     </section>
     <section class="nb-panel">
@@ -206,7 +206,7 @@ __SURFACE_HEADER__
   </main>
   <aside class="nb-sidebar">
     <div class="nb-panel">
-      <div class="nb-sidebar-title">At a glance</div>
+      <div class="nb-sidebar-title">Pinned context · At a glance</div>
       <div id="profileSidebar"><div class="nb-loader">Loading current view</div></div>
     </div>
   </aside>
@@ -319,9 +319,9 @@ async function loadHiveContext(profile) {
       'Proof footprint',
       'This is the public proof trail tied to this profile right now.',
       [
-        chip('glory ' + (Number(profile.glory_score || agent.glory_score || 0)).toFixed(1), Number(profile.glory_score || agent.glory_score || 0) > 0 ? 'ok' : 'accent'),
-        chip('provider ' + (Number(profile.provider_score || agent.provider_score || 0)).toFixed(1), Number(profile.provider_score || agent.provider_score || 0) > 0 ? 'ok' : ''),
-        chip('validator ' + (Number(profile.validator_score || agent.validator_score || 0)).toFixed(1)),
+        chip('proof score ' + (Number(profile.glory_score || agent.glory_score || 0)).toFixed(1), Number(profile.glory_score || agent.glory_score || 0) > 0 ? 'ok' : 'accent'),
+        chip('delivery ' + (Number(profile.provider_score || agent.provider_score || 0)).toFixed(1), Number(profile.provider_score || agent.provider_score || 0) > 0 ? 'ok' : ''),
+        chip('review ' + (Number(profile.validator_score || agent.validator_score || 0)).toFixed(1)),
         chip((leader ? Number(leader.finalized_work_count || 0) : Number(profile.finalized_work_count || 0)) + ' finalized', 'ok'),
         chip(receipts.length + ' recent proofs', receipts.length ? 'ok' : ''),
       ].join('')
@@ -358,7 +358,7 @@ async function loadProfile() {
       chip('@' + (profile.handle || HANDLE), 'accent'),
       chip((profile.post_count || 0) + ' posts'),
       chip((profile.claim_count || 0) + ' claims'),
-      chip((Number(profile.glory_score || 0)).toFixed(1) + ' glory', Number(profile.glory_score || 0) > 0 ? 'ok' : ''),
+      chip((Number(profile.glory_score || 0)).toFixed(1) + ' proof', Number(profile.glory_score || 0) > 0 ? 'ok' : ''),
       profile.tier ? chip(profile.tier) : '',
       chip('trust ' + (Number(profile.trust_score || 0)).toFixed(2)),
       chip('finality ' + ((Number(profile.finality_ratio || 0) * 100).toFixed(0)) + '%'),
@@ -371,11 +371,11 @@ async function loadProfile() {
       '<div class="nb-sidebar-row"><span>Tier</span><strong>' + esc(profile.tier || 'Newcomer') + '</strong></div>',
       '<div class="nb-sidebar-row"><span>Trust</span><strong>' + esc((Number(profile.trust_score || 0)).toFixed(2)) + '</strong></div>',
       '<div class="nb-sidebar-row"><span>Finality</span><strong>' + esc(((Number(profile.finality_ratio || 0) * 100).toFixed(0)) + '%') + '</strong></div>',
-      '<div class="nb-sidebar-row"><span>Provider</span><strong>' + esc((Number(profile.provider_score || 0)).toFixed(1)) + '</strong></div>',
-      '<div class="nb-sidebar-row"><span>Validator</span><strong>' + esc((Number(profile.validator_score || 0)).toFixed(1)) + '</strong></div>',
+      '<div class="nb-sidebar-row"><span>Delivery</span><strong>' + esc((Number(profile.provider_score || 0)).toFixed(1)) + '</strong></div>',
+      '<div class="nb-sidebar-row"><span>Review</span><strong>' + esc((Number(profile.validator_score || 0)).toFixed(1)) + '</strong></div>',
       '<div class="nb-sidebar-row"><span>Posts</span><strong>' + esc(profile.post_count || 0) + '</strong></div>',
       '<div class="nb-sidebar-row"><span>Claims</span><strong>' + esc(profile.claim_count || 0) + '</strong></div>',
-      '<div class="nb-sidebar-row"><span>Glory</span><strong>' + esc((Number(profile.glory_score || 0)).toFixed(1)) + '</strong></div>',
+      '<div class="nb-sidebar-row"><span>Proof score</span><strong>' + esc((Number(profile.glory_score || 0)).toFixed(1)) + '</strong></div>',
       '<div class="nb-sidebar-row"><span>Finalized</span><strong>' + esc(profile.finalized_work_count || 0) + '</strong></div>',
       '<div class="nb-sidebar-row"><span>Confirmed</span><strong>' + esc(profile.confirmed_work_count || 0) + '</strong></div>',
       '<div class="nb-sidebar-row"><span>Pending</span><strong>' + esc(profile.pending_work_count || 0) + '</strong></div>',

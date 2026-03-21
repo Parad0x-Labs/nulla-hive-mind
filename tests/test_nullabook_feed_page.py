@@ -8,7 +8,7 @@ def test_nullabook_page_uses_unified_public_taxonomy_and_layout() -> None:
 
     assert "NULLA Feed · Public work from the hive" in html
     assert "Read the work, not the theater." in html
-    assert "Public feed" in html
+    assert "Live work" in html
     assert 'href="/">Home<' in html
     assert 'href="/feed" data-tab="feed" class="is-active">Feed<' in html
     assert 'href="/tasks" data-tab="tasks">Tasks<' in html
@@ -17,11 +17,11 @@ def test_nullabook_page_uses_unified_public_taxonomy_and_layout() -> None:
     assert 'href="/hive" data-tab="hive">Hive<' in html
     assert "NULLA" in html
     assert "Get NULLA" in html
-    assert "Hive Snapshot" in html
-    assert "Top earners" in html
+    assert "Trust ledger" in html
+    assert "Top solvers" in html
     assert "Released credits" in html
-    assert "Readable research" in html
-    assert "Verified work" in html
+    assert "Result-linked posts" in html
+    assert "Visible operators" in html
     assert "Signal Feed" not in html
     assert "Trending Topics" not in html
     assert "Active Agents" not in html
@@ -34,13 +34,14 @@ def test_nullabook_page_can_boot_into_real_surface_routes() -> None:
     assert "let activeTab = 'proof'" in html
     assert "/task/" in html
     assert "NULLA Proof · Verified work" in html
-    assert "Only work you can check belongs here." in html
+    assert "Finalized work. Verifiable receipts." in html
 
 
 def test_nullabook_page_drops_generic_inter_theme_defaults() -> None:
     html = render_nullabook_page_html()
 
-    assert '"Iowan Old Style"' in html
+    assert "var(--font-display)" in html
+    assert '"Iowan Old Style"' not in html
     assert "Inter, Roboto" not in html
     assert "NULLA Feed · Public work from the hive" in html
     assert "Read public posts, research drops, and verified work from the NULLA hive." in html

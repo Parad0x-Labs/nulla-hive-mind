@@ -11,29 +11,33 @@ INSTALL_URL = f"{REPO_URL}/blob/main/docs/INSTALL.md"
 def public_site_base_styles() -> str:
     return """
 :root {
-  --bg: #050816;
-  --bg-alt: #0a1122;
-  --surface: rgba(10, 16, 30, 0.84);
-  --surface2: rgba(14, 22, 40, 0.92);
-  --surface3: rgba(19, 30, 54, 0.96);
-  --border: rgba(158, 174, 220, 0.16);
-  --border-hover: rgba(169, 128, 255, 0.42);
-  --text: #eef2ff;
-  --text-muted: #a8b4d2;
-  --text-dim: #7784a8;
-  --accent: #9c7dff;
-  --accent2: #5fd0ff;
-  --green: #64e0a7;
-  --orange: #f2ae62;
-  --blue: #6cbcff;
-  --purple: #b392ff;
-  --red: #ff7b92;
-  --pink: #ff83d4;
-  --radius: 18px;
-  --radius-sm: 12px;
-  --shadow: 0 28px 84px rgba(0, 0, 0, 0.36);
-  --font-ui: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
-  --font-display: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --bg: #0d0f12;
+  --bg-alt: #111418;
+  --surface: #13161b;
+  --surface2: #181c22;
+  --surface3: #1e232b;
+  --border: rgba(180, 186, 200, 0.12);
+  --border-strong: rgba(180, 186, 200, 0.22);
+  --border-hover: rgba(196, 125, 66, 0.4);
+  --rule: rgba(180, 186, 200, 0.12);
+  --text: #ece7dd;
+  --text-muted: #a59c90;
+  --text-dim: #6f675d;
+  --paper-strong: #fff7ee;
+  --accent: #c47d42;
+  --accent-strong: #d49467;
+  --accent2: #91a88a;
+  --green: #74c69d;
+  --orange: #d27a3d;
+  --blue: #9bc3ff;
+  --red: #cf5c5c;
+  --glow: none;
+  --radius: 4px;
+  --radius-sm: 2px;
+  --shadow: none;
+  --font-ui: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-display: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", "Menlo", "Consolas", monospace;
 }
 *, *::before, *::after { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -41,45 +45,22 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.55;
   color: var(--text);
   background:
-    radial-gradient(circle at 14% 18%, rgba(156, 125, 255, 0.18), transparent 24%),
-    radial-gradient(circle at 86% 12%, rgba(95, 208, 255, 0.16), transparent 22%),
-    radial-gradient(circle at 50% 100%, rgba(255, 131, 212, 0.08), transparent 20%),
+    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px),
     linear-gradient(180deg, var(--bg) 0%, var(--bg-alt) 100%);
+  background-size: 28px 28px, 28px 28px, auto;
+  background-position: -1px -1px, -1px -1px, 0 0;
   -webkit-font-smoothing: antialiased;
-  position: relative;
-}
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px),
-    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px);
-  background-size: 26px 26px;
-  opacity: 0.28;
-}
-body::after {
-  content: "";
-  position: fixed;
-  inset: auto auto 4% -40px;
-  width: 260px;
-  height: 260px;
-  pointer-events: none;
-  border-radius: 46% 54% 58% 42% / 46% 40% 60% 54%;
-  background:
-    radial-gradient(circle at 40% 38%, rgba(156, 125, 255, 0.22), transparent 42%),
-    radial-gradient(circle at 72% 62%, rgba(95, 208, 255, 0.18), transparent 38%);
-  filter: blur(12px);
-  opacity: 0.82;
 }
 a {
   color: var(--blue);
   text-decoration: none;
 }
-a:hover { color: var(--accent2); }
+a:hover { color: var(--accent); }
 .ns-shell {
   width: min(1180px, calc(100vw - 32px));
   margin: 0 auto;
@@ -88,52 +69,52 @@ a:hover { color: var(--accent2); }
   position: sticky;
   top: 0;
   z-index: 100;
-  backdrop-filter: blur(16px) saturate(1.25);
-  -webkit-backdrop-filter: blur(16px) saturate(1.25);
-  background: rgba(5, 8, 22, 0.72);
-  border-bottom: 1px solid rgba(158, 174, 220, 0.12);
+  background: rgba(13, 15, 18, 0.97);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 .ns-header-inner {
-  min-height: 72px;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 16px;
+  min-height: 56px;
+  display: flex;
   align-items: center;
+  gap: 16px;
 }
 .ns-brand {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   color: var(--text);
+  flex-shrink: 0;
 }
 .ns-brand:hover { color: var(--text); }
 .ns-brand-mark {
-  width: 38px;
-  height: 38px;
+  width: 28px;
+  height: 28px;
   position: relative;
-  border-radius: 14px;
-  border: 1px solid rgba(156, 125, 255, 0.28);
-  background: linear-gradient(135deg, rgba(156, 125, 255, 0.18), rgba(95, 208, 255, 0.08));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface2);
 }
 .ns-brand-mark::before,
 .ns-brand-mark::after {
   content: "";
   position: absolute;
-  top: 8px;
-  width: 13px;
-  height: 18px;
-  border-radius: 58% 42% 60% 40% / 54% 46% 52% 48%;
-  background: linear-gradient(180deg, rgba(238, 242, 255, 0.88), rgba(156, 125, 255, 0.78));
-  box-shadow: 0 0 18px rgba(156, 125, 255, 0.24);
+  border-radius: 1px;
 }
 .ns-brand-mark::before {
-  left: 7px;
-  transform: rotate(-22deg);
+  top: 5px;
+  left: 5px;
+  width: 6px;
+  height: 16px;
+  background: var(--accent);
 }
 .ns-brand-mark::after {
-  right: 7px;
-  transform: rotate(22deg);
+  top: 9px;
+  right: 5px;
+  width: 10px;
+  height: 8px;
+  background: var(--text);
 }
 .ns-brand-copy {
   display: flex;
@@ -142,109 +123,165 @@ a:hover { color: var(--accent2); }
 }
 .ns-brand-title {
   font-family: var(--font-display);
-  font-size: 26px;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
   line-height: 1;
-  letter-spacing: -0.04em;
 }
 .ns-brand-subtitle {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
   color: var(--text-dim);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .ns-nav {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
 .ns-nav a {
   display: inline-flex;
   align-items: center;
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 999px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius);
   color: var(--text-muted);
   border: 1px solid transparent;
-  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .ns-nav a:hover,
 .ns-nav a:focus-visible {
   color: var(--text);
-  border-color: rgba(156, 125, 255, 0.24);
-  background: rgba(255,255,255,0.04);
+  border-color: var(--border);
+  background: rgba(255,255,255,0.03);
   outline: none;
-  transform: translateY(-1px);
 }
 .ns-nav a.is-active {
   color: var(--text);
-  border-color: rgba(156, 125, 255, 0.28);
-  background: rgba(156, 125, 255, 0.12);
+  border-color: var(--border-hover);
+  background: rgba(196, 125, 66, 0.08);
 }
 .ns-header-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
-  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
 }
-.ns-ghost-link {
+.ns-meta-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ns-meta-links a {
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
+.ns-meta-links a:hover { color: var(--text-muted); }
 .ns-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 42px;
-  padding: 0 16px;
-  border-radius: 999px;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius);
   font-weight: 700;
-  color: #04101c;
-  background: linear-gradient(135deg, var(--accent2), #9cf1ff);
-  box-shadow: 0 14px 38px rgba(95, 208, 255, 0.18);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: 1px solid var(--accent);
+  color: #fff7ee;
+  background: var(--accent);
+  cursor: pointer;
 }
-.ns-button:hover { color: #04101c; transform: translateY(-1px); }
+.ns-button:hover {
+  color: #fff7ee;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
 .ns-button--secondary {
-  color: var(--text);
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(158, 174, 220, 0.18);
-  box-shadow: none;
+  color: var(--text-muted);
+  background: transparent;
+  border-color: var(--border);
 }
-.ns-button--secondary:hover { color: var(--text); }
+.ns-button--secondary:hover {
+  color: var(--text);
+  background: rgba(255,255,255,0.03);
+  border-color: var(--border-hover);
+}
+.ns-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.ns-chip--ok { color: var(--green); border-color: rgba(116, 198, 157, 0.25); background: rgba(116, 198, 157, 0.06); }
+.ns-chip--warn { color: var(--orange); border-color: rgba(210, 122, 61, 0.25); background: rgba(210, 122, 61, 0.06); }
+.ns-chip--accent { color: var(--accent); border-color: rgba(196, 125, 66, 0.25); background: rgba(196, 125, 66, 0.06); }
+.ns-chip--danger { color: var(--red); border-color: rgba(207, 92, 92, 0.25); background: rgba(207, 92, 92, 0.06); }
 .ns-footer {
-  margin: 44px auto 28px;
-  padding: 20px 0 0;
-  border-top: 1px solid rgba(158, 174, 220, 0.12);
+  margin: 32px auto 16px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--border);
 }
 .ns-footer-inner {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
 }
 .ns-footer-copy {
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 .ns-footer-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px;
 }
 .ns-footer-links a {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 @media (max-width: 980px) {
   .ns-header-inner {
-    grid-template-columns: 1fr;
-    padding: 14px 0;
+    min-height: auto;
+    flex-wrap: wrap;
+    padding: 10px 0;
+    gap: 8px;
   }
-  .ns-nav,
+  .ns-nav {
+    order: 3;
+    width: 100%;
+  }
   .ns-header-actions {
-    justify-content: flex-start;
+    order: 2;
+    width: 100%;
+    justify-content: space-between;
   }
 }
 """
@@ -253,11 +290,13 @@ a:hover { color: var(--accent2); }
 def render_landing_header() -> str:
     return _render_header(
         nav_items=(
-            ('/', 'Home', True, ''),
-            ('#how-it-works', 'How it works', False, ''),
-            ('#status', 'Status', False, ''),
-            (DOCS_URL, 'Docs', False, ' target="_blank" rel="noreferrer noopener"'),
-            (REPO_URL, 'GitHub', False, ' target="_blank" rel="noreferrer noopener"'),
+            ("/", "Home", True, ""),
+            ("#how-it-works", "How it works", False, ""),
+            ("#status", "Status", False, ""),
+        ),
+        secondary_items=(
+            (DOCS_URL, "Docs", False, ' target="_blank" rel="noreferrer noopener"'),
+            (REPO_URL, "GitHub", False, ' target="_blank" rel="noreferrer noopener"'),
         ),
         primary_cta_href=INSTALL_URL,
         primary_cta_label="Get NULLA",
@@ -268,17 +307,19 @@ def render_surface_header(*, active: str) -> str:
     active_key = str(active or "").strip().lower()
     return _render_header(
         nav_items=(
-            ('/', 'Home', active_key == 'home', ''),
-            ('/feed', 'Feed', active_key == 'feed', ' data-tab="feed"'),
-            ('/tasks', 'Tasks', active_key == 'tasks', ' data-tab="tasks"'),
-            ('/agents', 'Agents', active_key == 'agents', ' data-tab="agents"'),
-            ('/proof', 'Proof', active_key == 'proof', ' data-tab="proof"'),
-            ('/hive', 'Hive', active_key == 'hive', ' data-tab="hive"'),
+            ("/", "Home", active_key == "home", ""),
+            ("/feed", "Feed", active_key == "feed", ' data-tab="feed"'),
+            ("/tasks", "Tasks", active_key == "tasks", ' data-tab="tasks"'),
+            ("/agents", "Agents", active_key == "agents", ' data-tab="agents"'),
+            ("/proof", "Proof", active_key == "proof", ' data-tab="proof"'),
+            ("/hive", "Hive", active_key == "hive", ' data-tab="hive"'),
+        ),
+        secondary_items=(
+            (STATUS_URL, "Status", False, ' target="_blank" rel="noreferrer noopener"'),
+            (DOCS_URL, "Docs", False, ' target="_blank" rel="noreferrer noopener"'),
         ),
         primary_cta_href=INSTALL_URL,
         primary_cta_label="Get NULLA",
-        ghost_href=DOCS_URL,
-        ghost_label="Docs",
     )
 
 
@@ -286,8 +327,11 @@ def render_public_site_footer() -> str:
     return f"""
 <footer class="ns-footer">
   <div class="ns-shell ns-footer-inner">
-    <div class="ns-footer-copy">NULLA · local-first AI with memory, tools, and trusted reach.</div>
+    <div class="ns-footer-copy">NULLA · proof-led local agent runtime</div>
     <div class="ns-footer-links">
+      <a href="/proof">Proof</a>
+      <a href="/tasks">Tasks</a>
+      <a href="/agents">Agents</a>
       <a href="{escape(STATUS_URL, quote=True)}" target="_blank" rel="noreferrer noopener">Status</a>
       <a href="{escape(DOCS_URL, quote=True)}" target="_blank" rel="noreferrer noopener">Docs</a>
       <a href="{escape(REPO_URL, quote=True)}" target="_blank" rel="noreferrer noopener">GitHub</a>
@@ -300,10 +344,9 @@ def render_public_site_footer() -> str:
 def _render_header(
     *,
     nav_items: tuple[tuple[str, str, bool, str], ...],
+    secondary_items: tuple[tuple[str, str, bool, str], ...],
     primary_cta_href: str,
     primary_cta_label: str,
-    ghost_href: str | None = None,
-    ghost_label: str | None = None,
 ) -> str:
     nav_parts: list[str] = []
     for href, label, active, attrs in nav_items:
@@ -311,12 +354,11 @@ def _render_header(
         nav_parts.append(
             f'<a href="{escape(href, quote=True)}"{attrs}{active_attr}>{escape(label)}</a>'
         )
-    nav_html = "".join(nav_parts)
-    ghost_html = ""
-    if ghost_href and ghost_label:
-        ghost_html = (
-            f'<a class="ns-ghost-link" href="{escape(ghost_href, quote=True)}" target="_blank" '
-            f'rel="noreferrer noopener">{escape(ghost_label)}</a>'
+    secondary_parts: list[str] = []
+    for href, label, active, attrs in secondary_items:
+        active_attr = ' class="is-active"' if active else ""
+        secondary_parts.append(
+            f'<a href="{escape(href, quote=True)}"{attrs}{active_attr}>{escape(label)}</a>'
         )
     return f"""
 <header class="ns-header">
@@ -325,14 +367,16 @@ def _render_header(
       <span class="ns-brand-mark" aria-hidden="true"></span>
       <span class="ns-brand-copy">
         <span class="ns-brand-title">NULLA</span>
-        <span class="ns-brand-subtitle">Local-first AI agent</span>
+        <span class="ns-brand-subtitle">Local-first runtime</span>
       </span>
     </a>
     <nav class="ns-nav" aria-label="Primary">
-      {nav_html}
+      {"".join(nav_parts)}
     </nav>
     <div class="ns-header-actions">
-      {ghost_html}
+      <div class="ns-meta-links">
+        {"".join(secondary_parts)}
+      </div>
       <a class="ns-button" href="{escape(primary_cta_href, quote=True)}" target="_blank" rel="noreferrer noopener">{escape(primary_cta_label)}</a>
     </div>
   </div>

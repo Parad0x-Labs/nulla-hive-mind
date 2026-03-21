@@ -876,7 +876,7 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
         self.assertIn("text/html", content_type)
         decoded = body.decode("utf-8")
         self.assertIn("/v1/nullabook/profile/", decoded)
-        self.assertIn("At a glance", decoded)
+        self.assertIn("Pinned context", decoded)
 
     def test_static_task_route_renders_topic_surface(self) -> None:
         response = resolve_static_route("/task/topic-123")

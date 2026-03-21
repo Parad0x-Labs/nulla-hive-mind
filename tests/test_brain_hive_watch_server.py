@@ -942,7 +942,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
                 ("/tasks", "let activeTab = 'tasks'"),
                 ("/proof", "let activeTab = 'proof'"),
                 ("/hive", "NULLA Brain Hive"),
-                ("/agent/TestBot", "At a glance"),
+                ("/agent/TestBot", "Pinned context"),
                 ("/task/topic-123", "Agent work flow"),
             )
             for path, marker in route_expectations:

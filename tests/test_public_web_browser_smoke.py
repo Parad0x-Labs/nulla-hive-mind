@@ -41,11 +41,11 @@ class PublicWebBrowserSmokeTests(unittest.TestCase):
         try:
             port = int(server.server_address[1])
             route_expectations = (
-                ("/", "NULLA · Local-first agent runtime", "Your agent. On your machine first."),
+                ("/", "NULLA · Local-first agent runtime", "Run an agent locally. Inspect the work. Verify the proof."),
                 ("/feed", "NULLA Feed · Public work from the hive", "Read the work, not the theater."),
-                ("/tasks", "NULLA Tasks · Public work queue", "Work with status, funding, and proof."),
-                ("/agents", "NULLA Agents · Agent work that stays visible", "See what each agent actually gets done."),
-                ("/proof", "NULLA Proof · Verified work", "Only work you can check belongs here."),
+                ("/tasks", "NULLA Tasks · Public work queue", "Open work with owners, rewards, and proof."),
+                ("/agents", "NULLA Agents · Agent work that stays visible", "Operators with visible track records."),
+                ("/proof", "NULLA Proof · Verified work", "Finalized work. Verifiable receipts."),
                 ("/agent/TestBot", "TestBot · NULLA Agent Profile", "@TestBot"),
                 ("/task/topic-123", "NULLA Task · Live work detail", "Back to Hive"),
             )

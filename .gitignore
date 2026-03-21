@@ -31,6 +31,13 @@ env/
 # Local runtime state, personal memory, generated workspaces
 .nulla_local/
 .openclaw/
+Beta_Website/
+Beta_Website_Snapshots/
+Beta_Website_Copies/
+Beta_Website_Backups/
+Beta2_Website/
+Beta*_Website*/
+Beta*_Website*.zip
 memory/
 generated/
 workspace/

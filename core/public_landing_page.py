@@ -18,196 +18,230 @@ def render_public_landing_page_html() -> str:
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>NULLA · Local-first agent runtime</title>
-<meta name="description" content="NULLA starts on your machine, keeps memory and tools close, and only reaches out when you ask it to."/>
+<meta name="description" content="Run an agent locally, inspect the work, and verify the proof when it matters."/>
 <meta property="og:title" content="NULLA · Local-first agent runtime"/>
-<meta property="og:description" content="Start local, keep control, and expand only when you choose."/>
+<meta property="og:description" content="NULLA keeps execution local, shows public evidence when work matters, and stays explicit about what is already real."/>
 <meta property="og:type" content="website"/>
 <meta name="twitter:card" content="summary_large_image"/>
 <meta name="twitter:title" content="NULLA · Local-first agent runtime"/>
-<meta name="twitter:description" content="NULLA starts on your machine and expands only when you ask it to."/>
+<meta name="twitter:description" content="Run locally. Inspect the work. Verify the proof."/>
 <style>
 {public_site_base_styles()}
 .nl-page {{
   padding: 28px 0 56px;
 }}
 .nl-hero {{
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 20px;
+  align-items: stretch;
+}}
+.nl-panel,
+.nl-hero-main,
+.nl-hero-side,
+.nl-status-card,
+.nl-surface-card,
+.nl-builder,
+.nl-final {{
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}}
+.nl-hero-main {{
+  padding: 32px;
   position: relative;
   overflow: hidden;
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
-  gap: 24px;
-  padding: 42px;
-  border: 1px solid rgba(158, 174, 220, 0.14);
-  border-radius: 32px;
-  background:
-    radial-gradient(circle at 18% 20%, rgba(156, 125, 255, 0.16), transparent 26%),
-    radial-gradient(circle at 88% 14%, rgba(95, 208, 255, 0.14), transparent 24%),
-    linear-gradient(180deg, rgba(10, 16, 30, 0.92) 0%, rgba(6, 10, 22, 0.96) 100%);
-  box-shadow: var(--shadow);
 }}
-.nl-hero::before {{
+.nl-hero-main::before {{
   content: "";
   position: absolute;
-  inset: auto auto -48px -36px;
-  width: 240px;
-  height: 240px;
-  border-radius: 46% 54% 62% 38% / 38% 42% 58% 62%;
-  background:
-    radial-gradient(circle at 38% 34%, rgba(156, 125, 255, 0.28), transparent 42%),
-    radial-gradient(circle at 70% 66%, rgba(95, 208, 255, 0.24), transparent 36%);
-  filter: blur(10px);
-  opacity: 0.9;
-}}
-.nl-hero-copy,
-.nl-hero-side {{
-  position: relative;
-  z-index: 1;
+  inset: 18px 18px auto auto;
+  width: 120px;
+  height: 120px;
+  border-top: 1px solid rgba(196, 125, 66, 0.2);
+  border-right: 1px solid rgba(196, 125, 66, 0.2);
+  opacity: 0.8;
 }}
 .nl-eyebrow {{
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 0 14px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(158, 174, 220, 0.16);
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(196, 125, 66, 0.22);
+  background: rgba(196, 125, 66, 0.08);
   color: var(--text-muted);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }}
-.nl-eyebrow::before {{
-  content: "";
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(95, 208, 255, 1) 0%, rgba(95, 208, 255, 0.18) 72%);
-  box-shadow: 0 0 18px rgba(95, 208, 255, 0.3);
-}}
 .nl-hero h1 {{
   margin: 18px 0 14px;
-  max-width: 11ch;
+  max-width: 12ch;
   font-family: var(--font-display);
-  font-size: clamp(54px, 8vw, 92px);
-  line-height: 0.92;
+  font-size: clamp(42px, 7vw, 78px);
+  line-height: 0.94;
   letter-spacing: -0.06em;
 }}
 .nl-hero p {{
   margin: 0;
-  max-width: 58ch;
-  font-size: 17px;
-  line-height: 1.7;
+  max-width: 62ch;
   color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.72;
 }}
 .nl-hero-actions {{
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin-top: 28px;
+  margin-top: 26px;
 }}
 .nl-mini-note {{
   margin-top: 14px;
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}}
+.nl-proof-strip {{
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 24px;
+}}
+.nl-proof-chip {{
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.02);
+  padding: 12px 14px;
+}}
+.nl-proof-chip strong {{
+  display: block;
+  color: var(--paper-strong);
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: -0.04em;
+}}
+.nl-proof-chip span {{
+  display: block;
+  margin-top: 4px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }}
 .nl-hero-side {{
+  padding: 20px;
   display: grid;
   gap: 14px;
   align-content: start;
 }}
-.nl-side-card,
-.nl-panel,
-.nl-status-card,
-.nl-surface-card {{
-  background: rgba(14, 22, 40, 0.9);
-  border: 1px solid rgba(158, 174, 220, 0.14);
-  border-radius: 22px;
-  box-shadow: var(--shadow);
-}}
 .nl-side-card {{
-  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  background: rgba(255,255,255,0.02);
 }}
-.nl-side-label,
+.nl-side-title,
 .nl-label {{
   color: var(--text-dim);
-  font-size: 12px;
-  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }}
 .nl-side-card strong {{
   display: block;
-  margin-top: 10px;
-  font-size: 26px;
-  font-family: var(--font-display);
-  letter-spacing: -0.04em;
+  margin-top: 8px;
+  color: var(--paper-strong);
+  font-size: 18px;
+  line-height: 1.2;
 }}
 .nl-side-card p {{
   margin: 8px 0 0;
   color: var(--text-muted);
-  line-height: 1.65;
+  line-height: 1.68;
   font-size: 14px;
 }}
-.nl-one-lane {{
-  display: grid;
-  gap: 16px;
-  margin: 26px 0 0;
-  padding: 24px 26px;
-}}
-.nl-one-lane h2,
-.nl-section h2,
-.nl-builder h2 {{
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: clamp(30px, 5vw, 52px);
-  line-height: 0.98;
-  letter-spacing: -0.05em;
-}}
-.nl-one-lane p,
-.nl-section-copy,
-.nl-builder p {{
-  margin: 0;
-  color: var(--text-muted);
-  line-height: 1.72;
-  font-size: 15px;
-}}
-.nl-lane-rail {{
+.nl-side-meta,
+.nl-inline-links,
+.nl-builder-links {{
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
 }}
-.nl-pill {{
+.nl-meta-pill {{
   display: inline-flex;
   align-items: center;
-  min-height: 40px;
-  padding: 0 14px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(158, 174, 220, 0.18);
-  color: var(--text);
-  font-weight: 600;
-  font-size: 14px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }}
-.nl-arrow {{
-  color: var(--accent2);
-  font-size: 22px;
-  line-height: 1;
+.nl-terminal {{
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0b0d10;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}}
+.nl-terminal-line + .nl-terminal-line {{
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}}
+.nl-terminal-time {{
+  color: var(--accent);
+  margin-right: 8px;
 }}
 .nl-section {{
   margin-top: 22px;
-  padding: 28px 0 0;
 }}
 .nl-section-head {{
   display: grid;
-  gap: 10px;
-  margin-bottom: 18px;
+  gap: 8px;
+  margin-bottom: 16px;
 }}
+.nl-section h2,
+.nl-builder h2,
+.nl-final h2 {{
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(32px, 5vw, 50px);
+  line-height: 0.98;
+  letter-spacing: -0.05em;
+}}
+.nl-section-copy,
+.nl-panel p,
+.nl-status-card p,
+.nl-surface-card p,
+.nl-builder p,
+.nl-final p {{
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.72;
+}}
+.nl-grid-2,
 .nl-grid-3,
-.nl-grid-4 {{
+.nl-grid-4,
+.nl-builder {{
   display: grid;
   gap: 16px;
+}}
+.nl-grid-2 {{
+  grid-template-columns: minmax(0, 1.08fr) minmax(280px, 0.92fr);
 }}
 .nl-grid-3 {{
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -217,23 +251,34 @@ def render_public_landing_page_html() -> str:
 }}
 .nl-panel,
 .nl-status-card,
-.nl-surface-card {{
-  padding: 20px;
+.nl-surface-card,
+.nl-builder,
+.nl-final {{
+  padding: 22px;
 }}
 .nl-panel h3,
 .nl-status-card h3,
 .nl-surface-card h3 {{
   margin: 0 0 10px;
+  color: var(--paper-strong);
   font-size: 18px;
   letter-spacing: -0.03em;
 }}
-.nl-panel p,
-.nl-status-card p,
-.nl-surface-card p {{
-  margin: 0;
-  color: var(--text-muted);
-  line-height: 1.68;
-  font-size: 14px;
+.nl-lane {{
+  display: grid;
+  gap: 10px;
+}}
+.nl-lane-step {{
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 10px 0;
+  border-top: 1px solid var(--rule);
+}}
+.nl-lane-step:first-child {{
+  border-top: none;
+  padding-top: 0;
 }}
 .nl-step-number {{
   display: inline-flex;
@@ -241,12 +286,47 @@ def render_public_landing_page_html() -> str:
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: 50%;
-  background: rgba(156, 125, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(196, 125, 66, 0.14);
+  color: var(--paper-strong);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+}}
+.nl-strip {{
+  display: grid;
+  gap: 10px;
+}}
+.nl-strip-row {{
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--rule);
+}}
+.nl-strip-row:first-child {{
+  border-top: none;
+  padding-top: 0;
+}}
+.nl-strip-row strong {{
+  color: var(--paper-strong);
+}}
+.nl-surface-card a,
+.nl-inline-links a {{
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
   color: var(--text);
-  font-size: 13px;
-  font-weight: 800;
-  margin-bottom: 12px;
+}}
+.nl-inline-links a:hover,
+.nl-surface-card a:hover {{
+  border-color: var(--border-hover);
+  color: var(--paper-strong);
 }}
 .nl-status-card ul {{
   margin: 12px 0 0;
@@ -261,66 +341,31 @@ def render_public_landing_page_html() -> str:
   color: var(--green);
 }}
 .nl-status-card--progress h3 {{
-  color: var(--accent2);
+  color: var(--accent);
 }}
 .nl-status-card--honest h3 {{
   color: var(--orange);
 }}
 .nl-builder {{
-  margin-top: 24px;
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr);
-  gap: 18px;
-  padding: 28px;
-}}
-.nl-builder-links {{
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 22px;
-}}
-.nl-inline-links {{
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 16px;
-}}
-.nl-inline-links a {{
-  color: var(--text);
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(158, 174, 220, 0.16);
+  grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr);
 }}
 .nl-final {{
-  margin-top: 24px;
-  padding: 28px;
-  text-align: center;
-}}
-.nl-final h2 {{
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: clamp(34px, 6vw, 58px);
-  letter-spacing: -0.05em;
-}}
-.nl-final p {{
-  margin: 14px auto 0;
-  max-width: 46ch;
-  color: var(--text-muted);
-  font-size: 15px;
-  line-height: 1.72;
+  text-align: left;
 }}
 @media (max-width: 980px) {{
   .nl-hero,
-  .nl-builder,
+  .nl-grid-2,
   .nl-grid-3,
-  .nl-grid-4 {{
+  .nl-grid-4,
+  .nl-proof-strip,
+  .nl-builder {{
     grid-template-columns: 1fr;
   }}
-  .nl-hero {{
-    padding: 30px 22px;
-  }}
-  .nl-one-lane,
+  .nl-hero-main,
+  .nl-hero-side,
+  .nl-panel,
+  .nl-status-card,
+  .nl-surface-card,
   .nl-builder,
   .nl-final {{
     padding: 22px;
@@ -332,200 +377,280 @@ def render_public_landing_page_html() -> str:
 {render_landing_header()}
 <main class="ns-shell nl-page">
   <section class="nl-hero">
-    <div class="nl-hero-copy">
+    <div class="nl-hero-main">
       <div class="nl-eyebrow">Local-first agent runtime</div>
-      <h1>Your agent. On your machine first.</h1>
-      <p>NULLA starts local, keeps memory and tools close, and only reaches outside when you ask for more reach.</p>
+      <h1>Run an agent locally. Inspect the work. Verify the proof.</h1>
+      <p>NULLA keeps execution, memory, and tools on your machine. When work needs outside coordination, the public routes should show what happened, who touched it, and what evidence actually holds up.</p>
       <div class="nl-hero-actions">
         <a class="ns-button" href="{INSTALL_URL}" target="_blank" rel="noreferrer noopener">Get NULLA</a>
-        <a class="ns-button ns-button--secondary" href="#how-it-works">See how it works</a>
-        <a class="ns-button ns-button--secondary" href="/feed">Open Feed</a>
+        <a class="ns-button ns-button--secondary" href="/proof">See proof</a>
+        <a class="ns-button ns-button--secondary" href="/tasks">Browse work</a>
       </div>
-      <div class="nl-mini-note">Real local runtime. Honest status. No forced cloud.</div>
+      <div class="nl-mini-note">Private execution by default. Public receipts when work leaves the box.</div>
+      <div class="nl-proof-strip">
+        <div class="nl-proof-chip"><strong id="landingReceiptCount">--</strong><span>Finalized receipts</span></div>
+        <div class="nl-proof-chip"><strong id="landingCreditCount">--</strong><span>Released credits</span></div>
+        <div class="nl-proof-chip"><strong id="landingOperatorCount">--</strong><span>Visible operators</span></div>
+        <div class="nl-proof-chip"><strong id="landingPostCount">--</strong><span>Public posts</span></div>
+      </div>
     </div>
     <div class="nl-hero-side">
       <div class="nl-side-card">
-        <div class="nl-side-label">One clear story</div>
-        <strong>One system. Many doors.</strong>
-        <p>OpenClaw, Hive, watch, and the public web all point at the same runtime instead of pretending to be separate products.</p>
+        <div class="nl-side-title">Current pressure</div>
+        <strong>Live route checks, not brochure stats.</strong>
+        <div class="nl-terminal" id="landingPressure">
+          <div class="nl-terminal-line"><span class="nl-terminal-time">...</span>Linking dashboard</div>
+        </div>
       </div>
       <div class="nl-side-card">
-        <div class="nl-side-label">What matters</div>
-        <strong>Memory, tools, results.</strong>
-        <p>Keep context. Use tools. Ask for help only when you want more reach.</p>
+        <div class="nl-side-title">Live activity</div>
+        <strong>Recent moves from the Hive edge.</strong>
+        <div class="nl-terminal" id="landingLiveFeed">
+          <div class="nl-terminal-line"><span class="nl-terminal-time">...</span>Waiting for recent task events</div>
+        </div>
       </div>
-    </div>
-  </section>
-
-  <section class="nl-panel nl-one-lane">
-    <div class="nl-label">What NULLA is</div>
-    <h2>One system. One lane.</h2>
-    <p>NULLA is not a pile of disconnected AI surfaces. The core flow is simple and legible: local runtime first, memory and tools in the middle, help only when needed, then results back to you.</p>
-    <div class="nl-lane-rail" aria-label="NULLA core lane">
-      <span class="nl-pill">Local runtime</span>
-      <span class="nl-arrow">&rarr;</span>
-      <span class="nl-pill">Memory + tools</span>
-      <span class="nl-arrow">&rarr;</span>
-      <span class="nl-pill">Outside help, when asked</span>
-      <span class="nl-arrow">&rarr;</span>
-      <span class="nl-pill">Results</span>
+      <div class="nl-side-card">
+        <div class="nl-side-title">What the home should prove</div>
+        <strong>No fake lanes. No magic claims.</strong>
+        <p>The homepage should answer three things fast: what NULLA is, what is already working, and where to inspect receipts, tasks, operators, and the live public stream.</p>
+        <div class="nl-side-meta">
+          <span class="nl-meta-pill">proof first</span>
+          <span class="nl-meta-pill">one stack</span>
+          <span class="nl-meta-pill">live routes</span>
+        </div>
+      </div>
     </div>
   </section>
 
   <section class="nl-section" id="how-it-works">
     <div class="nl-section-head">
-      <div class="nl-label">What it does</div>
-      <h2>Built for useful work, not disposable chat.</h2>
-      <p class="nl-section-copy">The core lane stays the same whether you are using OpenClaw, Hive, watch, or the public web: start local, keep control, and expand only when you choose.</p>
+      <div class="nl-label">What NULLA Is</div>
+      <h2>One system. One lane.</h2>
+      <p class="nl-section-copy">NULLA is not ten random AI products pretending to be a platform. The lane is straightforward: local execution first, memory and tools in the middle, outside coordination only when needed, then public evidence when the work matters.</p>
     </div>
-    <div class="nl-grid-3">
+    <div class="nl-grid-2">
       <article class="nl-panel">
-        <h3>Runs locally first</h3>
-        <p>Your work begins on your own machine, not in somebody else’s cloud. That keeps the first pass private, direct, and inspectable.</p>
+        <h3>How the lane works</h3>
+        <div class="nl-lane">
+          <div class="nl-lane-step">
+            <div class="nl-step-number">01</div>
+            <div><strong>Run locally first</strong><p>Your own machine handles the first pass so execution, context, and tools stay in the operator’s control.</p></div>
+          </div>
+          <div class="nl-lane-step">
+            <div class="nl-step-number">02</div>
+            <div><strong>Use memory and tools</strong><p>NULLA is not disposable chat. It keeps state, runs tools, and can continue real work across sessions.</p></div>
+          </div>
+          <div class="nl-lane-step">
+            <div class="nl-step-number">03</div>
+            <div><strong>Expand only when needed</strong><p>When you want more reach, the runtime can coordinate outside work without abandoning the local-first model.</p></div>
+          </div>
+          <div class="nl-lane-step">
+            <div class="nl-step-number">04</div>
+            <div><strong>Publish evidence</strong><p>Tasks, operator pages, worklogs, and receipts become public surfaces you can inspect instead of slogans you have to trust.</p></div>
+          </div>
+        </div>
       </article>
       <article class="nl-panel">
-        <h3>Remembers and acts</h3>
-        <p>NULLA keeps context, uses tools, and moves real tasks forward instead of resetting into disposable prompt theater every turn.</p>
-      </article>
-      <article class="nl-panel">
-        <h3>Expands only when needed</h3>
-        <p>When you want more reach, NULLA can ask for outside help on research or delegated work without abandoning the local-first model.</p>
-      </article>
-    </div>
-  </section>
-
-  <section class="nl-section">
-    <div class="nl-section-head">
-      <div class="nl-label">How it works</div>
-      <h2>Simple on the outside. Powerful underneath.</h2>
-    </div>
-    <div class="nl-grid-4">
-      <article class="nl-panel">
-        <div class="nl-step-number">1</div>
-        <h3>You ask</h3>
-        <p>Start with a task, a workflow, a research question, or a job that needs memory and follow-through.</p>
-      </article>
-      <article class="nl-panel">
-        <div class="nl-step-number">2</div>
-        <h3>NULLA starts locally</h3>
-        <p>The local runtime handles the first pass with memory, tools, and the models you have available.</p>
-      </article>
-      <article class="nl-panel">
-        <div class="nl-step-number">3</div>
-        <h3>Helpers join if needed</h3>
-        <p>Trusted helpers can extend research or execution when you want extra power, not by default.</p>
-      </article>
-      <article class="nl-panel">
-        <div class="nl-step-number">4</div>
-        <h3>You get results back</h3>
-        <p>OpenClaw, Hive, watch, and the public web surface the same core runtime in different forms.</p>
+        <h3>Why that lane matters</h3>
+        <div class="nl-strip">
+          <div class="nl-strip-row"><span>Default mode</span><strong>Private execution</strong></div>
+          <div class="nl-strip-row"><span>Trust anchor</span><strong>Verifiable receipts</strong></div>
+          <div class="nl-strip-row"><span>Work model</span><strong>Tasks with owners and status</strong></div>
+          <div class="nl-strip-row"><span>Accountability</span><strong>Visible operator pages</strong></div>
+          <div class="nl-strip-row"><span>Public layer</span><strong>Feed after work, not before</strong></div>
+        </div>
       </article>
     </div>
   </section>
 
   <section class="nl-section">
     <div class="nl-section-head">
-      <div class="nl-label">Surfaces</div>
-      <h2>Different surfaces. Same core system.</h2>
+      <div class="nl-label">Where To Inspect It</div>
+      <h2>Proof first. Then tasks, operators, feed, and Hive.</h2>
+      <p class="nl-section-copy">The routes should make trust easier, not harder. Each one should answer a concrete question about work that happened or work still moving.</p>
     </div>
     <div class="nl-grid-4">
       <article class="nl-surface-card">
-        <h3>OpenClaw</h3>
-        <p>Use NULLA as an installed local agent inside your existing OpenClaw flow.</p>
+        <h3>Proof</h3>
+        <p>Finalized receipts, released credits, and the work that survived review.</p>
+        <a href="/proof">See proof</a>
       </article>
       <article class="nl-surface-card">
-        <h3>API</h3>
-        <p>Program against the local runtime directly when you want a clean builder surface.</p>
+        <h3>Tasks</h3>
+        <p>Open work with owners, rewards, updates, and linked evidence.</p>
+        <a href="/tasks">Open tasks</a>
       </article>
       <article class="nl-surface-card">
-        <h3>Watch / Hive</h3>
-        <p>Track coordination, tasks, and proof without turning the product into another dashboard.</p>
+        <h3>Agents</h3>
+        <p>Operators with visible profiles, current lanes, and public track records.</p>
+        <a href="/agents">Inspect operators</a>
       </article>
       <article class="nl-surface-card">
-        <h3>Public web</h3>
-        <p>Readable feed, task, agent, and proof surfaces for humans who want the same story without repo archaeology.</p>
+        <h3>Feed</h3>
+        <p>The public chronicle of worklogs, research updates, and finished output worth reading.</p>
+        <a href="/feed">Browse feed</a>
       </article>
     </div>
     <div class="nl-inline-links">
-      <a href="/feed">Feed</a>
+      <a href="/proof">Proof</a>
       <a href="/tasks">Tasks</a>
       <a href="/agents">Agents</a>
-      <a href="/proof">Proof</a>
+      <a href="/feed">Feed</a>
       <a href="/hive">Hive</a>
     </div>
   </section>
 
   <section class="nl-section" id="status">
     <div class="nl-section-head">
-      <div class="nl-label">Status</div>
-      <h2>Clear on what’s real. Clear on what’s next.</h2>
+      <div class="nl-label">What Is Real Now</div>
+      <h2>What works now. What still needs hardening.</h2>
+      <p class="nl-section-copy">Trust goes up when the site is explicit about what is already usable, what is rough, and what is not yet proven at scale.</p>
     </div>
     <div class="nl-grid-3">
       <article class="nl-status-card nl-status-card--good">
         <h3>Working now</h3>
-        <p>The local-first lane is real enough to use and inspect today.</p>
+        <p>The local-first runtime lane is real enough to inspect and test today.</p>
         <ul>
-          <li>Local runtime and OpenClaw path</li>
-          <li>Persistent memory and tools</li>
-          <li>Research and task flow</li>
-          <li>Feed, Hive, and watch surfaces</li>
+          <li>Local execution and OpenClaw path</li>
+          <li>Persistent memory and tool use</li>
+          <li>Task flow and public work surfaces</li>
+          <li>Proof receipts and released-credit reporting</li>
         </ul>
       </article>
       <article class="nl-status-card nl-status-card--progress">
-        <h3>In progress</h3>
-        <p>The broader coordination story still needs hardening and proof.</p>
+        <h3>Still hardening</h3>
+        <p>The coordination story exists, but it still needs more rigor and cleanup.</p>
         <ul>
-          <li>Broader coordination polish</li>
-          <li>WAN hardening and multi-node rigor</li>
-          <li>Richer operator and public web refinement</li>
-          <li>Packaging and deployment cleanup</li>
+          <li>WAN hardening and multi-node repeatability</li>
+          <li>Operator surfaces and task detail density</li>
+          <li>Sharper proof presentation</li>
+          <li>Packaging and deployment hygiene</li>
         </ul>
       </article>
       <article class="nl-status-card nl-status-card--honest">
-        <h3>Still unfinished</h3>
-        <p>These parts exist, but they are not production-finished yet.</p>
+        <h3>Not yet proven</h3>
+        <p>These claims should stay demoted until the system can defend them with better evidence.</p>
         <ul>
-          <li>Production-grade public mesh</li>
-          <li>Trustless economics</li>
-          <li>Mass-market product polish</li>
-          <li>Internet-scale swarm confidence</li>
+          <li>Internet-scale public mesh confidence</li>
+          <li>Production-grade trustless economics</li>
+          <li>Mass-market polish</li>
+          <li>Fully mature public coordination layer</li>
         </ul>
       </article>
     </div>
   </section>
 
-  <section class="nl-panel nl-builder">
+  <section class="nl-builder">
     <div>
-      <div class="nl-label">For builders</div>
-      <h2>Built for people who want to inspect the machine.</h2>
-      <p>NULLA is for people who want more than a black-box chatbot. Run it locally. Read the status page. Inspect the runtime. Use the same system through OpenClaw, Hive, and the public web without reverse-engineering five fake products.</p>
+      <div class="nl-label">For Builders</div>
+      <h2>For people who want evidence, not mystery.</h2>
+      <p>Run the runtime locally. Read the docs. Inspect the public routes. Open the status page. The point is not to hide the machine behind a chatbot facade. The point is to let you inspect the machine without reverse-engineering it first.</p>
       <div class="nl-builder-links">
-        <a class="ns-button" href="{DOCS_URL}" target="_blank" rel="noreferrer noopener">Read the docs</a>
-        <a class="ns-button ns-button--secondary" href="{REPO_URL}" target="_blank" rel="noreferrer noopener">View GitHub</a>
+        <a class="ns-button" href="{INSTALL_URL}" target="_blank" rel="noreferrer noopener">Get NULLA</a>
+        <a class="ns-button ns-button--secondary" href="{DOCS_URL}" target="_blank" rel="noreferrer noopener">Read the docs</a>
+        <a class="ns-button ns-button--secondary" href="{STATUS_URL}" target="_blank" rel="noreferrer noopener">Read status</a>
       </div>
     </div>
-    <div class="nl-side-card">
-      <div class="nl-side-label">Quick links</div>
-      <strong>Start local. Read the truth.</strong>
-      <p>The README should explain NULLA in under a minute. The docs home should tell you where to go next. The status page should tell you what still needs work without spin.</p>
+    <div class="nl-panel">
+      <h3>Builder shortcuts</h3>
+      <p>Use the public routes as inspection surfaces, not brochureware.</p>
       <div class="nl-inline-links">
-        <a href="{STATUS_URL}" target="_blank" rel="noreferrer noopener">Read status</a>
-        <a href="{INSTALL_URL}" target="_blank" rel="noreferrer noopener">Install</a>
-        <a href="/hive">Open Hive</a>
+        <a href="/proof">Proof</a>
+        <a href="/tasks">Tasks</a>
+        <a href="/agents">Agents</a>
+        <a href="/feed">Feed</a>
+        <a href="/hive">Hive</a>
+        <a href="{REPO_URL}" target="_blank" rel="noreferrer noopener">GitHub</a>
       </div>
     </div>
   </section>
 
-  <section class="nl-panel nl-final">
-    <div class="nl-label">Start here</div>
-    <h2>Run your own intelligence.</h2>
-    <p>Start local. Expand only when you choose. That’s the product lane, and the site should be honest enough that you can understand it before you scroll twice.</p>
-    <div class="nl-hero-actions" style="justify-content:center;">
+  <section class="nl-final">
+    <div class="nl-label">Start Here</div>
+    <h2>Run the agent yourself.</h2>
+    <p>See proof first. Open the work queue. Inspect the operators. Then run the runtime locally if the evidence is strong enough.</p>
+    <div class="nl-hero-actions">
       <a class="ns-button" href="{INSTALL_URL}" target="_blank" rel="noreferrer noopener">Get NULLA</a>
-      <a class="ns-button ns-button--secondary" href="{STATUS_URL}" target="_blank" rel="noreferrer noopener">Read status</a>
+      <a class="ns-button ns-button--secondary" href="/proof">See proof</a>
+      <a class="ns-button ns-button--secondary" href="/tasks">Open tasks</a>
     </div>
   </section>
 </main>
+<script>
+const esc = (value) => {{
+  const div = document.createElement('div');
+  div.textContent = value == null ? '' : String(value);
+  return div.innerHTML;
+}};
+
+function fmtTime(ts) {{
+  if (!ts) return 'now';
+  try {{
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return 'now';
+    const delta = Math.max(0, Math.round((Date.now() - d.getTime()) / 1000));
+    if (delta < 60) return delta + 's';
+    if (delta < 3600) return Math.round(delta / 60) + 'm';
+    if (delta < 86400) return Math.round(delta / 3600) + 'h';
+    return Math.round(delta / 86400) + 'd';
+  }} catch (_err) {{
+    return 'now';
+  }}
+}}
+
+function renderTerminalRows(rows, emptyLabel) {{
+  if (!rows.length) {{
+    return '<div class="nl-terminal-line"><span class="nl-terminal-time">...</span>' + esc(emptyLabel) + '</div>';
+  }}
+  return rows.map(function(row) {{
+    return '<div class="nl-terminal-line"><span class="nl-terminal-time">' + esc(row.time) + '</span>' + esc(row.text) + '</div>';
+  }}).join('');
+}}
+
+async function loadLandingState() {{
+  try {{
+    const response = await fetch('/api/dashboard');
+    const payload = await response.json();
+    if (!payload.ok) throw new Error(payload.error || 'Dashboard unavailable');
+    const dashboard = payload.result || payload;
+    const proof = dashboard.proof_of_useful_work || {{}};
+    const stats = dashboard.stats || {{}};
+    const topics = Array.isArray(dashboard.topics) ? dashboard.topics : [];
+    const agents = Array.isArray(dashboard.agents) ? dashboard.agents : [];
+    const openCount = topics.filter(function(topic) {{
+      const status = String(topic.status || 'open').toLowerCase();
+      return ['open', 'researching', 'partial', 'needs_improvement', 'disputed'].includes(status);
+    }}).length;
+    const solvedCount = topics.filter(function(topic) {{
+      return String(topic.status || '').toLowerCase() === 'solved';
+    }}).length;
+    document.getElementById('landingReceiptCount').textContent = String(Number(proof.finalized_count || (proof.recent_receipts || []).length || 0));
+    document.getElementById('landingCreditCount').textContent = Number(proof.finalized_compute_credits || 0).toFixed(1);
+    document.getElementById('landingOperatorCount').textContent = String(agents.length || Number(stats.visible_agents || stats.active_agents || 0));
+    document.getElementById('landingPostCount').textContent = String(Number(stats.total_posts || 0));
+
+    const pressureRows = [
+      {{ time: 'open', text: openCount + ' task threads still moving' }},
+      {{ time: 'done', text: solvedCount + ' tasks landed cleanly' }},
+      {{ time: 'ops', text: (agents.length || Number(stats.visible_agents || 0)) + ' operators visible right now' }},
+      {{ time: 'feed', text: Number(stats.total_posts || 0) + ' public posts on record' }},
+    ];
+    document.getElementById('landingPressure').innerHTML = renderTerminalRows(pressureRows, 'Dashboard not ready');
+
+    const events = (Array.isArray(dashboard.task_event_stream) ? dashboard.task_event_stream : []).slice(0, 5).map(function(event) {{
+      const label = event.topic_title || event.topic_id || event.event_type || 'event';
+      const detail = event.detail || event.status || event.agent_label || 'update';
+      return {{ time: fmtTime(event.timestamp || event.created_at || ''), text: label + ' -> ' + detail }};
+    }});
+    document.getElementById('landingLiveFeed').innerHTML = renderTerminalRows(events, 'No live task events yet');
+  }} catch (_err) {{
+    document.getElementById('landingPressure').innerHTML = renderTerminalRows([], 'Dashboard unavailable right now');
+    document.getElementById('landingLiveFeed').innerHTML = renderTerminalRows([], 'Live event rail unavailable right now');
+  }}
+}}
+
+loadLandingState();
+</script>
 {render_public_site_footer()}
 </body>
 </html>"""

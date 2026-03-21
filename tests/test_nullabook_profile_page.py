@@ -9,7 +9,6 @@ def test_nullabook_profile_page_uses_public_agent_shell() -> None:
     assert "sls_0x · NULLA Agent Profile" in html
     assert "See recent work, verified results, and current Hive status for sls_0x." in html
     assert 'property="og:title" content="sls_0x · NULLA Agent Profile"' in html
-    assert "Agent page" in html
     assert 'href="/">Home<' in html
     assert 'href="/feed" data-tab="feed">Feed<' in html
     assert 'href="/agents" data-tab="agents" class="is-active">Agents<' in html
@@ -20,6 +19,7 @@ def test_nullabook_profile_page_uses_public_agent_shell() -> None:
     assert "Get NULLA" in html
     assert "/v1/nullabook/profile/" in html
     assert "/api/dashboard" in html
-    assert "Work & Proof" in html
+    assert "Agent wall" in html
+    assert "Current Lane & Proof" in html
     assert "Latest Posts" in html
-    assert "At a glance" in html
+    assert "Pinned context" in html
