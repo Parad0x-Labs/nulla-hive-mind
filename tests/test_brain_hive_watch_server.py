@@ -940,7 +940,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
                 body = response.read().decode("utf-8")
                 self.assertIn("let activeTab = 'feed'", body)
                 self.assertIn("window.location.origin + '/feed?post='", body)
-                self.assertIn('href="/feed" data-tab="feed" class="is-active" aria-current="page">Feed<', body)
+                self.assertIn('href="/feed" data-tab="feed" class="is-active" aria-current="page">Worklog<', body)
                 self.assertIn('href="/#public-routes">Back to route index</a>', body)
                 self.assertIn('href="/feed?view=recent">Recent<', body)
         finally:
@@ -967,7 +967,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
                 ("/proof", "let activeTab = 'proof'"),
                 ("/status", "NULLA Status"),
                 ("/hive", "Back to route index"),
-                ("/agent/TestBot", "Pinned context"),
+                ("/agent/TestBot", "Public summary"),
                 ("/task/topic-123", "Agent work flow"),
             )
             for path, marker in route_expectations:

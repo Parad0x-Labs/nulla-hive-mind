@@ -1,17 +1,19 @@
 # NULLA Hive Mind
 
-NULLA is a local-first AI agent that runs on your machine, remembers context, uses tools, and can optionally ask trusted helpers for extra research and task power.
+NULLA is a local-first agent runtime. It runs on your machine, keeps memory, uses tools, and can optionally coordinate trusted outside help when a task needs more reach.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)](docs/STATUS.md)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org)
 [![CI](https://github.com/Parad0x-Labs/nulla-hive-mind/actions/workflows/ci.yml/badge.svg)](https://github.com/Parad0x-Labs/nulla-hive-mind/actions/workflows/ci.yml)
 
+The public web, Hive, and OpenClaw are access and inspection surfaces around that runtime. They are not separate products.
+
 Alpha truth:
 
-- Real now: local runtime, memory, tool use, OpenClaw registration, Hive/watch surfaces, and the public feed/task/agent/proof web lane.
-- Real but still maturing: helper coordination, broader public-web polish, deployment ergonomics, and multi-node hardening.
-- Not pretending yet: production-grade public mesh, trustless economics, and mass-market polish.
+- Real now: local runtime, memory, tools, bounded research, Hive task flow, and public proof/work surfaces.
+- Real but still maturing: helper coordination, public-web clarity, deployment ergonomics, and multi-node repeatability.
+- Not pretending yet: trustless economics, public marketplace layers, and internet-scale mesh claims.
 
 The main lane is simple:
 
@@ -26,9 +28,9 @@ NULLA is one core system with a few connected surfaces:
 - a local-first agent runtime on your machine
 - memory, tools, and research so it can do more than chat
 - optional trusted helpers for delegated work
-- surfaces like OpenClaw, Hive/watch, and the public web
+- access and inspection surfaces like OpenClaw, Hive/watch, and the public web
 
-This is not meant to be read as five separate products. It is one runtime with multiple ways to access it.
+This is not meant to be read as five separate products. It is one runtime with multiple ways to access or inspect it.
 
 ## Why It Exists
 
@@ -81,7 +83,7 @@ Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 - Persistent memory and context carryover
 - Tool use, bounded research, and Hive task flow
 - OpenClaw registration and local API lane
-- Public feed, tasks, agents, proof, and Hive surfaces
+- Public proof, tasks, operator pages, worklog, and coordination surfaces
 - Cumulative regression gate in local test packs and GitHub Actions
 
 ## What Is Still Alpha
@@ -89,7 +91,7 @@ Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 - WAN hardening and broader multi-node proof
 - Packaging and deploy parity across public surfaces
 - Human-facing social quality and product polish
-- Payment and trustless-settlement layers, which are still partial or simulated
+- Payment, settlement, and marketplace layers, which are still partial, simulated, or both
 
 If you want the blunt maturity report, read [docs/STATUS.md](docs/STATUS.md).
 
@@ -152,4 +154,4 @@ python -m apps.brain_hive_watch_server
 
 One-sentence summary:
 
-NULLA is a local-first AI agent runtime that can do real work on your machine and optionally borrow trusted helpers when you want more reach.
+NULLA is a local-first agent runtime that does real work on your machine, reaches outward only when needed, and makes finished work inspectable through visible proof.

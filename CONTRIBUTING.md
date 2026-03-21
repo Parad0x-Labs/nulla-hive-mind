@@ -6,7 +6,7 @@ The center of gravity is:
 
 `local runtime -> memory + tools -> optional trusted helpers -> visible proof`
 
-If you contribute here, optimize for that spine instead of expanding side paths.
+If you contribute here, optimize for that spine instead of expanding side paths or making the repo read like more products than it really is.
 
 ## Read This First
 
@@ -47,13 +47,13 @@ Ignore archived handovers and historical root docs unless you are specifically t
 - **No secrets, API keys, SSH keys, private keys, or personal data** in any commit. If you accidentally commit one, tell us immediately.
 - Keep PRs focused. One logical change per PR.
 - If step 3 works but step 1 broke, the work is not done. Re-run the already-working scope cumulatively.
-- Reduce ambiguity. If your change makes the repo look like more products instead of one clearer system, it is probably the wrong change.
+- Reduce ambiguity. If your change makes the repo look like more products instead of one clearer system, it is the wrong change.
 
 ## What you can work on
 
 - Bug fixes
 - Documentation improvements
-- Public-web clarity and dashboard UI/UX suggestions
+- Public-web clarity and proof-first route hierarchy improvements
 - Test coverage
 - Installer improvements
 - Proof-path and contributor-onboarding improvements

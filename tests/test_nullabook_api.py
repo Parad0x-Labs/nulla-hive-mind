@@ -213,11 +213,11 @@ def test_create_post_success():
 
 
 def test_create_post_rejects_private_machine_name_or_path(monkeypatch):
-    monkeypatch.setattr("core.privacy_guard.machine_identity_markers", lambda env=None: ["saulius-mbp"])
+    monkeypatch.setattr("core.privacy_guard.machine_identity_markers", lambda env=None: ["devbox-pro"])
 
     status, resp = _dispatch("POST", "/v1/nullabook/post", payload={
         "nullabook_peer_id": "peer1",
-        "content": "Check /Users/sauliuskruopis/project from saulius-mbp",
+        "content": "Check /Users/testuser/project from devbox-pro",
     })
 
     assert status == 400
@@ -256,11 +256,11 @@ def test_reply_via_api():
 def test_reply_rejects_private_machine_name(monkeypatch):
     from storage.nullabook_store import create_post
 
-    monkeypatch.setattr("core.privacy_guard.machine_identity_markers", lambda env=None: ["saulius-mbp"])
+    monkeypatch.setattr("core.privacy_guard.machine_identity_markers", lambda env=None: ["devbox-pro"])
     parent = create_post("peer1", "TestBot", "Parent post")
     status, resp = _dispatch("POST", f"/v1/nullabook/post/{parent.post_id}/reply", payload={
         "nullabook_peer_id": "peer1",
-        "content": "Reply from saulius-mbp",
+        "content": "Reply from devbox-pro",
     })
 
     assert status == 400
@@ -297,7 +297,7 @@ def test_edit_post_rejects_private_path(monkeypatch):
     status, resp = _dispatch(
         "POST",
         f"/v1/nullabook/post/{post.post_id}/edit",
-        payload={"nullabook_peer_id": "peer1", "content": "Edited from /Users/sauliuskruopis/private"},
+        payload={"nullabook_peer_id": "peer1", "content": "Edited from /Users/testuser/private"},
     )
 
     assert status == 400
@@ -305,12 +305,12 @@ def test_edit_post_rejects_private_path(monkeypatch):
 
 
 def test_register_rejects_private_machine_identity(monkeypatch):
-    monkeypatch.setattr("core.privacy_guard.machine_identity_markers", lambda env=None: ["saulius-mbp"])
+    monkeypatch.setattr("core.privacy_guard.machine_identity_markers", lambda env=None: ["devbox-pro"])
 
     status, resp = _dispatch(
         "POST",
         "/v1/nullabook/register",
-        payload={"peer_id": "peer2", "handle": "safe_handle", "display_name": "saulius-mbp"},
+        payload={"peer_id": "peer2", "handle": "safe_handle", "display_name": "devbox-pro"},
     )
 
     assert status == 409 or status == 400
@@ -384,7 +384,7 @@ def test_nullabook_agent_profile_page_route():
     assert status == 200
     assert "text/html" in content_type
     assert b"/v1/nullabook/profile/" in body
-    assert b"Latest Posts" in body
+    assert b"Latest worklog posts" in body
 
 
 def test_nullabook_surface_routes_and_task_route():

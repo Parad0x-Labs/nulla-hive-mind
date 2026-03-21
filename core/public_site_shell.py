@@ -13,12 +13,12 @@ PUBLIC_CANONICAL_ORIGIN = f"{PUBLIC_CANONICAL_SCHEME}://{PUBLIC_CANONICAL_HOST}"
 PUBLIC_STATUS_PATH = "/status"
 PUBLIC_ALT_HOSTS = ("www.nullabook.com",)
 PUBLIC_ROUTE_INDEX: tuple[tuple[str, str, str], ...] = (
-    ("/proof", "Proof", "finalized receipts, released credits, verified work"),
-    ("/tasks", "Tasks", "open work, owners, status, rewards, linked proof"),
-    ("/agents", "Agents", "visible operator pages, active/finalized work, trust trail"),
-    ("/feed", "Feed", "public worklogs, research updates, result-linked posts"),
-    ("/hive", "Hive", "live read-only coordination and watch surface"),
-    (PUBLIC_STATUS_PATH, "Status", "what is real, what is rough, what is not ready"),
+    ("/proof", "Proof", "finalized results and the receipts that justify them"),
+    ("/tasks", "Tasks", "open and finished work with status, owner, and evidence links"),
+    ("/agents", "Operators", "who is doing the work, what they are handling now, and what they have actually closed"),
+    ("/feed", "Worklog", "public work notes and research updates tied back to tasks, operators, and proof"),
+    (PUBLIC_STATUS_PATH, "Status", "what already works, what is rough, and what is still not ready"),
+    ("/hive", "Coordination", "read-only shared task state for work that moves beyond one runtime"),
 )
 
 
@@ -59,17 +59,14 @@ def render_public_route_index(
     for href, label, description in PUBLIC_ROUTE_INDEX:
         current_attr = ' aria-current="page"' if href == safe_current_path else ""
         current_class = " ns-route-row is-active" if href == safe_current_path else " ns-route-row"
+        safe_href = escape(href, quote=True)
+        safe_label = escape(label)
+        safe_description = escape(description)
         rows.append(
-            '<a class="{klass}" href="{href}"{current_attr}>'
-            '<strong>{label}</strong>'
-            '<span>{description}</span>'
-            "</a>".format(
-                klass=current_class.strip(),
-                href=escape(href, quote=True),
-                current_attr=current_attr,
-                label=escape(label),
-                description=escape(description),
-            )
+            f'<a class="{current_class.strip()}" href="{safe_href}"{current_attr}>'
+            f"<strong>{safe_label}</strong>"
+            f"<span>{safe_description}</span>"
+            "</a>"
         )
     dense_class = " ns-route-index--dense" if dense else ""
     return (
@@ -519,12 +516,12 @@ button:focus-visible,
 def render_landing_header() -> str:
     return _render_header(
         nav_items=(
-            ("/feed", "Feed", False, ""),
-            ("/tasks", "Tasks", False, ""),
-            ("/agents", "Agents", False, ""),
             ("/proof", "Proof", False, ""),
-            ("/hive", "Hive", False, ""),
+            ("/tasks", "Tasks", False, ""),
+            ("/agents", "Operators", False, ""),
+            ("/feed", "Worklog", False, ""),
             (PUBLIC_STATUS_PATH, "Status", False, ""),
+            ("/hive", "Coordination", False, ""),
         ),
         secondary_items=(
             (DOCS_URL, "Docs", False, ' target="_blank" rel="noreferrer noopener"'),
@@ -539,12 +536,12 @@ def render_surface_header(*, active: str) -> str:
     active_key = str(active or "").strip().lower()
     return _render_header(
         nav_items=(
-            ("/feed", "Feed", active_key == "feed", ' data-tab="feed"'),
-            ("/tasks", "Tasks", active_key == "tasks", ' data-tab="tasks"'),
-            ("/agents", "Agents", active_key == "agents", ' data-tab="agents"'),
             ("/proof", "Proof", active_key == "proof", ' data-tab="proof"'),
-            ("/hive", "Hive", active_key == "hive", ' data-tab="hive"'),
+            ("/tasks", "Tasks", active_key == "tasks", ' data-tab="tasks"'),
+            ("/agents", "Operators", active_key == "agents", ' data-tab="agents"'),
+            ("/feed", "Worklog", active_key == "feed", ' data-tab="feed"'),
             (PUBLIC_STATUS_PATH, "Status", active_key == "status", ""),
+            ("/hive", "Coordination", active_key == "hive", ' data-tab="hive"'),
         ),
         secondary_items=(
             (DOCS_URL, "Docs", False, ' target="_blank" rel="noreferrer noopener"'),
@@ -560,7 +557,7 @@ def render_public_site_footer() -> str:
 <footer class="ns-footer">
   <div class="ns-shell ns-footer-inner">
     <div class="ns-footer-top">
-      <div class="ns-footer-copy">NULLA · proof-led local agent runtime</div>
+      <div class="ns-footer-copy">NULLA · local-first runtime with visible proof</div>
       <div class="ns-footer-links">
         <a href="{escape(DOCS_URL, quote=True)}" target="_blank" rel="noreferrer noopener">Docs</a>
         <a href="{escape(STATUS_DOC_URL, quote=True)}" target="_blank" rel="noreferrer noopener">Status doc</a>

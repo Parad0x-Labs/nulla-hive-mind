@@ -865,7 +865,7 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
         self.assertIn("text/html", content_type)
         decoded = body.decode("utf-8")
         self.assertIn("let activeTab = 'tasks'", decoded)
-        self.assertIn("No active tasks", decoded)
+        self.assertIn("No task activity", decoded)
 
     def test_static_proof_route_renders_proof_surface(self) -> None:
         response = resolve_static_route("/proof")
@@ -921,7 +921,7 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
         self.assertIn("text/html", content_type)
         decoded = body.decode("utf-8")
         self.assertIn("/v1/nullabook/profile/", decoded)
-        self.assertIn("Pinned context", decoded)
+        self.assertIn("Public summary", decoded)
 
     def test_static_task_route_renders_topic_surface(self) -> None:
         response = resolve_static_route("/task/topic-123")

@@ -122,7 +122,7 @@ def render_public_status_page_html(*, canonical_url: str = "") -> str:
   <section class="ns-status-hero">
     <div class="ns-status-kicker">Public status</div>
     <h1>What is real. What is rough. What is not ready.</h1>
-    <p>Status is a route, not a footnote. This page exists so visitors can see the current public surface honestly instead of having to infer readiness from scattered copy or broken links.</p>
+    <p>Status is a route, not a footnote. This page exists so visitors can see the current public surface honestly instead of inferring readiness from scattered copy, historical nouns, or broken links.</p>
     <div class="ns-status-links">
       <a class="ns-button" href="{STATUS_DOC_URL}" target="_blank" rel="noreferrer noopener">Open status doc</a>
       <a class="ns-button ns-button--secondary" href="{DOCS_URL}" target="_blank" rel="noreferrer noopener">Read docs</a>
@@ -138,15 +138,15 @@ def render_public_status_page_html(*, canonical_url: str = "") -> str:
       <h2>Working now</h2>
       <p>The local-first runtime lane is real enough to inspect and test today.</p>
       <ul>
-        <li>Local execution and OpenClaw path</li>
+        <li>Local execution and local access surfaces</li>
         <li>Persistent memory and tool use</li>
         <li>Task flow and public work surfaces</li>
-        <li>Proof receipts and released-credit reporting</li>
+        <li>Proof receipts and readable work state</li>
       </ul>
     </article>
     <article class="ns-status-card ns-status-card--warn">
       <h2>Still hardening</h2>
-      <p>The coordination story exists, but the public surface still needs sharper discipline.</p>
+      <p>The coordination story exists, but the public surface still needs sharper discipline and less internal jargon.</p>
       <ul>
         <li>WAN hardening and multi-node repeatability</li>
         <li>Operator surfaces and task detail density</li>
@@ -158,8 +158,8 @@ def render_public_status_page_html(*, canonical_url: str = "") -> str:
       <h2>Not yet proven</h2>
       <p>These claims stay demoted until the system can defend them with better evidence.</p>
       <ul>
-        <li>Internet-scale public mesh confidence</li>
-        <li>Production-grade trustless economics</li>
+        <li>Public multi-node repeatability</li>
+        <li>Economic rails beyond local simulation</li>
         <li>Mass-market polish</li>
         <li>Fully mature public coordination layer</li>
       </ul>

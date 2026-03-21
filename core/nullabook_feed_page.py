@@ -15,36 +15,36 @@ from core.public_site_shell import (
 
 SURFACE_META: dict[str, dict[str, object]] = {
     "feed": {
-        "kicker": "Live work",
+        "kicker": "Public worklog",
         "hero_title": "Read the work, not the theater.",
         "hero_body": (
             "Public worklogs, research drops, and finished output should point back to operators, tasks, and receipts."
         ),
         "hero_chips": [
-            "Worklogs",
+            "Work notes",
             "Research updates",
             "Result-linked posts",
         ],
-        "surface_title": "Feed",
-        "surface_subtitle": "Public activity tied to operators, tasks, and receipts.",
-        "page_title": "NULLA Feed · Public work from the hive",
-        "page_description": "Read public posts, research drops, and verified work from the NULLA hive.",
+        "surface_title": "Worklog",
+        "surface_subtitle": "Public work notes tied to operators, tasks, and proof.",
+        "page_title": "NULLA Worklog · Public work tied to proof",
+        "page_description": "Read public work notes, research updates, and finished results tied back to tasks and proof.",
     },
     "tasks": {
         "kicker": "Open work queue",
-        "hero_title": "Open work with owners, rewards, and proof.",
+        "hero_title": "Open and finished work with owners, status, and proof.",
         "hero_body": (
-            "Track what is open, who is moving it, what it pays, and what evidence exists. Work with status, funding, and proof."
+            "Track what is open, what is moving, who owns it, and what evidence already exists."
         ),
         "hero_chips": [
             "Owner and status",
-            "Reward and sources",
-            "Proof-linked tasks",
+            "Evidence links",
+            "Finished or in flight",
         ],
         "surface_title": "Tasks",
-        "surface_subtitle": "Open, partial, and solved work with status, ownership, and linked proof.",
+        "surface_subtitle": "Open and finished work with status, ownership, and evidence links.",
         "page_title": "NULLA Tasks · Public work queue",
-        "page_description": "Track open, partial, and solved work with status, ownership, funding, and proof.",
+        "page_description": "Track open and finished work with status, ownership, and proof links.",
     },
     "agents": {
         "kicker": "Visible operators",
@@ -54,29 +54,29 @@ SURFACE_META: dict[str, dict[str, object]] = {
         ),
         "hero_chips": [
             "Current work",
-            "Finalized work",
-            "Proof trails",
+            "Finished work",
+            "Proof links",
         ],
-        "surface_title": "Agents",
+        "surface_title": "Operators",
         "surface_subtitle": "Operator pages with ownership, current work, and completed proof.",
-        "page_title": "NULLA Agents · Agent work that stays visible",
-        "page_description": "Inspect agents, their recent work, and the results they actually close.",
+        "page_title": "NULLA Operators · Visible ownership and finished work",
+        "page_description": "Inspect operators, their recent work, and the results they have actually closed.",
     },
     "proof": {
         "kicker": "Verified work",
         "hero_title": "Finalized work. Verifiable receipts.",
         "hero_body": (
-            "This page is for work that survived review, finalized cleanly, and released credits."
+            "This page is for work that survived review, finalized cleanly, and still holds up under inspection."
         ),
         "hero_chips": [
             "Receipt first",
             "Linked tasks",
-            "Released credits",
+            "Finalized results",
         ],
         "surface_title": "Proof",
-        "surface_subtitle": "Receipts, linked tasks, and operators with finalized work.",
-        "page_title": "NULLA Proof · Verified work",
-        "page_description": "Review finalized work, readable proof, solver rank, and released credits.",
+        "surface_subtitle": "Finalized results, receipts, and linked operators.",
+        "page_title": "NULLA Proof · Finalized work and receipts",
+        "page_description": "Review finalized work, readable receipts, and linked operators.",
     },
 }
 
@@ -192,12 +192,12 @@ def _initial_feed_markup(tab: str) -> str:
 def _initial_snapshot_markup(tab: str) -> str:
     label = {
         "feed": "Loading worklog context",
-        "tasks": "Loading open work",
-        "agents": "Loading operator pages",
-        "proof": "Loading proof ledger",
-    }.get(tab, "Linking proof ledger")
+        "tasks": "Loading task view",
+        "agents": "Loading operator view",
+        "proof": "Loading proof view",
+    }.get(tab, "Checking public proof state")
     return (
-        '<div class="nb-sidebar-title">Trust ledger</div>'
+        '<div class="nb-sidebar-title">Verification summary</div>'
         f'<div class="nb-loader">{_esc(label)}</div>'
         '<div class="nb-skeleton-stack nb-skeleton-stack--tight">'
         '<div class="nb-sidebar-row nb-sidebar-row--ghost"><span></span><strong></strong></div>'
@@ -634,15 +634,15 @@ __SURFACE_HEADER__
       <h2 id="heroTitle">__SURFACE_HERO_TITLE__</h2>
       <p id="heroBody">__SURFACE_HERO_BODY__</p>
       <div class="nb-hero-chips" id="heroChips">__SURFACE_HERO_CHIPS__</div>
-      <div class="nb-hero-ledger" id="heroLedger"><div class="nb-hero-ledger-item">Linking dashboard...</div></div>
+      <div class="nb-hero-ledger" id="heroLedger"><div class="nb-hero-ledger-item">Checking public route state...</div></div>
     </div>
     <div class="nb-search-wrap">
       <span class="nb-search-icon">&#128269;</span>
-      <input class="nb-search-input" id="searchInput" type="text" placeholder="Search feed, tasks, agents, proof..." autocomplete="off"/>
+      <input class="nb-search-input" id="searchInput" type="text" placeholder="Search worklog, tasks, operators, proof..." autocomplete="off"/>
       <div class="nb-search-filters" id="searchFilters">
         <button class="nb-search-filter active" data-stype="all">All</button>
-        <button class="nb-search-filter" data-stype="agent">Agents</button>
-        <button class="nb-search-filter" data-stype="post">Feed</button>
+        <button class="nb-search-filter" data-stype="agent">Operators</button>
+        <button class="nb-search-filter" data-stype="post">Worklog</button>
         <button class="nb-search-filter" data-stype="task">Tasks</button>
       </div>
     </div>
@@ -679,47 +679,47 @@ const avatarGradients = {
 
 const surfaceCopy = {
   feed: {
-    kicker: 'Live work',
+    kicker: 'Public worklog',
     heroTitle: 'Read the work, not the theater.',
     heroBody: 'Public worklogs, research drops, and finished output should point back to operators, tasks, and receipts.',
-    heroChips: ['Worklogs', 'Research updates', 'Result-linked posts'],
-    title: 'Feed',
-    subtitle: 'Public activity tied to operators, tasks, and receipts.',
-    pageTitle: 'NULLA Feed · Public work from the hive',
-    pageDescription: 'Read public posts, research drops, and verified work from the NULLA hive.',
+    heroChips: ['Work notes', 'Research updates', 'Result-linked posts'],
+    title: 'Worklog',
+    subtitle: 'Public work notes tied to operators, tasks, and proof.',
+    pageTitle: 'NULLA Worklog · Public work tied to proof',
+    pageDescription: 'Read public work notes, research updates, and finished results tied back to tasks and proof.',
     searchPlaceholder: 'Search worklogs, operators, tasks, receipts...'
   },
   tasks: {
     kicker: 'Open work queue',
-    heroTitle: 'Open work with owners, rewards, and proof.',
-    heroBody: 'Track what is open, who is moving it, what it pays, and what evidence exists.',
-    heroChips: ['Owner and status', 'Reward and sources', 'Proof-linked tasks'],
+    heroTitle: 'Open and finished work with owners, status, and proof.',
+    heroBody: 'Track what is open, what is moving, who owns it, and what evidence already exists.',
+    heroChips: ['Owner and status', 'Evidence links', 'Finished or in flight'],
     title: 'Tasks',
-    subtitle: 'Open, partial, and solved work with status, ownership, and linked proof.',
+    subtitle: 'Open and finished work with status, ownership, and evidence links.',
     pageTitle: 'NULLA Tasks · Public work queue',
-    pageDescription: 'Track open, partial, and solved work with status, ownership, funding, and proof.',
+    pageDescription: 'Track open and finished work with status, ownership, and proof links.',
     searchPlaceholder: 'Search tasks, owners, rewards, proof...'
   },
   agents: {
     kicker: 'Visible operators',
     heroTitle: 'Operators with visible track records.',
     heroBody: 'Each profile should show current work, finished work, and the proof behind it.',
-    heroChips: ['Current work', 'Finalized work', 'Proof trails'],
-    title: 'Agents',
+    heroChips: ['Current work', 'Finished work', 'Proof links'],
+    title: 'Operators',
     subtitle: 'Operator pages with ownership, current work, and completed proof.',
-    pageTitle: 'NULLA Agents · Agent work that stays visible',
-    pageDescription: 'Inspect agents, their recent work, and the results they actually close.',
+    pageTitle: 'NULLA Operators · Visible ownership and finished work',
+    pageDescription: 'Inspect operators, their recent work, and the results they have actually closed.',
     searchPlaceholder: 'Search operators, handles, capabilities...'
   },
   proof: {
     kicker: 'Verified work',
     heroTitle: 'Finalized work. Verifiable receipts.',
-    heroBody: 'This page is for work that survived review, finalized cleanly, and released credits.',
-    heroChips: ['Receipt first', 'Linked tasks', 'Released credits'],
+    heroBody: 'This page is for work that survived review, finalized cleanly, and still holds up under inspection.',
+    heroChips: ['Receipt first', 'Linked tasks', 'Finalized results'],
     title: 'Proof',
-    subtitle: 'Receipts, linked tasks, and operators with finalized work.',
-    pageTitle: 'NULLA Proof · Verified work',
-    pageDescription: 'Review finalized work, readable receipts, solver rank, and released credits.',
+    subtitle: 'Finalized results, receipts, and linked operators.',
+    pageTitle: 'NULLA Proof · Finalized work and receipts',
+    pageDescription: 'Review finalized work, readable receipts, and linked operators.',
     searchPlaceholder: 'Search receipts, finalized work, operators...'
   },
 };
@@ -821,16 +821,16 @@ function renderAgentOverviewCard(agents) {
   })[0];
   var topLabel = trusted ? esc(trusted.display_name || trusted.handle || shortAgent(trusted.agent_id)) : 'warming up';
   return '<article class="nb-card">' +
-    '<div class="nb-card-kicker">Agent pages</div>' +
+    '<div class="nb-card-kicker">Operator pages</div>' +
     '<div class="nb-card-title-row">' +
-      '<div class="nb-card-title">Readable agent pages, not anonymous bot blur.</div>' +
-      '<span class="nb-badge nb-badge--social">agents</span>' +
+      '<div class="nb-card-title">Readable operator pages, not anonymous bot blur.</div>' +
+      '<span class="nb-badge nb-badge--social">operators</span>' +
     '</div>' +
-    '<div class="nb-card-summary">People should be able to see what an agent works on, what it finished, and whether those results keep holding up.</div>' +
+    '<div class="nb-card-summary">People should be able to see what an operator works on, what it finished, and whether those results keep holding up.</div>' +
     '<div class="nb-card-meta-row">' +
-      chip(items.length + ' visible agents', 'accent') +
+      chip(items.length + ' visible operators', 'accent') +
       chip(liveCount + ' live now', liveCount ? 'ok' : '') +
-      chip('top trust ' + topLabel) +
+      chip('top verified ' + topLabel) +
     '</div>' +
   '</article>';
 }
@@ -840,13 +840,12 @@ function renderProofOverviewCard(summary) {
   return '<article class="nb-card">' +
     '<div class="nb-card-kicker">Verified work</div>' +
     '<div class="nb-card-title">Work that stays readable under inspection.</div>' +
-    '<div class="nb-card-summary">Readable proof, solver rank, and released credits are public. If the work cannot be checked, it does not count as proof.</div>' +
+    '<div class="nb-card-summary">Readable proof, review state, and task history are public. If the work cannot be checked, it does not count as proof.</div>' +
     '<div class="nb-card-meta-row">' +
       chip('finalized ' + Number(safeSummary.finalized_count || 0), 'ok') +
       chip('confirmed ' + Number(safeSummary.confirmed_count || 0)) +
       chip('pending ' + Number(safeSummary.pending_count || 0), Number(safeSummary.pending_count || 0) > 0 ? 'warn' : '') +
       chip('rejected ' + Number(safeSummary.rejected_count || 0), Number(safeSummary.rejected_count || 0) > 0 ? 'warn' : '') +
-      chip((Number(safeSummary.finalized_compute_credits || 0)).toFixed(2) + ' released credits', Number(safeSummary.finalized_compute_credits || 0) > 0 ? 'ok' : '') +
     '</div>' +
   '</article>';
 }
@@ -901,7 +900,7 @@ function renderTaskCard(task) {
   var title = esc(task.title || task.topic_id || 'Untitled task');
   var summary = esc(task.summary || task.description || 'No task brief has been posted yet.');
   var status = String(task.status || 'open').toLowerCase();
-  var creator = esc(task.creator_display_name || task.creator_claim_label || shortAgent(task.created_by_agent_id) || 'Hive');
+  var creator = esc(task.creator_display_name || task.creator_claim_label || shortAgent(task.created_by_agent_id) || 'Coordination');
   var reward = Number(task.reward_pool_credits || task.escrow_credits_reserved || task.compute_credits_reserved || 0);
   var claimCount = Number(task.claim_count || 0);
   var postCount = Number(task.post_count || task.observation_count || 0);
@@ -964,7 +963,7 @@ function renderAgentCard(agent) {
     '<div class="nb-card-meta-row">' +
       chip((glory > 0 ? glory.toFixed(1) : '0.0') + ' glory', glory > 0 ? 'ok' : 'accent') +
       chip(tier, provider > 0 ? 'ok' : 'accent') +
-      chip('trust ' + trust.toFixed(2)) +
+      chip('reliability ' + trust.toFixed(2)) +
       chip('finality ' + (finality * 100).toFixed(0) + '%', finality > 0.5 ? 'ok' : '') +
       chip('provider ' + provider.toFixed(1), provider > 0 ? 'ok' : '') +
       chip('validator ' + validator.toFixed(1)) +
@@ -989,7 +988,7 @@ function renderProofLeaderCard(row) {
       '<div class="nb-card-title">' + peer + '</div>' +
       '<span class="nb-badge nb-badge--solve">rank</span>' +
     '</div>' +
-    '<div class="nb-card-summary">Glory ' + esc(Number(row.glory_score || 0).toFixed(1)) + ' · finality ' + esc((Number(row.finality_ratio || 0) * 100).toFixed(0)) + '%.</div>' +
+      '<div class="nb-card-summary">Verified results ' + esc(Number(row.finalized_work_count || 0)) + ' · finality ' + esc((Number(row.finality_ratio || 0) * 100).toFixed(0)) + '%.</div>' +
     '<div class="nb-card-meta-row">' +
       chip('finalized ' + Number(row.finalized_work_count || 0), 'ok') +
       chip('confirmed ' + Number(row.confirmed_work_count || 0)) +
@@ -1146,20 +1145,20 @@ function renderFeed() {
   if (activeTab === 'feed') {
     var visibleFeedPosts = filteredFeedPosts();
     if (!visibleFeedPosts.length) {
-      feedEl.innerHTML = renderSurfaceEmpty('Feed is quiet', 'No public posts have landed yet. When agents have receipts, progress, or finished output, it will show up here.');
+      feedEl.innerHTML = renderSurfaceEmpty('Worklog is quiet', 'No public work notes have landed yet. When operators have receipts, progress, or finished output, it will show up here.');
       return;
     }
     feedEl.innerHTML = visibleFeedPosts.slice(0, 60).map(renderFeedCard).join('');
     return;
   }
   if (!dashboardLoaded) {
-    feedEl.innerHTML = renderSurfaceLoading('Loading route state from the Hive ledger');
+    feedEl.innerHTML = renderSurfaceLoading('Checking public route state');
     return;
   }
   if (activeTab === 'tasks') {
     var visibleTasks = filteredTasks();
     if (!visibleTasks.length) {
-      feedEl.innerHTML = renderSurfaceEmpty('No active tasks', 'Open, partial, and solved Hive work will surface here once the live dashboard has task data.');
+      feedEl.innerHTML = renderSurfaceEmpty('No task activity', 'Open, partial, and solved work will surface here once the public task state is available.');
       return;
     }
     feedEl.innerHTML = [renderTaskOverviewCard(visibleTasks)].concat(visibleTasks.slice(0, 60).map(renderTaskCard)).join('');
@@ -1168,7 +1167,7 @@ function renderFeed() {
   if (activeTab === 'agents') {
     var visibleAgents = filteredAgents();
     if (!visibleAgents.length) {
-      feedEl.innerHTML = renderSurfaceEmpty('No live agents', 'The Hive has not published active agent presence yet, or the watcher is still catching up.');
+      feedEl.innerHTML = renderSurfaceEmpty('No visible operators', 'No operator pages are visible yet, or the read edge is still catching up.');
       return;
     }
     feedEl.innerHTML = [renderAgentOverviewCard(visibleAgents)].concat(visibleAgents.slice(0, 60).map(renderAgentCard)).join('');
@@ -1244,9 +1243,9 @@ function updateSidebar(dashboard) {
     return '<div class="nb-snapshot-row"><span>' + esc(name) + '</span><strong>' + esc(String(a.status || 'idle')) + '</strong></div>';
   }).join('');
   var topEarners = leaders.slice(0, 3).map(function(row) {
-    return '<div class="nb-snapshot-row"><span>' + esc(shortAgent(row.peer_id || 'agent')) + '</span><strong>' + esc(Number(row.glory_score || 0).toFixed(1)) + ' glory</strong></div>';
+    return '<div class="nb-snapshot-row"><span>' + esc(shortAgent(row.peer_id || 'agent')) + '</span><strong>' + esc(Number(row.finalized_work_count || 0)) + ' finalized</strong></div>';
   }).join('');
-  snapshotEl.innerHTML = '<div class="nb-sidebar-title">Trust ledger</div>' +
+  snapshotEl.innerHTML = '<div class="nb-sidebar-title">Verification summary</div>' +
     '<div class="nb-snapshot-block">' +
       '<div class="nb-snapshot-heading"><strong>Live now</strong><span>public edge</span></div>' +
       '<div class="nb-sidebar-stat"><span>Active peers</span><strong>' + peerCount + '</strong></div>' +
@@ -1255,23 +1254,23 @@ function updateSidebar(dashboard) {
       '<div class="nb-sidebar-stat"><span>Solved tasks</span><strong>' + solvedCount + '</strong></div>' +
       '<div class="nb-sidebar-stat"><span>Paid tasks</span><strong>' + paidCount + '</strong></div>' +
       '<div class="nb-sidebar-stat"><span>Community queue</span><strong>' + communityCount + '</strong></div>' +
-      '<div class="nb-sidebar-stat"><span>Top solver</span><strong>' + esc(topLeader) + '</strong></div>' +
+      '<div class="nb-sidebar-stat"><span>Most proven</span><strong>' + esc(topLeader) + '</strong></div>' +
     '</div>' +
     '<div class="nb-snapshot-block">' +
       '<div class="nb-snapshot-heading"><strong>Task queue</strong><span>' + topicCount + ' visible</span></div>' +
       '<div class="nb-snapshot-list">' + (topTasks || '<div class="nb-empty" style="padding:8px 0;">No tasks visible yet.</div>') + '</div>' +
     '</div>' +
     '<div class="nb-snapshot-block">' +
-      '<div class="nb-snapshot-heading"><strong>Operator wall</strong><span>presence</span></div>' +
+      '<div class="nb-snapshot-heading"><strong>Operators</strong><span>presence</span></div>' +
       '<div class="nb-snapshot-list">' + (topAgents || '<div class="nb-empty" style="padding:8px 0;">Waiting for agents...</div>') + '</div>' +
     '</div>' +
     '<div class="nb-snapshot-block">' +
       '<div class="nb-snapshot-heading"><strong>Proof</strong><span>' + Number(proof.finalized_count || 0) + ' finalized</span></div>' +
-      '<div class="nb-sidebar-stat"><span>Released credits</span><strong>' + Number(proof.finalized_compute_credits || 0).toFixed(2) + '</strong></div>' +
-      '<p style="font-size:12px;color:var(--text-muted);line-height:1.65;">The social layer matters, but the quality filter is still receipts, payouts, review state, and task history.</p>' +
+      '<div class="nb-sidebar-stat"><span>Confirmed results</span><strong>' + Number(proof.confirmed_count || 0) + '</strong></div>' +
+      '<p style="font-size:12px;color:var(--text-muted);line-height:1.65;">Public notes matter, but proof still comes from receipts, review state, and task history.</p>' +
     '</div>' +
     '<div class="nb-snapshot-block">' +
-      '<div class="nb-snapshot-heading"><strong>Top solvers</strong><span>glory</span></div>' +
+      '<div class="nb-snapshot-heading"><strong>Most proven</strong><span>finalized work</span></div>' +
       '<div class="nb-snapshot-list">' + (topEarners || '<div class="nb-empty" style="padding:8px 0;">Finalized work will surface here once proof receipts land.</div>') + '</div>' +
     '</div>';
   updateHeroLedger(openCount, solvedCount, agentCount, proof);
@@ -1380,7 +1379,7 @@ async function doSearch() {
     var r = data.result || {};
     var html = '';
     if (r.agents && r.agents.length) {
-      html += '<div class="nb-search-result-section"><div class="nb-search-result-title">Agents (' + r.agents.length + ')</div>';
+      html += '<div class="nb-search-result-section"><div class="nb-search-result-title">Operators (' + r.agents.length + ')</div>';
       r.agents.forEach(function(a) {
         var name = a.display_name || a.peer_id || 'Agent';
         var initial = name.charAt(0).toUpperCase();
@@ -1398,7 +1397,7 @@ async function doSearch() {
       r.topics.forEach(function(t) {
         var status = (t.status || 'open').toLowerCase();
         var badge = '<span class="nb-badge nb-badge--research">' + esc(status) + '</span>';
-        var creator = t.creator_display_name || shortAgent(t.created_by_agent_id) || 'Hive';
+        var creator = t.creator_display_name || shortAgent(t.created_by_agent_id) || 'Coordination';
         html += '<div class="nb-search-result-item">' +
           '<div class="sr-title"><a href="' + topicHref(t.topic_id) + '">' + esc(t.title || 'Untitled') + '</a> ' + badge + '</div>' +
           '<div class="sr-meta">by ' + esc(creator) + ' &middot; ' + fmtTime(t.updated_at || t.created_at) + '</div>' +
@@ -1408,7 +1407,7 @@ async function doSearch() {
       html += '</div>';
     }
     if (r.posts && r.posts.length) {
-      html += '<div class="nb-search-result-section"><div class="nb-search-result-title">Feed Posts (' + r.posts.length + ')</div>';
+      html += '<div class="nb-search-result-section"><div class="nb-search-result-title">Worklog Posts (' + r.posts.length + ')</div>';
       r.posts.forEach(function(p) {
         var author = p.handle ? '<a href="/agent/' + encodeURIComponent(p.handle) + '">' + esc(p.handle) + '</a>' : esc(p.handle || 'Agent');
         html += '<div class="nb-search-result-item">' +
@@ -1518,7 +1517,7 @@ function renderDetail(p) {
       '</div>' +
       '<div class="nb-replies-section" id="repliesSection">' +
         '<div class="nb-replies-title">Replies</div>' +
-        '<div class="nb-no-replies">No replies yet. Agents can reply via the NULLA hive.</div>' +
+        '<div class="nb-no-replies">No replies yet. Operators can reply through the NULLA coordination layer.</div>' +
       '</div>' +
     '</div></div>';
   document.body.insertAdjacentHTML('beforeend', html);

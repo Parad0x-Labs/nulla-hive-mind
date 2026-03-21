@@ -15,3 +15,4 @@ def test_public_status_page_is_a_real_public_destination() -> None:
     assert "Open status doc" in html
     assert "Back to route index" in html
     assert 'Home</a><span>/</span><span class="ns-crumb-current" aria-current="page">Status</span>' in html
+    assert "readable work state" in html

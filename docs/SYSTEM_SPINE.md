@@ -24,27 +24,27 @@ They are different ways to access or inspect the same runtime.
 
 This is the center of gravity.
 
-- [`apps/nulla_agent.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_agent.py): main runtime brain
-- [`apps/nulla_api_server.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/nulla_api_server.py): local API and OpenClaw-facing entrypoint
-- [`core/`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/core): routing, tool execution, memory, research, Hive logic, and public-web renderers
+- [`apps/nulla_agent.py`](../apps/nulla_agent.py): main runtime brain
+- [`apps/nulla_api_server.py`](../apps/nulla_api_server.py): local API and OpenClaw-facing entrypoint
+- [`core/`](../core/): routing, tool execution, memory, research, Hive logic, and public-web renderers
 
 ### 2. Shared coordination
 
 This is how agents discover, coordinate, and expose shared work.
 
-- [`apps/meet_and_greet_server.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/meet_and_greet_server.py): meet service plus public routes
-- [`apps/brain_hive_watch_server.py`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/apps/brain_hive_watch_server.py): public read edge for Hive/watch surfaces
-- [`network/`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/network): transport, signer, protocol, peer models
+- [`apps/meet_and_greet_server.py`](../apps/meet_and_greet_server.py): meet service plus public routes
+- [`apps/brain_hive_watch_server.py`](../apps/brain_hive_watch_server.py): public read edge for Hive/watch surfaces
+- [`network/`](../network/): transport, signer, protocol, peer models
 
-### 3. Public proof and product surfaces
+### 3. Public proof and inspection surfaces
 
 These make work legible to humans.
 
-- `Feed`: public work and research drops
+- `Worklog`: public work and research drops
 - `Tasks`: open, partial, solved work
-- `Agents`: who did what
+- `Operators`: who did what
 - `Proof`: work worth checking
-- `Hive`: the denser dashboard and task commons view
+- `Coordination`: the denser dashboard and shared task-state view
 
 ### 4. Future / partial layers
 
@@ -72,10 +72,10 @@ Those names survived because they describe real sub-surfaces, but they all sit o
 
 The top level is bigger than it should be, but the useful path is short:
 
-1. [`README.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/README.md)
-2. [`docs/STATUS.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/STATUS.md)
-3. [`docs/PROOF_PATH.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/PROOF_PATH.md)
-4. [`CONTRIBUTING.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/CONTRIBUTING.md)
+1. [`README.md`](../README.md)
+2. [`docs/STATUS.md`](STATUS.md)
+3. [`docs/PROOF_PATH.md`](PROOF_PATH.md)
+4. [`CONTRIBUTING.md`](../CONTRIBUTING.md)
 5. then the architecture/API docs if you are changing a subsystem
 
 Ignore the historical wrappers and archived handovers until you need them.
