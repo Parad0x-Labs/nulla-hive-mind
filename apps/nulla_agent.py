@@ -18,6 +18,7 @@ from typing import Any
 from core import audit_logger, feedback_engine, policy_engine
 from core.agent_runtime import checkpoints as agent_checkpoint_runtime
 from core.agent_runtime import fast_paths as agent_fast_paths
+from core.agent_runtime import hive_runtime as agent_hive_runtime
 from core.agent_runtime import nullabook as agent_nullabook_runtime
 from core.agent_runtime import presence as agent_presence_runtime
 from core.agent_runtime import response as agent_response_runtime
@@ -4836,90 +4837,24 @@ class NullaAgent:
         *,
         session_id: str,
     ) -> tuple[bool, str, bool, dict[str, Any] | None]:
-        handled, details = self.hive_activity_tracker.maybe_handle_command_details(user_input, session_id=session_id)
-        response = str((details or {}).get("response_text") or "")
-        command_kind = str((details or {}).get("command_kind") or "").strip().lower()
-        if not handled:
-            return False, "", False, None
-        allow_model_wording = not self._looks_like_hive_prompt_control_command(user_input) and command_kind != "watcher_unavailable"
-        if not self._hive_tracker_needs_bridge_fallback(response):
-            return True, response, allow_model_wording, details
-        bridge_details = self._maybe_handle_hive_bridge_fallback(
+        return agent_hive_runtime.maybe_handle_hive_runtime_command(
+            self,
             user_input,
             session_id=session_id,
-            tracker_response=response,
         )
-        if bridge_details is not None:
-            return True, str(bridge_details.get("response_text") or ""), True, bridge_details
-        return True, response, allow_model_wording, details
 
     def _recover_hive_runtime_command_input(self, user_input: str) -> str:
-        lowered = " ".join(str(user_input or "").strip().lower().split())
-        if not lowered:
-            return ""
-        if self._looks_like_hive_topic_drafting_request(lowered):
-            return ""
-        if self._looks_like_hive_topic_update_request(lowered) or self._looks_like_hive_topic_delete_request(lowered):
-            return ""
-        if looks_like_semantic_hive_request(lowered):
-            return "show me the open hive tasks"
-        if not any(marker in lowered for marker in ("hive", "hive mind", "brain hive", "public hive")):
-            return ""
-        if any(
-            marker in lowered
-            for marker in (
-                "ignore hive",
-                "ignore it for now",
-                "new task",
-                "new topic",
-                "create task",
-                "create topic",
-                "status",
-                "complete",
-                "completed",
-                "finished",
-                "done",
-            )
-        ):
-            return ""
-        compact = lowered.strip(" \t\r\n?!.,")
-        if re.fullmatch(
-            r"(?:hi\s+)?(?:check|show|see)\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)(?:\s+(?:pls|please))?",
-            compact,
-        ):
-            return "show me the open hive tasks"
-        has_task_marker = any(marker in lowered for marker in ("task", "tasks", "taks", "work"))
-        has_inquiry_marker = any(
-            marker in lowered
-            for marker in (
-                "check",
-                "see",
-                "show",
-                "what",
-                "what's",
-                "whats",
-                "any",
-                "open",
-                "up",
-                "available",
-                "can we do",
-            )
+        return agent_hive_runtime.recover_hive_runtime_command_input(
+            self,
+            user_input,
+            looks_like_semantic_hive_request_fn=looks_like_semantic_hive_request,
         )
-        if not (has_task_marker and has_inquiry_marker):
-            return ""
-        return "show me the open hive tasks"
 
     def _hive_tracker_needs_bridge_fallback(self, response: str) -> bool:
-        lowered = str(response or "").strip().lower()
-        return lowered.startswith("hive watcher is not configured") or lowered.startswith("i couldn't reach the hive watcher")
+        return agent_hive_runtime.hive_tracker_needs_bridge_fallback(response)
 
     def _looks_like_hive_prompt_control_command(self, user_input: str) -> bool:
-        lowered = " ".join(str(user_input or "").strip().lower().split())
-        if not lowered:
-            return False
-        if "ignore hive" in lowered or "ignore it for now" in lowered:
-            return True
-        return "ignore" in lowered and "remind" in lowered
+        return agent_hive_runtime.looks_like_hive_prompt_control_command(user_input)
 
     def _maybe_handle_hive_bridge_fallback(
         self,
@@ -4928,70 +4863,23 @@ class NullaAgent:
         session_id: str,
         tracker_response: str,
     ) -> dict[str, Any] | None:
-        if not self.public_hive_bridge.enabled():
-            return None
-        topics = self.public_hive_bridge.list_public_topics(
-            limit=12,
-            statuses=("open", "researching", "disputed"),
+        return agent_hive_runtime.maybe_handle_hive_bridge_fallback(
+            self,
+            user_input,
+            session_id=session_id,
+            tracker_response=tracker_response,
         )
-        if not topics:
-            return None
-        self._store_hive_topic_selection_state(session_id, topics)
-        lowered = " ".join(str(user_input or "").strip().lower().split())
-        if "online" in lowered and "task" not in lowered and "tasks" not in lowered and "work" not in lowered:
-            lead = "I couldn't read live agent presence from the watcher, but I can still pull public Hive tasks (public-bridge-derived; live presence unavailable):"
-        elif "not configured" in str(tracker_response or "").lower():
-            lead = "Live Hive watcher is not configured here, but I can still pull public Hive tasks (public-bridge-derived; live presence unavailable):"
-        else:
-            lead = "I couldn't reach the live Hive watcher, but I can still pull public Hive tasks (public-bridge-derived; live presence unavailable):"
-        return {
-            "command_kind": "task_list_bridge_fallback",
-            "watcher_status": "bridge_fallback",
-            "lead": lead,
-            "response_text": self.hive_activity_tracker._render_hive_task_list_with_lead(topics, lead=lead),
-            "topics": topics,
-            "online_agents": [],
-            "truth_source": "public_bridge",
-            "truth_label": "public-bridge-derived",
-            "truth_status": str((topics[0] or {}).get("truth_transport") or "bridge_fallback"),
-            "truth_timestamp": str((topics[0] or {}).get("truth_timestamp") or ""),
-            "presence_claim_state": "unavailable",
-            "presence_source": "watcher",
-            "presence_truth_label": "public-bridge-derived",
-            "presence_freshness_label": "unavailable",
-            "presence_note": "live watcher presence unavailable in public-bridge fallback",
-        }
 
     def _store_hive_topic_selection_state(
         self,
         session_id: str,
         topics: list[dict[str, Any]],
     ) -> None:
-        state = session_hive_state(session_id)
-        topic_ids = [
-            str(topic.get("topic_id") or "").strip()
-            for topic in list(topics or [])
-            if str(topic.get("topic_id") or "").strip()
-        ]
-        titles = [
-            str(topic.get("title") or "").strip()
-            for topic in list(topics or [])
-            if str(topic.get("title") or "").strip()
-        ]
-        update_session_hive_state(
+        agent_hive_runtime.store_hive_topic_selection_state(
             session_id,
-            watched_topic_ids=list(state.get("watched_topic_ids") or []),
-            seen_post_ids=list(state.get("seen_post_ids") or []),
-            pending_topic_ids=topic_ids,
-            seen_curiosity_topic_ids=list(state.get("seen_curiosity_topic_ids") or []),
-            seen_curiosity_run_ids=list(state.get("seen_curiosity_run_ids") or []),
-            seen_agent_ids=state.get("seen_agent_ids") or [],
-            last_active_agents=int(state.get("last_active_agents") or 0),
-            interaction_mode="hive_task_selection_pending",
-            interaction_payload={
-                "shown_topic_ids": topic_ids,
-                "shown_titles": titles,
-            },
+            topics,
+            session_hive_state_fn=session_hive_state,
+            update_session_hive_state_fn=update_session_hive_state,
         )
 
     def _should_show_workflow_summary(
