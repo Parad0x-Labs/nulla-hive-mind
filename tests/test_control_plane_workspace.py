@@ -8,6 +8,8 @@ from unittest import mock
 
 import core.control_plane_workspace as control_plane_workspace
 from core.control_plane import policies as control_plane_policies
+from core.control_plane import queue_views as control_plane_queue_views
+from core.control_plane import runtime_views as control_plane_runtime_views
 from core.control_plane import schemas as control_plane_schemas
 from core.control_plane import templates as control_plane_templates
 from core.control_plane_workspace import collect_control_plane_status, sync_control_plane_workspace
@@ -22,6 +24,27 @@ class ControlPlaneWorkspaceTests(unittest.TestCase):
         self.assertEqual(
             control_plane_workspace._template_library(),
             control_plane_templates.template_library(spawn_policy_fn=control_plane_workspace._spawn_policy),
+        )
+
+    def test_control_plane_workspace_facade_reuses_extracted_read_views(self) -> None:
+        conn = mock.Mock()
+        conn.execute.return_value.fetchone.return_value = None
+
+        self.assertEqual(
+            control_plane_workspace._load_open_task_offers(conn, limit=5),
+            control_plane_queue_views.load_open_task_offers(
+                conn,
+                limit=5,
+                table_exists_fn=control_plane_workspace._table_exists,
+            ),
+        )
+        self.assertEqual(
+            control_plane_workspace._load_runtime_checkpoints(conn, limit=5),
+            control_plane_runtime_views.load_runtime_checkpoints(
+                conn,
+                limit=5,
+                table_exists_fn=control_plane_workspace._table_exists,
+            ),
         )
 
     def test_sync_control_plane_workspace_creates_real_mirror_and_templates(self) -> None:

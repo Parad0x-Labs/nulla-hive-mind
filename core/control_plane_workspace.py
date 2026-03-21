@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from core.control_plane import policies as control_plane_policies
+from core.control_plane import queue_views as control_plane_queue_views
+from core.control_plane import runtime_views as control_plane_runtime_views
 from core.control_plane import schemas as control_plane_schemas
 from core.control_plane import templates as control_plane_templates
 from core import policy_engine, runtime_paths
@@ -239,285 +241,119 @@ def _workspace_root() -> Path:
 
 
 def _load_open_task_offers(conn: Any, *, limit: int) -> list[dict[str, Any]]:
-    if not _table_exists(conn, "task_offers"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT task_id, parent_peer_id, task_type, subtask_type, summary, priority, deadline_ts, status, created_at, updated_at
-        FROM task_offers
-        WHERE status IN ('open', 'claimed', 'assigned')
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    return control_plane_queue_views.load_open_task_offers(
+        conn,
+        limit=limit,
+        table_exists_fn=_table_exists,
+    )
 
 
 def _load_reviewer_lane(conn: Any, *, limit: int) -> dict[str, Any]:
-    if not _table_exists(conn, "task_results"):
-        return {"generated_at": _utcnow(), "lane": "reviewer", "items": []}
-    rows = conn.execute(
-        """
-        SELECT result_id, task_id, helper_peer_id, result_type, summary, confidence, status, created_at, updated_at
-        FROM task_results
-        WHERE status = 'submitted'
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    ).fetchall()
-    return {
-        "generated_at": _utcnow(),
-        "lane": "reviewer",
-        "review_required": True,
-        "items": [dict(row) for row in rows],
-    }
+    return control_plane_queue_views.load_reviewer_lane(
+        conn,
+        limit=limit,
+        table_exists_fn=_table_exists,
+        utcnow_fn=_utcnow,
+    )
 
 
 def _load_commons_promotion_queue(conn: Any, *, limit: int) -> dict[str, Any]:
-    if not _table_exists(conn, "hive_commons_promotion_candidates"):
-        return {"generated_at": _utcnow(), "lane": "commons_promotion", "items": []}
-    rows = conn.execute(
-        """
-        SELECT candidate_id, post_id, topic_id, requested_by_agent_id, score, status, review_state,
-               archive_state, promoted_topic_id, support_weight, challenge_weight, cite_weight,
-               comment_count, evidence_depth, downstream_use_count, training_signal_count,
-               reasons_json, metadata_json, created_at, updated_at
-        FROM hive_commons_promotion_candidates
-        ORDER BY score DESC, updated_at DESC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    ).fetchall()
-    items: list[dict[str, Any]] = []
-    for row in rows:
-        item = dict(row)
-        item["reasons"] = _json_loads(item.pop("reasons_json", "[]"), fallback=[])
-        item["metadata"] = _json_loads(item.pop("metadata_json", "{}"), fallback={})
-        items.append(item)
-    return {
-        "generated_at": _utcnow(),
-        "lane": "commons_promotion",
-        "review_required": True,
-        "items": items,
-    }
+    return control_plane_queue_views.load_commons_promotion_queue(
+        conn,
+        limit=limit,
+        table_exists_fn=_table_exists,
+        json_loads_fn=_json_loads,
+        utcnow_fn=_utcnow,
+    )
 
 
 def _load_archivist_lane(conn: Any, *, limit: int) -> dict[str, Any]:
-    if _table_exists(conn, "useful_outputs"):
-        rows = conn.execute(
-            """
-            SELECT useful_output_id, source_type, source_id, task_id, topic_id, summary,
-                   quality_score, archive_state, eligibility_state, source_updated_at
-            FROM useful_outputs
-            WHERE archive_state IN ('candidate', 'approved')
-            ORDER BY quality_score DESC, source_updated_at DESC
-            LIMIT ?
-            """,
-            (max(1, int(limit)),),
-        ).fetchall()
-        return {
-            "generated_at": _utcnow(),
-            "lane": "archivist",
-            "review_required": False,
-            "archive_mode": "approved_summaries_only",
-            "items": [dict(row) for row in rows],
-        }
-    if not _table_exists(conn, "task_results"):
-        return {"generated_at": _utcnow(), "lane": "archivist", "items": []}
-    rows = conn.execute(
-        """
-        SELECT result_id, task_id, helper_peer_id, result_type, summary, confidence, status, created_at, updated_at
-        FROM task_results
-        WHERE status IN ('accepted', 'partial', 'reviewed')
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    ).fetchall()
-    return {
-        "generated_at": _utcnow(),
-        "lane": "archivist",
-        "review_required": False,
-        "archive_mode": "approved_summaries_only",
-        "items": [dict(row) for row in rows],
-    }
+    return control_plane_queue_views.load_archivist_lane(
+        conn,
+        limit=limit,
+        table_exists_fn=_table_exists,
+        utcnow_fn=_utcnow,
+    )
 
 
 def _load_active_assignments(conn: Any, *, limit: int) -> list[dict[str, Any]]:
-    if not _table_exists(conn, "task_assignments"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT assignment_id, task_id, claim_id, parent_peer_id, helper_peer_id, assignment_mode,
-               status, capability_token_id, lease_expires_at, last_progress_state, last_progress_note,
-               assigned_at, updated_at, progress_updated_at, completed_at
-        FROM task_assignments
-        WHERE status = 'active'
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    return control_plane_queue_views.load_active_assignments(
+        conn,
+        limit=limit,
+        table_exists_fn=_table_exists,
+    )
 
 
 def _load_active_hive_claims(conn: Any, *, limit: int) -> list[dict[str, Any]]:
-    if not _table_exists(conn, "hive_topic_claims"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT claim_id, topic_id, agent_id, status, note, capability_tags_json, created_at, updated_at
-        FROM hive_topic_claims
-        WHERE status = 'active'
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    ).fetchall()
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        item = dict(row)
-        item["capability_tags"] = _json_loads(item.pop("capability_tags_json", "[]"), fallback=[])
-        out.append(item)
-    return out
+    return control_plane_queue_views.load_active_hive_claims(
+        conn,
+        limit=limit,
+        table_exists_fn=_table_exists,
+        json_loads_fn=_json_loads,
+    )
 
 
 def _load_runtime_sessions(conn: Any, *, limit: int, event_limit: int) -> list[dict[str, Any]]:
-    if not _table_exists(conn, "runtime_sessions"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT session_id, started_at, updated_at, event_count, last_event_type, last_message,
-               request_preview, task_class, status, last_checkpoint_id
-        FROM runtime_sessions
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    ).fetchall()
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        item = dict(row)
-        checkpoint_id = str(item.get("last_checkpoint_id") or "").strip()
-        item["checkpoint"] = _runtime_checkpoint(conn, checkpoint_id) if checkpoint_id else None
-        item["recent_events"] = _runtime_events(conn, str(item["session_id"]), limit=event_limit)
-        receipts = _runtime_receipts(conn, str(item["session_id"]), limit=12)
-        item["tool_receipts"] = receipts
-        item["touched_paths"] = sorted({path for receipt in receipts for path in _paths_from_payload(receipt)})
-        out.append(item)
-    return out
+    return control_plane_runtime_views.load_runtime_sessions(
+        conn,
+        limit=limit,
+        event_limit=event_limit,
+        table_exists_fn=_table_exists,
+        runtime_checkpoint_fn=_runtime_checkpoint,
+        runtime_events_fn=_runtime_events,
+        runtime_receipts_fn=_runtime_receipts,
+        paths_from_payload_fn=_paths_from_payload,
+    )
 
 
 def _load_runtime_checkpoints(conn: Any, *, limit: int) -> list[dict[str, Any]]:
-    if not _table_exists(conn, "runtime_checkpoints"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT checkpoint_id, session_id, task_id, task_class, status, step_count, last_tool_name,
-               final_response, failure_text, resume_count, created_at, updated_at, completed_at
-        FROM runtime_checkpoints
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    return control_plane_runtime_views.load_runtime_checkpoints(
+        conn,
+        limit=limit,
+        table_exists_fn=_table_exists,
+    )
 
 
 def _load_recent_task_results(conn: Any, *, limit: int) -> list[dict[str, Any]]:
-    if not _table_exists(conn, "task_results"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT result_id, task_id, helper_peer_id, result_type, summary, confidence,
-               evidence_json, abstract_steps_json, risk_flags_json, status, created_at, updated_at
-        FROM task_results
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    ).fetchall()
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        item = dict(row)
-        item["evidence"] = _json_loads(item.pop("evidence_json", "[]"), fallback=[])
-        item["abstract_steps"] = _json_loads(item.pop("abstract_steps_json", "[]"), fallback=[])
-        item["risk_flags"] = _json_loads(item.pop("risk_flags_json", "[]"), fallback=[])
-        out.append(item)
-    return out
+    return control_plane_runtime_views.load_recent_task_results(
+        conn,
+        limit=limit,
+        table_exists_fn=_table_exists,
+        json_loads_fn=_json_loads,
+    )
 
 
 def _load_pending_operator_actions(conn: Any, *, limit: int) -> list[dict[str, Any]]:
-    if not _table_exists(conn, "operator_action_requests"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT action_id, session_id, task_id, action_kind, scope_json, status, created_at, updated_at
-        FROM operator_action_requests
-        WHERE status = 'pending_approval'
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    ).fetchall()
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        item = dict(row)
-        item["scope"] = _json_loads(item.pop("scope_json", "{}"), fallback={})
-        out.append(item)
-    return out
+    return control_plane_queue_views.load_pending_operator_actions(
+        conn,
+        limit=limit,
+        table_exists_fn=_table_exists,
+        json_loads_fn=_json_loads,
+    )
 
 
 def _load_pending_runtime_checkpoints(conn: Any, *, limit: int) -> list[dict[str, Any]]:
-    if not _table_exists(conn, "runtime_checkpoints"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT checkpoint_id, session_id, task_id, task_class, status, step_count, last_tool_name,
-               created_at, updated_at
-        FROM runtime_checkpoints
-        WHERE status = 'pending_approval'
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    return control_plane_queue_views.load_pending_runtime_checkpoints(
+        conn,
+        limit=limit,
+        table_exists_fn=_table_exists,
+    )
 
 
 def _load_failed_runtime_sessions(conn: Any, *, limit: int) -> list[dict[str, Any]]:
-    if not _table_exists(conn, "runtime_sessions"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT session_id, started_at, updated_at, event_count, last_event_type,
-               last_message, request_preview, task_class, status, last_checkpoint_id
-        FROM runtime_sessions
-        WHERE status IN ('failed', 'interrupted')
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    return control_plane_queue_views.load_failed_runtime_sessions(
+        conn,
+        limit=limit,
+        table_exists_fn=_table_exists,
+    )
 
 
 def _load_rejected_results(conn: Any, *, limit: int) -> list[dict[str, Any]]:
-    if not _table_exists(conn, "task_results"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT result_id, task_id, helper_peer_id, summary, confidence, status, created_at, updated_at
-        FROM task_results
-        WHERE status IN ('rejected', 'harmful', 'failed')
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    return control_plane_queue_views.load_rejected_results(
+        conn,
+        limit=limit,
+        table_exists_fn=_table_exists,
+    )
 
 
 def _load_swarm_budget_summary(conn: Any) -> dict[str, Any]:
@@ -808,88 +644,40 @@ def _load_adaptation_proof_summary(conn: Any, *, db_path: str | Path | None = No
 
 
 def list_useful_outputs_for_workspace(db_path: str | Path | None = None, *, limit: int = 64) -> list[dict[str, Any]]:
-    rows = []
-    conn = get_connection(db_path or DEFAULT_DB_PATH)
-    try:
-        if _table_exists(conn, "useful_outputs"):
-            fetched = conn.execute(
-                """
-                SELECT useful_output_id, source_type, source_id, task_id, topic_id, summary,
-                       quality_score, archive_state, eligibility_state, durability_reasons_json,
-                       eligibility_reasons_json, source_updated_at
-                FROM useful_outputs
-                ORDER BY quality_score DESC, source_updated_at DESC
-                LIMIT ?
-                """,
-                (max(1, int(limit)),),
-            ).fetchall()
-            rows = [dict(row) for row in fetched]
-    finally:
-        conn.close()
-    for item in rows:
-        item["durability_reasons"] = _json_loads(item.pop("durability_reasons_json", "[]"), fallback=[])
-        item["eligibility_reasons"] = _json_loads(item.pop("eligibility_reasons_json", "[]"), fallback=[])
-    return rows
+    return control_plane_runtime_views.list_useful_outputs_for_workspace(
+        db_path,
+        limit=limit,
+        table_exists_fn=_table_exists,
+        json_loads_fn=_json_loads,
+    )
 
 
 def _runtime_checkpoint(conn: Any, checkpoint_id: str) -> dict[str, Any] | None:
-    if not checkpoint_id or not _table_exists(conn, "runtime_checkpoints"):
-        return None
-    row = conn.execute(
-        """
-        SELECT checkpoint_id, session_id, task_id, task_class, status, step_count, last_tool_name,
-               final_response, failure_text, resume_count, created_at, updated_at, completed_at
-        FROM runtime_checkpoints
-        WHERE checkpoint_id = ?
-        LIMIT 1
-        """,
-        (checkpoint_id,),
-    ).fetchone()
-    return dict(row) if row else None
+    return control_plane_runtime_views.runtime_checkpoint(
+        conn,
+        checkpoint_id,
+        table_exists_fn=_table_exists,
+    )
 
 
 def _runtime_events(conn: Any, session_id: str, *, limit: int) -> list[dict[str, Any]]:
-    if not _table_exists(conn, "runtime_session_events"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT session_id, seq, event_type, message, details_json, created_at
-        FROM runtime_session_events
-        WHERE session_id = ?
-        ORDER BY seq DESC
-        LIMIT ?
-        """,
-        (session_id, max(1, int(limit))),
-    ).fetchall()
-    events: list[dict[str, Any]] = []
-    for row in rows[::-1]:
-        item = dict(row)
-        item["details"] = _json_loads(item.pop("details_json", "{}"), fallback={})
-        events.append(item)
-    return events
+    return control_plane_runtime_views.runtime_events(
+        conn,
+        session_id,
+        limit=limit,
+        table_exists_fn=_table_exists,
+        json_loads_fn=_json_loads,
+    )
 
 
 def _runtime_receipts(conn: Any, session_id: str, *, limit: int) -> list[dict[str, Any]]:
-    if not _table_exists(conn, "runtime_tool_receipts"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT receipt_key, session_id, checkpoint_id, tool_name, idempotency_key,
-               arguments_json, execution_json, created_at, updated_at
-        FROM runtime_tool_receipts
-        WHERE session_id = ?
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (session_id, max(1, int(limit))),
-    ).fetchall()
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        item = dict(row)
-        item["arguments"] = _json_loads(item.pop("arguments_json", "{}"), fallback={})
-        item["execution"] = _json_loads(item.pop("execution_json", "{}"), fallback={})
-        out.append(item)
-    return out
+    return control_plane_runtime_views.runtime_receipts(
+        conn,
+        session_id,
+        limit=limit,
+        table_exists_fn=_table_exists,
+        json_loads_fn=_json_loads,
+    )
 
 
 def _budget_caps_policy() -> dict[str, Any]:
