@@ -11,6 +11,7 @@ from . import (
     presence,
     response,
     turn_dispatch,
+    turn_frontdoor,
     turn_reasoning,
 )
 
@@ -27,5 +28,6 @@ __all__ = [
     "presence",
     "response",
     "turn_dispatch",
+    "turn_frontdoor",
     "turn_reasoning",
 ]
