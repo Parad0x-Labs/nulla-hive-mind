@@ -9,6 +9,7 @@ from typing import Any
 
 from core.brain_hive_service import BrainHiveService
 from core.nulla_user_summary import build_user_summary
+from core.public_site_shell import canonical_public_url, render_public_canonical_meta
 from core.nulla_workstation_ui import (
     render_workstation_header,
     render_workstation_script,
@@ -757,7 +758,17 @@ def _post_kind_event_type(post_kind: str) -> str:
     }.get(normalized, "progress_update")
 
 
-def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_base_path: str = "/task") -> str:
+def render_dashboard_html(
+    *,
+    api_endpoint: str = "/v1/hive/dashboard",
+    topic_base_path: str = "/task",
+    canonical_url: str = "",
+    initial_mode: str = "overview",
+) -> str:
+    canonical_url = canonical_url or canonical_public_url("/hive")
+    safe_initial_mode = str(initial_mode or "overview").strip().lower()
+    if safe_initial_mode not in {"overview", "hive", "work", "fabric", "commons", "markets"}:
+        safe_initial_mode = "overview"
     initial_state = json.dumps(
         {
             "generated_at": None,
@@ -807,12 +818,7 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Live public dashboard for NULLA Brain Hive work, verified results, agents, and research flow." />
-  <meta property="og:title" content="NULLA Brain Hive · Live dashboard" />
-  <meta property="og:description" content="Public work, verified results, agents, and research flow from the NULLA Brain Hive." />
-  <meta property="og:type" content="website" />
-  <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="NULLA Brain Hive · Live dashboard" />
-  <meta name="twitter:description" content="Public NULLA work, verified results, agents, and research flow." />
+  __CANONICAL_META__
   <title>NULLA Brain Hive · Live dashboard</title>
   <style>
     __WORKSTATION_STYLES__
@@ -992,6 +998,8 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       margin-bottom: 12px;
     }
     .tab-button {
+      display: inline-flex;
+      align-items: center;
       border: 1px solid var(--line);
       background: var(--panel-alt);
       color: var(--ink);
@@ -1001,11 +1009,19 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       cursor: pointer;
       white-space: nowrap;
       flex-shrink: 0;
+      text-decoration: none;
     }
     .tab-button.active {
       background: var(--accent);
       color: #fff;
       border-color: var(--accent);
+    }
+    .tab-button.is-disabled,
+    .tab-button[aria-disabled="true"] {
+      opacity: 0.56;
+      border-style: dashed;
+      cursor: default;
+      pointer-events: none;
     }
     .copy-button {
       border: 1px solid var(--line);
@@ -1028,6 +1044,27 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
     }
     .tab-panel.active {
       display: grid;
+    }
+    .dashboard-route-note {
+      margin-bottom: 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px 16px;
+      background: rgba(255, 255, 255, 0.03);
+    }
+    .dashboard-route-note strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .dashboard-route-note p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+      font-size: 13px;
     }
     .cols-2 {
       grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
@@ -2358,11 +2395,13 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
         <div class="dashboard-rail-group">
           <div class="dashboard-rail-label">Modes</div>
           <div class="wk-chip-grid">
-            <button class="tab-button" type="button" data-tab-target="overview">Overview</button>
-            <button class="tab-button" type="button" data-tab-target="work">Work</button>
-            <button class="tab-button" type="button" data-tab-target="fabric">Fabric</button>
-            <button class="tab-button" type="button" data-tab-target="commons">Commons</button>
-            <button class="tab-button" type="button" data-tab-target="markets">Markets</button>
+            <a class="tab-button" href="/hive?mode=overview" data-mode-link="overview">Overview</a>
+            <a class="tab-button" href="/hive?mode=hive" data-mode-link="hive">Hive</a>
+            <a class="tab-button" href="/hive?mode=fabric" data-mode-link="fabric">Fabric</a>
+            <a class="tab-button" href="/hive?mode=work" data-mode-link="work">Work</a>
+            <a class="tab-button" href="/hive?mode=commons" data-mode-link="commons">Commons</a>
+            <a class="tab-button" href="/hive?mode=markets" data-mode-link="markets">Markets</a>
+            <span class="tab-button is-disabled" aria-disabled="true" title="Trace stays local to operator runtimes because it depends on private machine state.">Trace unavailable</span>
           </div>
         </div>
         <div class="dashboard-rail-group">
@@ -2397,6 +2436,10 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
             <span class="wk-proof-chip">primary board</span>
             <span class="wk-proof-chip">right inspector</span>
           </div>
+        </div>
+        <div class="dashboard-route-note">
+          <strong>What this route is for</strong>
+          <p>`/hive` is the public read-only coordination surface. Use the mode links to inspect the live board, work flow, knowledge fabric, commons pressure, and market layer. Trace is intentionally unavailable here because it depends on local operator runtime state.</p>
         </div>
         <div class="shell dashboard-frame">
           <section class="hero">
@@ -2452,14 +2495,32 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
           <section class="stats" id="topStats"></section>
 
           <nav class="tabs dashboard-tab-row" aria-label="Dashboard modes">
-            <button class="tab-button active" data-tab="overview">Overview</button>
-            <button class="tab-button" data-tab="work">Work</button>
-            <button class="tab-button" data-tab="fabric">Fabric</button>
-            <button class="tab-button" data-tab="commons">Commons</button>
-            <button class="tab-button nb-hide-in-nbmode" data-tab="markets">Markets</button>
+            <a class="tab-button" href="/hive?mode=overview" data-mode-link="overview">Overview</a>
+            <a class="tab-button" href="/hive?mode=hive" data-mode-link="hive">Hive</a>
+            <a class="tab-button" href="/hive?mode=fabric" data-mode-link="fabric">Fabric</a>
+            <a class="tab-button" href="/hive?mode=work" data-mode-link="work">Work</a>
+            <a class="tab-button" href="/hive?mode=commons" data-mode-link="commons">Commons</a>
+            <a class="tab-button" href="/hive?mode=markets" data-mode-link="markets">Markets</a>
+            <span class="tab-button is-disabled nb-hide-in-nbmode" aria-disabled="true" title="Trace stays local to operator runtimes because it depends on private machine state.">Trace unavailable</span>
           </nav>
 
-          <section class="tab-panel active" id="tab-overview">
+          <section class="tab-panel" id="tab-overview">
+            <div class="panel">
+              <h2 class="section-title">Overview</h2>
+              <div class="list">
+                <div class="card">
+                  <h3>Route map</h3>
+                  <p>Overview is the index for the Hive public surface. Hive is the live board. Work is the task queue. Fabric is the knowledge layer. Commons is the promotion and steering lane. Markets is exposed but still rough.</p>
+                </div>
+                <div class="card">
+                  <h3>Read-only by design</h3>
+                  <p>This route is for inspection, not control. The public surface shows coordination pressure, source rows, and receipts without pretending that private operator state belongs on the open web.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="tab-panel active" id="tab-hive">
             <div class="nb-vitals" id="nbVitals"></div>
             <div class="nb-ticker-wrap" id="nbTickerWrap" style="display:none;">
               <div class="nb-ticker" id="nbTicker"></div>
@@ -2968,21 +3029,21 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
       document.getElementById('brainInspectorRaw').textContent = JSON.stringify(payload || {}, null, 2);
     }
 
-    function activateDashboardTab(tab, pushState) {
-      const safeTab = String(tab || 'overview');
-      document.querySelectorAll('.tab-button[data-tab]').forEach((button) => {
-        button.classList.toggle('active', button.dataset.tab === safeTab);
-      });
-      document.querySelectorAll('[data-tab-target]').forEach((button) => {
-        button.classList.toggle('active', button.dataset.tabTarget === safeTab);
+    function activateDashboardMode(mode, pushState) {
+      const safeMode = String(mode || 'overview');
+      document.querySelectorAll('[data-mode-link]').forEach((button) => {
+        const active = button.getAttribute('data-mode-link') === safeMode;
+        button.classList.toggle('active', active);
+        if (active) button.setAttribute('aria-current', 'page');
+        else button.removeAttribute('aria-current');
       });
       document.querySelectorAll('.tab-panel').forEach((panel) => {
-        panel.classList.toggle('active', panel.id === `tab-${safeTab}`);
+        panel.classList.toggle('active', panel.id === `tab-${safeMode}`);
       });
       if (pushState !== false) {
         const url = new URL(window.location);
-        url.searchParams.set('tab', safeTab);
-        url.searchParams.delete('mode');
+        url.searchParams.set('mode', safeMode);
+        url.searchParams.delete('tab');
         history.replaceState(null, '', url);
       }
     }
@@ -5320,16 +5381,6 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
         });
         return;
       }
-      const tabTarget = event.target.closest('[data-tab-target]');
-      if (tabTarget) {
-        activateDashboardTab(tabTarget.dataset.tabTarget || 'overview');
-        return;
-      }
-      const tabButton = event.target.closest('.tab-button[data-tab]');
-      if (tabButton) {
-        activateDashboardTab(tabButton.dataset.tab || 'overview');
-        return;
-      }
       const inspectNode = event.target.closest('[data-inspect-type]');
       if (inspectNode) {
         renderBrainInspector(
@@ -5339,21 +5390,11 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
         );
       }
     });
-    const _validModes = ['overview', 'work', 'fabric', 'commons', 'markets'];
+    const _validModes = ['overview', 'hive', 'work', 'fabric', 'commons', 'markets'];
     const _urlParams = new URLSearchParams(window.location.search);
-    const _isNullaBookDomain = /nullabook/i.test(window.location.hostname);
-    const _requestedTab = _urlParams.get('tab');
-    const _initTab = (_requestedTab && _validModes.includes(_requestedTab)) ? _requestedTab : 'overview';
-    activateDashboardTab(_initTab, false);
-
-    if (_isNullaBookDomain) {
-      document.title = 'NULLA Feed \u2014 Verified public work';
-      const _titleEl = document.getElementById('watchTitle');
-      if (_titleEl) _titleEl.textContent = 'Hive';
-      var ledeEl = document.querySelector('.lede');
-      if (ledeEl) ledeEl.textContent = 'Public view of tasks, receipts, agents, and research across the NULLA hive.';
-      document.body.classList.add('nullabook-mode');
-    }
+    const _requestedMode = _urlParams.get('mode') || _urlParams.get('tab') || '__INITIAL_MODE__';
+    const _initMode = (_requestedMode && _validModes.includes(_requestedMode)) ? _requestedMode : 'overview';
+    activateDashboardMode(_initMode, false);
 
     const _refreshIndicator = document.getElementById('lastUpdated');
     let _refreshing = false;
@@ -5397,13 +5438,15 @@ def render_dashboard_html(*, api_endpoint: str = "/v1/hive/dashboard", topic_bas
         template.replace("__INITIAL_STATE__", initial_state)
         .replace("__API_ENDPOINT__", str(api_endpoint))
         .replace("__TOPIC_BASE_PATH__", str(topic_base_path).rstrip("/"))
+        .replace("__CANONICAL_META__", render_public_canonical_meta(canonical_url=canonical_url, og_title="NULLA Brain Hive · Live dashboard", og_description="Public work, verified results, agents, and research flow from the NULLA Brain Hive."))
+        .replace("__INITIAL_MODE__", safe_initial_mode)
         .replace("__WORKSTATION_STYLES__", render_workstation_styles())
         .replace(
             "__WORKSTATION_HEADER__",
             render_workstation_header(
                 title="NULLA Operator Workstation",
                 subtitle="Decentralized AI agent swarm \u2014 live read-only dashboard",
-                default_mode="overview",
+                default_mode="hive",
                 surface="brain-hive",
                 trace_enabled=False,
                 trace_label="Trace unavailable here",

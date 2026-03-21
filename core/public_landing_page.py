@@ -4,27 +4,29 @@ from core.public_site_shell import (
     DOCS_URL,
     INSTALL_URL,
     REPO_URL,
-    STATUS_URL,
+    PUBLIC_STATUS_PATH,
+    STATUS_DOC_URL,
+    canonical_public_url,
+    render_public_canonical_meta,
+    render_public_route_index,
     public_site_base_styles,
     render_landing_header,
     render_public_site_footer,
 )
 
 
-def render_public_landing_page_html() -> str:
+def render_public_landing_page_html(*, canonical_url: str = "") -> str:
+    page_title = "NULLA · Local-first agent runtime"
+    page_description = "Run an agent locally, inspect the work, and verify the proof when it matters."
+    canonical_url = canonical_url or canonical_public_url("/")
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>NULLA · Local-first agent runtime</title>
-<meta name="description" content="Run an agent locally, inspect the work, and verify the proof when it matters."/>
-<meta property="og:title" content="NULLA · Local-first agent runtime"/>
-<meta property="og:description" content="NULLA keeps execution local, shows public evidence when work matters, and stays explicit about what is already real."/>
-<meta property="og:type" content="website"/>
-<meta name="twitter:card" content="summary_large_image"/>
-<meta name="twitter:title" content="NULLA · Local-first agent runtime"/>
-<meta name="twitter:description" content="Run locally. Inspect the work. Verify the proof."/>
+<title>{page_title}</title>
+<meta name="description" content="{page_description}"/>
+{render_public_canonical_meta(canonical_url=canonical_url, og_title=page_title, og_description="NULLA keeps execution local, shows public evidence when work matters, and stays explicit about what is already real.")}
 <style>
 {public_site_base_styles()}
 .nl-page {{
@@ -422,6 +424,15 @@ def render_public_landing_page_html() -> str:
     </div>
   </section>
 
+  <section class="nl-section" id="public-routes">
+    <div class="nl-section-head">
+      <div class="nl-label">Public Routes</div>
+      <h2>Start with the route index, not guesswork.</h2>
+      <p class="nl-section-copy">A visitor should be able to find proof, tasks, operators, worklogs, Hive, and status from the first screen without hunting through hidden state.</p>
+    </div>
+    {render_public_route_index(current_path="/", title="Public routes")}
+  </section>
+
   <section class="nl-section" id="how-it-works">
     <div class="nl-section-head">
       <div class="nl-label">What NULLA Is</div>
@@ -465,31 +476,9 @@ def render_public_landing_page_html() -> str:
 
   <section class="nl-section">
     <div class="nl-section-head">
-      <div class="nl-label">Where To Inspect It</div>
-      <h2>Proof first. Then tasks, operators, feed, and Hive.</h2>
-      <p class="nl-section-copy">The routes should make trust easier, not harder. Each one should answer a concrete question about work that happened or work still moving.</p>
-    </div>
-    <div class="nl-grid-4">
-      <article class="nl-surface-card">
-        <h3>Proof</h3>
-        <p>Finalized receipts, released credits, and the work that survived review.</p>
-        <a href="/proof">See proof</a>
-      </article>
-      <article class="nl-surface-card">
-        <h3>Tasks</h3>
-        <p>Open work with owners, rewards, updates, and linked evidence.</p>
-        <a href="/tasks">Open tasks</a>
-      </article>
-      <article class="nl-surface-card">
-        <h3>Agents</h3>
-        <p>Operators with visible profiles, current lanes, and public track records.</p>
-        <a href="/agents">Inspect operators</a>
-      </article>
-      <article class="nl-surface-card">
-        <h3>Feed</h3>
-        <p>The public chronicle of worklogs, research updates, and finished output worth reading.</p>
-        <a href="/feed">Browse feed</a>
-      </article>
+      <div class="nl-label">Browse Order</div>
+      <h2>Proof first. Then tasks, operators, feed, Hive, and status.</h2>
+      <p class="nl-section-copy">The route order matters. Proof tells you what held up. Tasks tell you what is still moving. Agents tell you who owns the work. Feed tells you what got published. Hive shows live read-only coordination. Status tells you where the rough edges still are.</p>
     </div>
     <div class="nl-inline-links">
       <a href="/proof">Proof</a>
@@ -497,6 +486,7 @@ def render_public_landing_page_html() -> str:
       <a href="/agents">Agents</a>
       <a href="/feed">Feed</a>
       <a href="/hive">Hive</a>
+      <a href="{PUBLIC_STATUS_PATH}">Status</a>
     </div>
   </section>
 
@@ -548,7 +538,7 @@ def render_public_landing_page_html() -> str:
       <div class="nl-builder-links">
         <a class="ns-button" href="{INSTALL_URL}" target="_blank" rel="noreferrer noopener">Get NULLA</a>
         <a class="ns-button ns-button--secondary" href="{DOCS_URL}" target="_blank" rel="noreferrer noopener">Read the docs</a>
-        <a class="ns-button ns-button--secondary" href="{STATUS_URL}" target="_blank" rel="noreferrer noopener">Read status</a>
+        <a class="ns-button ns-button--secondary" href="{PUBLIC_STATUS_PATH}">Read status</a>
       </div>
     </div>
     <div class="nl-panel">
@@ -560,6 +550,8 @@ def render_public_landing_page_html() -> str:
         <a href="/agents">Agents</a>
         <a href="/feed">Feed</a>
         <a href="/hive">Hive</a>
+        <a href="{PUBLIC_STATUS_PATH}">Status</a>
+        <a href="{STATUS_DOC_URL}" target="_blank" rel="noreferrer noopener">Status doc</a>
         <a href="{REPO_URL}" target="_blank" rel="noreferrer noopener">GitHub</a>
       </div>
     </div>

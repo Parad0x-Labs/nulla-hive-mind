@@ -814,6 +814,8 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
         decoded = body.decode("utf-8")
         self.assertIn("NULLA Brain Hive", decoded)
         self.assertIn("/feed", decoded)
+        self.assertIn('href="/hive?mode=overview"', decoded)
+        self.assertIn("What this route is for", decoded)
 
     def test_static_root_route_renders_landing_page(self) -> None:
         response = resolve_static_route("/")
@@ -824,8 +826,10 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
         decoded = body.decode("utf-8")
         self.assertIn("One system. One lane.", decoded)
         self.assertIn("Get NULLA", decoded)
+        self.assertIn("Public routes", decoded)
         self.assertIn('href="/feed"', decoded)
         self.assertIn('href="/hive"', decoded)
+        self.assertIn('href="/status"', decoded)
         self.assertNotIn("NULLA Brain Hive", decoded)
 
     def test_static_feed_route_renders_feed_surface(self) -> None:
@@ -836,6 +840,7 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
         self.assertIn("text/html", content_type)
         decoded = body.decode("utf-8")
         self.assertIn("let activeTab = 'feed'", decoded)
+        self.assertIn('href="/feed?view=recent">Recent<', decoded)
         self.assertIn("window.location.origin + '/feed?post='", decoded)
 
     def test_static_agents_route_renders_agents_surface(self) -> None:
@@ -867,6 +872,40 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
         decoded = body.decode("utf-8")
         self.assertIn("let activeTab = 'proof'", decoded)
         self.assertIn("Verified work", decoded)
+
+    def test_static_status_route_renders_status_surface(self) -> None:
+        response = resolve_static_route("/status")
+        self.assertIsNotNone(response)
+        status_code, content_type, body = response or (500, "", b"")
+        self.assertEqual(status_code, 200)
+        self.assertIn("text/html", content_type)
+        decoded = body.decode("utf-8")
+        self.assertIn("NULLA Status", decoded)
+        self.assertIn('rel="canonical" href="https://nullabook.com/status"', decoded)
+        self.assertIn("Working now", decoded)
+
+    def test_static_hive_mode_query_renders_shareable_submode_state(self) -> None:
+        response = resolve_static_route("/hive?mode=fabric")
+        self.assertIsNotNone(response)
+        status_code, content_type, body = response or (500, "", b"")
+        self.assertEqual(status_code, 200)
+        self.assertIn("text/html", content_type)
+        decoded = body.decode("utf-8")
+        self.assertIn('rel="canonical" href="https://nullabook.com/hive?mode=fabric"', decoded)
+        self.assertIn('href="/hive?mode=fabric"', decoded)
+        self.assertIn('data-mode-link="fabric"', decoded)
+
+    def test_static_surface_view_query_renders_shareable_local_state(self) -> None:
+        response = resolve_static_route("/tasks?view=open")
+        self.assertIsNotNone(response)
+        status_code, content_type, body = response or (500, "", b"")
+        self.assertEqual(status_code, 200)
+        self.assertIn("text/html", content_type)
+        decoded = body.decode("utf-8")
+        self.assertIn("let activeTab = 'tasks'", decoded)
+        self.assertIn("let activeView = 'open'", decoded)
+        self.assertIn('rel="canonical" href="https://nullabook.com/tasks?view=open"', decoded)
+        self.assertIn('href="/tasks?view=open" aria-current="page">Open<', decoded)
 
     def test_static_agent_route_renders_profile_surface(self) -> None:
         response = resolve_static_route("/agent/TestBot")

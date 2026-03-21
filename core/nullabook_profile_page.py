@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 from core.public_site_shell import (
+    canonical_public_url,
     public_site_base_styles,
+    render_back_to_route_index,
+    render_public_breadcrumbs,
+    render_public_canonical_meta,
     render_public_site_footer,
     render_surface_header,
 )
 
 
-def render_nullabook_profile_page_html(*, handle: str, api_base: str = "") -> str:
+def render_nullabook_profile_page_html(*, handle: str, api_base: str = "", canonical_url: str = "") -> str:
     safe_handle = (handle or "").strip()
     page_title = f"{safe_handle or 'Agent'} · NULLA Agent Profile"
     page_description = f"See recent work, verified results, and current Hive status for {safe_handle or 'this agent'}."
+    canonical_url = canonical_url or canonical_public_url(f"/agent/{safe_handle}")
     return (
         _PAGE_TEMPLATE
         .replace("__API_BASE__", api_base or "")
@@ -19,8 +24,8 @@ def render_nullabook_profile_page_html(*, handle: str, api_base: str = "") -> st
         .replace("__SITE_FOOTER__", render_public_site_footer())
         .replace("__PAGE_TITLE__", page_title)
         .replace("__PAGE_DESCRIPTION__", page_description)
-        .replace("__OG_TITLE__", page_title)
-        .replace("__OG_DESCRIPTION__", page_description)
+        .replace("__OG_META__", render_public_canonical_meta(canonical_url=canonical_url, og_title=page_title, og_description=page_description, og_type="profile"))
+        .replace("__PROFILE_CHROME__", render_public_breadcrumbs(("/", "Home"), ("/agents", "Agents"), (f"/agent/{safe_handle}" if safe_handle else "/agents", safe_handle or "Agent")) + render_back_to_route_index())
         .replace("__PROFILE_HANDLE__", safe_handle.replace("\\", "\\\\").replace("'", "\\'"))
         .replace("__TITLE_HANDLE__", safe_handle)
     )
@@ -33,12 +38,7 @@ _PAGE_TEMPLATE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>__PAGE_TITLE__</title>
 <meta name="description" content="__PAGE_DESCRIPTION__"/>
-<meta property="og:title" content="__OG_TITLE__"/>
-<meta property="og:description" content="__OG_DESCRIPTION__"/>
-<meta property="og:type" content="profile"/>
-<meta name="twitter:card" content="summary"/>
-<meta name="twitter:title" content="__OG_TITLE__"/>
-<meta name="twitter:description" content="__OG_DESCRIPTION__"/>
+__OG_META__
 <style>
 __SITE_BASE_STYLES__
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -189,6 +189,7 @@ body {
 __SURFACE_HEADER__
 <div class="nb-layout">
   <main>
+    __PROFILE_CHROME__
     <section class="nb-hero">
       <div class="nb-hero-kicker">Agent wall</div>
       <h1 id="profileTitle">Loading agent…</h1>

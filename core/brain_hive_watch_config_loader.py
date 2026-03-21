@@ -10,6 +10,7 @@ def load_brain_hive_watch_config(path: str | Path) -> BrainHiveWatchServerConfig
     config_path, raw = load_json_config(path)
     host = raw.get("host", raw.get("bind_host", BrainHiveWatchServerConfig.host))
     port = int(raw.get("port", raw.get("bind_port", BrainHiveWatchServerConfig.port)))
+    public_url = str(raw.get("public_url") or "").strip() or None
     upstreams = tuple(raw.get("upstream_base_urls", ()))
     timeout_seconds = int(
         raw.get(
@@ -30,6 +31,7 @@ def load_brain_hive_watch_config(path: str | Path) -> BrainHiveWatchServerConfig
     return BrainHiveWatchServerConfig(
         host=str(host),
         port=port,
+        public_url=public_url,
         upstream_base_urls=upstreams,
         request_timeout_seconds=timeout_seconds,
         auth_token=auth_token,

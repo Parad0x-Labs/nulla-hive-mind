@@ -53,6 +53,8 @@ from core.meet_and_greet_models import (
 from core.meet_and_greet_service import MeetAndGreetConfig, MeetAndGreetService
 from core.public_hive_quotas import reserve_public_hive_write_quota
 from core.public_landing_page import render_public_landing_page_html
+from core.public_site_shell import canonical_public_url
+from core.public_status_page import render_public_status_page_html
 from network.knowledge_models import KnowledgeAdvert, KnowledgeRefresh, KnowledgeReplicaAd, KnowledgeWithdraw
 from network.signer import get_local_peer_id
 
@@ -195,7 +197,7 @@ def build_server(
                     content_length=len(body),
                 )
                 return
-            static_response = resolve_static_route(parsed.path)
+            static_response = resolve_static_route(self.path)
             if static_response is not None:
                 status_code, content_type, body = static_response
                 self._write_bytes_response(
@@ -232,7 +234,7 @@ def build_server(
                 body = metrics.render_prometheus().encode("utf-8")
                 self._write_bytes_response(200, "text/plain; version=0.0.4", body)
                 return
-            static_response = resolve_static_route(parsed.path)
+            static_response = resolve_static_route(self.path)
             if static_response is not None:
                 status_code, content_type, body = static_response
                 self._write_bytes_response(status_code, content_type, body)
@@ -426,11 +428,24 @@ def serve(config: MeetAndGreetServerConfig | None = None) -> None:
 
 
 def resolve_static_route(path: str) -> tuple[int, str, bytes] | None:
-    clean_path = path.rstrip("/") or "/"
+    parsed = urlparse(path)
+    clean_path = parsed.path.rstrip("/") or "/"
+    query = parse_qs(parsed.query or "")
+    current_view = str((query.get("view") or [""])[0]).strip()
+    current_mode = str((query.get("mode") or query.get("tab") or ["overview"])[0]).strip()
     if clean_path == "/":
-        return 200, "text/html; charset=utf-8", render_public_landing_page_html().encode("utf-8")
+        return 200, "text/html; charset=utf-8", render_public_landing_page_html(canonical_url=canonical_public_url("/")).encode("utf-8")
+    if clean_path == "/status":
+        return 200, "text/html; charset=utf-8", render_public_status_page_html(canonical_url=canonical_public_url("/status")).encode("utf-8")
     if clean_path in {"/brain-hive", "/hive"}:
-        return 200, "text/html; charset=utf-8", render_dashboard_html().encode("utf-8")
+        return (
+            200,
+            "text/html; charset=utf-8",
+            render_dashboard_html(
+                canonical_url=canonical_public_url("/hive", query={"mode": current_mode} if current_mode and current_mode != "overview" else None),
+                initial_mode=current_mode,
+            ).encode("utf-8"),
+        )
     nullabook_surface_by_path = {
         "/nullabook": "feed",
         "/feed": "feed",
@@ -443,13 +458,27 @@ def resolve_static_route(path: str) -> tuple[int, str, bytes] | None:
         return (
             200,
             "text/html; charset=utf-8",
-            render_nullabook_page_html(initial_tab=nullabook_surface_by_path[clean_path]).encode("utf-8"),
+            render_nullabook_page_html(
+                initial_tab=nullabook_surface_by_path[clean_path],
+                current_view=current_view,
+                canonical_url=canonical_public_url(
+                    "/feed" if clean_path == "/nullabook" else clean_path,
+                    query={"view": current_view} if current_view else None,
+                ),
+            ).encode("utf-8"),
         )
     if clean_path.startswith("/agent/"):
         from core.nullabook_profile_page import render_nullabook_profile_page_html
         handle = unquote(clean_path.removeprefix("/agent/").strip("/"))
         if handle:
-            return 200, "text/html; charset=utf-8", render_nullabook_profile_page_html(handle=handle).encode("utf-8")
+            return (
+                200,
+                "text/html; charset=utf-8",
+                render_nullabook_profile_page_html(
+                    handle=handle,
+                    canonical_url=canonical_public_url(f"/agent/{handle}"),
+                ).encode("utf-8"),
+            )
     if clean_path.startswith("/task/"):
         topic_id = unquote(clean_path.removeprefix("/task/").strip("/"))
         if topic_id:

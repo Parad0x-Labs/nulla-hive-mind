@@ -11,6 +11,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from core.brain_hive_dashboard import render_dashboard_html, render_not_found_html, render_topic_detail_html
 from core.public_landing_page import render_public_landing_page_html
+from core.public_site_shell import canonical_public_url, redirect_to_canonical_public_host
+from core.public_status_page import render_public_status_page_html
 
 from .config import BrainHiveWatchServerConfig
 
@@ -64,14 +66,48 @@ def build_watch_server(
             dashboard_cache["snapshot"] = dict(snapshot)
             dashboard_cache["fetched_at"] = time.monotonic()
 
+    def _public_canonical_url(path: str, *, query: dict[str, str] | None = None) -> str:
+        configured_origin = str(cfg.public_url or "").strip().rstrip("/")
+        if not configured_origin:
+            return canonical_public_url(path, query=query)
+        clean_path = "/" + str(path or "/").lstrip("/")
+        if clean_path == "//":
+            clean_path = "/"
+        if not query:
+            return f"{configured_origin}{clean_path}"
+        from urllib.parse import urlencode
+
+        qs = urlencode([(key, value) for key, value in query.items() if str(value or "").strip()])
+        return f"{configured_origin}{clean_path}" + (f"?{qs}" if qs else "")
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "NullaBrainHiveWatch/0.1"
 
+        def _canonical_redirect_url(self, parsed) -> str | None:
+            return redirect_to_canonical_public_host(
+                host_header=self.headers.get("X-Forwarded-Host") or self.headers.get("Host"),
+                path=parsed.path,
+                query=parsed.query,
+            )
+
         def do_HEAD(self) -> None:
             parsed = urlparse(self.path)
+            redirect_url = self._canonical_redirect_url(parsed)
+            if redirect_url:
+                self._write_bytes(
+                    308,
+                    "text/plain; charset=utf-8",
+                    b"",
+                    headers={"Location": redirect_url},
+                    write_body=False,
+                    content_length=0,
+                )
+                return
             clean_path = parsed.path.rstrip("/") or "/"
             qs = parse_qs(parsed.query or "")
             post_id = str((qs.get("post") or [""])[0]).strip()
+            current_view = str((qs.get("view") or [""])[0]).strip()
+            current_mode = str((qs.get("mode") or qs.get("tab") or ["overview"])[0]).strip()
             nullabook_surface_by_path = {
                 "/nullabook": "feed",
                 "/feed": "feed",
@@ -83,17 +119,31 @@ def build_watch_server(
                 from core.nullabook_feed_page import render_nullabook_page_html
 
                 og_kw: dict[str, str] = {
-                    "initial_tab": nullabook_surface_by_path.get(clean_path, "feed")
+                    "initial_tab": nullabook_surface_by_path.get(clean_path, "feed"),
+                    "current_view": current_view,
+                    "canonical_url": _public_canonical_url(
+                        "/feed" if clean_path == "/nullabook" else clean_path,
+                        query={"view": current_view} if current_view else None,
+                    ),
                 }
                 body = render_nullabook_page_html(**og_kw).encode("utf-8")
                 self._write_bytes(200, "text/html; charset=utf-8", b"", write_body=False, content_length=len(body))
                 return
             if clean_path == "/":
-                body = render_public_landing_page_html().encode("utf-8")
+                body = render_public_landing_page_html(canonical_url=_public_canonical_url("/")).encode("utf-8")
+                self._write_bytes(200, "text/html; charset=utf-8", b"", write_body=False, content_length=len(body))
+                return
+            if clean_path == "/status":
+                body = render_public_status_page_html(canonical_url=_public_canonical_url("/status")).encode("utf-8")
                 self._write_bytes(200, "text/html; charset=utf-8", b"", write_body=False, content_length=len(body))
                 return
             if clean_path in {"/brain-hive", "/hive"}:
-                body = render_dashboard_html(api_endpoint="/api/dashboard", topic_base_path="/task").encode("utf-8")
+                body = render_dashboard_html(
+                    api_endpoint="/api/dashboard",
+                    topic_base_path="/task",
+                    canonical_url=_public_canonical_url("/hive", query={"mode": current_mode} if current_mode and current_mode != "overview" else None),
+                    initial_mode=current_mode,
+                ).encode("utf-8")
                 self._write_bytes(
                     200,
                     "text/html; charset=utf-8",
@@ -111,7 +161,10 @@ def build_watch_server(
 
                 handle = unquote(clean_path.removeprefix("/agent/").strip("/"))
                 if handle:
-                    body = render_nullabook_profile_page_html(handle=handle).encode("utf-8")
+                    body = render_nullabook_profile_page_html(
+                        handle=handle,
+                        canonical_url=_public_canonical_url(f"/agent/{handle}"),
+                    ).encode("utf-8")
                     self._write_bytes(200, "text/html; charset=utf-8", b"", write_body=False, content_length=len(body))
                     return
             if clean_path.startswith("/task/"):
@@ -174,9 +227,22 @@ def build_watch_server(
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
+            redirect_url = self._canonical_redirect_url(parsed)
+            if redirect_url:
+                self._write_bytes(
+                    308,
+                    "text/plain; charset=utf-8",
+                    b"",
+                    headers={"Location": redirect_url},
+                    write_body=False,
+                    content_length=0,
+                )
+                return
             clean_path = parsed.path.rstrip("/") or "/"
             qs = parse_qs(parsed.query or "")
             post_id = str((qs.get("post") or [""])[0]).strip()
+            current_view = str((qs.get("view") or [""])[0]).strip()
+            current_mode = str((qs.get("mode") or qs.get("tab") or ["overview"])[0]).strip()
             nullabook_surface_by_path = {
                 "/nullabook": "feed",
                 "/feed": "feed",
@@ -188,7 +254,12 @@ def build_watch_server(
                 from core.nullabook_feed_page import render_nullabook_page_html
 
                 og_kw: dict[str, str] = {
-                    "initial_tab": nullabook_surface_by_path.get(clean_path, "feed")
+                    "initial_tab": nullabook_surface_by_path.get(clean_path, "feed"),
+                    "current_view": current_view,
+                    "canonical_url": _public_canonical_url(
+                        "/feed" if clean_path == "/nullabook" else clean_path,
+                        query={"view": current_view} if current_view else None,
+                    ),
                 }
                 if post_id:
                     try:
@@ -210,7 +281,7 @@ def build_watch_server(
                                     {
                                         "og_title": f"{name} on NULLA Feed",
                                         "og_description": str(post.get("content") or "")[:300],
-                                        "og_url": f"https://nullabook.com/feed?post={post_id}",
+                                        "og_url": _public_canonical_url("/feed", query={"post": post_id}),
                                     }
                                 )
                                 break
@@ -220,11 +291,20 @@ def build_watch_server(
                 self._write_bytes(200, "text/html; charset=utf-8", html.encode("utf-8"))
                 return
             if clean_path == "/":
-                html = render_public_landing_page_html()
+                html = render_public_landing_page_html(canonical_url=_public_canonical_url("/"))
+                self._write_bytes(200, "text/html; charset=utf-8", html.encode("utf-8"))
+                return
+            if clean_path == "/status":
+                html = render_public_status_page_html(canonical_url=_public_canonical_url("/status"))
                 self._write_bytes(200, "text/html; charset=utf-8", html.encode("utf-8"))
                 return
             if clean_path in {"/brain-hive", "/hive"}:
-                html = render_dashboard_html(api_endpoint="/api/dashboard", topic_base_path="/task")
+                html = render_dashboard_html(
+                    api_endpoint="/api/dashboard",
+                    topic_base_path="/task",
+                    canonical_url=_public_canonical_url("/hive", query={"mode": current_mode} if current_mode and current_mode != "overview" else None),
+                    initial_mode=current_mode,
+                )
                 self._write_bytes(
                     200,
                     "text/html; charset=utf-8",
@@ -240,7 +320,10 @@ def build_watch_server(
 
                 handle = unquote(clean_path.removeprefix("/agent/").strip("/"))
                 if handle:
-                    html = render_nullabook_profile_page_html(handle=handle)
+                    html = render_nullabook_profile_page_html(
+                        handle=handle,
+                        canonical_url=_public_canonical_url(f"/agent/{handle}"),
+                    )
                     self._write_bytes(200, "text/html; charset=utf-8", html.encode("utf-8"))
                     return
             if clean_path.startswith("/task/"):

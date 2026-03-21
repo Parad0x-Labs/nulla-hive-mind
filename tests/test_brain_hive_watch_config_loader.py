@@ -61,6 +61,25 @@ class BrainHiveWatchConfigLoaderTests(unittest.TestCase):
         self.assertEqual(config.tls_keyfile, str((tls_dir / "watch-key.pem").resolve()))
         self.assertEqual(config.tls_ca_file, str((tls_dir / "cluster-ca.pem").resolve()))
 
+    def test_loads_public_url_when_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "watch-edge-1.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "host": "0.0.0.0",
+                        "port": 8788,
+                        "upstream_base_urls": ["https://seed-eu.example.nulla"],
+                        "public_url": "https://nullabook.com",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_brain_hive_watch_config(config_path)
+
+        self.assertEqual(config.public_url, "https://nullabook.com")
+
 
 if __name__ == "__main__":
     unittest.main()

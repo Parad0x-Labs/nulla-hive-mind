@@ -498,6 +498,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertIn("/api/dashboard", html)
         self.assertIn("/task", html)
         self.assertIn("NULLA Brain Hive · Live dashboard", html)
+        self.assertIn('rel="canonical" href="https://nullabook.com/hive"', html)
         self.assertIn("NULLA Operator Workstation", html)
         self.assertIn("Verified work", html)
         self.assertIn("workstation v1", html)
@@ -552,7 +553,8 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertIn("brainInspectorTitle", html)
         self.assertIn("brainInspectorTruth", html)
         self.assertIn("brainInspectorTruthNote", html)
-        self.assertIn('data-tab="overview"', html)
+        self.assertIn('href="/hive?mode=overview"', html)
+        self.assertIn('data-mode-link="overview"', html)
         self.assertIn("renderWorkstationChrome", html)
         self.assertIn("function tradingPresenceState(", html)
         self.assertIn("const presenceState = tradingPresenceState(trading, data.generated_at, data.agents || []);", html)
@@ -562,7 +564,9 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertIn("data-open-chip", html)
         self.assertIn("Token Trading", html)
         self.assertIn("Agent Knowledge Growth", html)
-        self.assertIn('data-tab="fabric"', html)
+        self.assertIn("What this route is for", html)
+        self.assertIn('href="/hive?mode=fabric"', html)
+        self.assertIn('data-mode-link="fabric"', html)
         self.assertIn("Mesh manifests", html)
 
     def test_build_trading_learning_payload_extracts_learning_lab_and_flow(self) -> None:
@@ -918,7 +922,9 @@ class BrainHiveWatchServerTests(unittest.TestCase):
                 body = response.read().decode("utf-8")
                 self.assertIn("let activeTab = 'feed'", body)
                 self.assertIn("window.location.origin + '/feed?post='", body)
-                self.assertIn('href="/feed" data-tab="feed" class="is-active">Feed<', body)
+                self.assertIn('href="/feed" data-tab="feed" class="is-active" aria-current="page">Feed<', body)
+                self.assertIn('href="/#public-routes">Back to route index</a>', body)
+                self.assertIn('href="/feed?view=recent">Recent<', body)
         finally:
             server.shutdown()
             server.server_close()
@@ -941,6 +947,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
                 ("/agents", "let activeTab = 'agents'"),
                 ("/tasks", "let activeTab = 'tasks'"),
                 ("/proof", "let activeTab = 'proof'"),
+                ("/status", "NULLA Status"),
                 ("/hive", "NULLA Brain Hive"),
                 ("/agent/TestBot", "Pinned context"),
                 ("/task/topic-123", "Agent work flow"),
@@ -974,7 +981,9 @@ class BrainHiveWatchServerTests(unittest.TestCase):
                 "/tasks",
                 "/agents",
                 "/proof",
+                "/status",
                 "/hive",
+                "/hive?mode=fabric",
                 "/brain-hive",
                 "/task/topic-123",
                 "/agent/TestBot",
@@ -990,6 +999,57 @@ class BrainHiveWatchServerTests(unittest.TestCase):
                     self.assertEqual(body, b"")
                     self.assertGreaterEqual(int(response.getheader("Content-Length") or "0"), 0)
                     conn.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+
+    def test_watch_server_redirects_alternate_public_host_to_canonical_host(self) -> None:
+        server = build_server(
+            BrainHiveWatchServerConfig(
+                host="127.0.0.1",
+                port=0,
+                upstream_base_urls=("http://127.0.0.1:8766",),
+            )
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = int(server.server_address[1])
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", "/feed?view=recent", headers={"Host": "www.nullabook.com"})
+            response = conn.getresponse()
+            body = response.read()
+            self.assertEqual(response.status, 308)
+            self.assertEqual(response.getheader("Location"), "https://nullabook.com/feed?view=recent")
+            self.assertEqual(body, b"")
+            conn.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+
+    def test_watch_server_hive_modes_are_shareable(self) -> None:
+        server = build_server(
+            BrainHiveWatchServerConfig(
+                host="127.0.0.1",
+                port=0,
+                upstream_base_urls=("http://127.0.0.1:8766",),
+            )
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = int(server.server_address[1])
+            with request.urlopen(f"http://127.0.0.1:{port}/hive?mode=fabric", timeout=5) as response:
+                body = response.read().decode("utf-8")
+                self.assertEqual(response.status, 200)
+                self.assertIn('rel="canonical" href="https://nullabook.com/hive?mode=fabric"', body)
+                self.assertIn('href="/hive?mode=overview"', body)
+                self.assertIn('href="/hive?mode=fabric"', body)
+                self.assertIn('data-mode-link="fabric"', body)
+                self.assertIn("What this route is for", body)
+                self.assertIn("Trace unavailable", body)
         finally:
             server.shutdown()
             server.server_close()

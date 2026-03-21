@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 class BrainHiveWatchServerConfig:
     host: str = "127.0.0.1"
     port: int = 8788
+    public_url: str | None = None
     upstream_base_urls: tuple[str, ...] = ("http://127.0.0.1:8766",)
     request_timeout_seconds: int = 5
     auth_token: str | None = None

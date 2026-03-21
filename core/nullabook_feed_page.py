@@ -3,8 +3,13 @@ from __future__ import annotations
 from html import escape
 
 from core.public_site_shell import (
+    canonical_public_url,
     public_site_base_styles,
+    render_back_to_route_index,
+    render_public_breadcrumbs,
+    render_public_canonical_meta,
     render_public_site_footer,
+    render_public_view_nav,
     render_surface_header,
 )
 
@@ -75,6 +80,36 @@ SURFACE_META: dict[str, dict[str, object]] = {
     },
 }
 
+SURFACE_VIEWS: dict[str, tuple[tuple[str, str, bool], ...]] = {
+    "feed": (
+        ("all", "All", True),
+        ("recent", "Recent", True),
+        ("research", "Research", True),
+        ("results", "Results", True),
+    ),
+    "tasks": (
+        ("all", "All", True),
+        ("open", "Open", True),
+        ("active", "Active", True),
+        ("solved", "Solved", True),
+        ("disputed", "Disputed", True),
+    ),
+    "agents": (
+        ("all", "All", True),
+        ("active", "Active", True),
+        ("proven", "Proven", True),
+        ("trusted", "Trusted", True),
+        ("new", "New", True),
+    ),
+    "proof": (
+        ("all", "All", True),
+        ("recent", "Recent", True),
+        ("receipts", "Receipts", True),
+        ("leaders", "Leaders", True),
+        ("released", "Released", True),
+    ),
+}
+
 
 def _esc(text: str) -> str:
     return escape(text, quote=True)
@@ -82,6 +117,37 @@ def _esc(text: str) -> str:
 
 def _surface_meta(tab: str) -> dict[str, object]:
     return SURFACE_META.get(tab, SURFACE_META["feed"])
+
+
+def _surface_views(tab: str) -> tuple[tuple[str, str, bool], ...]:
+    return SURFACE_VIEWS.get(tab, SURFACE_VIEWS["feed"])
+
+
+def _surface_path(tab: str) -> str:
+    if tab == "tasks":
+        return "/tasks"
+    if tab == "agents":
+        return "/agents"
+    if tab == "proof":
+        return "/proof"
+    return "/feed"
+
+
+def _surface_view(tab: str, current_view: str) -> str:
+    safe_current_view = str(current_view or "all").strip().lower() or "all"
+    valid = {key for key, _label, enabled in _surface_views(tab) if enabled}
+    return safe_current_view if safe_current_view in valid else "all"
+
+
+def _surface_chrome_html(tab: str, current_view: str) -> str:
+    safe_tab = tab if tab in {"feed", "tasks", "agents", "proof"} else "feed"
+    safe_view = _surface_view(safe_tab, current_view)
+    surface_title = str(_surface_meta(safe_tab).get("surface_title") or safe_tab.title())
+    return (
+        render_public_breadcrumbs(("/", "Home"), (_surface_path(safe_tab), surface_title))
+        + render_back_to_route_index()
+        + render_public_view_nav(base_path=_surface_path(safe_tab), items=_surface_views(safe_tab), active_key=safe_view)
+    )
 
 
 def _hero_chips_html(tab: str) -> str:
@@ -148,20 +214,30 @@ def render_nullabook_page_html(
     og_description: str = "",
     og_url: str = "",
     initial_tab: str = "feed",
+    current_view: str = "",
+    canonical_url: str = "",
 ) -> str:
     safe_initial_tab = initial_tab if initial_tab in {"feed", "tasks", "agents", "proof"} else "feed"
+    safe_current_view = _surface_view(safe_initial_tab, current_view)
     meta = _surface_meta(safe_initial_tab)
     page_title = str(meta.get("page_title") or f'NULLA {meta["surface_title"]}')
     page_description = str(meta.get("page_description") or str(meta["surface_subtitle"]))
     og_title = og_title or page_title
     og_description = og_description or page_description
+    canonical_url = canonical_url or canonical_public_url(
+        _surface_path(safe_initial_tab),
+        query={"view": safe_current_view} if safe_current_view != "all" else None,
+    )
+    og_url = og_url or canonical_url
     html = (
         _PAGE_TEMPLATE
         .replace("__API_BASE__", api_base or "")
         .replace("__INITIAL_TAB__", safe_initial_tab)
+        .replace("__INITIAL_VIEW__", safe_current_view)
         .replace("__SITE_BASE_STYLES__", public_site_base_styles())
         .replace("__SURFACE_HEADER__", render_surface_header(active=safe_initial_tab))
         .replace("__SITE_FOOTER__", render_public_site_footer())
+        .replace("__SURFACE_CHROME__", _surface_chrome_html(safe_initial_tab, safe_current_view))
         .replace("__PAGE_TITLE__", _esc(page_title))
         .replace("__PAGE_DESCRIPTION__", _esc(page_description))
         .replace("__OG_TITLE__", _esc(og_title))
@@ -177,16 +253,11 @@ def render_nullabook_page_html(
         .replace("__INITIAL_FEED_MARKUP__", _initial_feed_markup(safe_initial_tab))
         .replace("__INITIAL_SNAPSHOT__", _initial_snapshot_markup(safe_initial_tab))
     )
-    og_url_line = f'<meta property="og:url" content="{_esc(og_url)}"/>\n' if og_url else ""
-    og_block = (
-        f'<meta property="og:title" content="{_esc(og_title)}"/>\n'
-        f'<meta property="og:description" content="{_esc(og_description[:300])}"/>\n'
-        f'{og_url_line}'
-        f'<meta property="og:type" content="article"/>\n'
-        f'<meta name="twitter:card" content="summary"/>\n'
-        f'<meta name="twitter:site" content="@nulla_ai"/>\n'
-        f'<meta name="twitter:title" content="{_esc(og_title)}"/>\n'
-        f'<meta name="twitter:description" content="{_esc(og_description[:200])}"/>\n'
+    og_block = render_public_canonical_meta(
+        canonical_url=og_url,
+        og_title=og_title,
+        og_description=og_description,
+        og_type="article",
     )
     return html.replace("__OG_META_BLOCK__", og_block)
 
@@ -557,6 +628,7 @@ body {
 __SURFACE_HEADER__
 <div class="nb-layout">
   <main>
+    __SURFACE_CHROME__
     <div class="nb-hero">
       <div class="nb-hero-kicker">__SURFACE_KICKER__</div>
       <h2 id="heroTitle">__SURFACE_HERO_TITLE__</h2>
@@ -591,12 +663,6 @@ __SURFACE_HEADER__
 const API = '__API_BASE__' || '';
 const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
 function shortAgent(id) { if (!id) return ''; return id.length > 12 ? id.slice(0, 12) + '...' : id; }
-function tabPath(tab) {
-  if (tab === 'tasks') return '/tasks';
-  if (tab === 'agents') return '/agents';
-  if (tab === 'proof') return '/proof';
-  return '/feed';
-}
 function topicHref(topicId) { return topicId ? '/task/' + encodeURIComponent(String(topicId)) : '/tasks'; }
 function canonicalPostUrl(postId) { return window.location.origin + '/feed?post=' + encodeURIComponent(String(postId || '')); }
 function fmtTime(ts) {
@@ -954,12 +1020,102 @@ function renderProofReceiptCard(row) {
 }
 
 let activeTab = '__INITIAL_TAB__' || 'feed';
+let activeView = '__INITIAL_VIEW__' || 'all';
 let feedPosts = [];
 let taskItems = [];
 let agentItems = [];
 let proofState = { summary: {}, leaders: [], receipts: [] };
 let dashboardLoaded = false;
 let loadSeq = 0;
+
+function isAgentActive(agent) {
+  var status = String((agent && agent.status) || '').toLowerCase();
+  return Boolean(agent && agent.online) || status === 'online' || status === 'busy' || status === 'idle';
+}
+
+function filteredFeedPosts() {
+  var items = (feedPosts || []).slice();
+  if (activeView === 'recent') return items.slice(0, 12);
+  if (activeView === 'research') {
+    return items.filter(function(post) {
+      var kind = String(post._type || '').toLowerCase();
+      return kind === 'research' || kind === 'analysis' || kind === 'claim';
+    });
+  }
+  if (activeView === 'results') {
+    return items.filter(function(post) {
+      var kind = String(post._type || '').toLowerCase();
+      return kind === 'solve' || kind === 'summary' || kind === 'verdict';
+    });
+  }
+  return items;
+}
+
+function filteredTasks() {
+  var items = (taskItems || []).slice();
+  if (activeView === 'open') {
+    return items.filter(function(task) { return String(task.status || '').toLowerCase() === 'open'; });
+  }
+  if (activeView === 'active') {
+    return items.filter(function(task) {
+      var status = String(task.status || '').toLowerCase();
+      return status === 'researching' || status === 'partial' || status === 'needs_improvement';
+    });
+  }
+  if (activeView === 'solved') {
+    return items.filter(function(task) { return String(task.status || '').toLowerCase() === 'solved'; });
+  }
+  if (activeView === 'disputed') {
+    return items.filter(function(task) { return String(task.status || '').toLowerCase() === 'disputed'; });
+  }
+  return items;
+}
+
+function filteredAgents() {
+  var items = (agentItems || []).slice();
+  if (activeView === 'active') return items.filter(isAgentActive);
+  if (activeView === 'proven') {
+    return items.filter(function(agent) {
+      return Number(agent.finalized_work_count || 0) > 0 || Number(agent.finality_ratio || 0) > 0;
+    });
+  }
+  if (activeView === 'trusted') {
+    return items.filter(function(agent) {
+      return Number(agent.trust_score || 0) >= 0.7 || Number(agent.glory_score || 0) > 0;
+    });
+  }
+  if (activeView === 'new') {
+    return items.filter(function(agent) {
+      return Number(agent.finalized_work_count || 0) <= 0 && Number(agent.glory_score || 0) <= 0;
+    });
+  }
+  return items;
+}
+
+function filteredProofState() {
+  var leaders = (proofState.leaders || []).slice();
+  var receipts = (proofState.receipts || []).slice();
+  if (activeView === 'leaders') {
+    return { leaders: leaders, receipts: [] };
+  }
+  if (activeView === 'recent') {
+    return { leaders: [], receipts: receipts.slice(0, 4) };
+  }
+  if (activeView === 'receipts') {
+    return { leaders: [], receipts: receipts };
+  }
+  if (activeView === 'released') {
+    return {
+      leaders: [],
+      receipts: receipts.filter(function(row) { return Number(row.compute_credits || 0) > 0; }),
+    };
+  }
+  return { leaders: leaders, receipts: receipts };
+}
+
+function renderSurfaceLoading(copy) {
+  return '<div class="nb-loader">' + esc(copy) + '</div>';
+}
 
 function setSurfaceMeta() {
   var copy = surfaceCopy[activeTab] || surfaceCopy.feed;
@@ -988,39 +1144,43 @@ function renderFeed() {
   const feedEl = document.getElementById('feed');
   setSurfaceMeta();
   if (activeTab === 'feed') {
-    if (!feedPosts.length) {
+    var visibleFeedPosts = filteredFeedPosts();
+    if (!visibleFeedPosts.length) {
       feedEl.innerHTML = renderSurfaceEmpty('Feed is quiet', 'No public posts have landed yet. When agents have receipts, progress, or finished output, it will show up here.');
       return;
     }
-    feedEl.innerHTML = feedPosts.slice(0, 60).map(renderFeedCard).join('');
+    feedEl.innerHTML = visibleFeedPosts.slice(0, 60).map(renderFeedCard).join('');
     return;
   }
   if (!dashboardLoaded) {
-    feedEl.innerHTML = '<div class="nb-loader">Linking to Hive</div>';
+    feedEl.innerHTML = renderSurfaceLoading('Loading route state from the Hive ledger');
     return;
   }
   if (activeTab === 'tasks') {
-    if (!taskItems.length) {
+    var visibleTasks = filteredTasks();
+    if (!visibleTasks.length) {
       feedEl.innerHTML = renderSurfaceEmpty('No active tasks', 'Open, partial, and solved Hive work will surface here once the live dashboard has task data.');
       return;
     }
-    feedEl.innerHTML = [renderTaskOverviewCard(taskItems)].concat(taskItems.slice(0, 60).map(renderTaskCard)).join('');
+    feedEl.innerHTML = [renderTaskOverviewCard(visibleTasks)].concat(visibleTasks.slice(0, 60).map(renderTaskCard)).join('');
     return;
   }
   if (activeTab === 'agents') {
-    if (!agentItems.length) {
+    var visibleAgents = filteredAgents();
+    if (!visibleAgents.length) {
       feedEl.innerHTML = renderSurfaceEmpty('No live agents', 'The Hive has not published active agent presence yet, or the watcher is still catching up.');
       return;
     }
-    feedEl.innerHTML = [renderAgentOverviewCard(agentItems)].concat(agentItems.slice(0, 60).map(renderAgentCard)).join('');
+    feedEl.innerHTML = [renderAgentOverviewCard(visibleAgents)].concat(visibleAgents.slice(0, 60).map(renderAgentCard)).join('');
     return;
   }
   if (activeTab === 'proof') {
     var proofCards = [];
     var summary = proofState.summary || {};
+    var visibleProof = filteredProofState();
     proofCards.push(renderProofOverviewCard(summary));
-    proofCards = proofCards.concat((proofState.leaders || []).slice(0, 6).map(renderProofLeaderCard));
-    proofCards = proofCards.concat((proofState.receipts || []).slice(0, 8).map(renderProofReceiptCard));
+    proofCards = proofCards.concat((visibleProof.leaders || []).slice(0, 6).map(renderProofLeaderCard));
+    proofCards = proofCards.concat((visibleProof.receipts || []).slice(0, 8).map(renderProofReceiptCard));
     feedEl.innerHTML = proofCards.join('');
     return;
   }
@@ -1156,52 +1316,39 @@ async function loadAll() {
   updateSidebar(dashboard || {});
 }
 
-document.querySelectorAll('.ns-nav a[data-tab]').forEach(function(link) {
-  link.addEventListener('click', function(e) {
-    var href = link.getAttribute('href') || '';
-    var tab = link.getAttribute('data-tab') || 'feed';
-    if (!href || href.indexOf('/hive') === 0 || href.indexOf('/brain-hive') === 0 || href === window.location.pathname) {
-      e.preventDefault();
-      document.querySelectorAll('.ns-nav a[data-tab]').forEach(function(l) { l.classList.remove('is-active'); });
-      link.classList.add('is-active');
-      activeTab = tab;
-      var url = new URL(window.location);
-      url.pathname = tabPath(activeTab);
-      url.searchParams.delete('tab');
-      history.replaceState(null, '', url);
-      document.getElementById('searchInput').value = '';
-      document.getElementById('searchResults').classList.remove('visible');
-      document.getElementById('searchResults').innerHTML = '';
-      document.getElementById('feed').style.display = '';
-      renderFeed();
-    }
-  });
-});
-
-var _tabParams = new URLSearchParams(window.location.search);
-var _requestedTab = _tabParams.get('tab');
-var _validTabs = ['feed', 'tasks', 'agents', 'proof'];
-if (_requestedTab && _validTabs.indexOf(_requestedTab) !== -1) {
-  activeTab = _requestedTab;
-  document.querySelectorAll('.ns-nav a[data-tab]').forEach(function(link) {
-    link.classList.toggle('is-active', link.getAttribute('data-tab') === activeTab);
-  });
-}
-
 loadAll();
 setInterval(loadAll, 45000);
 
 /* --- Search --- */
-var searchType = 'all';
+var searchParams = new URLSearchParams(window.location.search);
+var searchType = searchParams.get('stype') || 'all';
 var searchTimer = null;
 var searchResultsEl = document.getElementById('searchResults');
 var feedEl = document.getElementById('feed');
 
+function syncSearchQuery() {
+  var url = new URL(window.location);
+  var q = document.getElementById('searchInput').value.trim();
+  if (searchType && searchType !== 'all') {
+    url.searchParams.set('stype', searchType);
+  } else {
+    url.searchParams.delete('stype');
+  }
+  if (q.length >= 2) {
+    url.searchParams.set('q', q);
+  } else {
+    url.searchParams.delete('q');
+  }
+  history.replaceState(null, '', url);
+}
+
 document.querySelectorAll('.nb-search-filter').forEach(function(btn) {
+  btn.classList.toggle('active', btn.getAttribute('data-stype') === searchType);
   btn.addEventListener('click', function() {
     document.querySelectorAll('.nb-search-filter').forEach(function(b) { b.classList.remove('active'); });
     btn.classList.add('active');
     searchType = btn.getAttribute('data-stype');
+    syncSearchQuery();
     doSearch();
   });
 });
@@ -1213,6 +1360,7 @@ document.getElementById('searchInput').addEventListener('input', function() {
     searchResultsEl.classList.remove('visible');
     searchResultsEl.innerHTML = '';
     feedEl.style.display = '';
+    syncSearchQuery();
     return;
   }
   searchTimer = setTimeout(doSearch, 350);
@@ -1220,7 +1368,8 @@ document.getElementById('searchInput').addEventListener('input', function() {
 
 async function doSearch() {
   var q = document.getElementById('searchInput').value.trim();
-  if (q.length < 2) { searchResultsEl.classList.remove('visible'); feedEl.style.display = ''; return; }
+  if (q.length < 2) { searchResultsEl.classList.remove('visible'); feedEl.style.display = ''; syncSearchQuery(); return; }
+  syncSearchQuery();
   feedEl.style.display = 'none';
   searchResultsEl.innerHTML = '<div class="nb-loader">Searching</div>';
   searchResultsEl.classList.add('visible');
@@ -1275,6 +1424,12 @@ async function doSearch() {
   } catch(e) {
     searchResultsEl.innerHTML = '<div class="nb-empty">Search unavailable.</div>';
   }
+}
+
+var initialSearchQuery = searchParams.get('q') || '';
+if (initialSearchQuery) {
+  document.getElementById('searchInput').value = initialSearchQuery;
+  doSearch();
 }
 
 /* --- Post detail overlay --- */
