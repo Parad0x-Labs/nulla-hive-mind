@@ -20,6 +20,8 @@ from core.agent_runtime import checkpoints as agent_checkpoint_runtime
 from core.agent_runtime import fast_paths as agent_fast_paths
 from core.agent_runtime import presence as agent_presence_runtime
 from core.agent_runtime import response as agent_response_runtime
+from core.agent_runtime.builder import scaffolds as agent_builder_scaffolds
+from core.agent_runtime.builder import support as agent_builder_support
 from core.autonomous_topic_research import pick_autonomous_research_signal, research_topic_from_signal
 from core.candidate_knowledge_lane import get_candidate_by_id
 from core.channel_actions import dispatch_outbound_post_intent, parse_channel_post_intent
@@ -4279,37 +4281,11 @@ class NullaAgent:
         source_context: dict[str, object] | None,
         reason: str,
     ) -> dict[str, Any]:
-        workspace_available = bool(str((source_context or {}).get("workspace") or (source_context or {}).get("workspace_root") or "").strip())
-        write_enabled = bool(policy_engine.get("filesystem.allow_write_workspace", False))
-        if not workspace_available:
-            gap_reason = "I need an active workspace before I can run a real bounded builder loop."
-        elif not write_enabled:
-            gap_reason = "Workspace writes are disabled on this runtime, so I cannot run a real bounded builder loop."
-        else:
-            gap_reason = reason
-        return {
-            "requested_capability": "workspace.build_scaffold",
-            "requested_label": "builder controller",
-            "support_level": "unsupported",
-            "claim": (
-                "I can run a bounded local builder loop in the active workspace: create starter folders/files, write narrow Telegram or Discord bot scaffolds, "
-                "inspect files, apply explicit replacements, and run bounded local commands."
-            ),
-            "partial_reason": (
-                "This is still a bounded local builder loop, not a full autonomous research -> build -> debug -> test system "
-                "for arbitrary products or stacks."
-                if workspace_available and write_enabled
-                else ""
-            ),
-            "reason": gap_reason,
-            "nearby_alternatives": [
-                "Ask me to inspect the repo or read specific files in the workspace.",
-                "Ask for a starter scaffold or a Telegram or Discord bot scaffold in the active workspace.",
-                "Ask me to create a starter folder or first files in a concrete workspace path.",
-                "Give me an exact replacement to apply in a file and I can run it locally.",
-                "Give me a bounded local command or test to run in the workspace.",
-            ],
-        }
+        return agent_builder_support.support_gap_report(
+            source_context=source_context,
+            reason=reason,
+            write_enabled=bool(policy_engine.get("filesystem.allow_write_workspace", False)),
+        )
 
     def _builder_controller_profile(
         self,
@@ -4319,88 +4295,15 @@ class NullaAgent:
         interpretation: Any,
         source_context: dict[str, object] | None,
     ) -> dict[str, Any]:
-        source_context = dict(source_context or {})
-        if not self._should_run_builder_controller(
+        return agent_builder_support.controller_profile(
+            self,
             effective_input=effective_input,
             classification=classification,
-            source_context=source_context,
-        ):
-            return {"should_handle": False}
-        target = self._workspace_build_target(
-            query_text=effective_input,
             interpretation=interpretation,
-        )
-        workflow_probe = plan_tool_workflow(
-            user_text=effective_input,
-            task_class=str(classification.get("task_class") or "unknown"),
-            executed_steps=[],
             source_context=source_context,
+            plan_tool_workflow_fn=plan_tool_workflow,
+            looks_like_workspace_bootstrap_request_fn=_looks_like_workspace_bootstrap_request,
         )
-        workflow_intent = str(dict(workflow_probe.next_payload or {}).get("intent") or "").strip()
-        workflow_supported_request = self._supports_bounded_builder_workflow_request(
-            effective_input=effective_input,
-            task_class=str(classification.get("task_class") or "unknown"),
-            source_context=source_context,
-        )
-        explicit_file_request = self._looks_like_explicit_workspace_file_request(effective_input)
-        generic_bootstrap_request = self._looks_like_generic_workspace_bootstrap_request(str(effective_input or "").lower())
-        if str(target.get("platform") or "").strip() in {"telegram", "discord"}:
-            return {
-                "should_handle": True,
-                "supported": True,
-                "mode": "scaffold",
-                "target": target,
-            }
-        if workflow_supported_request and workflow_probe.handled and workflow_probe.next_payload and workflow_intent in {
-            "workspace.search_text",
-            "workspace.read_file",
-            "workspace.write_file",
-            "workspace.ensure_directory",
-            "sandbox.run_command",
-            "hive.create_topic",
-        } and (explicit_file_request or not generic_bootstrap_request):
-            return {
-                "should_handle": True,
-                "supported": True,
-                "mode": "workflow",
-                "target": target,
-                "initial_payloads": [dict(workflow_probe.next_payload or {})],
-            }
-        if generic_bootstrap_request:
-            return {
-                "should_handle": True,
-                "supported": True,
-                "mode": "scaffold",
-                "target": target,
-            }
-        if workflow_supported_request and workflow_probe.handled and workflow_probe.next_payload and workflow_intent in {
-            "workspace.search_text",
-            "workspace.read_file",
-            "workspace.write_file",
-            "workspace.ensure_directory",
-            "sandbox.run_command",
-            "hive.create_topic",
-        }:
-            return {
-                "should_handle": True,
-                "supported": True,
-                "mode": "workflow",
-                "target": target,
-                "initial_payloads": [dict(workflow_probe.next_payload or {})],
-            }
-        return {
-            "should_handle": True,
-            "supported": False,
-            "mode": "unsupported",
-            "target": target,
-            "gap_report": self._builder_support_gap_report(
-                source_context=source_context,
-                reason=(
-                    "I do not have a real bounded builder path for that request on this runtime. "
-                    "I can handle bounded workspace starters, narrow bot scaffolds, or explicit inspect/edit/run flows in the active workspace."
-                ),
-            ),
-        }
 
     def _supports_bounded_builder_workflow_request(
         self,
@@ -4481,31 +4384,14 @@ class NullaAgent:
         execution: Any,
         tool_payload: dict[str, Any],
     ) -> dict[str, Any]:
-        tool_name = str(getattr(execution, "tool_name", "") or tool_payload.get("intent") or "unknown").strip()
-        return {
-            "tool_name": tool_name,
-            "status": str(getattr(execution, "status", "") or "executed"),
-            "mode": str(getattr(execution, "mode", "") or ""),
-            "response_text": str(getattr(execution, "response_text", "") or ""),
-            "arguments": dict(tool_payload.get("arguments") or {}),
-            "observation": dict((getattr(execution, "details", {}) or {}).get("observation") or {}),
-            "details": dict(getattr(execution, "details", {}) or {}),
-            "artifacts": [dict(item) for item in list((getattr(execution, "details", {}) or {}).get("artifacts") or []) if isinstance(item, dict)],
-            "summary": self._tool_step_summary(
-                str(getattr(execution, "response_text", "") or ""),
-                fallback=str(getattr(execution, "status", "") or "executed"),
-            ),
-        }
+        return agent_builder_support.controller_step_record(
+            self,
+            execution=execution,
+            tool_payload=tool_payload,
+        )
 
     def _workspace_build_verification_payload(self, *, target: dict[str, str]) -> dict[str, Any] | None:
-        language = str(target.get("language") or "").strip().lower()
-        root_dir = str(target.get("root_dir") or "").strip().rstrip("/")
-        if language != "python" or not root_dir:
-            return None
-        return {
-            "intent": "sandbox.run_command",
-            "arguments": {"command": f"python3 -m compileall -q {root_dir}/src"},
-        }
+        return agent_builder_support.workspace_build_verification_payload(target=target)
 
     def _builder_initial_payloads(
         self,
@@ -4516,44 +4402,17 @@ class NullaAgent:
         web_notes: list[dict[str, Any]],
         initial_payloads: list[dict[str, Any]] | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-        if mode == "workflow":
-            return [dict(item) for item in list(initial_payloads or []) if isinstance(item, dict)], []
-        sources = self._workspace_build_sources(web_notes)
-        file_map = self._workspace_build_file_map(
+        return agent_builder_support.initial_payloads(
+            self,
+            mode=mode,
             target=target,
             user_request=user_request,
             web_notes=web_notes,
+            initial_payloads=initial_payloads,
         )
-        payloads = [
-            {
-                "intent": "workspace.write_file",
-                "arguments": {"path": path, "content": content},
-            }
-            for path, content in file_map.items()
-        ]
-        verification_payload = self._workspace_build_verification_payload(target=target)
-        if verification_payload is not None:
-            payloads.append(verification_payload)
-        return payloads, sources
 
     def _builder_controller_backing_sources(self, executed_steps: list[dict[str, Any]]) -> list[str]:
-        sources: list[str] = []
-        seen: set[str] = set()
-        for step in list(executed_steps or []):
-            tool_name = str(step.get("tool_name") or "").strip()
-            if tool_name.startswith("workspace."):
-                source = "workspace"
-            elif tool_name.startswith("sandbox."):
-                source = "sandbox"
-            elif tool_name.startswith("web."):
-                source = "web_lookup"
-            else:
-                continue
-            if source in seen:
-                continue
-            seen.add(source)
-            sources.append(source)
-        return sources
+        return agent_builder_support.controller_backing_sources(executed_steps)
 
     def _builder_controller_observations(
         self,
@@ -4566,74 +4425,18 @@ class NullaAgent:
         final_status: str,
         artifacts: dict[str, Any],
     ) -> dict[str, Any]:
-        return {
-            "channel": "bounded_builder",
-            "builder_mode": str(mode or "").strip(),
-            "target": {
-                "platform": str(target.get("platform") or "").strip(),
-                "language": str(target.get("language") or "").strip(),
-                "root_dir": str(target.get("root_dir") or "").strip(),
-            },
-            "step_count": len(executed_steps),
-            "stop_reason": str(stop_reason or "").strip(),
-            "final_status": str(final_status or "").strip(),
-            "artifacts": dict(artifacts or {}),
-            "sources": [
-                {
-                    "title": str(item.get("title") or "").strip(),
-                    "url": str(item.get("url") or "").strip(),
-                    "label": str(item.get("label") or "").strip(),
-                }
-                for item in list(sources or [])[:4]
-            ],
-            "executed_steps": [
-                {
-                    "tool_name": str(step.get("tool_name") or "").strip(),
-                    "status": str(step.get("status") or "").strip(),
-                    "mode": str(step.get("mode") or "").strip(),
-                    "summary": str(step.get("summary") or "").strip(),
-                    "arguments": dict(step.get("arguments") or {}),
-                    "observation": dict(step.get("observation") or {}),
-                }
-                for step in list(executed_steps or [])[:8]
-            ],
-        }
+        return agent_builder_support.controller_observations(
+            mode=mode,
+            target=target,
+            executed_steps=executed_steps,
+            stop_reason=stop_reason,
+            sources=sources,
+            final_status=final_status,
+            artifacts=artifacts,
+        )
 
     def _builder_retry_history(self, executed_steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        seen: dict[tuple[str, str], dict[str, Any]] = {}
-        retries: list[dict[str, Any]] = []
-        for index, step in enumerate(list(executed_steps or []), start=1):
-            tool_name = str(step.get("tool_name") or "").strip()
-            if tool_name != "sandbox.run_command":
-                continue
-            observation = dict(step.get("observation") or {})
-            command = str(observation.get("command") or dict(step.get("arguments") or {}).get("command") or "").strip()
-            if not command:
-                continue
-            key = (tool_name, command)
-            if key not in seen:
-                seen[key] = {
-                    "command": command,
-                    "attempts": 1,
-                    "step_indexes": [index],
-                    "returncodes": [int(observation.get("returncode") or 0)],
-                }
-                continue
-            seen[key]["attempts"] = int(seen[key].get("attempts") or 1) + 1
-            seen[key]["step_indexes"] = [*list(seen[key].get("step_indexes") or []), index]
-            seen[key]["returncodes"] = [*list(seen[key].get("returncodes") or []), int(observation.get("returncode") or 0)]
-        for entry in seen.values():
-            if int(entry.get("attempts") or 0) <= 1:
-                continue
-            retries.append(
-                {
-                    "command": str(entry.get("command") or "").strip(),
-                    "attempts": int(entry.get("attempts") or 0),
-                    "step_indexes": [int(item) for item in list(entry.get("step_indexes") or [])],
-                    "returncodes": [int(item) for item in list(entry.get("returncodes") or [])],
-                }
-            )
-        return retries
+        return agent_builder_support.retry_history(executed_steps)
 
     def _builder_controller_artifacts(
         self,
@@ -4641,80 +4444,20 @@ class NullaAgent:
         executed_steps: list[dict[str, Any]],
         stop_reason: str,
     ) -> dict[str, Any]:
-        file_diffs: list[dict[str, Any]] = []
-        command_outputs: list[dict[str, Any]] = []
-        failures: list[dict[str, Any]] = []
-        for index, step in enumerate(list(executed_steps or []), start=1):
-            for artifact in [dict(item) for item in list(step.get("artifacts") or []) if isinstance(item, dict)]:
-                artifact_type = str(artifact.get("artifact_type") or "").strip()
-                record = {"step_index": index, **artifact}
-                if artifact_type == "file_diff":
-                    file_diffs.append(record)
-                elif artifact_type == "command_output":
-                    command_outputs.append(record)
-                elif artifact_type == "failure":
-                    failures.append(record)
-        return {
-            "file_diffs": file_diffs[:8],
-            "command_outputs": command_outputs[:8],
-            "failures": failures[:6],
-            "retry_history": self._builder_retry_history(executed_steps),
-            "stop_reason": str(stop_reason or "").strip(),
-        }
+        return agent_builder_support.controller_artifacts(
+            executed_steps=executed_steps,
+            stop_reason=stop_reason,
+        )
 
     def _builder_artifact_citation_block(self, artifacts: dict[str, Any]) -> str:
-        payload = dict(artifacts or {})
-        lines = ["Artifacts:"]
-        file_diffs = [dict(item) for item in list(payload.get("file_diffs") or []) if isinstance(item, dict)]
-        if file_diffs:
-            files = ", ".join(f"`{str(item.get('path') or '').strip()}`" for item in file_diffs[:4] if str(item.get("path") or "").strip())
-            if files:
-                lines.append(f"- changed files: {files}")
-            diff_preview = str(file_diffs[0].get("diff_preview") or "").strip()
-            if diff_preview:
-                lines.append(f"- diff preview: `{self._runtime_preview(diff_preview, limit=180)}`")
-        command_outputs = [dict(item) for item in list(payload.get("command_outputs") or []) if isinstance(item, dict)]
-        if command_outputs:
-            command_bits = []
-            for item in command_outputs[:3]:
-                command = str(item.get("command") or "").strip()
-                returncode = int(item.get("returncode") or 0)
-                if command:
-                    command_bits.append(f"`{command}` (exit {returncode})")
-            if command_bits:
-                lines.append(f"- commands: {', '.join(command_bits)}")
-        failures = [dict(item) for item in list(payload.get("failures") or []) if isinstance(item, dict)]
-        if failures:
-            failure_bits = []
-            for item in failures[:2]:
-                summary = str(item.get("summary") or "").strip()
-                if summary:
-                    failure_bits.append(f"`{self._runtime_preview(summary, limit=140)}`")
-            if failure_bits:
-                lines.append(f"- failures seen: {', '.join(failure_bits)}")
-        retries = [dict(item) for item in list(payload.get("retry_history") or []) if isinstance(item, dict)]
-        if retries:
-            retry_bits = []
-            for item in retries[:2]:
-                command = str(item.get("command") or "").strip()
-                attempts = int(item.get("attempts") or 0)
-                if command and attempts > 1:
-                    retry_bits.append(f"`{command}` x{attempts}")
-            if retry_bits:
-                lines.append(f"- retries: {', '.join(retry_bits)}")
-        stop_reason = str(payload.get("stop_reason") or "").strip()
-        if stop_reason:
-            lines.append(f"- stop reason: `{stop_reason}`")
-        return "\n".join(lines)
+        return agent_builder_support.artifact_citation_block(self, artifacts)
 
     def _append_builder_artifact_citations(self, text: str, *, artifacts: dict[str, Any]) -> str:
-        message = str(text or "").strip()
-        citation_block = self._builder_artifact_citation_block(artifacts)
-        if not citation_block.strip():
-            return message
-        if not message:
-            return citation_block
-        return f"{message}\n\n{citation_block}".strip()
+        return agent_builder_support.append_artifact_citations(
+            self,
+            text,
+            artifacts=artifacts,
+        )
 
     def _builder_controller_degraded_response(
         self,
@@ -4727,26 +4470,15 @@ class NullaAgent:
         session_id: str,
         artifacts: dict[str, Any],
     ) -> str:
-        root_dir = str(target.get("root_dir") or "the workspace").strip()
-        if failed_execution is not None:
-            failure_text = self._tool_failure_user_message(
-                execution=failed_execution,
-                effective_input=effective_input,
-                session_id=session_id,
-            )
-            if executed_steps:
-                return (
-                    f"I completed {len(executed_steps)} bounded builder step"
-                    f"{'' if len(executed_steps) == 1 else 's'} under `{root_dir}`, "
-                    f"but the loop stopped at `{getattr(failed_execution, 'tool_name', '') or 'tool'!s}`. {failure_text}"
-                ).strip()
-            return failure_text
-        if executed_steps:
-            return (
-                f"I completed {len(executed_steps)} bounded builder step"
-                f"{'' if len(executed_steps) == 1 else 's'} under `{root_dir}` and stopped with `{stop_reason}`."
-            ).strip()
-        return f"I could not start a bounded builder loop for `{root_dir}` on this run.".strip()
+        return agent_builder_support.controller_degraded_response(
+            self,
+            target=target,
+            executed_steps=executed_steps,
+            stop_reason=stop_reason,
+            failed_execution=failed_execution,
+            effective_input=effective_input,
+            session_id=session_id,
+        )
 
     def _builder_controller_direct_response(
         self,
@@ -4754,17 +4486,11 @@ class NullaAgent:
         effective_input: str,
         executed_steps: list[dict[str, Any]],
     ) -> str | None:
-        if not executed_steps:
-            return None
-        last_step = dict(executed_steps[-1] or {})
-        if (
-            self._looks_like_exact_workspace_readback_request(effective_input)
-            and str(last_step.get("tool_name") or "").strip() == "workspace.read_file"
-        ):
-            response_text = str(last_step.get("response_text") or "").strip()
-            if response_text:
-                return response_text
-        return None
+        return agent_builder_support.controller_direct_response(
+            self,
+            effective_input=effective_input,
+            executed_steps=executed_steps,
+        )
 
     def _builder_controller_workflow_summary(
         self,
@@ -4774,53 +4500,13 @@ class NullaAgent:
         stop_reason: str,
         artifacts: dict[str, Any],
     ) -> str:
-        lines = [
-            f"- bounded builder controller executed {len(executed_steps)} real step{'s' if len(executed_steps) != 1 else ''}",
-            f"- builder mode: `{mode}`",
-        ]
-        if executed_steps:
-            chain = " -> ".join(str(step.get("tool_name") or "tool").strip() for step in list(executed_steps or [])[:8])
-            if chain:
-                lines.append(f"- tool chain: `{chain}`")
-        if stop_reason:
-            lines.append(f"- stop reason: `{stop_reason}`")
-        file_diffs = [dict(item) for item in list((artifacts or {}).get("file_diffs") or []) if isinstance(item, dict)]
-        if file_diffs:
-            lines.append(
-                "- changed files: "
-                + ", ".join(f"`{str(item.get('path') or '').strip()}`" for item in file_diffs[:4] if str(item.get("path") or "").strip())
-            )
-        command_outputs = [dict(item) for item in list((artifacts or {}).get("command_outputs") or []) if isinstance(item, dict)]
-        if command_outputs:
-            lines.append(
-                "- commands: "
-                + ", ".join(
-                    f"`{str(item.get('command') or '').strip()}` (exit {int(item.get('returncode') or 0)})"
-                    for item in command_outputs[:3]
-                    if str(item.get("command") or "").strip()
-                )
-            )
-        failures = [dict(item) for item in list((artifacts or {}).get("failures") or []) if isinstance(item, dict)]
-        if failures:
-            lines.append(
-                "- failures seen: "
-                + ", ".join(
-                    f"`{self._runtime_preview(str(item.get('summary') or ''), limit=120)}`"
-                    for item in failures[:2]
-                    if str(item.get("summary") or "").strip()
-                )
-            )
-        retries = [dict(item) for item in list((artifacts or {}).get("retry_history") or []) if isinstance(item, dict)]
-        if retries:
-            lines.append(
-                "- retries: "
-                + ", ".join(
-                    f"`{str(item.get('command') or '').strip()}` x{int(item.get('attempts') or 0)}"
-                    for item in retries[:2]
-                    if str(item.get("command") or "").strip() and int(item.get("attempts") or 0) > 1
-                )
-            )
-        return "\n".join(lines)
+        return agent_builder_support.controller_workflow_summary(
+            self,
+            mode=mode,
+            executed_steps=executed_steps,
+            stop_reason=stop_reason,
+            artifacts=artifacts,
+        )
 
     def _run_bounded_builder_loop(
         self,
@@ -5171,43 +4857,12 @@ class NullaAgent:
         )
 
     def _workspace_build_target(self, *, query_text: str, interpretation: Any) -> dict[str, str]:
-        lowered = str(query_text or "").lower()
-        topic_hints = {str(item).lower() for item in getattr(interpretation, "topic_hints", []) or []}
-        requested_root_dir = self._extract_requested_builder_root(query_text)
-        platform = "generic"
-        if "discord" in lowered or "discord bot" in topic_hints:
-            platform = "discord"
-        elif "telegram" in lowered or "tg bot" in lowered or "telegram bot" in topic_hints:
-            platform = "telegram"
-
-        heuristic_hits = search_user_heuristics(
-            query_text,
-            topic_hints=list(topic_hints),
-            limit=4,
+        return agent_builder_scaffolds.workspace_build_target(
+            query_text=query_text,
+            interpretation=interpretation,
+            extract_requested_builder_root_fn=self._extract_requested_builder_root,
+            search_user_heuristics_fn=search_user_heuristics,
         )
-        preferred_stacks = [
-            str(item.get("signal") or "").strip().lower()
-            for item in heuristic_hits
-            if str(item.get("category") or "") == "preferred_stack"
-        ]
-        if "python" in lowered:
-            language = "python"
-        elif "typescript" in lowered or "node" in lowered or "javascript" in lowered or (preferred_stacks and preferred_stacks[0] in {"typescript", "javascript"}):
-            language = "typescript"
-        else:
-            language = "python"
-
-        return {
-            "platform": platform,
-            "language": language,
-            "root_dir": (
-                requested_root_dir.rstrip("/")
-                if requested_root_dir
-                else f"generated/{platform}-bot"
-                if platform in {"telegram", "discord"}
-                else "generated/workspace-starter"
-            ),
-        }
 
     def _workspace_build_file_map(
         self,
@@ -5216,79 +4871,14 @@ class NullaAgent:
         user_request: str,
         web_notes: list[dict[str, Any]],
     ) -> dict[str, str]:
-        platform = str(target.get("platform") or "generic")
-        language = str(target.get("language") or "python")
-        root_dir = str(target.get("root_dir") or "generated/build-brief").rstrip("/")
-        sources = self._workspace_build_sources(web_notes)
-
-        if platform == "telegram" and language == "python":
-            return {
-                f"{root_dir}/README.md": self._telegram_python_readme(user_request=user_request, root_dir=root_dir, sources=sources),
-                f"{root_dir}/requirements.txt": "python-telegram-bot>=22.0,<23.0\n",
-                f"{root_dir}/.env.example": "TELEGRAM_BOT_TOKEN=replace-me\nBOT_NAME=NULLA Local Bot\n",
-                f"{root_dir}/src/bot.py": self._telegram_python_bot_source(sources=sources),
-            }
-        if platform == "telegram" and language == "typescript":
-            return {
-                f"{root_dir}/README.md": self._telegram_typescript_readme(user_request=user_request, root_dir=root_dir, sources=sources),
-                f"{root_dir}/package.json": self._telegram_typescript_package_json(),
-                f"{root_dir}/tsconfig.json": self._telegram_typescript_tsconfig(),
-                f"{root_dir}/.env.example": "TELEGRAM_BOT_TOKEN=replace-me\nBOT_NAME=NULLA Local Bot\n",
-                f"{root_dir}/src/bot.ts": self._telegram_typescript_bot_source(sources=sources),
-            }
-        if platform == "discord" and language == "python":
-            return {
-                f"{root_dir}/README.md": self._discord_python_readme(user_request=user_request, root_dir=root_dir, sources=sources),
-                f"{root_dir}/requirements.txt": "discord.py>=2.5,<3.0\n",
-                f"{root_dir}/.env.example": "DISCORD_BOT_TOKEN=replace-me\n",
-                f"{root_dir}/src/bot.py": self._discord_python_bot_source(sources=sources),
-            }
-        if platform == "discord" and language == "typescript":
-            return {
-                f"{root_dir}/README.md": self._discord_typescript_readme(user_request=user_request, root_dir=root_dir, sources=sources),
-                f"{root_dir}/package.json": self._discord_typescript_package_json(),
-                f"{root_dir}/tsconfig.json": self._telegram_typescript_tsconfig(),
-                f"{root_dir}/.env.example": "DISCORD_BOT_TOKEN=replace-me\n",
-                f"{root_dir}/src/bot.ts": self._discord_typescript_bot_source(sources=sources),
-            }
-        if language == "typescript":
-            return {
-                f"{root_dir}/README.md": self._generic_workspace_readme(
-                    user_request=user_request,
-                    root_dir=root_dir,
-                    sources=sources,
-                    language=language,
-                ),
-                f"{root_dir}/package.json": self._generic_typescript_package_json(root_dir=root_dir),
-                f"{root_dir}/tsconfig.json": self._telegram_typescript_tsconfig(),
-                f"{root_dir}/src/index.ts": self._generic_typescript_source(user_request=user_request, sources=sources),
-            }
-        return {
-            f"{root_dir}/README.md": self._generic_workspace_readme(
-                user_request=user_request,
-                root_dir=root_dir,
-                sources=sources,
-                language=language,
-            ),
-            f"{root_dir}/src/main.py": self._generic_python_source(user_request=user_request, sources=sources),
-        }
+        return agent_builder_scaffolds.workspace_build_file_map(
+            target=target,
+            user_request=user_request,
+            web_notes=web_notes,
+        )
 
     def _workspace_build_sources(self, web_notes: list[dict[str, Any]]) -> list[dict[str, str]]:
-        selected: list[dict[str, str]] = []
-        seen: set[str] = set()
-        for note in list(web_notes or [])[:4]:
-            url = str(note.get("result_url") or "").strip()
-            if not url or url in seen:
-                continue
-            seen.add(url)
-            selected.append(
-                {
-                    "title": str(note.get("result_title") or note.get("origin_domain") or "Source").strip(),
-                    "url": url,
-                    "label": str(note.get("source_profile_label") or note.get("origin_domain") or "").strip(),
-                }
-            )
-        return selected
+        return agent_builder_scaffolds.workspace_build_sources(web_notes)
 
     def _workspace_build_verification(
         self,
@@ -5347,9 +4937,7 @@ class NullaAgent:
         return "\n".join(lines)
 
     def _sources_section(self, sources: list[dict[str, str]]) -> str:
-        if not sources:
-            return "- No live sources were captured in this run.\n"
-        return "\n".join(f"- {item['title']}: {item['url']}" for item in sources[:4]) + "\n"
+        return agent_builder_scaffolds.sources_section(sources)
 
     def _generic_workspace_readme(
         self,
@@ -5359,310 +4947,82 @@ class NullaAgent:
         sources: list[dict[str, str]],
         language: str,
     ) -> str:
-        entrypoint = "src/index.ts" if language == "typescript" else "src/main.py"
-        return (
-            "# Workspace Starter\n\n"
-            f"Bounded local {language} starter generated to unblock real work in `{root_dir}`.\n\n"
-            "## Request\n\n"
-            f"- {user_request.strip()}\n\n"
-            "## Sources\n\n"
-            f"{self._sources_section(sources)}\n"
-            "## Files\n\n"
-            f"- `{entrypoint}`: first executable entrypoint for this workspace.\n"
-            "- `README.md`: visible grounding for what this starter is trying to do.\n"
+        return agent_builder_scaffolds.generic_workspace_readme(
+            user_request=user_request,
+            root_dir=root_dir,
+            sources=sources,
+            language=language,
         )
 
     def _generic_python_source(self, *, user_request: str, sources: list[dict[str, str]]) -> str:
-        source_lines = "\n".join(f"# - {item['title']}: {item['url']}" for item in sources[:4]) or "# - No live sources captured in this run."
-        return (
-            '"""Workspace starter entrypoint.\n\n'
-            f"Request: {user_request.strip()}\n"
-            "Source references:\n"
-            f"{source_lines}\n"
-            '"""\n\n'
-            "from __future__ import annotations\n\n"
-            "def main() -> None:\n"
-            '    print("NULLA workspace starter is ready for the next implementation step.")\n\n'
-            'if __name__ == "__main__":\n'
-            "    main()\n"
+        return agent_builder_scaffolds.generic_python_source(
+            user_request=user_request,
+            sources=sources,
         )
 
     def _generic_typescript_package_json(self, *, root_dir: str) -> str:
-        package_name = re.sub(r"[^a-z0-9_-]+", "-", root_dir.strip("/").split("/")[-1].lower()).strip("-") or "nulla-workspace-starter"
-        return (
-            "{\n"
-            f'  "name": "{package_name}",\n'
-            '  "private": true,\n'
-            '  "type": "module",\n'
-            '  "scripts": {\n'
-            '    "dev": "tsx src/index.ts"\n'
-            "  },\n"
-            '  "devDependencies": {\n'
-            '    "tsx": "^4.19.2",\n'
-            '    "typescript": "^5.7.3"\n'
-            "  }\n"
-            "}\n"
-        )
+        return agent_builder_scaffolds.generic_typescript_package_json(root_dir=root_dir)
 
     def _generic_typescript_source(self, *, user_request: str, sources: list[dict[str, str]]) -> str:
-        source_lines = "\n".join(f"// - {item['title']}: {item['url']}" for item in sources[:4]) or "// - No live sources captured in this run."
-        return (
-            "// Workspace starter entrypoint.\n"
-            f"// Request: {user_request.strip()}\n"
-            "// Source references:\n"
-            f"{source_lines}\n\n"
-            'console.log("NULLA workspace starter is ready for the next implementation step.");\n'
+        return agent_builder_scaffolds.generic_typescript_source(
+            user_request=user_request,
+            sources=sources,
         )
 
     def _telegram_python_readme(self, *, user_request: str, root_dir: str, sources: list[dict[str, str]]) -> str:
-        return (
-            "# Telegram Bot Scaffold\n\n"
-            "Local-first Telegram bot scaffold generated from the current research lane.\n\n"
-            "## Why This Shape\n\n"
-            "- Keep the first pass small, editable, and runnable on a local machine.\n"
-            "- Anchor protocol details on Telegram's official docs instead of generic blog spam.\n"
-            "- Keep implementation references visible in the repo instead of hiding them in chat history.\n\n"
-            "## Request\n\n"
-            f"- {user_request.strip()}\n\n"
-            "## Sources\n\n"
-            f"{self._sources_section(sources)}\n"
-            "## Files\n\n"
-            "- `src/bot.py`: minimal command + message handlers.\n"
-            "- `.env.example`: environment variables for local runs.\n"
-            "- `requirements.txt`: first-pass Python dependencies.\n\n"
-            "## Run\n\n"
-            "1. Create a virtualenv.\n"
-            "2. Install `requirements.txt`.\n"
-            "3. Export `TELEGRAM_BOT_TOKEN`.\n"
-            f"4. Run `python {root_dir}/src/bot.py`.\n"
+        return agent_builder_scaffolds.telegram_python_readme(
+            user_request=user_request,
+            root_dir=root_dir,
+            sources=sources,
         )
 
     def _telegram_python_bot_source(self, *, sources: list[dict[str, str]]) -> str:
-        source_lines = "\n".join(f"# - {item['title']}: {item['url']}" for item in sources[:4]) or "# - No live sources captured in this run."
-        return (
-            '"""Telegram bot scaffold.\n\n'
-            "Source references:\n"
-            f"{source_lines}\n"
-            '"""\n\n'
-            "from __future__ import annotations\n\n"
-            "import logging\n"
-            "import os\n"
-            "from typing import Final\n\n"
-            "from telegram import Update\n"
-            "from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters\n\n"
-            'TOKEN_ENV: Final = "TELEGRAM_BOT_TOKEN"\n'
-            'DEFAULT_REPLY: Final = "NULLA local scaffold is online."\n\n'
-            "logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')\n\n"
-            "async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:\n"
-            '    await update.effective_message.reply_text("NULLA scaffold is live. Use /help for commands.")\n\n'
-            "async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:\n"
-            '    await update.effective_message.reply_text("Commands: /start, /help. Everything else echoes for now.")\n\n'
-            "async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:\n"
-            "    if update.effective_message is None or not update.effective_message.text:\n"
-            "        return\n"
-            '    await update.effective_message.reply_text(f"{DEFAULT_REPLY}\\n\\nYou said: {update.effective_message.text}")\n\n'
-            "def build_application(token: str) -> Application:\n"
-            "    app = ApplicationBuilder().token(token).build()\n"
-            '    app.add_handler(CommandHandler("start", start))\n'
-            '    app.add_handler(CommandHandler("help", help_command))\n'
-            "    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))\n"
-            "    return app\n\n"
-            "def main() -> None:\n"
-            "    token = os.getenv(TOKEN_ENV, '').strip()\n"
-            "    if not token:\n"
-            '        raise SystemExit("Set TELEGRAM_BOT_TOKEN before running the scaffold.")\n'
-            "    app = build_application(token)\n"
-            "    app.run_polling(allowed_updates=Update.ALL_TYPES)\n\n"
-            'if __name__ == "__main__":\n'
-            "    main()\n"
-        )
+        return agent_builder_scaffolds.telegram_python_bot_source(sources=sources)
 
     def _telegram_typescript_readme(self, *, user_request: str, root_dir: str, sources: list[dict[str, str]]) -> str:
-        return (
-            "# Telegram Bot Scaffold (TypeScript)\n\n"
-            "TypeScript-first Telegram scaffold generated from the research lane.\n\n"
-            "## Request\n\n"
-            f"- {user_request.strip()}\n\n"
-            "## Sources\n\n"
-            f"{self._sources_section(sources)}\n"
-            "## Run\n\n"
-            "1. Install dependencies with `npm install`.\n"
-            "2. Copy `.env.example` to `.env`.\n"
-            f"3. Run `npm run dev --prefix {root_dir}`.\n"
+        return agent_builder_scaffolds.telegram_typescript_readme(
+            user_request=user_request,
+            root_dir=root_dir,
+            sources=sources,
         )
 
     def _telegram_typescript_package_json(self) -> str:
-        return (
-            "{\n"
-            '  "name": "nulla-telegram-bot-scaffold",\n'
-            '  "private": true,\n'
-            '  "type": "module",\n'
-            '  "scripts": {\n'
-            '    "dev": "tsx src/bot.ts"\n'
-            "  },\n"
-            '  "dependencies": {\n'
-            '    "dotenv": "^16.4.5",\n'
-            '    "grammy": "^1.32.0"\n'
-            "  },\n"
-            '  "devDependencies": {\n'
-            '    "tsx": "^4.19.2",\n'
-            '    "typescript": "^5.7.3"\n'
-            "  }\n"
-            "}\n"
-        )
+        return agent_builder_scaffolds.telegram_typescript_package_json()
 
     def _telegram_typescript_tsconfig(self) -> str:
-        return (
-            "{\n"
-            '  "compilerOptions": {\n'
-            '    "target": "ES2022",\n'
-            '    "module": "NodeNext",\n'
-            '    "moduleResolution": "NodeNext",\n'
-            '    "strict": true,\n'
-            '    "esModuleInterop": true,\n'
-            '    "skipLibCheck": true,\n'
-            '    "outDir": "dist"\n'
-            "  },\n"
-            '  "include": ["src/**/*.ts"]\n'
-            "}\n"
-        )
+        return agent_builder_scaffolds.telegram_typescript_tsconfig()
 
     def _telegram_typescript_bot_source(self, *, sources: list[dict[str, str]]) -> str:
-        source_lines = "\n".join(f"// - {item['title']}: {item['url']}" for item in sources[:4]) or "// - No live sources captured in this run."
-        return (
-            "// Telegram bot scaffold.\n"
-            "// Source references:\n"
-            f"{source_lines}\n\n"
-            'import "dotenv/config";\n'
-            'import { Bot } from "grammy";\n\n'
-            'const token = process.env.TELEGRAM_BOT_TOKEN?.trim();\n'
-            "if (!token) {\n"
-            '  throw new Error("Set TELEGRAM_BOT_TOKEN before running the scaffold.");\n'
-            "}\n\n"
-            'const bot = new Bot(token);\n\n'
-            'bot.command("start", (ctx) => ctx.reply("NULLA TypeScript scaffold is live."));\n'
-            'bot.command("help", (ctx) => ctx.reply("Commands: /start, /help."));\n'
-            'bot.on("message:text", (ctx) => ctx.reply(`NULLA local scaffold heard: ${ctx.message.text}`));\n\n'
-            "bot.start();\n"
-        )
+        return agent_builder_scaffolds.telegram_typescript_bot_source(sources=sources)
 
     def _discord_python_readme(self, *, user_request: str, root_dir: str, sources: list[dict[str, str]]) -> str:
-        return (
-            "# Discord Bot Scaffold\n\n"
-            "Python Discord scaffold generated from the research lane.\n\n"
-            "## Request\n\n"
-            f"- {user_request.strip()}\n\n"
-            "## Sources\n\n"
-            f"{self._sources_section(sources)}\n"
-            "## Run\n\n"
-            f"1. Install `requirements.txt`.\n2. Export `DISCORD_BOT_TOKEN`.\n3. Run `python {root_dir}/src/bot.py`.\n"
+        return agent_builder_scaffolds.discord_python_readme(
+            user_request=user_request,
+            root_dir=root_dir,
+            sources=sources,
         )
 
     def _discord_python_bot_source(self, *, sources: list[dict[str, str]]) -> str:
-        source_lines = "\n".join(f"# - {item['title']}: {item['url']}" for item in sources[:4]) or "# - No live sources captured in this run."
-        return (
-            '"""Discord bot scaffold.\n\n'
-            "Source references:\n"
-            f"{source_lines}\n"
-            '"""\n\n'
-            "from __future__ import annotations\n\n"
-            "import os\n\n"
-            "import discord\n\n"
-            'TOKEN_ENV = "DISCORD_BOT_TOKEN"\n\n'
-            "intents = discord.Intents.default()\n"
-            "intents.message_content = True\n"
-            "client = discord.Client(intents=intents)\n\n"
-            "@client.event\n"
-            "async def on_ready() -> None:\n"
-            '    print(f"Logged in as {client.user}")\n\n'
-            "@client.event\n"
-            "async def on_message(message: discord.Message) -> None:\n"
-            "    if message.author == client.user:\n"
-            "        return\n"
-            '    if message.content.startswith("!ping"):\n'
-            '        await message.channel.send("pong")\n\n'
-            "def main() -> None:\n"
-            "    token = os.getenv(TOKEN_ENV, '').strip()\n"
-            "    if not token:\n"
-            '        raise SystemExit("Set DISCORD_BOT_TOKEN before running the scaffold.")\n'
-            "    client.run(token)\n\n"
-            'if __name__ == "__main__":\n'
-            "    main()\n"
-        )
+        return agent_builder_scaffolds.discord_python_bot_source(sources=sources)
 
     def _discord_typescript_readme(self, *, user_request: str, root_dir: str, sources: list[dict[str, str]]) -> str:
-        return (
-            "# Discord Bot Scaffold (TypeScript)\n\n"
-            "TypeScript Discord scaffold generated from the research lane.\n\n"
-            "## Request\n\n"
-            f"- {user_request.strip()}\n\n"
-            "## Sources\n\n"
-            f"{self._sources_section(sources)}\n"
-            "## Run\n\n"
-            f"1. Install dependencies.\n2. Copy `.env.example` to `.env`.\n3. Run `npm run dev --prefix {root_dir}`.\n"
+        return agent_builder_scaffolds.discord_typescript_readme(
+            user_request=user_request,
+            root_dir=root_dir,
+            sources=sources,
         )
 
     def _discord_typescript_package_json(self) -> str:
-        return (
-            "{\n"
-            '  "name": "nulla-discord-bot-scaffold",\n'
-            '  "private": true,\n'
-            '  "type": "module",\n'
-            '  "scripts": {\n'
-            '    "dev": "tsx src/bot.ts"\n'
-            "  },\n"
-            '  "dependencies": {\n'
-            '    "discord.js": "^14.18.0",\n'
-            '    "dotenv": "^16.4.5"\n'
-            "  },\n"
-            '  "devDependencies": {\n'
-            '    "tsx": "^4.19.2",\n'
-            '    "typescript": "^5.7.3"\n'
-            "  }\n"
-            "}\n"
-        )
+        return agent_builder_scaffolds.discord_typescript_package_json()
 
     def _discord_typescript_bot_source(self, *, sources: list[dict[str, str]]) -> str:
-        source_lines = "\n".join(f"// - {item['title']}: {item['url']}" for item in sources[:4]) or "// - No live sources captured in this run."
-        return (
-            "// Discord bot scaffold.\n"
-            "// Source references:\n"
-            f"{source_lines}\n\n"
-            'import "dotenv/config";\n'
-            'import { Client, GatewayIntentBits } from "discord.js";\n\n'
-            'const token = process.env.DISCORD_BOT_TOKEN?.trim();\n'
-            "if (!token) {\n"
-            '  throw new Error("Set DISCORD_BOT_TOKEN before running the scaffold.");\n'
-            "}\n\n"
-            "const client = new Client({\n"
-            "  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],\n"
-            "});\n\n"
-            'client.once("ready", () => {\n'
-            '  console.log(`Logged in as ${client.user?.tag ?? "unknown-user"}`);\n'
-            "});\n\n"
-            'client.on("messageCreate", async (message) => {\n'
-            "  if (message.author.bot) {\n"
-            "    return;\n"
-            "  }\n"
-            '  if (message.content === "!ping") {\n'
-            '    await message.reply("pong");\n'
-            "  }\n"
-            "});\n\n"
-            "client.login(token);\n"
-        )
+        return agent_builder_scaffolds.discord_typescript_bot_source(sources=sources)
 
     def _generic_build_brief(self, *, user_request: str, root_dir: str, sources: list[dict[str, str]]) -> str:
-        return (
-            "# Generated Build Brief\n\n"
-            "A code scaffold was not generated because the request did not match a supported bot scaffold yet.\n\n"
-            "## Request\n\n"
-            f"- {user_request.strip()}\n\n"
-            "## Sources\n\n"
-            f"{self._sources_section(sources)}\n"
-            "## Next Moves\n\n"
-            "- Lock the target runtime and language.\n"
-            "- Confirm the delivery interface.\n"
-            "- Generate a more specific scaffold on the next turn.\n"
+        return agent_builder_scaffolds.generic_build_brief(
+            user_request=user_request,
+            root_dir=root_dir,
+            sources=sources,
         )
 
     def _maybe_execute_model_tool_intent(
