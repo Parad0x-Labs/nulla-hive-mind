@@ -1,3 +1,3 @@
-from . import scaffolds, support
+from . import controller, scaffolds, support
 
-__all__ = ["scaffolds", "support"]
+__all__ = ["controller", "scaffolds", "support"]
