@@ -139,12 +139,7 @@ body {
   font-size: 13px;
   line-height: 1.55;
   color: var(--text);
-  background:
-    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px),
-    linear-gradient(180deg, var(--bg) 0%, var(--bg-alt) 100%);
-  background-size: 28px 28px, 28px 28px, auto;
-  background-position: -1px -1px, -1px -1px, 0 0;
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
 }
 a {
@@ -169,10 +164,8 @@ button:focus-visible,
   position: sticky;
   top: 0;
   z-index: 100;
-  background: rgba(13, 15, 18, 0.97);
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 .ns-header-inner {
   min-height: 56px;

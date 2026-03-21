@@ -34,8 +34,8 @@ def render_public_landing_page_html(*, canonical_url: str = "") -> str:
 }}
 .nl-hero {{
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
-  gap: 20px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  gap: 14px;
   align-items: stretch;
 }}
 .nl-panel,
@@ -47,60 +47,48 @@ def render_public_landing_page_html(*, canonical_url: str = "") -> str:
 .nl-final {{
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius);
 }}
 .nl-hero-main {{
-  padding: 32px;
-  position: relative;
-  overflow: hidden;
-}}
-.nl-hero-main::before {{
-  content: "";
-  position: absolute;
-  inset: 18px 18px auto auto;
-  width: 120px;
-  height: 120px;
-  border-top: 1px solid rgba(196, 125, 66, 0.2);
-  border-right: 1px solid rgba(196, 125, 66, 0.2);
-  opacity: 0.8;
+  padding: 24px;
 }}
 .nl-eyebrow {{
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(196, 125, 66, 0.22);
-  background: rgba(196, 125, 66, 0.08);
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 11px;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }}
 .nl-hero h1 {{
-  margin: 18px 0 14px;
-  max-width: 12ch;
+  margin: 14px 0 10px;
+  max-width: 13ch;
   font-family: var(--font-display);
-  font-size: clamp(42px, 7vw, 78px);
-  line-height: 0.94;
-  letter-spacing: -0.06em;
+  font-size: clamp(34px, 5vw, 56px);
+  line-height: 1;
+  letter-spacing: -0.05em;
 }}
 .nl-hero p {{
   margin: 0;
   max-width: 62ch;
   color: var(--text-muted);
-  font-size: 15px;
-  line-height: 1.72;
+  font-size: 14px;
+  line-height: 1.6;
 }}
 .nl-hero-actions {{
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 26px;
+  gap: 10px;
+  margin-top: 18px;
 }}
 .nl-mini-note {{
-  margin-top: 14px;
+  margin-top: 10px;
   color: var(--text-dim);
   font-size: 12px;
   text-transform: uppercase;
@@ -109,21 +97,21 @@ def render_public_landing_page_html(*, canonical_url: str = "") -> str:
 .nl-proof-strip {{
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 24px;
+  gap: 8px;
+  margin-top: 18px;
 }}
 .nl-proof-chip {{
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255,255,255,0.02);
-  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 10px 12px;
 }}
 .nl-proof-chip strong {{
   display: block;
   color: var(--paper-strong);
-  font-family: var(--font-display);
-  font-size: 22px;
-  letter-spacing: -0.04em;
+  font-family: var(--font-ui);
+  font-size: 18px;
+  letter-spacing: -0.02em;
 }}
 .nl-proof-chip span {{
   display: block;
@@ -135,16 +123,16 @@ def render_public_landing_page_html(*, canonical_url: str = "") -> str:
   text-transform: uppercase;
 }}
 .nl-hero-side {{
-  padding: 20px;
+  padding: 14px;
   display: grid;
-  gap: 14px;
+  gap: 10px;
   align-content: start;
 }}
 .nl-side-card {{
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px 18px;
-  background: rgba(255,255,255,0.02);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  background: transparent;
 }}
 .nl-side-title,
 .nl-label {{
@@ -156,31 +144,31 @@ def render_public_landing_page_html(*, canonical_url: str = "") -> str:
 }}
 .nl-side-card strong {{
   display: block;
-  margin-top: 8px;
+  margin-top: 6px;
   color: var(--paper-strong);
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1.2;
 }}
 .nl-side-card p {{
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: var(--text-muted);
-  line-height: 1.68;
-  font-size: 14px;
+  line-height: 1.55;
+  font-size: 13px;
 }}
 .nl-side-meta,
 .nl-inline-links,
 .nl-builder-links {{
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 16px;
+  gap: 8px;
+  margin-top: 12px;
 }}
 .nl-meta-pill {{
   display: inline-flex;
   align-items: center;
-  min-height: 30px;
-  padding: 0 10px;
-  border-radius: 8px;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   color: var(--text-muted);
   font-family: var(--font-mono);
@@ -189,11 +177,11 @@ def render_public_landing_page_html(*, canonical_url: str = "") -> str:
   text-transform: uppercase;
 }}
 .nl-terminal {{
-  margin-top: 12px;
+  margin-top: 10px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #0b0d10;
-  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 8px 10px;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-muted);
@@ -208,21 +196,21 @@ def render_public_landing_page_html(*, canonical_url: str = "") -> str:
   margin-right: 8px;
 }}
 .nl-section {{
-  margin-top: 22px;
+  margin-top: 16px;
 }}
 .nl-section-head {{
   display: grid;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 6px;
+  margin-bottom: 10px;
 }}
 .nl-section h2,
 .nl-builder h2,
 .nl-final h2 {{
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(32px, 5vw, 50px);
-  line-height: 0.98;
-  letter-spacing: -0.05em;
+  font-size: clamp(22px, 3vw, 30px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
 }}
 .nl-section-copy,
 .nl-panel p,
@@ -232,15 +220,15 @@ def render_public_landing_page_html(*, canonical_url: str = "") -> str:
 .nl-final p {{
   margin: 0;
   color: var(--text-muted);
-  font-size: 15px;
-  line-height: 1.72;
+  font-size: 14px;
+  line-height: 1.58;
 }}
 .nl-grid-2,
 .nl-grid-3,
 .nl-grid-4,
 .nl-builder {{
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }}
 .nl-grid-2 {{
   grid-template-columns: minmax(0, 1.08fr) minmax(280px, 0.92fr);
@@ -256,15 +244,15 @@ def render_public_landing_page_html(*, canonical_url: str = "") -> str:
 .nl-surface-card,
 .nl-builder,
 .nl-final {{
-  padding: 22px;
+  padding: 16px;
 }}
 .nl-panel h3,
 .nl-status-card h3,
 .nl-surface-card h3 {{
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   color: var(--paper-strong);
-  font-size: 18px;
-  letter-spacing: -0.03em;
+  font-size: 16px;
+  letter-spacing: -0.02em;
 }}
 .nl-lane {{
   display: grid;
@@ -288,8 +276,9 @@ def render_public_landing_page_html(*, canonical_url: str = "") -> str:
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: 8px;
-  background: rgba(196, 125, 66, 0.14);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid var(--border);
   color: var(--paper-strong);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -320,9 +309,9 @@ def render_public_landing_page_html(*, canonical_url: str = "") -> str:
   align-items: center;
   min-height: 32px;
   padding: 0 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: rgba(255,255,255,0.03);
+  background: transparent;
   color: var(--text);
 }}
 .nl-inline-links a:hover,

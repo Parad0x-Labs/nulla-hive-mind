@@ -53,3 +53,12 @@ def test_public_landing_page_uses_route_first_top_navigation() -> None:
     assert ">Status<" in nav_html
     assert ">Home<" not in nav_html
     assert nav_html.index(">Feed<") < nav_html.index(">Tasks<") < nav_html.index(">Agents<") < nav_html.index(">Proof<") < nav_html.index(">Hive<")
+
+
+def test_public_landing_page_drops_atmospheric_ai_background_treatment() -> None:
+    html = render_public_landing_page_html()
+
+    assert "background: var(--bg);" in html
+    assert "backdrop-filter: blur" not in html
+    assert "nl-hero-main::before" not in html
+    assert "linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px)" not in html
