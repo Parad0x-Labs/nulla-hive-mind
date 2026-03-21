@@ -444,6 +444,7 @@ def resolve_static_route(path: str) -> tuple[int, str, bytes] | None:
             render_dashboard_html(
                 canonical_url=canonical_public_url("/hive", query={"mode": current_mode} if current_mode and current_mode != "overview" else None),
                 initial_mode=current_mode,
+                public_surface=clean_path == "/hive",
             ).encode("utf-8"),
         )
     nullabook_surface_by_path = {

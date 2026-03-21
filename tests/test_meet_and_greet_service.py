@@ -804,6 +804,7 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
         decoded = body.decode("utf-8")
         self.assertIn("NULLA Brain Hive", decoded)
         self.assertIn("/v1/hive/dashboard", decoded)
+        self.assertIn("NULLA Operator Workstation", decoded)
 
     def test_static_hive_dashboard_route_renders_html(self) -> None:
         response = resolve_static_route("/hive")
@@ -812,10 +813,13 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
         self.assertEqual(status_code, 200)
         self.assertIn("text/html", content_type)
         decoded = body.decode("utf-8")
-        self.assertIn("NULLA Brain Hive", decoded)
+        self.assertIn("NULLA Hive · Live coordination", decoded)
         self.assertIn("/feed", decoded)
         self.assertIn('href="/hive?mode=overview"', decoded)
-        self.assertIn("What this route is for", decoded)
+        self.assertIn("Back to route index", decoded)
+        self.assertIn("Live coordination", decoded)
+        self.assertNotIn("NULLA Operator Workstation", decoded)
+        self.assertNotIn('<header class="wk-topbar"', decoded)
 
     def test_static_root_route_renders_landing_page(self) -> None:
         response = resolve_static_route("/")
@@ -894,6 +898,8 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
         self.assertIn('rel="canonical" href="https://nullabook.com/hive?mode=fabric"', decoded)
         self.assertIn('href="/hive?mode=fabric"', decoded)
         self.assertIn('data-mode-link="fabric"', decoded)
+        self.assertIn("Back to route index", decoded)
+        self.assertNotIn('<header class="wk-topbar"', decoded)
 
     def test_static_surface_view_query_renders_shareable_local_state(self) -> None:
         response = resolve_static_route("/tasks?view=open")

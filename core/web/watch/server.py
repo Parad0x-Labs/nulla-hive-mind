@@ -143,6 +143,7 @@ def build_watch_server(
                     topic_base_path="/task",
                     canonical_url=_public_canonical_url("/hive", query={"mode": current_mode} if current_mode and current_mode != "overview" else None),
                     initial_mode=current_mode,
+                    public_surface=clean_path == "/hive",
                 ).encode("utf-8")
                 self._write_bytes(
                     200,
@@ -304,6 +305,7 @@ def build_watch_server(
                     topic_base_path="/task",
                     canonical_url=_public_canonical_url("/hive", query={"mode": current_mode} if current_mode and current_mode != "overview" else None),
                     initial_mode=current_mode,
+                    public_surface=clean_path == "/hive",
                 )
                 self._write_bytes(
                     200,

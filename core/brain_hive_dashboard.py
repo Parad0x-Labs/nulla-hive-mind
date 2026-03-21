@@ -9,7 +9,15 @@ from typing import Any
 
 from core.brain_hive_service import BrainHiveService
 from core.nulla_user_summary import build_user_summary
-from core.public_site_shell import canonical_public_url, render_public_canonical_meta
+from core.public_site_shell import (
+    canonical_public_url,
+    public_site_base_styles,
+    render_back_to_route_index,
+    render_public_breadcrumbs,
+    render_public_canonical_meta,
+    render_public_site_footer,
+    render_surface_header,
+)
 from core.nulla_workstation_ui import (
     render_workstation_header,
     render_workstation_script,
@@ -758,17 +766,66 @@ def _post_kind_event_type(post_kind: str) -> str:
     }.get(normalized, "progress_update")
 
 
+def _render_public_hive_mode_nav(*, active_mode: str) -> str:
+    safe_mode = str(active_mode or "overview").strip().lower()
+    if safe_mode not in {"overview", "hive", "work", "fabric", "commons", "markets"}:
+        safe_mode = "overview"
+    items = (
+        ("overview", "Overview"),
+        ("hive", "Hive"),
+        ("fabric", "Fabric"),
+        ("work", "Work"),
+        ("commons", "Commons"),
+        ("markets", "Markets"),
+    )
+    parts: list[str] = []
+    for key, label in items:
+        href = "/hive" if key == "overview" else f"/hive?mode={escape(key, quote=True)}"
+        current_attr = ' aria-current="page"' if key == safe_mode else ""
+        parts.append(
+            f'<a href="{href}" data-mode-link="{escape(key, quote=True)}"{current_attr}>{escape(label)}</a>'
+        )
+    parts.append(
+        '<span aria-disabled="true" title="Trace stays local because it depends on private operator runtime state.">Trace unavailable</span>'
+    )
+    return f'<nav class="ns-local-nav" aria-label="Hive modes">{"".join(parts)}</nav>'
+
+
+def _render_public_hive_route_chrome(*, active_mode: str) -> str:
+    return (
+        '<section class="ns-shell ns-hive-route-shell">'
+        + render_public_breadcrumbs(("/", "Home"), ("/hive", "Hive"))
+        + render_back_to_route_index()
+        + (
+            '<div class="ns-hive-intro">'
+            '<div class="ns-hive-kicker">Live coordination</div>'
+            '<h1>Hive</h1>'
+            '<p>/hive is the public read-only coordination surface. Inspect the board, work flow, knowledge fabric, commons pressure, and market layer here. Trace stays local because it depends on private operator runtime state.</p>'
+            "</div>"
+        )
+        + _render_public_hive_mode_nav(active_mode=active_mode)
+        + "</section>"
+    )
+
+
 def render_dashboard_html(
     *,
     api_endpoint: str = "/v1/hive/dashboard",
     topic_base_path: str = "/task",
     canonical_url: str = "",
     initial_mode: str = "overview",
+    public_surface: bool = False,
 ) -> str:
     canonical_url = canonical_url or canonical_public_url("/hive")
     safe_initial_mode = str(initial_mode or "overview").strip().lower()
     if safe_initial_mode not in {"overview", "hive", "work", "fabric", "commons", "markets"}:
         safe_initial_mode = "overview"
+    page_title = "NULLA Hive · Live coordination" if public_surface else "NULLA Brain Hive · Live dashboard"
+    page_description = (
+        "Public read-only coordination surface for live NULLA work, knowledge flow, and linked proof."
+        if public_surface
+        else "Live public dashboard for NULLA Brain Hive work, verified results, agents, and research flow."
+    )
     initial_state = json.dumps(
         {
             "generated_at": None,
@@ -817,11 +874,12 @@ def render_dashboard_html(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Live public dashboard for NULLA Brain Hive work, verified results, agents, and research flow." />
+  <meta name="description" content="__PAGE_DESCRIPTION__" />
   __CANONICAL_META__
-  <title>NULLA Brain Hive · Live dashboard</title>
+  <title>__PAGE_TITLE__</title>
   <style>
     __WORKSTATION_STYLES__
+    __SITE_BASE_STYLES__
     :root {
       --bg: var(--wk-bg);
       --panel: var(--wk-panel);
@@ -2284,6 +2342,35 @@ def render_dashboard_html(
       .nb-onboard { grid-template-columns: 1fr; }
       .nb-topbar { padding: 10px 16px; }
     }
+    .ns-hive-route-shell {
+      padding-top: 18px;
+    }
+    .ns-hive-intro {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      padding: 16px;
+      margin: 0 0 12px;
+    }
+    .ns-hive-kicker {
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .ns-hive-intro h1 {
+      margin: 8px 0 6px;
+      font-family: var(--font-display);
+      font-size: clamp(26px, 3vw, 34px);
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+    .ns-hive-intro p {
+      margin: 0;
+      max-width: 72ch;
+      color: var(--text-muted);
+      line-height: 1.7;
+    }
     body.nullabook-mode .wk-topbar { display: none; }
     body.nullabook-mode .wk-app-shell { padding-top: 0; }
     body.nullabook-mode .dashboard-workbench { display: block; }
@@ -2298,6 +2385,100 @@ def render_dashboard_html(
     body.nullabook-mode .wk-main-column { padding: 0; max-width: 100%; }
     body.nullabook-mode .dashboard-stage { padding: 0; background: transparent; border: none; box-shadow: none; }
     body.nullabook-mode footer { text-align: center; }
+    body.public-hive-mode {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+    }
+    body.public-hive-mode .wk-app-shell {
+      padding: 0 0 40px;
+    }
+    body.public-hive-mode .wk-topbar,
+    body.public-hive-mode .dashboard-rail,
+    body.public-hive-mode .dashboard-inspector,
+    body.public-hive-mode .hero,
+    body.public-hive-mode .stats,
+    body.public-hive-mode .tabs.dashboard-tab-row,
+    body.public-hive-mode .dashboard-stage-head,
+    body.public-hive-mode .dashboard-route-note,
+    body.public-hive-mode .nb-topbar,
+    body.public-hive-mode .nb-hide-in-nbmode {
+      display: none;
+    }
+    body.public-hive-mode .dashboard-workbench {
+      display: block;
+    }
+    body.public-hive-mode .wk-main-column {
+      padding: 0;
+      max-width: 100%;
+    }
+    body.public-hive-mode .dashboard-stage {
+      padding: 0;
+      background: transparent;
+      border: none;
+      box-shadow: none;
+    }
+    body.public-hive-mode .shell.dashboard-frame {
+      max-width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 0 0 24px;
+    }
+    body.public-hive-mode .wk-panel,
+    body.public-hive-mode .panel,
+    body.public-hive-mode .stat,
+    body.public-hive-mode .card,
+    body.public-hive-mode .mini-stat,
+    body.public-hive-mode .fold-card,
+    body.public-hive-mode .dashboard-home-card,
+    body.public-hive-mode .timeline-item,
+    body.public-hive-mode .claim-stream-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: none;
+    }
+    body.public-hive-mode .eyebrow,
+    body.public-hive-mode .stat-label,
+    body.public-hive-mode .meta-label,
+    body.public-hive-mode .row-meta,
+    body.public-hive-mode .small,
+    body.public-hive-mode .wk-panel-copy,
+    body.public-hive-mode .wk-panel-eyebrow,
+    body.public-hive-mode .wk-rail-label,
+    body.public-hive-mode .wk-inspector-label {
+      color: var(--text-muted);
+    }
+    body.public-hive-mode .wk-panel-title,
+    body.public-hive-mode .section-title,
+    body.public-hive-mode h2,
+    body.public-hive-mode h3 {
+      color: var(--paper-strong);
+    }
+    body.public-hive-mode .pill,
+    body.public-hive-mode .wk-proof-chip,
+    body.public-hive-mode .tab-button,
+    body.public-hive-mode .nb-chip,
+    body.public-hive-mode .mini-chip {
+      background: rgba(255, 255, 255, 0.02);
+      border-color: var(--border);
+      color: var(--text-muted);
+      border-radius: var(--radius-sm);
+      box-shadow: none;
+    }
+    body.public-hive-mode .pill.live,
+    body.public-hive-mode .wk-proof-chip--primary,
+    body.public-hive-mode .tab-button.is-active,
+    body.public-hive-mode .tab-button[aria-current="page"] {
+      background: rgba(196, 125, 66, 0.08);
+      border-color: var(--border-hover);
+      color: var(--accent);
+    }
+    body.public-hive-mode .tab-button:hover,
+    body.public-hive-mode .tab-button:focus-visible {
+      border-color: var(--border-hover);
+      color: var(--text);
+      transform: none;
+    }
 
     .nb-topbar {
       display: none;
@@ -2363,28 +2544,13 @@ def render_dashboard_html(
     }
     .nb-mode-link:hover { color: var(--ink); background: rgba(255,255,255,0.06); }
     .nb-mode-link.active { color: var(--accent, #61dafb); background: rgba(97,218,251,0.1); }
-  </style>
+</style>
 </head>
-<body>
+<body class="__BODY_CLASS__">
   <script>window._nbd={t0:Date.now()};</script>
-  <nav class="nb-topbar" id="nbTopbar">
-    <div class="nb-topbar-brand">
-      <a href="/" style="color:inherit;text-decoration:none;"><span>&#x1F98B;</span> NULLA</a>
-      <span class="nb-topbar-pulse" id="nbPulse" title="Live"></span>
-    </div>
-    <div class="nb-topbar-modes" id="nbTopbarModes">
-      <a href="/feed" class="nb-mode-link" data-nb-route="feed">Feed</a>
-      <a href="/tasks" class="nb-mode-link" data-nb-route="tasks">Tasks</a>
-      <a href="/agents" class="nb-mode-link" data-nb-route="agents">Agents</a>
-      <a href="/proof" class="nb-mode-link" data-nb-route="proof">Proof</a>
-      <a href="/hive" class="nb-mode-link active" data-nb-route="hive">Hive</a>
-    </div>
-    <div class="nb-topbar-links">
-      <a href="https://github.com/Parad0x-Labs/" target="_blank" rel="noreferrer noopener">GitHub</a>
-      <a href="https://x.com/nulla_ai" target="_blank" rel="noreferrer noopener">@nulla_ai</a>
-      <a href="https://discord.gg/WuqCDnyfZ8" target="_blank" rel="noreferrer noopener">Discord</a>
-    </div>
-  </nav>
+  __LEGACY_TOPBAR__
+  __SURFACE_HEADER__
+  __PUBLIC_ROUTE_CHROME__
   <div class="wk-app-shell">
     __WORKSTATION_HEADER__
     <div class="dashboard-workbench">
@@ -2788,6 +2954,7 @@ def render_dashboard_html(
     </div>
   </div>
 
+  __SITE_FOOTER__
   <script>
     __WORKSTATION_SCRIPT__
     const state = __INITIAL_STATE__;
@@ -5438,12 +5605,53 @@ def render_dashboard_html(
         template.replace("__INITIAL_STATE__", initial_state)
         .replace("__API_ENDPOINT__", str(api_endpoint))
         .replace("__TOPIC_BASE_PATH__", str(topic_base_path).rstrip("/"))
-        .replace("__CANONICAL_META__", render_public_canonical_meta(canonical_url=canonical_url, og_title="NULLA Brain Hive · Live dashboard", og_description="Public work, verified results, agents, and research flow from the NULLA Brain Hive."))
+        .replace(
+            "__CANONICAL_META__",
+            render_public_canonical_meta(
+                canonical_url=canonical_url,
+                og_title=page_title,
+                og_description=page_description,
+            ),
+        )
+        .replace("__PAGE_TITLE__", page_title)
+        .replace("__PAGE_DESCRIPTION__", page_description)
         .replace("__INITIAL_MODE__", safe_initial_mode)
         .replace("__WORKSTATION_STYLES__", render_workstation_styles())
+        .replace("__SITE_BASE_STYLES__", public_site_base_styles() if public_surface else "")
+        .replace("__BODY_CLASS__", "public-hive-mode" if public_surface else "")
+        .replace(
+            "__LEGACY_TOPBAR__",
+            ""
+            if public_surface
+            else """<nav class="nb-topbar" id="nbTopbar">
+    <div class="nb-topbar-brand">
+      <a href="/" style="color:inherit;text-decoration:none;"><span>&#x1F98B;</span> NULLA</a>
+      <span class="nb-topbar-pulse" id="nbPulse" title="Live"></span>
+    </div>
+    <div class="nb-topbar-modes" id="nbTopbarModes">
+      <a href="/feed" class="nb-mode-link" data-nb-route="feed">Feed</a>
+      <a href="/tasks" class="nb-mode-link" data-nb-route="tasks">Tasks</a>
+      <a href="/agents" class="nb-mode-link" data-nb-route="agents">Agents</a>
+      <a href="/proof" class="nb-mode-link" data-nb-route="proof">Proof</a>
+      <a href="/hive" class="nb-mode-link active" data-nb-route="hive">Hive</a>
+    </div>
+    <div class="nb-topbar-links">
+      <a href="https://github.com/Parad0x-Labs/" target="_blank" rel="noreferrer noopener">GitHub</a>
+      <a href="https://x.com/nulla_ai" target="_blank" rel="noreferrer noopener">@nulla_ai</a>
+      <a href="https://discord.gg/WuqCDnyfZ8" target="_blank" rel="noreferrer noopener">Discord</a>
+    </div>
+  </nav>""",
+        )
+        .replace("__SURFACE_HEADER__", render_surface_header(active="hive") if public_surface else "")
+        .replace(
+            "__PUBLIC_ROUTE_CHROME__",
+            _render_public_hive_route_chrome(active_mode=safe_initial_mode) if public_surface else "",
+        )
         .replace(
             "__WORKSTATION_HEADER__",
-            render_workstation_header(
+            ""
+            if public_surface
+            else render_workstation_header(
                 title="NULLA Operator Workstation",
                 subtitle="Decentralized AI agent swarm \u2014 live read-only dashboard",
                 default_mode="hive",
@@ -5452,6 +5660,7 @@ def render_dashboard_html(
                 trace_label="Trace unavailable here",
             ),
         )
+        .replace("__SITE_FOOTER__", render_public_site_footer() if public_surface else "")
         .replace("__WORKSTATION_SCRIPT__", render_workstation_script())
     )
 

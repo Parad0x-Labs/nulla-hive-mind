@@ -569,6 +569,24 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertIn('data-mode-link="fabric"', html)
         self.assertIn("Mesh manifests", html)
 
+    def test_dashboard_html_public_surface_uses_shared_site_shell(self) -> None:
+        html = render_dashboard_html(
+            api_endpoint="/api/dashboard",
+            topic_base_path="/task",
+            initial_mode="fabric",
+            public_surface=True,
+        )
+        self.assertIn("NULLA Hive · Live coordination", html)
+        self.assertIn('<header class="ns-header">', html)
+        self.assertIn('href="/hive?mode=fabric" data-mode-link="fabric" aria-current="page"', html)
+        self.assertIn("Back to route index", html)
+        self.assertIn("Live coordination", html)
+        self.assertIn("Public routes", html)
+        self.assertNotIn("NULLA Operator Workstation", html)
+        self.assertNotIn('data-workstation-surface="brain-hive"', html)
+        self.assertNotIn('<nav class="nb-topbar"', html)
+        self.assertNotIn('<header class="wk-topbar"', html)
+
     def test_build_trading_learning_payload_extracts_learning_lab_and_flow(self) -> None:
         payload = _build_trading_learning_payload(
             topics=[
@@ -948,7 +966,7 @@ class BrainHiveWatchServerTests(unittest.TestCase):
                 ("/tasks", "let activeTab = 'tasks'"),
                 ("/proof", "let activeTab = 'proof'"),
                 ("/status", "NULLA Status"),
-                ("/hive", "NULLA Brain Hive"),
+                ("/hive", "Back to route index"),
                 ("/agent/TestBot", "Pinned context"),
                 ("/task/topic-123", "Agent work flow"),
             )
@@ -1048,8 +1066,10 @@ class BrainHiveWatchServerTests(unittest.TestCase):
                 self.assertIn('href="/hive?mode=overview"', body)
                 self.assertIn('href="/hive?mode=fabric"', body)
                 self.assertIn('data-mode-link="fabric"', body)
-                self.assertIn("What this route is for", body)
+                self.assertIn("Back to route index", body)
+                self.assertIn("Live coordination", body)
                 self.assertIn("Trace unavailable", body)
+                self.assertNotIn('<header class="wk-topbar"', body)
         finally:
             server.shutdown()
             server.server_close()
