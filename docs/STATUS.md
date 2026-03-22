@@ -1,10 +1,10 @@
 # What Works Today
 
-Brutally honest status matrix. Updated 2026-03-20.
+Brutally honest status matrix. Updated 2026-03-22.
 
 ## Latest Stabilization Checkpoint
 
-The current `main` checkpoint materially improved eight areas:
+The current `main` checkpoint materially improved nine areas:
 
 1. **Live info truth and presentation**
    Prices, weather, and "latest on X" questions are less likely to fall back to useless snippets or Wikipedia sludge. Dedicated live lanes now handle quote-style and freshness-sensitive requests more directly, and they fail more honestly when grounding is weak.
@@ -22,12 +22,14 @@ The current `main` checkpoint materially improved eight areas:
    Worklog hygiene, public-web filtering, case-safe profile post lookup, watch-edge security defaults, and dashboard speed paths all improved locally. Deployed parity still depends on restarting the live droplets.
 8. **Public web and proof-path hardening**
    Public top-level routes now resolve as `Worklog`, `Tasks`, `Operators`, `Proof`, and `Coordination`; stale/spoofable public-write paths were hardened; and the repo/docs now expose a cleaner one-system proof path instead of scattering the story across stale handovers.
+9. **Install/package sanity and acceptance gating**
+   Built package discovery now includes the runtime `adapters` and `tools` roots instead of dropping them from packaged installs, the API container health check now hits the same `/healthz` path the docs and server expose, and the repo carries an enforced LLM acceptance lane with a committed report surface.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1011 passed, 11 skipped, 20 xfailed, 10 xpassed, 1 warning` |
+| Full suite result | `1149 passed, 13 skipped, 21 xfailed, 9 xpassed, 1 warning` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -52,7 +54,7 @@ Current test gate on this checkpoint:
 | **Proof-of-useful-work** | **Works** | Glory scores, receipts, evidence-based grading, and partial-result paths are present. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. |
 | **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, and build on every push. Local full gate currently `1011 passed, 11 skipped, 20 xfailed, 10 xpassed, 1 warning`; check Actions for the latest branch conclusion. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1149 passed, 13 skipped, 21 xfailed, 9 xpassed, 1 warning`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist. Not yet proven at scale over internet. |
 | **DHT routing** | **Partial** | Code exists. Not hardened as public routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
@@ -86,12 +88,12 @@ Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1011 passed, 11 skipped, 20 xfailed, 10 xpassed, 1 warning` |
-| Passing | 1011 |
-| Skipped | 11 |
-| Expected failures (xfail) | 20 |
-| Unexpected passes (xpass) | 10 |
-| Test files | 145 |
+| Full suite result | `1149 passed, 13 skipped, 21 xfailed, 9 xpassed, 1 warning` |
+| Passing | 1149 |
+| Skipped | 13 |
+| Expected failures (xfail) | 21 |
+| Unexpected passes (xpass) | 9 |
+| Test files | 174 |
 
 Run `pytest tests/ -v` to reproduce.
 

@@ -26,7 +26,7 @@ EXPOSE 8765
 EXPOSE 11435
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD curl -sf http://localhost:11435/health || exit 1
+    CMD curl -sf http://localhost:11435/healthz || exit 1
 
 # Default: run the agent API server
 CMD ["python3", "-m", "apps.nulla_api_server"]
