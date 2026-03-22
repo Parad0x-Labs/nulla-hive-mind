@@ -12,7 +12,6 @@ from core.execution import capabilities as execution_capabilities
 from core.execution.constants import (
     _HIVE_TOOL_INTENTS,
     _MUTATING_OPERATOR_INTENTS,
-    _NEARBY_CAPABILITY_IDS,
     _READ_ONLY_OPERATOR_INTENTS,
     _WEB_TOOL_INTENTS,
 )
@@ -106,143 +105,6 @@ def supported_public_capability_tags(*, limit: int = 16) -> list[str]:
         limit=limit,
         runtime_capability_ledger_fn=runtime_capability_ledger,
     )
-
-
-def _all_capability_entries(*, extra_entries: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-    entries = [dict(entry) for entry in runtime_capability_ledger()]
-    for entry in list(extra_entries or []):
-        if not isinstance(entry, dict):
-            continue
-        entries.append(_annotate_capability_entry(entry))
-    return entries
-
-
-def _annotate_capability_entry(entry: dict[str, Any]) -> dict[str, Any]:
-    enriched = dict(entry or {})
-    capability_id = str(enriched.get("capability_id") or "").strip()
-    supported = bool(enriched.get("supported"))
-    support_level = str(enriched.get("support_level") or "").strip().lower()
-    partial_reason = str(enriched.get("partial_reason") or "").strip()
-    if support_level not in {"full", "partial", "unsupported"}:
-        if partial_reason and supported:
-            support_level = "partial"
-        elif supported:
-            support_level = "full"
-        else:
-            support_level = "unsupported"
-    enriched["support_level"] = support_level
-    if "gap_kind" not in enriched or not str(enriched.get("gap_kind") or "").strip():
-        unsupported_reason = str(enriched.get("unsupported_reason") or "").strip().lower()
-        if support_level == "partial":
-            enriched["gap_kind"] = "partial_support"
-        elif "disabled" in unsupported_reason:
-            enriched["gap_kind"] = "disabled"
-        elif "missing auth" in unsupported_reason:
-            enriched["gap_kind"] = "missing_auth"
-        elif "not configured" in unsupported_reason:
-            enriched["gap_kind"] = "not_configured"
-        elif "future" in unsupported_reason:
-            enriched["gap_kind"] = "future_unsupported"
-        else:
-            enriched["gap_kind"] = "unwired"
-    if "nearby_capability_ids" not in enriched:
-        enriched["nearby_capability_ids"] = list(_NEARBY_CAPABILITY_IDS.get(capability_id, []))
-    return enriched
-
-
-def _capability_gap_from_entry(
-    entry: dict[str, Any],
-    *,
-    requested_label: str,
-    extra_entries: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    annotated = _annotate_capability_entry(entry)
-    all_entries = _all_capability_entries(extra_entries=extra_entries)
-    support_level = str(annotated.get("support_level") or "unsupported").strip().lower()
-    claim = str(annotated.get("claim") or "").strip()
-    reason = (
-        str(annotated.get("partial_reason") or "").strip()
-        if support_level == "partial"
-        else str(annotated.get("unsupported_reason") or claim or "").strip()
-    )
-    if support_level == "full" and bool(annotated.get("supported")):
-        reason = claim
-    return {
-        "requested_capability": str(annotated.get("capability_id") or requested_label).strip(),
-        "requested_label": requested_label,
-        "support_level": support_level,
-        "gap_kind": str(annotated.get("gap_kind") or "unwired").strip(),
-        "claim": claim,
-        "partial_reason": str(annotated.get("partial_reason") or "").strip(),
-        "reason": reason,
-        "nearby_alternatives": _combine_alternative_text(
-            _nearby_alternatives_from_capability_ids(
-                [str(item).strip() for item in list(annotated.get("nearby_capability_ids") or []) if str(item).strip()],
-                all_entries,
-            )
-        ),
-    }
-
-
-def _nearby_alternatives_from_capability_ids(
-    capability_ids: list[str],
-    entries: list[dict[str, Any]],
-) -> list[str]:
-    entry_map = {
-        str(entry.get("capability_id") or "").strip(): dict(entry)
-        for entry in list(entries or [])
-        if str(entry.get("capability_id") or "").strip()
-    }
-    alternatives: list[str] = []
-    for capability_id in list(capability_ids or []):
-        entry = dict(entry_map.get(str(capability_id).strip()) or {})
-        if not entry:
-            continue
-        support_level = str(entry.get("support_level") or "unsupported").strip().lower()
-        if support_level == "unsupported" and not bool(entry.get("supported")):
-            continue
-        claim = str(entry.get("claim") or "").strip()
-        if not claim:
-            continue
-        if support_level == "partial" and str(entry.get("partial_reason") or "").strip():
-            alternatives.append(f"{claim} ({str(entry.get('partial_reason') or '').strip()})")
-        else:
-            alternatives.append(claim)
-    return alternatives
-
-
-def _nearby_alternatives_for_unknown_intent(intent: str, entries: list[dict[str, Any]]) -> list[str]:
-    normalized = str(intent or "").strip().lower()
-    if normalized.startswith("workspace."):
-        return _combine_alternative_text(_nearby_alternatives_from_capability_ids(["workspace.read", "workspace.write"], entries))
-    if normalized.startswith("sandbox."):
-        return _combine_alternative_text(_nearby_alternatives_from_capability_ids(["workspace.read", "sandbox.command"], entries))
-    if normalized.startswith("web.") or normalized.startswith("browser."):
-        return _combine_alternative_text(_nearby_alternatives_from_capability_ids(["web.live_lookup"], entries))
-    if normalized.startswith("hive."):
-        return _combine_alternative_text(_nearby_alternatives_from_capability_ids(["hive.read", "hive.write"], entries))
-    if normalized.startswith("operator."):
-        return _combine_alternative_text(_nearby_alternatives_from_capability_ids(["operator.inspect_processes", "operator.inspect_disk_usage"], entries))
-    return []
-
-
-def _synthetic_gap_kind_for_intent(intent: str) -> str:
-    normalized = str(intent or "").strip().lower()
-    if normalized.startswith(("web.", "browser.", "workspace.", "sandbox.", "hive.", "operator.")):
-        return "unwired"
-    return "unsupported"
-
-
-def _combine_alternative_text(items: list[str]) -> list[str]:
-    seen: set[str] = set()
-    combined: list[str] = []
-    for item in list(items or []):
-        clean = str(item or "").strip()
-        if not clean or clean in seen:
-            continue
-        seen.add(clean)
-        combined.append(clean)
-    return combined
 
 
 def _unsupported_execution_for_intent(
@@ -1321,19 +1183,3 @@ def _normalize_item(item: Any) -> dict[str, Any]:
             if not str(key).startswith("_")
         }
     return {"value": str(item)}
-
-
-def _operator_argument_schema(tool_id: str) -> dict[str, str]:
-    if tool_id == "inspect_disk_usage":
-        return {"target_path": "path optional"}
-    if tool_id == "cleanup_temp_files":
-        return {"target_path": "path optional"}
-    if tool_id == "move_path":
-        return {"source_path": "path", "destination_path": "directory path"}
-    if tool_id == "schedule_calendar_event":
-        return {
-            "title": "string",
-            "start_iso": "ISO datetime",
-            "duration_minutes": "integer optional",
-        }
-    return {}
