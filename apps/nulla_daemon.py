@@ -246,8 +246,14 @@ class NullaDaemon:
         if self._order_book_thread:
             self._order_book_thread.join(timeout=2.0)
         if self._health_server:
-            self._health_server.shutdown()
-            self._health_server.server_close()
+            if hasattr(self._health_server, "should_exit"):
+                self._health_server.should_exit = True
+            shutdown = getattr(self._health_server, "shutdown", None)
+            if callable(shutdown):
+                shutdown()
+            server_close = getattr(self._health_server, "server_close", None)
+            if callable(server_close):
+                server_close()
         if self._health_thread and self._health_thread.is_alive():
             self._health_thread.join(timeout=2.0)
 
