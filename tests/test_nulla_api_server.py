@@ -19,12 +19,23 @@ from apps.nulla_api_server import (
     _run_agent,
     _stable_openclaw_session_id,
     _stream_agent_with_events,
+    create_app,
+    main,
 )
 from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
 from core.runtime_task_events import emit_runtime_event
+from core.web.api.runtime import RuntimeServices
 
 
 class NullaAPIServerModelMetadataTests(unittest.TestCase):
+    def test_create_app_keeps_runtime_services_in_app_state(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA", runtime_version_stamp={"release_version": "0.4.0"})
+
+        app = create_app(runtime)
+
+        self.assertIs(app.state.runtime, runtime)
+        self.assertEqual(app.state.model_name, "nulla")
+
     def test_daemon_runtime_config_uses_env_overrides_for_isolated_acceptance(self) -> None:
         with mock.patch.dict(
             os.environ,
@@ -314,6 +325,32 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=1)
+
+    def test_main_runs_uvicorn_with_factory_app_and_shutdown(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+        fake_uvicorn = mock.Mock()
+        fake_server = mock.Mock()
+        fake_uvicorn.Config.return_value = mock.sentinel.config
+        fake_uvicorn.Server.return_value = fake_server
+
+        with mock.patch("apps.nulla_api_server._bootstrap", return_value=runtime), mock.patch.dict(
+            "sys.modules",
+            {"uvicorn": fake_uvicorn},
+        ), mock.patch(
+            "sys.argv",
+            ["nulla-api-server", "--bind", "127.0.0.1", "--port", "18080"],
+        ):
+            exit_code = main()
+
+        self.assertEqual(exit_code, 0)
+        fake_uvicorn.Config.assert_called_once()
+        _, kwargs = fake_uvicorn.Config.call_args
+        self.assertEqual(kwargs["host"], "127.0.0.1")
+        self.assertEqual(kwargs["port"], 18080)
+        self.assertEqual(kwargs["access_log"], False)
+        self.assertIsNotNone(fake_uvicorn.Config.call_args.args[0])
+        fake_server.run.assert_called_once()
+        self.assertTrue(hasattr(runtime, "shutdown"))
 
     @unittest.skipUnless(os.environ.get("NULLA_LIVE_ROUTE_PROOF") == "1", "live route proof only")
     def test_live_trace_route_carries_workstation_deploy_proof(self) -> None:

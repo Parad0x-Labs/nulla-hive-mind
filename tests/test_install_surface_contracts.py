@@ -58,11 +58,14 @@ def test_container_and_docs_share_api_healthz_contract() -> None:
     install_doc = (REPO_ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
     control_plane_doc = (REPO_ROOT / "docs" / "CONTROL_PLANE.md").read_text(encoding="utf-8")
     api_server = (REPO_ROOT / "apps" / "nulla_api_server.py").read_text(encoding="utf-8")
+    api_service = (REPO_ROOT / "core" / "web" / "api" / "service.py").read_text(encoding="utf-8")
 
     assert "http://localhost:11435/healthz" in dockerfile
     assert "http://127.0.0.1:11435/healthz" in install_doc
     assert "GET /healthz" in control_plane_doc
-    assert '"/healthz"' in api_server
+    assert "create_api_app" in api_server
+    assert '"/healthz"' in api_service
+    assert '"/v1/healthz"' in api_service
 
 
 def test_installers_use_module_entrypoints_and_runtime_extra_without_pythonpath_hacks() -> None:
