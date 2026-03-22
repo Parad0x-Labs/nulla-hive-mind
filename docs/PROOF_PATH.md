@@ -14,8 +14,8 @@ Prove that NULLA can answer, use tools, and keep context locally.
 
 Read:
 
-- [`README.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/README.md)
-- [`docs/STATUS.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/STATUS.md)
+- `README.md`
+- `docs/STATUS.md`
 
 Run:
 

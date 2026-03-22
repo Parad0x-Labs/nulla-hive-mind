@@ -35,6 +35,25 @@ class RepoHygieneCheckTests(unittest.TestCase):
             with mock.patch.object(repo_hygiene_check, "PROJECT_ROOT", root):
                 self.assertEqual(repo_hygiene_check._repo_key_artifacts(), ["network/fixtures/node_signing_key.b64"])
 
+    def test_public_docs_do_not_embed_absolute_local_paths(self) -> None:
+        public_docs = [
+            "README.md",
+            "REPO_MAP.md",
+            "CONTRIBUTING.md",
+            "AGENT_HANDOVER.md",
+            "docs/README.md",
+            "docs/STATUS.md",
+            "docs/PROOF_PATH.md",
+            "docs/SYSTEM_SPINE.md",
+            "docs/CONTROL_PLANE.md",
+        ]
+        forbidden_fragments = ("/Users/", "/private/tmp/")
+
+        for relative_path in public_docs:
+            content = (repo_hygiene_check.PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+            for fragment in forbidden_fragments:
+                self.assertNotIn(fragment, content, msg=f"{relative_path} leaked {fragment}")
+
 
 if __name__ == "__main__":
     unittest.main()
