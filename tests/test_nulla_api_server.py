@@ -8,6 +8,8 @@ from http.server import ThreadingHTTPServer
 from unittest import mock
 from urllib import request
 
+from starlette.testclient import TestClient
+
 from apps.nulla_api_server import (
     PROJECT_ROOT,
     NullaAPIHandler,
@@ -41,6 +43,28 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
 
         self.assertIs(app.state.runtime, runtime)
         self.assertEqual(app.state.model_name, "nulla")
+
+    def test_create_app_emits_request_id_header_and_echoes_client_request_id(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA", runtime_version_stamp={"release_version": "0.4.0"})
+        app = create_app(runtime)
+
+        with TestClient(app) as client:
+            response = client.get("/healthz", headers={"X-Request-ID": "req-api-123"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-Request-ID"], "req-api-123")
+        self.assertEqual(response.headers["X-Correlation-ID"], "req-api-123")
+
+    def test_create_app_generates_request_id_when_missing(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA", runtime_version_stamp={"release_version": "0.4.0"})
+        app = create_app(runtime)
+
+        with TestClient(app) as client:
+            response = client.get("/healthz")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.headers["X-Request-ID"])
+        self.assertEqual(response.headers["X-Correlation-ID"], response.headers["X-Request-ID"])
 
     def test_daemon_runtime_config_uses_env_overrides_for_isolated_acceptance(self) -> None:
         with mock.patch.dict(

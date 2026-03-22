@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from collections.abc import Callable
 from urllib.parse import parse_qs
 
@@ -9,8 +11,11 @@ from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
 from starlette.routing import Route
 
+from ..request_ids import log_http_request, resolve_request_id, response_headers_with_request_id
 from .runtime import RuntimeServices, default_workspace_root
 from .service import ApiResponse, dispatch_get, dispatch_post, json_response
+
+logger = logging.getLogger("nulla.api.http")
 
 
 def _starlette_response(response: ApiResponse) -> Response:
@@ -21,6 +26,8 @@ def _starlette_response(response: ApiResponse) -> Response:
 
 
 async def _dispatch(request: Request) -> Response:
+    request_id = resolve_request_id(dict(request.headers.items()))
+    started = time.perf_counter()
     runtime: RuntimeServices = request.app.state.runtime
     model_name: str = request.app.state.model_name
     get_dispatcher: Callable[..., ApiResponse] = getattr(request.app.state, "get_dispatcher", dispatch_get)
@@ -30,6 +37,7 @@ async def _dispatch(request: Request) -> Response:
         "workspace_root_provider",
         default_workspace_root,
     )
+    response: ApiResponse
     if request.method == "GET":
         response = get_dispatcher(
             path=request.url.path,
@@ -37,25 +45,38 @@ async def _dispatch(request: Request) -> Response:
             runtime=runtime,
             model_name=model_name,
         )
-        return _starlette_response(response)
-    if request.method == "POST":
+    elif request.method == "POST":
         raw_body = await request.body()
         if not raw_body:
-            return _starlette_response(json_response(400, {"error": "empty body"}))
-        try:
-            body = json.loads(raw_body)
-        except json.JSONDecodeError:
-            return _starlette_response(json_response(400, {"error": "invalid JSON"}))
-        response = post_dispatcher(
-            path=request.url.path,
-            body=body,
-            headers=dict(request.headers.items()),
-            runtime=runtime,
-            model_name=model_name,
-            workspace_root_provider=workspace_root_provider,
-        )
-        return _starlette_response(response)
-    return _starlette_response(json_response(404, {"error": "not found"}))
+            response = json_response(400, {"error": "empty body"})
+        else:
+            try:
+                body = json.loads(raw_body)
+            except json.JSONDecodeError:
+                response = json_response(400, {"error": "invalid JSON"})
+            else:
+                response = post_dispatcher(
+                    path=request.url.path,
+                    body=body,
+                    headers=dict(request.headers.items()),
+                    runtime=runtime,
+                    model_name=model_name,
+                    workspace_root_provider=workspace_root_provider,
+                )
+    else:
+        response = json_response(404, {"error": "not found"})
+    response.headers = response_headers_with_request_id(response.headers, request_id=request_id)
+    latency_ms = (time.perf_counter() - started) * 1000.0
+    log_http_request(
+        logger,
+        component="api",
+        method=request.method,
+        path=request.url.path,
+        status_code=response.status,
+        latency_ms=latency_ms,
+        request_id=request_id,
+    )
+    return _starlette_response(response)
 
 
 def create_api_app(

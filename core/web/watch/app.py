@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from collections.abc import Callable
@@ -19,7 +20,10 @@ from core.public_landing_page import render_public_landing_page_html
 from core.public_site_shell import redirect_to_canonical_public_host
 from core.public_status_page import render_public_status_page_html
 
+from ..request_ids import log_http_request, resolve_request_id, response_headers_with_request_id
 from .config import BrainHiveWatchServerConfig
+
+logger = logging.getLogger("nulla.watch.http")
 
 
 def _response_headers(
@@ -159,10 +163,26 @@ def create_watch_app(
         return {"ok": False, "error": "All upstreams failed"}
 
     async def _dispatch(request: Request) -> Response:
+        request_id = resolve_request_id(dict(request.headers.items()))
+        started = time.perf_counter()
         clean_path = request.url.path.rstrip("/") or "/"
         query = parse_qs(request.url.query or "")
         post_id = str((query.get("post") or [""])[0]).strip()
         mode = str((query.get("mode") or ["overview"])[0]).strip().lower()
+
+        def _finish(response: Response) -> Response:
+            response.headers.update(response_headers_with_request_id(response.headers, request_id=request_id))
+            latency_ms = (time.perf_counter() - started) * 1000.0
+            log_http_request(
+                logger,
+                component="watch",
+                method=request.method,
+                path=clean_path,
+                status_code=response.status_code,
+                latency_ms=latency_ms,
+                request_id=request_id,
+            )
+            return response
 
         redirect_target = redirect_to_canonical_public_host(
             host_header=request.headers.get("host"),
@@ -170,17 +190,17 @@ def create_watch_app(
             query=request.url.query or "",
         )
         if redirect_target:
-            return _bytes_response(
+            return _finish(_bytes_response(
                 308,
                 "text/plain; charset=utf-8",
                 b"",
                 write_body=False,
                 content_length=0,
                 headers={"Location": redirect_target},
-            )
+            ))
 
         if request.method == "OPTIONS":
-            return _bytes_response(204, "text/plain; charset=utf-8", b"", write_body=False, content_length=0)
+            return _finish(_bytes_response(204, "text/plain; charset=utf-8", b"", write_body=False, content_length=0))
 
         nullabook_surface_by_path = {
             "/nullabook": "feed",
@@ -226,33 +246,33 @@ def create_watch_app(
                     except Exception:
                         pass
                 html = render_nullabook_page_html(**og_kw).encode("utf-8")
-                return _bytes_response(
+                return _finish(_bytes_response(
                     200,
                     "text/html; charset=utf-8",
                     html,
                     write_body=write_body,
                     content_length=len(html),
-                )
+                ))
 
             if clean_path == "/":
                 html = render_public_landing_page_html().encode("utf-8")
-                return _bytes_response(
+                return _finish(_bytes_response(
                     200,
                     "text/html; charset=utf-8",
                     html,
                     write_body=write_body,
                     content_length=len(html),
-                )
+                ))
 
             if clean_path == "/status":
                 html = render_public_status_page_html().encode("utf-8")
-                return _bytes_response(
+                return _finish(_bytes_response(
                     200,
                     "text/html; charset=utf-8",
                     html,
                     write_body=write_body,
                     content_length=len(html),
-                )
+                ))
 
             if clean_path in {"/brain-hive", "/hive"}:
                 html = render_dashboard_html(
@@ -261,7 +281,7 @@ def create_watch_app(
                     initial_mode=mode,
                     public_surface=clean_path == "/hive",
                 ).encode("utf-8")
-                return _bytes_response(
+                return _finish(_bytes_response(
                     200,
                     "text/html; charset=utf-8",
                     html,
@@ -271,7 +291,7 @@ def create_watch_app(
                         "X-Nulla-Workstation-Version": workstation_version,
                         "X-Nulla-Workstation-Surface": "brain-hive",
                     },
-                )
+                ))
 
             if clean_path.startswith("/agent/"):
                 from core.nullabook_profile_page import render_nullabook_profile_page_html
@@ -279,13 +299,13 @@ def create_watch_app(
                 handle = unquote(clean_path.removeprefix("/agent/").strip("/"))
                 if handle:
                     html = render_nullabook_profile_page_html(handle=handle).encode("utf-8")
-                    return _bytes_response(
+                    return _finish(_bytes_response(
                         200,
                         "text/html; charset=utf-8",
                         html,
                         write_body=write_body,
                         content_length=len(html),
-                    )
+                    ))
 
             if clean_path.startswith("/task/"):
                 topic_id = unquote(clean_path.removeprefix("/task/").strip("/"))
@@ -294,7 +314,7 @@ def create_watch_app(
                         topic_api_endpoint=f"/api/topic/{topic_id}",
                         posts_api_endpoint=f"/api/topic/{topic_id}/posts",
                     ).encode("utf-8")
-                    return _bytes_response(
+                    return _finish(_bytes_response(
                         200,
                         "text/html; charset=utf-8",
                         html,
@@ -304,7 +324,7 @@ def create_watch_app(
                             "X-Nulla-Workstation-Version": workstation_version,
                             "X-Nulla-Workstation-Surface": "brain-hive-topic",
                         },
-                    )
+                    ))
 
             if clean_path.startswith("/brain-hive/topic/"):
                 topic_id = unquote(clean_path.removeprefix("/brain-hive/topic/").strip("/"))
@@ -313,7 +333,7 @@ def create_watch_app(
                         topic_api_endpoint=f"/api/topic/{topic_id}",
                         posts_api_endpoint=f"/api/topic/{topic_id}/posts",
                     ).encode("utf-8")
-                    return _bytes_response(
+                    return _finish(_bytes_response(
                         200,
                         "text/html; charset=utf-8",
                         html,
@@ -323,10 +343,10 @@ def create_watch_app(
                             "X-Nulla-Workstation-Version": workstation_version,
                             "X-Nulla-Workstation-Surface": "brain-hive-topic",
                         },
-                    )
+                    ))
 
             if clean_path in {"/health", "/healthz"}:
-                return _json_response(
+                return _finish(_json_response(
                     200,
                     {
                         "ok": True,
@@ -337,22 +357,22 @@ def create_watch_app(
                         "error": None,
                     },
                     write_body=write_body,
-                )
+                ))
 
             if clean_path == "/api/dashboard" and request.method == "HEAD":
-                return _json_response(
+                return _finish(_json_response(
                     200,
                     {"ok": True, "result": None, "error": None},
                     write_body=False,
-                )
+                ))
 
             if clean_path == "/api/dashboard":
                 cached_snapshot = _dashboard_cache_hit()
                 if cached_snapshot is not None:
-                    return _json_response(
+                    return _finish(_json_response(
                         200,
                         {"ok": True, "result": cached_snapshot, "error": None, "cache_state": "hit"},
-                    )
+                    ))
                 try:
                     snapshot = await run_in_threadpool(
                         fetch_dashboard_from_upstreams,
@@ -364,18 +384,18 @@ def create_watch_app(
                         tls_insecure_skip_verify=cfg.tls_insecure_skip_verify,
                     )
                     _store_dashboard_cache(snapshot)
-                    return _json_response(
+                    return _finish(_json_response(
                         200,
                         {"ok": True, "result": snapshot, "error": None, "cache_state": "miss"},
-                    )
+                    ))
                 except Exception as exc:
                     stale_snapshot = _dashboard_cache_snapshot()
                     if stale_snapshot is not None:
-                        return _json_response(
+                        return _finish(_json_response(
                             200,
                             {"ok": True, "result": stale_snapshot, "error": None, "cache_state": "stale_fallback"},
-                        )
-                    return _json_response(502, {"ok": False, "result": None, "error": str(exc)})
+                        ))
+                    return _finish(_json_response(502, {"ok": False, "result": None, "error": str(exc)}))
 
             if clean_path.startswith("/api/topic/") and clean_path.endswith("/posts"):
                 topic_id = unquote(clean_path.removeprefix("/api/topic/").removesuffix("/posts").strip("/"))
@@ -391,9 +411,9 @@ def create_watch_app(
                             tls_ca_file=cfg.tls_ca_file,
                             tls_insecure_skip_verify=cfg.tls_insecure_skip_verify,
                         )
-                        return _json_response(200, {"ok": True, "result": posts, "error": None}, write_body=write_body)
+                        return _finish(_json_response(200, {"ok": True, "result": posts, "error": None}, write_body=write_body))
                     except Exception as exc:
-                        return _json_response(502, {"ok": False, "result": None, "error": str(exc)}, write_body=write_body)
+                        return _finish(_json_response(502, {"ok": False, "result": None, "error": str(exc)}, write_body=write_body))
 
             if clean_path.startswith("/api/topic/"):
                 topic_id = unquote(clean_path.removeprefix("/api/topic/").strip("/"))
@@ -409,21 +429,21 @@ def create_watch_app(
                             tls_ca_file=cfg.tls_ca_file,
                             tls_insecure_skip_verify=cfg.tls_insecure_skip_verify,
                         )
-                        return _json_response(200, {"ok": True, "result": topic, "error": None}, write_body=write_body)
+                        return _finish(_json_response(200, {"ok": True, "result": topic, "error": None}, write_body=write_body))
                     except Exception as exc:
-                        return _json_response(502, {"ok": False, "result": None, "error": str(exc)}, write_body=write_body)
+                        return _finish(_json_response(502, {"ok": False, "result": None, "error": str(exc)}, write_body=write_body))
 
             if clean_path == "/nullabook":
                 from core.nullabook_feed_page import render_nullabook_page_html
 
                 html = render_nullabook_page_html().encode("utf-8")
-                return _bytes_response(
+                return _finish(_bytes_response(
                     200,
                     "text/html; charset=utf-8",
                     html,
                     write_body=write_body,
                     content_length=len(html),
-                )
+                ))
 
             if clean_path.startswith("/v1/nullabook/") or clean_path == "/v1/hive/search":
                 proxy_path = clean_path
@@ -440,18 +460,18 @@ def create_watch_app(
                         tls_ca_file=cfg.tls_ca_file,
                         tls_insecure_skip_verify=cfg.tls_insecure_skip_verify,
                     )
-                    return _json_response(200, result, write_body=write_body)
+                    return _finish(_json_response(200, result, write_body=write_body))
                 except Exception as exc:
-                    return _json_response(502, {"ok": False, "result": None, "error": str(exc)}, write_body=write_body)
+                    return _finish(_json_response(502, {"ok": False, "result": None, "error": str(exc)}, write_body=write_body))
 
             if request.method == "HEAD":
-                return _bytes_response(404, "text/html; charset=utf-8", b"", write_body=False, content_length=0)
+                return _finish(_bytes_response(404, "text/html; charset=utf-8", b"", write_body=False, content_length=0))
 
-            return _bytes_response(
+            return _finish(_bytes_response(
                 404,
                 "text/html; charset=utf-8",
                 render_not_found_html(request.url.path).encode("utf-8"),
-            )
+            ))
 
         if request.method == "POST":
             if clean_path == "/v1/nullabook/upvote":
@@ -459,12 +479,12 @@ def create_watch_app(
                     raw_body = await request.body()
                     result = await _forward_upvote(raw_body)
                     status = 200 if result.get("ok", True) else 502
-                    return _json_response(status, result)
+                    return _finish(_json_response(status, result))
                 except Exception as exc:
-                    return _json_response(500, {"ok": False, "error": str(exc)})
-            return _json_response(404, {"ok": False, "error": f"Unknown POST path: {clean_path}"})
+                    return _finish(_json_response(500, {"ok": False, "error": str(exc)}))
+            return _finish(_json_response(404, {"ok": False, "error": f"Unknown POST path: {clean_path}"}))
 
-        return _json_response(404, {"ok": False, "error": "Unsupported request method."})
+        return _finish(_json_response(404, {"ok": False, "error": "Unsupported request method."}))
 
     app = Starlette(
         debug=False,

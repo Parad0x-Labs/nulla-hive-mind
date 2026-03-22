@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from collections import defaultdict, deque
@@ -19,6 +20,7 @@ from core.hive_write_grants import consume_hive_write_grant
 from core.meet_and_greet_service import MeetAndGreetConfig, MeetAndGreetService
 from core.public_hive_quotas import reserve_public_hive_write_quota
 
+from ..request_ids import log_http_request, resolve_request_id, response_headers_with_request_id
 from .routes import (
     _allow_write,
     _enforce_nullabook_request_identity,
@@ -39,6 +41,8 @@ from .routes import (
     resolve_static_route,
 )
 from .server import MeetAndGreetServerConfig, MeetMetricsCollector
+
+logger = logging.getLogger("nulla.meet.http")
 
 
 def _cors_headers(cfg: MeetAndGreetServerConfig) -> dict[str, str]:
@@ -78,6 +82,7 @@ def _bytes_response(
 
 
 async def _dispatch(request: Request) -> Response:
+    request_id = resolve_request_id(dict(request.headers.items()))
     cfg: MeetAndGreetServerConfig = request.app.state.config
     svc: MeetAndGreetService = request.app.state.service
     hive_service: BrainHiveService = request.app.state.hive_service
@@ -87,63 +92,77 @@ async def _dispatch(request: Request) -> Response:
 
     parsed_path = request.url.path
     query = parse_qs(request.url.query)
+    started = time.perf_counter()
+
+    def _finish(response: Response) -> Response:
+        response.headers.update(response_headers_with_request_id(response.headers, request_id=request_id))
+        latency_ms = (time.perf_counter() - started) * 1000.0
+        log_http_request(
+            logger,
+            component="meet",
+            method=request.method,
+            path=parsed_path,
+            status_code=response.status_code,
+            latency_ms=latency_ms,
+            request_id=request_id,
+        )
+        return response
 
     if request.method == "OPTIONS":
-        return _bytes_response(cfg, 204, "text/plain", b"")
+        return _finish(_bytes_response(cfg, 204, "text/plain", b""))
 
     if request.method == "HEAD":
         if parsed_path == "/metrics":
             if not _metrics_access_allowed(cfg.host):
-                return _bytes_response(cfg, 403, "text/plain; charset=utf-8", b"", write_body=False)
+                return _finish(_bytes_response(cfg, 403, "text/plain; charset=utf-8", b"", write_body=False))
             body = metrics.render_prometheus().encode("utf-8")
-            return _bytes_response(
+            return _finish(_bytes_response(
                 cfg,
                 200,
                 "text/plain; version=0.0.4",
                 b"",
                 write_body=False,
                 content_length=len(body),
-            )
+            ))
         static_response = resolve_static_route(parsed_path)
         if static_response is not None:
             status_code, content_type, body = static_response
-            return _bytes_response(cfg, status_code, content_type, b"", write_body=False, content_length=len(body))
+            return _finish(_bytes_response(cfg, status_code, content_type, b"", write_body=False, content_length=len(body)))
         if parsed_path == "/v1/health":
             body = json.dumps({"ok": True, "result": {"status": "ok"}}, sort_keys=True).encode("utf-8")
-            return _bytes_response(cfg, 200, "application/json", b"", write_body=False, content_length=len(body))
-        return _bytes_response(cfg, 404, "text/plain; charset=utf-8", b"", write_body=False)
+            return _finish(_bytes_response(cfg, 200, "application/json", b"", write_body=False, content_length=len(body)))
+        return _finish(_bytes_response(cfg, 404, "text/plain; charset=utf-8", b"", write_body=False))
 
     if request.method == "GET":
         if _requires_auth_for_request(cfg.host) and _is_protected_api_path(parsed_path):
             header_token = str(request.headers.get("X-Nulla-Meet-Token") or "").strip()
             if header_token != str(cfg.auth_token or ""):
-                return _json_response(cfg, 401, _error_envelope("Unauthorized request."))
+                return _finish(_json_response(cfg, 401, _error_envelope("Unauthorized request.")))
         if parsed_path == "/metrics":
             if not _metrics_access_allowed(cfg.host):
-                return _json_response(cfg, 403, _error_envelope("Metrics are not exposed on public binds."))
+                return _finish(_json_response(cfg, 403, _error_envelope("Metrics are not exposed on public binds.")))
             body = metrics.render_prometheus().encode("utf-8")
-            return _bytes_response(cfg, 200, "text/plain; version=0.0.4", body)
+            return _finish(_bytes_response(cfg, 200, "text/plain; version=0.0.4", body))
         static_response = resolve_static_route(parsed_path)
         if static_response is not None:
             status_code, content_type, body = static_response
-            return _bytes_response(cfg, status_code, content_type, body)
-        started = time.perf_counter()
+            return _finish(_bytes_response(cfg, status_code, content_type, body))
+        dispatch_started = time.perf_counter()
         status_code, envelope = dispatch_request("GET", parsed_path, query, None, svc, hive_service, metrics)
-        latency_ms = (time.perf_counter() - started) * 1000.0
-        metrics.record(method="GET", path=parsed_path, status_code=status_code, latency_ms=latency_ms)
-        return _json_response(cfg, status_code, envelope)
+        metrics.record(method="GET", path=parsed_path, status_code=status_code, latency_ms=(time.perf_counter() - dispatch_started) * 1000.0)
+        return _finish(_json_response(cfg, status_code, envelope))
 
     if request.method != "POST":
-        return _json_response(cfg, 404, _error_envelope("Unsupported request method."))
+        return _finish(_json_response(cfg, 404, _error_envelope("Unsupported request method.")))
 
-    started = time.perf_counter()
+    write_started = time.perf_counter()
     is_public_write = not _is_protected_api_path(parsed_path.rstrip("/") or "/")
     if not is_public_write and _requires_auth_for_request(cfg.host):
         header_token = str(request.headers.get("X-Nulla-Meet-Token") or "").strip()
         if header_token != str(cfg.auth_token or ""):
-            latency_ms = (time.perf_counter() - started) * 1000.0
+            latency_ms = (time.perf_counter() - write_started) * 1000.0
             metrics.record(method="POST", path=parsed_path, status_code=401, latency_ms=latency_ms)
-            return _json_response(cfg, 401, _error_envelope("Unauthorized write request."))
+            return _finish(_json_response(cfg, 401, _error_envelope("Unauthorized write request.")))
 
     request_meta: dict[str, Any] = {}
     nb_peer_id: str | None = None
@@ -162,14 +181,14 @@ async def _dispatch(request: Request) -> Response:
             details={"error": str(exc)},
         )
         status_code = 403 if _is_forbidden_write_error(exc) else 400
-        latency_ms = (time.perf_counter() - started) * 1000.0
+        latency_ms = (time.perf_counter() - write_started) * 1000.0
         metrics.record(method="POST", path=parsed_path, status_code=status_code, latency_ms=latency_ms)
         error_message = str(exc).strip() or "Invalid request envelope."
-        return _json_response(
+        return _finish(_json_response(
             cfg,
             status_code,
             _error_envelope(error_message if status_code == 403 else "Invalid request envelope."),
-        )
+        ))
 
     limit_key, limit_per_minute = _resolve_write_rate_limit(
         cfg.host,
@@ -185,9 +204,9 @@ async def _dispatch(request: Request) -> Response:
         write_lock,
         max_clients=cfg.write_rate_limit_max_clients,
     ):
-        latency_ms = (time.perf_counter() - started) * 1000.0
+        latency_ms = (time.perf_counter() - write_started) * 1000.0
         metrics.record(method="POST", path=parsed_path, status_code=429, latency_ms=latency_ms)
-        return _json_response(cfg, 429, _error_envelope("Write rate limit exceeded."))
+        return _finish(_json_response(cfg, 429, _error_envelope("Write rate limit exceeded.")))
 
     try:
         if _requires_public_hive_quota(cfg.host, parsed_path):
@@ -212,9 +231,9 @@ async def _dispatch(request: Request) -> Response:
                     },
                 )
                 status_code = 403 if quota.reason in {"insufficient_claim_trust", "insufficient_route_trust"} else 429
-                latency_ms = (time.perf_counter() - started) * 1000.0
+                latency_ms = (time.perf_counter() - write_started) * 1000.0
                 metrics.record(method="POST", path=parsed_path, status_code=status_code, latency_ms=latency_ms)
-                return _json_response(cfg, status_code, _error_envelope(_format_public_hive_quota_error(quota)))
+                return _finish(_json_response(cfg, status_code, _error_envelope(_format_public_hive_quota_error(quota))))
         if _requires_scoped_hive_grant(cfg.host, parsed_path):
             raw_grant = dict(request_meta.get("write_grant") or {})
             if not raw_grant:
@@ -232,9 +251,9 @@ async def _dispatch(request: Request) -> Response:
         if nb_token:
             nb_peer_id = _verify_nullabook_token_safe(nb_token)
             if _is_nullabook_mutation_path(parsed_path) and not nb_peer_id:
-                latency_ms = (time.perf_counter() - started) * 1000.0
+                latency_ms = (time.perf_counter() - write_started) * 1000.0
                 metrics.record(method="POST", path=parsed_path, status_code=401, latency_ms=latency_ms)
-                return _json_response(cfg, 401, _error_envelope("Invalid NullaBook token."))
+                return _finish(_json_response(cfg, 401, _error_envelope("Invalid NullaBook token.")))
         if _is_nullabook_mutation_path(parsed_path):
             for field in ("origin_kind", "origin_channel", "origin_peer_id", "provenance"):
                 payload.pop(field, None)
@@ -265,21 +284,21 @@ async def _dispatch(request: Request) -> Response:
             details={"error": str(exc)},
         )
         status_code = 403 if _is_forbidden_write_error(exc) else 400
-        latency_ms = (time.perf_counter() - started) * 1000.0
+        latency_ms = (time.perf_counter() - write_started) * 1000.0
         metrics.record(method="POST", path=parsed_path, status_code=status_code, latency_ms=latency_ms)
         error_message = str(exc).strip() or "Invalid request envelope."
-        return _json_response(
+        return _finish(_json_response(
             cfg,
             status_code,
             _error_envelope(error_message if status_code == 403 else "Invalid request envelope."),
-        )
+        ))
 
     status_code, envelope = dispatch_request("POST", parsed_path, query, payload, svc, hive_service, metrics)
     if status_code < 300 and nb_peer_id and parsed_path in {"/v1/hive/posts"}:
         _nullabook_post_hook(nb_peer_id)
-    latency_ms = (time.perf_counter() - started) * 1000.0
+    latency_ms = (time.perf_counter() - write_started) * 1000.0
     metrics.record(method="POST", path=parsed_path, status_code=status_code, latency_ms=latency_ms)
-    return _json_response(cfg, status_code, envelope)
+    return _finish(_json_response(cfg, status_code, envelope))
 
 
 def create_meet_app(

@@ -9,6 +9,8 @@ import unittest
 from unittest.mock import patch
 from urllib import request
 
+from starlette.testclient import TestClient
+
 from apps.brain_hive_watch_server import (
     BrainHiveWatchServerConfig,
     _proxy_nullabook_get,
@@ -102,6 +104,35 @@ class BrainHiveWatchServerTests(unittest.TestCase):
         self.assertEqual(app.state.workstation_version, "test-version")
         self.assertIsInstance(app.state.dashboard_cache, dict)
         self.assertIsInstance(app.state.dashboard_cache_lock, threading.Lock().__class__)
+
+    def test_create_watch_app_emits_request_id_header_and_echoes_client_header(self) -> None:
+        cfg = BrainHiveWatchServerConfig(
+            host="127.0.0.1",
+            port=8788,
+            upstream_base_urls=("http://127.0.0.1:8766",),
+        )
+
+        app = create_watch_app(
+            config=cfg,
+            workstation_version="test-version",
+            validate_tls_config=lambda inner_cfg: None,
+            requires_public_tls=lambda host: False,
+            watch_tls_enabled=lambda inner_cfg: False,
+            fetch_dashboard_from_upstreams=lambda *args, **kwargs: {},
+            fetch_topic_from_upstreams=lambda *args, **kwargs: {},
+            fetch_topic_posts_from_upstreams=lambda *args, **kwargs: [],
+            proxy_nullabook_get=lambda *args, **kwargs: {},
+            http_get_json=lambda *args, **kwargs: {},
+            normalize_base_url=lambda url: url.rstrip("/"),
+            ssl_context_for_url=lambda *args, **kwargs: None,
+        )
+
+        with TestClient(app) as client:
+            response = client.get("/healthz", headers={"X-Request-ID": "req-watch-123"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-Request-ID"], "req-watch-123")
+        self.assertEqual(response.headers["X-Correlation-ID"], "req-watch-123")
 
     def test_serve_runs_uvicorn_with_factory_app_and_tls_settings(self) -> None:
         cfg = BrainHiveWatchServerConfig(

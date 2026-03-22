@@ -26,7 +26,7 @@ class _JsonFormatter(logging.Formatter):
             "msg": record.getMessage(),
         }
         # Merge extra fields (set via logger.info("msg", extra={...}))
-        for key in ("task_id", "peer_id", "event", "component", "details", "trace_id"):
+        for key in ("task_id", "peer_id", "event", "component", "details", "trace_id", "request_id"):
             val = getattr(record, key, None)
             if val is not None:
                 payload[key] = val

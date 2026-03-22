@@ -13,6 +13,7 @@ from threading import Thread
 from unittest.mock import patch
 
 import pytest
+from starlette.testclient import TestClient
 
 import apps.meet_and_greet_server as _server_mod
 import core.api_write_auth as _api_write_auth_mod
@@ -266,6 +267,21 @@ class MeetAndGreetServiceTests(unittest.TestCase):
         self.assertIs(app.state.metrics, metrics)
         self.assertTrue(hasattr(app.state, "write_windows"))
         self.assertTrue(hasattr(app.state, "write_lock"))
+
+    def test_create_meet_app_emits_request_id_header_and_echoes_client_header(self) -> None:
+        app = create_meet_app(
+            config=MeetAndGreetServerConfig(host="127.0.0.1", port=8766, auth_token="token"),
+            service=self.service,
+            hive_service=_server_mod.BrainHiveService(),
+            metrics=MeetMetricsCollector(),
+        )
+
+        with TestClient(app) as client:
+            response = client.get("/v1/health", headers={"X-Request-ID": "req-meet-123"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-Request-ID"], "req-meet-123")
+        self.assertEqual(response.headers["X-Correlation-ID"], "req-meet-123")
 
     def test_register_meet_node_is_listed(self) -> None:
         node_id = f"seed-{uuid.uuid4().hex[:8]}"
