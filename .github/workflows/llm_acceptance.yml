@@ -1,0 +1,215 @@
+name: LLM Acceptance
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_live_runtime:
+        description: "Run the live runtime acceptance lane on a self-hosted runner"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: llm-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  llm-acceptance-fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Restore previous LLM eval baseline artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import io
+          import json
+          import os
+          import pathlib
+          import urllib.request
+          import zipfile
+
+          baseline_root = pathlib.Path("reports/llm_eval/baselines")
+          baseline_root.mkdir(parents=True, exist_ok=True)
+          api_url = os.environ["GITHUB_API_URL"].rstrip("/")
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          request_url = f"{api_url}/repos/{repo}/actions/artifacts?name=llm-eval-baseline&per_page=20"
+          req = urllib.request.Request(
+              request_url,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+              },
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  payload = json.load(response)
+          except Exception as exc:
+              print(f"No prior baseline artifact available: {exc}")
+              raise SystemExit(0)
+
+          artifacts = [item for item in payload.get("artifacts", []) if not item.get("expired")]
+          if not artifacts:
+              print("No non-expired prior baseline artifact found.")
+              raise SystemExit(0)
+
+          latest = sorted(artifacts, key=lambda item: item.get("created_at", ""), reverse=True)[0]
+          download_url = latest.get("archive_download_url")
+          if not download_url:
+              print("Latest baseline artifact has no download URL.")
+              raise SystemExit(0)
+
+          download_req = urllib.request.Request(
+              download_url,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+              },
+          )
+          with urllib.request.urlopen(download_req, timeout=60) as response:
+              archive_bytes = response.read()
+          with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+              archive.extractall(baseline_root)
+          print(f"Restored baseline artifact: {latest.get('id')}")
+          PY
+
+      - name: Run fast LLM acceptance gate
+        run: |
+          python ops/llm_eval.py \
+            --skip-live-runtime \
+            --output-root reports/llm_eval/latest \
+            --baseline-root reports/llm_eval/baselines
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: llm-eval-fast-reports
+          path: |
+            reports/llm_eval/latest/
+            docs/LLM_ACCEPTANCE_REPORT.md
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: llm-eval-baseline
+          path: reports/llm_eval/baselines/
+
+  llm-acceptance-live:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_live_runtime
+    needs: llm-acceptance-fast
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Verify Ollama model availability
+        run: |
+          ollama list
+          ollama list | grep -q 'qwen2.5:7b'
+
+      - name: Restore previous LLM eval baseline artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import io
+          import json
+          import os
+          import pathlib
+          import urllib.request
+          import zipfile
+
+          baseline_root = pathlib.Path("reports/llm_eval/baselines")
+          baseline_root.mkdir(parents=True, exist_ok=True)
+          api_url = os.environ["GITHUB_API_URL"].rstrip("/")
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          request_url = f"{api_url}/repos/{repo}/actions/artifacts?name=llm-eval-baseline&per_page=20"
+          req = urllib.request.Request(
+              request_url,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+              },
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  payload = json.load(response)
+          except Exception as exc:
+              print(f"No prior baseline artifact available: {exc}")
+              raise SystemExit(0)
+
+          artifacts = [item for item in payload.get("artifacts", []) if not item.get("expired")]
+          if not artifacts:
+              print("No non-expired prior baseline artifact found.")
+              raise SystemExit(0)
+
+          latest = sorted(artifacts, key=lambda item: item.get("created_at", ""), reverse=True)[0]
+          download_url = latest.get("archive_download_url")
+          if not download_url:
+              print("Latest baseline artifact has no download URL.")
+              raise SystemExit(0)
+
+          download_req = urllib.request.Request(
+              download_url,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+              },
+          )
+          with urllib.request.urlopen(download_req, timeout=60) as response:
+              archive_bytes = response.read()
+          with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+              archive.extractall(baseline_root)
+          print(f"Restored baseline artifact: {latest.get('id')}")
+          PY
+
+      - name: Run live LLM acceptance gate
+        run: |
+          python ops/llm_eval.py \
+            --output-root reports/llm_eval/latest \
+            --baseline-root reports/llm_eval/baselines \
+            --live-run-root artifacts/acceptance_runs/llm_eval_live \
+            --base-url http://127.0.0.1:18080
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: llm-eval-live-reports
+          path: |
+            reports/llm_eval/latest/
+            reports/llm_eval/baselines/
+            docs/LLM_ACCEPTANCE_REPORT.md
+            artifacts/acceptance_runs/llm_eval_live/evidence/

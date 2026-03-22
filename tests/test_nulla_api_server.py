@@ -11,6 +11,7 @@ from urllib import request
 from apps.nulla_api_server import (
     PROJECT_ROOT,
     NullaAPIHandler,
+    _daemon_runtime_config,
     _format_runtime_event_text,
     _normalize_chat_history,
     _parameter_count_for_model,
@@ -24,6 +25,42 @@ from core.runtime_task_events import emit_runtime_event
 
 
 class NullaAPIServerModelMetadataTests(unittest.TestCase):
+    def test_daemon_runtime_config_uses_env_overrides_for_isolated_acceptance(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "NULLA_DAEMON_BIND_HOST": "127.0.0.1",
+                "NULLA_DAEMON_BIND_PORT": "60220",
+                "NULLA_DAEMON_ADVERTISE_HOST": "127.0.0.1",
+                "NULLA_DAEMON_HEALTH_BIND_HOST": "127.0.0.1",
+                "NULLA_DAEMON_HEALTH_PORT": "0",
+            },
+            clear=False,
+        ):
+            config = _daemon_runtime_config(capacity=3, local_worker_threads=6)
+
+        self.assertEqual(config.bind_host, "127.0.0.1")
+        self.assertEqual(config.bind_port, 60220)
+        self.assertEqual(config.advertise_host, "127.0.0.1")
+        self.assertEqual(config.health_bind_host, "127.0.0.1")
+        self.assertEqual(config.health_bind_port, 0)
+        self.assertEqual(config.capacity, 3)
+        self.assertEqual(config.local_worker_threads, 6)
+
+    def test_daemon_runtime_config_ignores_invalid_integer_overrides(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "NULLA_DAEMON_BIND_PORT": "nope",
+                "NULLA_DAEMON_HEALTH_PORT": "still-nope",
+            },
+            clear=False,
+        ):
+            config = _daemon_runtime_config(capacity=2, local_worker_threads=4)
+
+        self.assertEqual(config.bind_port, 49152)
+        self.assertEqual(config.health_bind_port, 0)
+
     def test_parameter_size_for_model_uses_runtime_tag(self) -> None:
         self.assertEqual(_parameter_size_for_model("qwen2.5:14b"), "14B")
         self.assertEqual(_parameter_size_for_model("ollama/qwen2.5:0.5b"), "0.5B")
@@ -203,7 +240,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                 "started_at": "2026-03-14T10:00:00.000000Z",
                 "commit": "abc123def456",
                 "dirty": True,
-                "branch": "codex/local-bootstrap",
+                "branch": "feature/local-bootstrap",
             }
             with mock.patch("apps.nulla_api_server._runtime_version_stamp", stamp), mock.patch(
                 "apps.nulla_api_server._display_name",
@@ -217,7 +254,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                 self.assertEqual(response.headers.get("X-Nulla-Runtime-Build"), "0.4.0-closed-test+abc123def456.dirty")
                 self.assertEqual(response.headers.get("X-Nulla-Runtime-Commit"), "abc123def456")
                 self.assertEqual(response.headers.get("X-Nulla-Runtime-Dirty"), "1")
-                self.assertEqual(payload["runtime"]["branch"], "codex/local-bootstrap")
+                self.assertEqual(payload["runtime"]["branch"], "feature/local-bootstrap")
                 self.assertEqual(payload["runtime"]["build_id"], "0.4.0-closed-test+abc123def456.dirty")
                 self.assertEqual(payload["capabilities"]["feature_flags"]["public_hive_enabled"], True)
                 self.assertEqual(payload["capabilities"]["capabilities"][0]["name"], "local_runtime")
@@ -238,7 +275,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                 "started_at": "2026-03-14T10:00:00.000000Z",
                 "commit": "abc123def456",
                 "dirty": False,
-                "branch": "codex/local-bootstrap",
+                "branch": "feature/local-bootstrap",
             }
             with mock.patch("apps.nulla_api_server._runtime_version_stamp", stamp), request.urlopen(
                 f"http://127.0.0.1:{port}/api/runtime/version",
@@ -247,7 +284,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                 payload = json.loads(response.read().decode("utf-8"))
                 self.assertEqual(payload["release_version"], "0.4.0-closed-test")
                 self.assertEqual(payload["build_id"], "0.4.0-closed-test+abc123def456")
-                self.assertEqual(payload["branch"], "codex/local-bootstrap")
+                self.assertEqual(payload["branch"], "feature/local-bootstrap")
                 self.assertEqual(response.headers.get("X-Nulla-Runtime-Dirty"), "0")
         finally:
             server.shutdown()

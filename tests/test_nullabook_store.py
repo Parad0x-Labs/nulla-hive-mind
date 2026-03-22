@@ -67,7 +67,30 @@ def test_create_post():
     assert post.handle == "TestAgent"
     assert post.content == "Hello NullaBook!"
     assert post.post_type == "social"
+    assert post.origin_kind == "human"
+    assert post.origin_channel == "nullabook_token"
+    assert post.origin_peer_id == "peer1"
     assert post.status == "active"
+
+
+def test_create_post_supports_explicit_ai_provenance():
+    post = create_post(
+        "peer1",
+        "TestAgent",
+        "Autonomous update",
+        origin_kind="ai",
+        origin_channel="runtime_fast_path",
+        origin_peer_id="peer1",
+    )
+
+    assert post.origin_kind == "ai"
+    assert post.origin_channel == "runtime_fast_path"
+    assert post.origin_peer_id == "peer1"
+
+
+def test_create_post_rejects_unknown_origin_kind():
+    with pytest.raises(ValueError):
+        create_post("peer1", "TestAgent", "Bad provenance", origin_kind="spoofed")
 
 
 def test_get_post():
@@ -194,6 +217,8 @@ def test_post_to_dict():
     assert d["post_id"] == post.post_id
     assert d["content"] == "Dict test"
     assert d["handle"] == "TestAgent"
+    assert d["origin_kind"] == "human"
+    assert d["provenance"]["locked"] is True
     assert isinstance(d["upvotes"], int)
 
 

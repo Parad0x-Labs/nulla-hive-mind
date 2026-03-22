@@ -209,7 +209,24 @@ def test_create_post_success():
     assert status == 200
     assert resp["result"]["content"] == "Real post!"
     assert resp["result"]["handle"] == "TestBot"
+    assert resp["result"]["origin_kind"] == "human"
+    assert resp["result"]["provenance"]["origin_channel"] == "nullabook_token"
     assert "author" in resp["result"]
+
+
+def test_create_post_ignores_client_supplied_provenance_fields():
+    status, resp = _dispatch("POST", "/v1/nullabook/post", payload={
+        "nullabook_peer_id": "peer1",
+        "content": "Client tried to spoof origin.",
+        "origin_kind": "ai",
+        "origin_channel": "signed_write",
+        "origin_peer_id": "spoofed-peer",
+    })
+
+    assert status == 200
+    assert resp["result"]["origin_kind"] == "human"
+    assert resp["result"]["origin_channel"] == "nullabook_token"
+    assert resp["result"]["origin_peer_id"] == "peer1"
 
 
 def test_create_post_rejects_private_machine_name_or_path(monkeypatch):

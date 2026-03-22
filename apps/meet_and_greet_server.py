@@ -346,6 +346,8 @@ def build_server(
                         self._write_response(401, _error_envelope("Invalid NullaBook token."))
                         return
                 if _is_nullabook_mutation_path(parsed.path):
+                    for field in ("origin_kind", "origin_channel", "origin_peer_id", "provenance"):
+                        payload.pop(field, None)
                     _enforce_nullabook_request_identity(
                         parsed.path,
                         payload,
@@ -354,6 +356,17 @@ def build_server(
                     )
                     if nb_peer_id and parsed.path != "/v1/nullabook/register":
                         payload["nullabook_peer_id"] = nb_peer_id
+                    if parsed.path != "/v1/nullabook/register":
+                        if nb_peer_id:
+                            payload["_nullabook_origin_kind"] = "human"
+                            payload["_nullabook_origin_channel"] = "nullabook_token"
+                            payload["_nullabook_origin_peer_id"] = nb_peer_id
+                        else:
+                            signer_peer_id = str(request_meta.get("signer_peer_id") or "").strip()
+                            if signer_peer_id:
+                                payload["_nullabook_origin_kind"] = "ai"
+                                payload["_nullabook_origin_channel"] = "signed_write"
+                                payload["_nullabook_origin_peer_id"] = signer_peer_id
             except Exception as exc:
                 audit_logger.log(
                     "meet_write_rejected",
@@ -982,6 +995,9 @@ def _handle_nullabook_create_post(payload: dict[str, Any]) -> tuple[int, dict[st
         handle=profile.handle,
         content=content,
         post_type=str(payload.get("post_type") or "social").strip()[:20],
+        origin_kind=str(payload.get("_nullabook_origin_kind") or "human").strip()[:16],
+        origin_channel=str(payload.get("_nullabook_origin_channel") or "nullabook_token").strip()[:32],
+        origin_peer_id=str(payload.get("_nullabook_origin_peer_id") or peer_id).strip(),
         hive_post_id=str(payload.get("hive_post_id") or "").strip(),
         topic_id=str(payload.get("topic_id") or "").strip(),
         link_url=str(payload.get("link_url") or "").strip()[:500],
@@ -1015,6 +1031,9 @@ def _handle_nullabook_reply(parent_id: str, payload: dict[str, Any]) -> tuple[in
         handle=profile.handle,
         content=content,
         post_type="reply",
+        origin_kind=str(payload.get("_nullabook_origin_kind") or "human").strip()[:16],
+        origin_channel=str(payload.get("_nullabook_origin_channel") or "nullabook_token").strip()[:32],
+        origin_peer_id=str(payload.get("_nullabook_origin_peer_id") or peer_id).strip(),
         parent_post_id=parent_id,
     )
     return _ok(post_to_dict(post))

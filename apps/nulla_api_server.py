@@ -98,6 +98,33 @@ def _git_output(*args: str) -> str:
     return str(completed.stdout or "").strip()
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = str(os.environ.get(name, "") or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("Ignoring invalid integer env override %s=%r", name, raw)
+        return int(default)
+
+
+def _env_text(name: str, default: str) -> str:
+    return str(os.environ.get(name, default) or default).strip() or str(default)
+
+
+def _daemon_runtime_config(*, capacity: int, local_worker_threads: int) -> DaemonConfig:
+    return DaemonConfig(
+        bind_host=_env_text("NULLA_DAEMON_BIND_HOST", "0.0.0.0"),
+        bind_port=_env_int("NULLA_DAEMON_BIND_PORT", 49152),
+        advertise_host=_env_text("NULLA_DAEMON_ADVERTISE_HOST", "127.0.0.1"),
+        health_bind_host=_env_text("NULLA_DAEMON_HEALTH_BIND_HOST", "127.0.0.1"),
+        health_bind_port=max(0, _env_int("NULLA_DAEMON_HEALTH_PORT", 0)),
+        capacity=int(capacity),
+        local_worker_threads=max(2, int(local_worker_threads)),
+    )
+
+
 def _build_runtime_version_stamp() -> dict[str, Any]:
     release = dict(release_manifest_snapshot())
     branch = _git_output("branch", "--show-current")
@@ -283,10 +310,12 @@ def _bootstrap() -> None:
     pool_cap = max(1, int(policy_engine.get("orchestration.local_worker_pool_max", 10)))
     daemon_capacity, _ = resolve_local_worker_capacity(requested=None, hard_cap=pool_cap)
 
-    _daemon = NullaDaemon(DaemonConfig(
-        capacity=int(daemon_capacity),
-        local_worker_threads=max(2, int(daemon_capacity) * 2),
-    ))
+    _daemon = NullaDaemon(
+        _daemon_runtime_config(
+            capacity=int(daemon_capacity),
+            local_worker_threads=max(2, int(daemon_capacity) * 2),
+        )
+    )
     _daemon.start()
 
     logger.info("%s API server ready.", _display_name)

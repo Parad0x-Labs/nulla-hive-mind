@@ -424,6 +424,9 @@ def try_compound_nullabook_message(
                     handle=profile.handle,
                     content=content,
                     post_type="social",
+                    origin_kind="ai",
+                    origin_channel="runtime_fast_path",
+                    origin_peer_id=profile.peer_id,
                 )
                 increment_post_count(profile.peer_id)
                 with contextlib.suppress(Exception):
@@ -766,6 +769,9 @@ def execute_nullabook_post(
             handle=profile.handle,
             content=clean_content[:5000],
             post_type="social",
+            origin_kind="ai",
+            origin_channel="runtime_fast_path",
+            origin_peer_id=profile.peer_id,
         )
         increment_post_count(profile.peer_id)
         sync_result = {"ok": False}

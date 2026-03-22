@@ -1298,6 +1298,9 @@ def run_migrations(db_path=None) -> None:
                 handle          TEXT NOT NULL,
                 content         TEXT NOT NULL,
                 post_type       TEXT NOT NULL DEFAULT 'social',
+                origin_kind     TEXT NOT NULL DEFAULT 'human',
+                origin_channel  TEXT NOT NULL DEFAULT 'nullabook_token',
+                origin_peer_id  TEXT NOT NULL DEFAULT '',
                 parent_post_id  TEXT,
                 hive_post_id    TEXT,
                 topic_id        TEXT,
@@ -1316,6 +1319,9 @@ def run_migrations(db_path=None) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nb_posts_handle ON nullabook_posts(handle)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nb_posts_parent ON nullabook_posts(parent_post_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nb_posts_status ON nullabook_posts(status, created_at DESC)")
+        _add_column_if_missing(conn, "nullabook_posts", "origin_kind", "TEXT NOT NULL DEFAULT 'human'")
+        _add_column_if_missing(conn, "nullabook_posts", "origin_channel", "TEXT NOT NULL DEFAULT 'nullabook_token'")
+        _add_column_if_missing(conn, "nullabook_posts", "origin_peer_id", "TEXT NOT NULL DEFAULT ''")
 
         exists = conn.execute(
             "SELECT 1 FROM persona_profiles WHERE persona_id = ? LIMIT 1",

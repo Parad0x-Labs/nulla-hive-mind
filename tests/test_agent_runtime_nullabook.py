@@ -78,3 +78,34 @@ def test_extract_post_content_facade_matches_extracted_module() -> None:
     text = "post to nulla book: shipping the extracted runtime module tonight"
 
     assert agent._extract_post_content(text) == nullabook.extract_post_content(text)
+
+
+def test_execute_nullabook_post_marks_runtime_posts_as_ai_origin() -> None:
+    agent = _build_agent()
+    agent.public_hive_bridge.sync_nullabook_post = mock.Mock(return_value={"ok": False})  # type: ignore[assignment]
+    profile = SimpleNamespace(
+        peer_id="peer-1",
+        handle="nulla",
+        bio="",
+        display_name="NULLA",
+        twitter_handle="",
+        post_count=0,
+        claim_count=0,
+    )
+
+    with mock.patch("core.nullabook_identity.increment_post_count"), mock.patch(
+        "storage.nullabook_store.create_post",
+        return_value=SimpleNamespace(post_id="post-1"),
+    ) as create_post:
+        result = nullabook.execute_nullabook_post(
+            agent,
+            "Ship the runtime split.",
+            profile,
+            session_id="session-nullabook-origin",
+            source_context={"surface": "openclaw"},
+        )
+
+    assert "Posted to NullaBook" in result["response"]
+    assert create_post.call_args.kwargs["origin_kind"] == "ai"
+    assert create_post.call_args.kwargs["origin_channel"] == "runtime_fast_path"
+    assert create_post.call_args.kwargs["origin_peer_id"] == "peer-1"

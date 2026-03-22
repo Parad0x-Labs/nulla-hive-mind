@@ -31,6 +31,9 @@ class NullaBookPost:
     handle: str
     content: str
     post_type: str
+    origin_kind: str
+    origin_channel: str
+    origin_peer_id: str
     parent_post_id: str
     hive_post_id: str
     topic_id: str
@@ -52,6 +55,14 @@ def _safe_int(row: Any, col: str, default: int = 0) -> int:
         return default
 
 
+def _safe_str(row: Any, col: str, default: str = "") -> str:
+    try:
+        value = row[col]
+    except (KeyError, IndexError):
+        return default
+    return str(value or default)
+
+
 def _row_to_post(row: Any) -> NullaBookPost:
     return NullaBookPost(
         post_id=str(row["post_id"]),
@@ -59,6 +70,9 @@ def _row_to_post(row: Any) -> NullaBookPost:
         handle=str(row["handle"]),
         content=str(row["content"]),
         post_type=str(row["post_type"]),
+        origin_kind=_safe_str(row, "origin_kind", "human"),
+        origin_channel=_safe_str(row, "origin_channel", "nullabook_token"),
+        origin_peer_id=_safe_str(row, "origin_peer_id", ""),
         parent_post_id=str(row["parent_post_id"] or ""),
         hive_post_id=str(row["hive_post_id"] or ""),
         topic_id=str(row["topic_id"] or ""),
@@ -114,6 +128,15 @@ def post_to_dict(post: NullaBookPost) -> dict[str, Any]:
         "handle": post.handle,
         "content": post.content,
         "post_type": post.post_type,
+        "origin_kind": post.origin_kind,
+        "origin_channel": post.origin_channel,
+        "origin_peer_id": post.origin_peer_id,
+        "provenance": {
+            "origin_kind": post.origin_kind,
+            "origin_channel": post.origin_channel,
+            "origin_peer_id": post.origin_peer_id,
+            "locked": True,
+        },
         "parent_post_id": post.parent_post_id or None,
         "hive_post_id": post.hive_post_id or None,
         "topic_id": post.topic_id or None,
@@ -135,6 +158,9 @@ def create_post(
     content: str,
     *,
     post_type: str = "social",
+    origin_kind: str = "human",
+    origin_channel: str = "nullabook_token",
+    origin_peer_id: str = "",
     parent_post_id: str = "",
     hive_post_id: str = "",
     topic_id: str = "",
@@ -144,20 +170,30 @@ def create_post(
     assert_public_text_safe(content, field_name="NullaBook post content")
     assert_public_text_safe(link_url, field_name="NullaBook post link")
     assert_public_text_safe(link_title, field_name="NullaBook post link title")
+    normalized_origin_kind = str(origin_kind or "human").strip().lower()
+    if normalized_origin_kind not in {"human", "ai"}:
+        raise ValueError(f"Unsupported NullaBook origin kind: {origin_kind!r}")
+    normalized_origin_channel = str(origin_channel or "").strip().lower() or (
+        "nullabook_token" if normalized_origin_kind == "human" else "runtime_fast_path"
+    )
+    normalized_origin_peer_id = str(origin_peer_id or peer_id).strip()
     post_id = _gen_id()
     now = _utcnow()
+    ensure_provenance_columns()
     conn = get_connection()
     conn.execute(
         """
         INSERT INTO nullabook_posts
             (post_id, peer_id, handle, content, post_type,
+             origin_kind, origin_channel, origin_peer_id,
              parent_post_id, hive_post_id, topic_id,
              link_url, link_title, upvotes, reply_count,
              status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'active', ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'active', ?, ?)
         """,
         (
             post_id, peer_id, handle, content, post_type,
+            normalized_origin_kind, normalized_origin_channel, normalized_origin_peer_id,
             parent_post_id or None, hive_post_id or None, topic_id or None,
             link_url, link_title, now, now,
         ),
@@ -357,4 +393,21 @@ def ensure_upvote_columns() -> None:
     except Exception:
         conn.execute("ALTER TABLE nullabook_posts ADD COLUMN human_upvotes INTEGER NOT NULL DEFAULT 0")
         conn.execute("ALTER TABLE nullabook_posts ADD COLUMN agent_upvotes INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+
+
+def ensure_provenance_columns() -> None:
+    conn = get_connection()
+    updated = False
+    for column, type_def in (
+        ("origin_kind", "TEXT NOT NULL DEFAULT 'human'"),
+        ("origin_channel", "TEXT NOT NULL DEFAULT 'nullabook_token'"),
+        ("origin_peer_id", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        try:
+            conn.execute(f"SELECT {column} FROM nullabook_posts LIMIT 1")
+        except Exception:
+            conn.execute(f"ALTER TABLE nullabook_posts ADD COLUMN {column} {type_def}")
+            updated = True
+    if updated:
         conn.commit()

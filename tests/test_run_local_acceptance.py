@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from pathlib import Path
 
 import ops.run_local_acceptance as acceptance
@@ -118,6 +119,47 @@ def test_render_report_includes_profile_and_thresholds(tmp_path: Path) -> None:
     assert "cold start <= 120.0s" in rendered
 
 
+def test_default_runtime_command_targets_api_server_and_base_url_port(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    venv_python = repo_root / ".venv" / "bin"
+    venv_python.mkdir(parents=True)
+    (venv_python / "python").write_text("", encoding="utf-8")
+    monkeypatch.setattr(acceptance, "REPO_ROOT", repo_root)
+
+    command = acceptance._default_runtime_command(
+        repo_root=repo_root,
+        base_url="http://127.0.0.1:18080",
+    )
+
+    assert command[-6:] == ["-m", "apps.nulla_api_server", "--bind", "127.0.0.1", "--port", "18080"]
+    assert command[0] == str(repo_root / ".venv" / "bin" / "python")
+
+
+def test_resolve_runtime_command_uses_direct_launch_for_nondefault_port(tmp_path: Path) -> None:
+    start_script = tmp_path / "run.sh"
+    start_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    command = acceptance._resolve_runtime_command(
+        repo_root=tmp_path,
+        base_url="http://127.0.0.1:18080",
+        start_script=start_script,
+    )
+
+    assert "apps.nulla_api_server" in command
+    assert "--port" in command
+    assert "18080" in command
+
+
+def test_pick_isolated_daemon_bind_port_returns_stream_safe_pair() -> None:
+    port = acceptance._pick_isolated_daemon_bind_port(host="127.0.0.1")
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp_sock:
+        udp_sock.bind(("127.0.0.1", port))
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_sock:
+        tcp_sock.bind(("127.0.0.1", port + 1))
+
+
 def test_run_full_acceptance_restores_online_runtime(monkeypatch, tmp_path: Path) -> None:
     profile = acceptance.load_profile()
     calls: list[str] = []
@@ -127,11 +169,12 @@ def test_run_full_acceptance_restores_online_runtime(monkeypatch, tmp_path: Path
     start_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
 
     monkeypatch.setattr(acceptance.subprocess, "check_output", lambda *args, **kwargs: "9141b55\n")
+    monkeypatch.setattr(acceptance, "_pick_isolated_daemon_bind_port", lambda **kwargs: 60220)
     monkeypatch.setattr(acceptance, "_stop_runtime", lambda base_url: calls.append(f"stop:{base_url}"))
     monkeypatch.setattr(
         acceptance,
         "_start_runtime",
-        lambda **kwargs: calls.append(f"start:{kwargs['expected_commit']}") or object(),
+        lambda **kwargs: calls.append(f"start:{kwargs['expected_commit']}:{kwargs['daemon_bind_port']}") or object(),
     )
     monkeypatch.setattr(
         acceptance.AcceptanceRunner,
@@ -163,4 +206,4 @@ def test_run_full_acceptance_restores_online_runtime(monkeypatch, tmp_path: Path
     assert exit_code == 0
     assert not (runtime_home / "config" / "default_policy.yaml").exists()
     assert calls.count("report") == 1
-    assert calls.count("start:9141b55") == 3
+    assert calls.count("start:9141b55:60220") == 3

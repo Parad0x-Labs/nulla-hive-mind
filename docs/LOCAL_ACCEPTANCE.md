@@ -3,7 +3,7 @@
 This is the locked local acceptance bar for NULLA on `qwen2.5:7b`.
 
 Canonical profile:
-- [`config/acceptance/local_qwen25_7b_profile.json`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/config/acceptance/local_qwen25_7b_profile.json)
+- [`config/acceptance/local_qwen25_7b_profile.json`](../config/acceptance/local_qwen25_7b_profile.json)
 
 Canonical command:
 
@@ -33,3 +33,36 @@ Locked gate:
 - manual BTC verification must pass
 
 This is a real gate, not a vanity report. If a future run wants to call itself green, it should pass this profile or a stricter one.
+
+## LLM Evaluation Commands
+
+Fast deterministic acceptance gate:
+
+```bash
+python3 ops/llm_eval.py \
+  --skip-live-runtime \
+  --output-root reports/llm_eval/latest \
+  --baseline-root reports/llm_eval/baselines
+```
+
+Full live acceptance gate:
+
+```bash
+python3 ops/llm_eval.py \
+  --output-root reports/llm_eval/latest \
+  --baseline-root reports/llm_eval/baselines \
+  --live-run-root artifacts/acceptance_runs/llm_eval_live \
+  --base-url http://127.0.0.1:18080
+```
+
+What the fast gate proves:
+- rerun of the last 48h LLM/runtime regression pack
+- context-discipline scenarios
+- research-quality scenarios
+- Hive integrity scenarios
+- NullaBook provenance scenarios
+
+What only the live gate proves:
+- real local runtime boot on the current commit
+- real latency numbers for the locked local profile
+- live lookup/manual verification and offline honesty on the same runtime

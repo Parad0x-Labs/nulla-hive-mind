@@ -1,0 +1,738 @@
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.llm_eval import (
+    collect_recent_llm_inventory,
+    compare_pytest_results,
+    run_pytest_pack,
+    summarize_latency_rows,
+)
+from ops import run_local_acceptance as local_acceptance
+
+DEFAULT_OUTPUT_ROOT = REPO_ROOT / "reports" / "llm_eval" / "latest"
+DEFAULT_BASELINE_ROOT = REPO_ROOT / "reports" / "llm_eval" / "baselines"
+DEFAULT_LIVE_RUN_ROOT = REPO_ROOT / "artifacts" / "acceptance_runs" / "llm_eval_live"
+DEFAULT_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_qwen25_7b_profile.json"
+DEFAULT_BASE_URL = "http://127.0.0.1:18080"
+
+RECENT_48H_BASELINE_TARGETS = [
+    "tests/test_run_local_acceptance.py",
+    "tests/test_milestone1_ai_first_evals.py",
+    "tests/test_alpha_hardening_pass2_live_soak.py",
+    "tests/test_nulla_hive_task_flow.py",
+    "tests/test_nullabook_api.py",
+    "tests/test_nullabook_identity.py",
+    "tests/test_reward_engine.py",
+    "tests/test_openclaw_tooling_context.py",
+    "tests/test_nulla_web_freshness_and_lookup.py",
+]
+
+CONTEXT_SCENARIOS = [
+    {
+        "id": "active_task_followup_short_id",
+        "target": "tests/test_openclaw_tooling_context.py::OpenClawToolingContextTests::test_openclaw_can_confirm_short_followup_after_hive_task_list",
+        "description": "Short follow-up resolves against the active Hive task list instead of drifting.",
+    },
+    {
+        "id": "fresh_short_id_reference",
+        "target": "tests/test_openclaw_tooling_context.py::OpenClawToolingContextTests::test_openclaw_can_start_hive_task_from_fresh_short_id_reference",
+        "description": "Fresh short task references resolve cleanly against the current task list.",
+    },
+    {
+        "id": "history_recovery_followup",
+        "target": "tests/test_openclaw_tooling_context.py::OpenClawToolingContextTests::test_openclaw_can_confirm_short_followup_from_recent_history_when_session_state_is_empty",
+        "description": "Recent history can recover a short follow-up when volatile session state is empty.",
+    },
+    {
+        "id": "stale_active_task_not_sticky",
+        "target": "tests/test_openclaw_tooling_context.py::OpenClawToolingContextTests::test_openclaw_hive_create_confirm_beats_stale_active_task_state",
+        "description": "Stale active task state does not hijack a new confirmed create flow.",
+    },
+    {
+        "id": "watched_topic_followup",
+        "target": "tests/test_openclaw_tooling_context.py::OpenClawToolingContextTests::test_openclaw_hive_status_followup_uses_watched_topic_context",
+        "description": "Watched-topic follow-ups stay on the currently watched Hive topic.",
+    },
+    {
+        "id": "recent_history_topic_followup",
+        "target": "tests/test_openclaw_tooling_context.py::OpenClawToolingContextTests::test_openclaw_hive_status_followup_can_resolve_topic_from_recent_history",
+        "description": "Recent history can restore the correct topic when state is re-entered.",
+    },
+    {
+        "id": "vilnius_short_followup",
+        "target": "tests/test_nulla_runtime_contracts.py::test_short_vilnius_time_followup_reuses_recent_time_context",
+        "description": "Short follow-up keeps the active time context instead of falling back to generic chat.",
+    },
+    {
+        "id": "vilnius_malformed_followup",
+        "target": "tests/test_nulla_runtime_contracts.py::test_exact_vilnius_malformed_followup_reuses_session_time_context",
+        "description": "Malformed follow-up still binds to the active time question instead of leaking stale context.",
+    },
+    {
+        "id": "stale_person_context_purged_for_math",
+        "target": "tests/test_nulla_runtime_contracts.py::test_direct_math_overrides_stale_toly_context",
+        "description": "Direct math suppresses stale conversational context.",
+    },
+    {
+        "id": "hive_problem_review_followup",
+        "target": "tests/test_nulla_hive_task_flow.py::test_review_the_problem_clarifies_when_multiple_tasks_are_open",
+        "description": "Review/problem follow-up disambiguates against real open Hive tasks.",
+    },
+]
+
+RESEARCH_SCENARIOS = [
+    {
+        "id": "planned_search_for_live_updates",
+        "target": "tests/test_nulla_web_freshness_and_lookup.py::test_latest_telegram_updates_trigger_planned_web_lookup",
+        "description": "Fresh update queries route through planned search with source grounding.",
+    },
+    {
+        "id": "offline_honesty",
+        "target": "tests/test_nulla_web_freshness_and_lookup.py::test_live_info_without_web_fallback_returns_deterministic_disabled_response",
+        "description": "When live lookup is disabled, NULLA refuses to bluff current information.",
+    },
+    {
+        "id": "ultra_fresh_honesty",
+        "target": "tests/test_nulla_web_freshness_and_lookup.py::test_ultra_fresh_market_question_returns_insufficient_evidence_without_bluffing",
+        "description": "Ultra-fresh prompts stay honest instead of inventing minute-level certainty.",
+    },
+    {
+        "id": "structured_weather_lookup",
+        "target": "tests/test_nulla_web_freshness_and_lookup.py::test_weather_live_lookup_uses_structured_weather_wording",
+        "description": "Weather lookups use the structured live weather lane instead of generic sludge.",
+    },
+    {
+        "id": "structured_news_lookup",
+        "target": "tests/test_nulla_web_freshness_and_lookup.py::test_news_live_lookup_uses_structured_headline_wording",
+        "description": "News lookups use structured headline wording with freshness semantics.",
+    },
+    {
+        "id": "weak_evidence_uncertainty",
+        "target": "tests/test_nulla_web_freshness_and_lookup.py::test_adaptive_research_surfaces_uncertainty_when_evidence_stays_weak",
+        "description": "Adaptive research says uncertain when evidence remains weak.",
+    },
+    {
+        "id": "empty_lookup_honesty",
+        "target": "tests/test_nulla_web_freshness_and_lookup.py::test_empty_fresh_lookup_honestly_degrades_instead_of_using_memory_as_final_speaker",
+        "description": "Empty fresh lookups degrade honestly instead of laundering stale memory as live truth.",
+    },
+    {
+        "id": "openclaw_live_lookup",
+        "target": "tests/test_openclaw_tooling_context.py::OpenClawToolingContextTests::test_openclaw_surface_triggers_live_web_lookup_for_fresh_requests",
+        "description": "OpenClaw fresh requests trigger the live lookup lane rather than generic chat.",
+    },
+]
+
+HIVE_SCENARIOS = [
+    {
+        "id": "ux_preview_before_confirm",
+        "target": "tests/test_openclaw_tooling_context.py::OpenClawToolingContextTests::test_openclaw_hive_task_preview_beats_twitter_route_and_stays_clean",
+        "description": "Hive task creation uses the real user preview lane before any create call.",
+    },
+    {
+        "id": "confirm_posts_improved_copy",
+        "target": "tests/test_openclaw_tooling_context.py::OpenClawToolingContextTests::test_openclaw_hive_create_yes_improved_posts_improved_copy",
+        "description": "Confirmed Hive task creation posts the improved draft through the real UX path.",
+    },
+    {
+        "id": "unsigned_write_blocked",
+        "target": "tests/test_meet_and_greet_service.py::MeetAndGreetServerDispatchTests::test_http_server_requires_signed_write_envelope",
+        "description": "Unsigned task writes are rejected at the live HTTP boundary.",
+    },
+    {
+        "id": "spoofed_update_blocked",
+        "target": "tests/test_meet_and_greet_service.py::MeetAndGreetServerDispatchTests::test_http_server_rejects_spoofed_topic_update_actor",
+        "description": "Spoofed topic update actors cannot mutate Hive state.",
+    },
+    {
+        "id": "status_validation_no_mutation",
+        "target": "tests/test_meet_and_greet_service.py::MeetAndGreetServerDispatchTests::test_http_server_failed_status_validation_does_not_mutate_topic",
+        "description": "Failed status validation cannot mutate the underlying Hive topic.",
+    },
+    {
+        "id": "reward_release_once",
+        "target": "tests/test_reward_engine.py::RewardEngineTests::test_releasing_mature_reward_mints_compute_credits_once",
+        "description": "Released rewards mint credits once and stay replay-safe.",
+    },
+    {
+        "id": "reward_finalization_ordered",
+        "target": "tests/test_reward_engine.py::RewardEngineTests::test_confirmed_reward_finalizes_after_quiet_window",
+        "description": "Reward finalization only occurs after the ordered quiet-window progression.",
+    },
+    {
+        "id": "late_negative_review_blocks_finality",
+        "target": "tests/test_reward_engine.py::RewardEngineTests::test_negative_review_after_confirmation_slashes_work",
+        "description": "Late negative review blocks or reverses finality instead of silently settling.",
+    },
+]
+
+PROVENANCE_SCENARIOS = [
+    {
+        "id": "token_identity_mismatch_blocked",
+        "target": "tests/test_meet_and_greet_service.py::MeetAndGreetServerDispatchTests::test_http_server_rejects_nullabook_post_token_identity_mismatch",
+        "description": "Mismatched human token identity cannot write under another profile.",
+    },
+    {
+        "id": "auth_channel_sets_origin",
+        "target": "tests/test_meet_and_greet_service.py::MeetAndGreetServerDispatchTests::test_http_server_sets_nullabook_post_provenance_from_auth_channel",
+        "description": "The live HTTP boundary assigns human vs AI origin from the auth channel.",
+    },
+    {
+        "id": "runtime_fast_path_marks_ai_origin",
+        "target": "tests/test_agent_runtime_nullabook.py::test_execute_nullabook_post_marks_runtime_posts_as_ai_origin",
+        "description": "Runtime-authored NullaBook posts are marked AI-originated.",
+    },
+    {
+        "id": "api_ignores_client_provenance_spoof",
+        "target": "tests/test_nullabook_api.py::test_create_post_ignores_client_supplied_provenance_fields",
+        "description": "Client-supplied provenance fields cannot spoof the stored origin.",
+    },
+    {
+        "id": "store_default_human_origin",
+        "target": "tests/test_nullabook_store.py::test_create_post",
+        "description": "Default social posts stay human-originated unless a trusted internal path says otherwise.",
+    },
+    {
+        "id": "store_explicit_ai_origin",
+        "target": "tests/test_nullabook_store.py::test_create_post_supports_explicit_ai_provenance",
+        "description": "Trusted internal paths can explicitly write AI-originated posts.",
+    },
+]
+
+
+def _git_branch() -> str:
+    return subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(REPO_ROOT), text=True).strip()
+
+
+def _git_commit() -> str:
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT), text=True).strip()
+
+
+def _write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_markdown(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text.rstrip() + "\n", encoding="utf-8")
+
+
+def _display_path(path: Path | None) -> str:
+    if not path:
+        return ""
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _write_latency_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "run_id",
+        "commit_sha",
+        "request_type",
+        "test_id",
+        "cold_state",
+        "prompt_chars",
+        "response_chars",
+        "latency_seconds",
+        "ttfb_seconds",
+        "first_useful_token_seconds",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({name: row.get(name) for name in fieldnames})
+
+
+def _scenario_group_result(name: str, scenarios: list[dict[str, str]]) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    for scenario in scenarios:
+        pack = run_pytest_pack(name=scenario["id"], repo_root=REPO_ROOT, targets=[scenario["target"]])
+        results.append(
+            {
+                "scenario_id": scenario["id"],
+                "description": scenario["description"],
+                "target": scenario["target"],
+                "status": "pass" if pack["exit_code"] == 0 else "fail",
+                "duration_seconds": pack["duration_seconds"],
+                "summary": pack["summary"],
+                "exit_code": pack["exit_code"],
+                "stdout": pack["stdout"],
+                "stderr": pack["stderr"],
+            }
+        )
+    return {
+        "category": name,
+        "status": "pass" if all(item["status"] == "pass" for item in results) else "fail",
+        "scenarios": results,
+        "totals": {
+            "total": len(results),
+            "passed": sum(1 for item in results if item["status"] == "pass"),
+            "failed": sum(1 for item in results if item["status"] != "pass"),
+        },
+    }
+
+
+def _collect_latency_rows_from_acceptance(
+    *,
+    run_id: str,
+    commit_sha: str,
+    online_payload: dict[str, Any],
+    offline_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    results = dict(online_payload.get("results") or {})
+    request_map = {
+        "P0.1a_boot_hello": ("cold_start", True),
+        "P0.1b_capabilities": ("warm_simple", False),
+        "P0.2_local_file_create": ("tool_invocation", False),
+        "P0.3_append": ("tool_invocation", False),
+        "P0.3b_readback": ("tool_invocation", False),
+        "P0.5_tool_chain": ("chained_task", False),
+        "P0.6_logic": ("warm_logic", False),
+        "P0.4_live_lookup": ("research_lookup", False),
+        "P0.7_honesty_online": ("freshness_honesty", False),
+        "P1.3_instruction_fidelity": ("instruction_fidelity", False),
+        "P1.4_recovery": ("recovery", False),
+    }
+    for test_id, (request_type, cold_state) in request_map.items():
+        result = dict(results.get(test_id) or {})
+        rows.append(
+            {
+                "run_id": run_id,
+                "commit_sha": commit_sha,
+                "request_type": request_type,
+                "test_id": test_id,
+                "cold_state": cold_state,
+                "prompt_chars": len(str(result.get("prompt") or "")),
+                "response_chars": len(str(result.get("assistant_text") or "")),
+                "latency_seconds": result.get("latency_seconds"),
+                "ttfb_seconds": None,
+                "first_useful_token_seconds": None,
+            }
+        )
+    for index, result in enumerate(list(results.get("P1.1_consistency") or []), start=1):
+        rows.append(
+            {
+                "run_id": run_id,
+                "commit_sha": commit_sha,
+                "request_type": "consistency_repeat",
+                "test_id": f"P1.1_consistency[{index}]",
+                "cold_state": False,
+                "prompt_chars": 0,
+                "response_chars": len(str(result.get("assistant_text") or "")),
+                "latency_seconds": result.get("latency_seconds"),
+                "ttfb_seconds": None,
+                "first_useful_token_seconds": None,
+            }
+        )
+    offline = dict(offline_payload.get("result") or {})
+    rows.append(
+        {
+            "run_id": run_id,
+            "commit_sha": commit_sha,
+            "request_type": "offline_honesty",
+            "test_id": "offline_honesty",
+            "cold_state": False,
+            "prompt_chars": len(str(offline.get("prompt") or "")),
+            "response_chars": len(str(offline.get("assistant_text") or "")),
+            "latency_seconds": offline.get("latency_seconds"),
+            "ttfb_seconds": None,
+            "first_useful_token_seconds": None,
+        }
+    )
+    return rows
+
+
+def _run_live_acceptance(
+    *,
+    base_url: str,
+    profile_path: Path,
+    run_root: Path,
+) -> dict[str, Any]:
+    profile = local_acceptance.load_profile(profile_path)
+    exit_code = local_acceptance.run_full_acceptance(
+        base_url=base_url.rstrip("/"),
+        repo_root=REPO_ROOT,
+        run_root=run_root,
+        profile=profile,
+        runtime_home=(run_root / "runtime_home").resolve(),
+        workspace_root=(run_root / "workspace").resolve(),
+        start_script=local_acceptance.DEFAULT_START_SCRIPT,
+    )
+    online_payload = json.loads((run_root / "evidence" / "online_acceptance.json").read_text(encoding="utf-8"))
+    offline_payload = json.loads((run_root / "evidence" / "offline_honesty.json").read_text(encoding="utf-8"))
+    manual_payload = json.loads((run_root / "evidence" / "manual_btc_verification.json").read_text(encoding="utf-8"))
+    summary = local_acceptance.build_acceptance_summary(
+        online_payload=online_payload,
+        offline_payload=offline_payload,
+        manual_btc_check=manual_payload,
+        profile=profile,
+    )
+    return {
+        "status": "pass" if exit_code == 0 else "fail",
+        "exit_code": exit_code,
+        "profile": {
+            "profile_id": profile.profile_id,
+            "display_name": profile.display_name,
+            "model": profile.model,
+        },
+        "summary": summary,
+        "online": online_payload,
+        "offline": offline_payload,
+        "manual_btc": manual_payload,
+        "report_path": _display_path(run_root / "evidence" / "NULLA_LOCAL_ACCEPTANCE_REPORT.md"),
+    }
+
+
+def _render_regression_markdown(
+    *,
+    inventory: dict[str, Any],
+    recent_pack: dict[str, Any],
+    comparison: dict[str, Any],
+    baseline_path: Path | None,
+) -> str:
+    lines = [
+        "# 48h Regression Report",
+        "",
+        f"- baseline source: {_display_path(baseline_path) if baseline_path and baseline_path.exists() else 'none available; new baseline generated if current pack is green'}",
+        f"- current rerun status: {recent_pack['status']}",
+        f"- current rerun duration: {recent_pack['duration_seconds']}s",
+        f"- comparison status: {comparison['status']}",
+        "",
+        "Changed LLM/runtime surfaces in the last 48 hours:",
+    ]
+    for path in inventory["relevant_paths"]:
+        lines.append(f"- {path}")
+    lines.extend(
+        [
+            "",
+            "Current pack summary:",
+            f"- targets: {len(recent_pack['targets'])}",
+            f"- passed: {recent_pack['summary'].get('passed', 0)}",
+            f"- failed: {recent_pack['summary'].get('failed', 0)}",
+            f"- skipped: {recent_pack['summary'].get('skipped', 0)}",
+            f"- xfailed: {recent_pack['summary'].get('xfailed', 0)}",
+            f"- xpassed: {recent_pack['summary'].get('xpassed', 0)}",
+        ]
+    )
+    if comparison.get("baseline_available"):
+        lines.extend(
+            [
+                "",
+                "Diff vs baseline:",
+                f"- duration delta: {comparison['duration_delta_seconds']}s",
+                f"- pass regressed: {comparison['pass_regressed']}",
+                f"- duration regressed: {comparison['duration_regressed']}",
+            ]
+        )
+        for key, value in sorted(dict(comparison.get("summary_delta") or {}).items()):
+            lines.append(f"- {key}: {value:+d}")
+    return "\n".join(lines)
+
+
+def _render_category_table(category: dict[str, Any]) -> list[str]:
+    lines = [
+        "| Scenario | Status | Duration (s) | Target |",
+        "| --- | --- | ---: | --- |",
+    ]
+    for item in category["scenarios"]:
+        lines.append(
+            f"| {item['scenario_id']} | {item['status']} | {item['duration_seconds']} | `{item['target']}` |"
+        )
+    return lines
+
+
+def _render_summary_markdown(payload: dict[str, Any]) -> str:
+    env = payload["environment"]
+    lines = [
+        "# NULLA LLM Acceptance Summary",
+        "",
+        f"- commit SHA: {payload['commit_sha']}",
+        f"- branch: {payload['branch']}",
+        f"- test run timestamp: {payload['timestamp_utc']}",
+        f"- environment: {env['platform']} | python {env['python']} | cpu {env['cpu']} | ram {env['ram_gb']} GB | gpu {env['gpu'] or 'n/a'}",
+        f"- model/runtime configuration: {payload['model_runtime']}",
+        f"- recent baseline comparison: {payload['regression_48h']['comparison']['status']}",
+        f"- overall full gate: {'GREEN' if payload['overall_full_green'] else 'NOT GREEN'}",
+        f"- ci fast gate: {'GREEN' if payload['ci_fast_green'] else 'NOT GREEN'}",
+        "",
+        "## Pass / Fail Summary",
+        "",
+        f"- recent 48h regression: {payload['regression_48h']['status']}",
+        f"- live runtime acceptance: {payload['live_acceptance']['status']}",
+        f"- context discipline: {payload['context_discipline']['status']}",
+        f"- research quality: {payload['research_quality']['status']}",
+        f"- hive integrity: {payload['hive_integrity']['status']}",
+        f"- nullabook provenance: {payload['nullabook_provenance']['status']}",
+        "",
+        "## Latency Findings",
+        "",
+    ]
+    latency = payload["latency_summary"]
+    lines.extend(
+        [
+            f"- overall p50: {latency['overall']['p50']}",
+            f"- overall p95: {latency['overall']['p95']}",
+            f"- overall p99: {latency['overall']['p99']}",
+            f"- overall max: {latency['overall']['max']}",
+            "",
+            "| Request Type | Samples | p50 | p95 | p99 | max |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for request_type, summary in sorted(payload["latency_summary"]["by_request_type"].items()):
+        lines.append(
+            f"| {request_type} | {summary['samples']} | {summary['p50']} | {summary['p95']} | {summary['p99']} | {summary['max']} |"
+        )
+
+    for heading, key in (
+        ("Context Discipline Findings", "context_discipline"),
+        ("Research Quality Findings", "research_quality"),
+        ("Hive Integrity Findings", "hive_integrity"),
+        ("NullaBook Provenance Findings", "nullabook_provenance"),
+    ):
+        lines.extend(["", f"## {heading}", "", *_render_category_table(payload[key])])
+
+    lines.extend(
+        [
+            "",
+            "## Regressions",
+            "",
+            f"- 48h pack comparison: {payload['regression_48h']['comparison']['status']}",
+            f"- baseline path: {payload['regression_48h']['baseline_path'] or 'none'}",
+            "",
+            "## Blockers",
+            "",
+        ]
+    )
+    blockers = list(payload["blockers"])
+    if blockers:
+        for blocker in blockers:
+            lines.append(f"- {blocker}")
+    else:
+        lines.append("- none")
+
+    lines.extend(
+        [
+            "",
+            "## Exact Failing Tests",
+            "",
+        ]
+    )
+    if payload["failing_targets"]:
+        for target in payload["failing_targets"]:
+            lines.append(f"- `{target}`")
+    else:
+        lines.append("- none")
+
+    lines.extend(
+        [
+            "",
+            "## Next Actions",
+            "",
+            "- Keep the 48h regression baseline current only from real passing runs.",
+            "- Treat provenance or reward integrity regressions as hard release blockers.",
+        ]
+    )
+    if payload["live_acceptance"]["status"] == "pass":
+        report_path = str(payload["live_acceptance"].get("report_path") or "").strip()
+        if report_path:
+            lines.append(f"- Latest live acceptance evidence: `{report_path}`.")
+        lines.append("- Re-run the live lane whenever the runtime model, tool path, or acceptance thresholds change.")
+    else:
+        lines.append("- Run the live acceptance lane on a model-provisioned machine before public claims about UX latency.")
+    return "\n".join(lines)
+
+
+def _failures_markdown(payload: dict[str, Any]) -> str:
+    lines = ["# LLM Acceptance Failures", ""]
+    if payload["overall_full_green"] and not payload["blockers"]:
+        lines.append("- none")
+        return "\n".join(lines)
+    for blocker in payload["blockers"]:
+        lines.append(f"- blocker: {blocker}")
+    for target in payload["failing_targets"]:
+        lines.append(f"- failing target: {target}")
+    return "\n".join(lines)
+
+
+def _regression_payload(
+    *,
+    baseline_root: Path,
+    inventory: dict[str, Any],
+) -> dict[str, Any]:
+    current_targets = sorted(set(RECENT_48H_BASELINE_TARGETS + inventory["tests"]))
+    current = run_pytest_pack(name="recent_48h_llm_regression", repo_root=REPO_ROOT, targets=current_targets)
+    baseline_path = baseline_root / "recent_48h_regression.json"
+    baseline = None
+    if baseline_path.exists():
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    comparison = compare_pytest_results(current, baseline)
+    if current["exit_code"] == 0:
+        _write_json(baseline_path, current)
+    return {
+        "status": "pass" if current["exit_code"] == 0 and comparison["status"] != "degraded" else "fail",
+        "baseline_path": _display_path(baseline_path) if baseline_path.exists() else "",
+        "inventory": inventory,
+        "current": current,
+        "comparison": comparison,
+    }
+
+
+def run(args: argparse.Namespace) -> int:
+    output_root = Path(args.output_root).expanduser().resolve()
+    baseline_root = Path(args.baseline_root).expanduser().resolve()
+    live_run_root = Path(args.live_run_root).expanduser().resolve()
+    profile_path = Path(args.profile).expanduser().resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    baseline_root.mkdir(parents=True, exist_ok=True)
+
+    timestamp_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    commit_sha = _git_commit()
+    branch = str(args.branch_label or _git_branch()).strip() or _git_branch()
+    machine = local_acceptance._machine_info()
+    profile = local_acceptance.load_profile(profile_path)
+    run_id = f"llm-eval-{int(time.time())}"
+
+    inventory = collect_recent_llm_inventory(REPO_ROOT, since_hours=48)
+    regression_48h = _regression_payload(baseline_root=baseline_root, inventory=inventory)
+    context_discipline = _scenario_group_result("context_discipline", CONTEXT_SCENARIOS)
+    research_quality = _scenario_group_result("research_quality", RESEARCH_SCENARIOS)
+    hive_integrity = _scenario_group_result("hive_integrity", HIVE_SCENARIOS)
+    nullabook_provenance = _scenario_group_result("nullabook_provenance", PROVENANCE_SCENARIOS)
+
+    blockers: list[str] = []
+    live_acceptance: dict[str, Any]
+    latency_rows: list[dict[str, Any]]
+    if args.skip_live_runtime:
+        live_acceptance = {
+            "status": "blocked",
+            "reason": "Live runtime acceptance was skipped explicitly.",
+            "summary": {},
+        }
+        blockers.append("Live runtime speed/research acceptance was skipped, so full LLM acceptance is not proven in this run.")
+        latency_rows = []
+    else:
+        live_acceptance = _run_live_acceptance(
+            base_url=args.base_url,
+            profile_path=profile_path,
+            run_root=live_run_root,
+        )
+        latency_rows = _collect_latency_rows_from_acceptance(
+            run_id=run_id,
+            commit_sha=commit_sha,
+            online_payload=live_acceptance["online"],
+            offline_payload=live_acceptance["offline"],
+        )
+        if live_acceptance["status"] != "pass":
+            blockers.append("Live runtime acceptance failed.")
+
+    if regression_48h["status"] != "pass":
+        blockers.append("The rerun of recent 48h LLM/runtime tests regressed or failed.")
+    if context_discipline["status"] != "pass":
+        blockers.append("Context-discipline scenarios failed.")
+    if research_quality["status"] != "pass":
+        blockers.append("Research-quality scenarios failed.")
+    if hive_integrity["status"] != "pass":
+        blockers.append("Hive integrity scenarios failed.")
+    if nullabook_provenance["status"] != "pass":
+        blockers.append("NullaBook provenance scenarios failed.")
+
+    latency_summary = summarize_latency_rows(latency_rows) if latency_rows else {
+        "samples": 0,
+        "overall": {"p50": None, "p95": None, "p99": None, "max": None},
+        "by_request_type": {},
+    }
+
+    failing_targets = []
+    for category in (context_discipline, research_quality, hive_integrity, nullabook_provenance):
+        for scenario in category["scenarios"]:
+            if scenario["status"] != "pass":
+                failing_targets.append(scenario["target"])
+    if regression_48h["status"] != "pass":
+        failing_targets.extend(regression_48h["current"]["targets"])
+
+    payload = {
+        "run_id": run_id,
+        "timestamp_utc": timestamp_utc,
+        "commit_sha": commit_sha,
+        "branch": branch,
+        "environment": machine,
+        "model_runtime": {
+            "profile_id": profile.profile_id,
+            "profile_name": profile.display_name,
+            "model": profile.model,
+            "base_url": args.base_url,
+        },
+        "regression_48h": regression_48h,
+        "live_acceptance": live_acceptance,
+        "latency_summary": latency_summary,
+        "context_discipline": context_discipline,
+        "research_quality": research_quality,
+        "hive_integrity": hive_integrity,
+        "nullabook_provenance": nullabook_provenance,
+        "blockers": blockers,
+        "failing_targets": sorted(set(failing_targets)),
+        "overall_full_green": not blockers,
+        "ci_fast_green": regression_48h["status"] == "pass"
+        and context_discipline["status"] == "pass"
+        and research_quality["status"] == "pass"
+        and hive_integrity["status"] == "pass"
+        and nullabook_provenance["status"] == "pass",
+    }
+
+    summary_md = _render_summary_markdown(payload)
+    regression_md = _render_regression_markdown(
+        inventory=inventory,
+        recent_pack=regression_48h["current"],
+        comparison=regression_48h["comparison"],
+        baseline_path=Path(regression_48h["baseline_path"]) if regression_48h["baseline_path"] else None,
+    )
+    failures_md = _failures_markdown(payload)
+
+    _write_json(output_root / "summary.json", payload)
+    _write_markdown(output_root / "summary.md", summary_md)
+    _write_latency_csv(output_root / "latency.csv", latency_rows)
+    _write_json(output_root / "context_discipline.json", context_discipline)
+    _write_json(output_root / "research_quality.json", research_quality)
+    _write_json(output_root / "hive_integrity.json", hive_integrity)
+    _write_json(output_root / "nullabook_provenance.json", nullabook_provenance)
+    _write_markdown(output_root / "regression_48h.md", regression_md)
+    _write_markdown(output_root / "failures.md", failures_md)
+    _write_markdown(REPO_ROOT / "docs" / "LLM_ACCEPTANCE_REPORT.md", summary_md)
+
+    return 0 if payload["ci_fast_green"] and (args.skip_live_runtime or payload["overall_full_green"]) else 1
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Run NULLA LLM evaluation and acceptance reporting.")
+    parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT))
+    parser.add_argument("--baseline-root", default=str(DEFAULT_BASELINE_ROOT))
+    parser.add_argument("--live-run-root", default=str(DEFAULT_LIVE_RUN_ROOT))
+    parser.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
+    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    parser.add_argument("--branch-label", default="")
+    parser.add_argument("--skip-live-runtime", action="store_true")
+    args = parser.parse_args(argv)
+    return run(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

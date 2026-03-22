@@ -6,6 +6,7 @@ import os
 import platform
 import re
 import signal
+import socket
 import statistics
 import subprocess
 import sys
@@ -14,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib import request
+from urllib.parse import urlparse
 
 
 def _repo_root() -> Path:
@@ -22,6 +24,7 @@ def _repo_root() -> Path:
 
 REPO_ROOT = _repo_root()
 DEFAULT_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_qwen25_7b_profile.json"
+DEFAULT_START_SCRIPT = REPO_ROOT / "run.sh"
 
 
 @dataclass(frozen=True)
@@ -115,6 +118,67 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _runtime_endpoint_parts(base_url: str) -> tuple[str, int]:
+    parsed = urlparse(str(base_url or "").strip())
+    host = str(parsed.hostname or "127.0.0.1").strip() or "127.0.0.1"
+    port = int(parsed.port or (443 if parsed.scheme == "https" else 80))
+    return host, port
+
+
+def _default_runtime_command(*, repo_root: Path, base_url: str) -> list[str]:
+    bind_host, bind_port = _runtime_endpoint_parts(base_url)
+    venv_python = repo_root / ".venv" / "bin" / "python"
+    python_bin = venv_python if venv_python.exists() else Path(sys.executable)
+    return [
+        str(python_bin),
+        "-m",
+        "apps.nulla_api_server",
+        "--bind",
+        bind_host,
+        "--port",
+        str(bind_port),
+    ]
+
+
+def _resolve_runtime_command(
+    *,
+    repo_root: Path,
+    base_url: str,
+    start_script: Path | None,
+) -> list[str]:
+    bind_host, bind_port = _runtime_endpoint_parts(base_url)
+    if start_script and start_script.exists() and bind_host == "127.0.0.1" and bind_port == 11435:
+        return ["sh", str(start_script)]
+    return _default_runtime_command(repo_root=repo_root, base_url=base_url)
+
+
+def _port_is_bindable(host: str, port: int, *, sock_type: int) -> bool:
+    family = socket.AF_INET6 if ":" in str(host or "") else socket.AF_INET
+    with socket.socket(family, sock_type) as sock:
+        if sock_type == socket.SOCK_STREAM:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, int(port)))
+        except OSError:
+            return False
+    return True
+
+
+def _pick_isolated_daemon_bind_port(*, host: str = "127.0.0.1", attempts: int = 128) -> int:
+    for _ in range(max(1, int(attempts))):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.bind((host, 0))
+            candidate = int(probe.getsockname()[1])
+        if candidate <= 0 or candidate >= 65534:
+            continue
+        if not _port_is_bindable(host, candidate, sock_type=socket.SOCK_DGRAM):
+            continue
+        if not _port_is_bindable(host, candidate + 1, sock_type=socket.SOCK_STREAM):
+            continue
+        return candidate
+    raise RuntimeError(f"Could not find an isolated daemon bind port for host {host!r}.")
 
 
 def load_profile(path: str | Path | None = None) -> AcceptanceProfile:
@@ -606,6 +670,7 @@ def _start_runtime(
     model: str,
     start_script: Path,
     expected_commit: str,
+    daemon_bind_port: int,
 ) -> subprocess.Popen[Any]:
     runtime_home.mkdir(parents=True, exist_ok=True)
     workspace_root.mkdir(parents=True, exist_ok=True)
@@ -616,8 +681,17 @@ def _start_runtime(
     env["NULLA_HOME"] = str(runtime_home)
     env["NULLA_WORKSPACE_ROOT"] = str(workspace_root)
     env["NULLA_OLLAMA_MODEL"] = model
+    env["NULLA_DAEMON_BIND_HOST"] = "127.0.0.1"
+    env["NULLA_DAEMON_ADVERTISE_HOST"] = "127.0.0.1"
+    env["NULLA_DAEMON_BIND_PORT"] = str(int(daemon_bind_port))
+    env["NULLA_DAEMON_HEALTH_PORT"] = "0"
+    command = _resolve_runtime_command(
+        repo_root=repo_root,
+        base_url=base_url,
+        start_script=start_script,
+    )
     process = subprocess.Popen(
-        ["sh", str(start_script)],
+        command,
         cwd=str(repo_root),
         env=env,
         stdout=log_file,
@@ -639,6 +713,7 @@ def run_full_acceptance(
     start_script: Path,
 ) -> int:
     expected_commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=str(repo_root), text=True).strip()
+    daemon_bind_port = _pick_isolated_daemon_bind_port(host="127.0.0.1")
     _stop_runtime(base_url)
     _start_runtime(
         repo_root=repo_root,
@@ -649,6 +724,7 @@ def run_full_acceptance(
         model=profile.model,
         start_script=start_script,
         expected_commit=expected_commit,
+        daemon_bind_port=daemon_bind_port,
     )
     try:
         online_payload = AcceptanceRunner(
@@ -674,6 +750,7 @@ def run_full_acceptance(
             model=profile.model,
             start_script=start_script,
             expected_commit=expected_commit,
+            daemon_bind_port=daemon_bind_port,
         )
         offline_payload = run_offline_honesty(base_url, repo_root=repo_root, run_root=run_root)
     finally:
@@ -688,6 +765,7 @@ def run_full_acceptance(
             model=profile.model,
             start_script=start_script,
             expected_commit=expected_commit,
+            daemon_bind_port=daemon_bind_port,
         )
     render_report(
         repo_root=repo_root,
@@ -853,7 +931,7 @@ def main(argv: list[str]) -> int:
     full.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
     full.add_argument("--runtime-home", default="")
     full.add_argument("--workspace-root", default="")
-    full.add_argument("--start-script", default=str(REPO_ROOT / "Start_NULLA.sh"))
+    full.add_argument("--start-script", default=str(DEFAULT_START_SCRIPT))
 
     args = parser.parse_args(argv)
     run_root = Path(args.run_root).expanduser().resolve()

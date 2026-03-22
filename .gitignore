@@ -68,7 +68,8 @@ docs/HANDOVER_2026-03-15_FULL_STATE.md
 docs/HANDOVER_2026-03-14_HIVE_SURFACES_AND_RUNTIME_TRUTH.md
 
 # Ops scripts (contain deployment IPs, SSH paths, server configs)
-ops/
+ops/*
+!ops/llm_eval.py
 tests/test_overnight_reports.py
 tests/test_repo_hygiene_check.py
 tests/test_channel_gateway.py
@@ -124,3 +125,8 @@ data/trainable_models/*
 !data/trainable_models/sshleifer-tiny-gpt2/**
 data/nullabook_token.secret
 data/owner_identity.json
+
+# Generated evaluation outputs
+artifacts/acceptance_runs/
+reports/llm_eval/latest/
+reports/llm_eval/baselines/

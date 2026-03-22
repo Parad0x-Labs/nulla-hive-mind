@@ -1242,6 +1242,82 @@ class MeetAndGreetServerDispatchTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertTrue(body["ok"])
             self.assertEqual(body["result"]["peer_id"], local_peer_id)
+            self.assertEqual(body["result"]["origin_kind"], "human")
+            self.assertEqual(body["result"]["origin_channel"], "nullabook_token")
+            conn.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2.0)
+
+    def test_http_server_sets_nullabook_post_provenance_from_auth_channel(self) -> None:
+        from core.nullabook_identity import register_nullabook_account
+
+        local_peer_id = _signer_mod.get_local_peer_id()
+        reg = register_nullabook_account(f"owner_{uuid.uuid4().hex[:8]}", peer_id=local_peer_id)
+        try:
+            server = _server_mod.build_server(
+                _server_mod.MeetAndGreetServerConfig(host="127.0.0.1", port=0, require_signed_writes=True),
+                service=self.service,
+            )
+        except PermissionError:
+            self.skipTest("Local socket binds are not permitted in this sandbox.")
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            host, port = server.server_address
+
+            ai_payload = _api_write_auth_mod.build_signed_write_envelope(
+                target_path="/v1/nullabook/post",
+                payload={
+                    "nullabook_peer_id": local_peer_id,
+                    "content": "Autonomous agent post.",
+                    "origin_kind": "human",
+                    "origin_channel": "spoofed",
+                    "origin_peer_id": "spoofed-peer",
+                },
+            )
+            conn = http.client.HTTPConnection(host, port, timeout=5)
+            conn.request(
+                "POST",
+                "/v1/nullabook/post",
+                body=json.dumps(ai_payload),
+                headers={"Content-Type": "application/json"},
+            )
+            response = conn.getresponse()
+            body = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(response.status, 200)
+            self.assertEqual(body["result"]["origin_kind"], "ai")
+            self.assertEqual(body["result"]["origin_channel"], "signed_write")
+            self.assertEqual(body["result"]["origin_peer_id"], local_peer_id)
+            conn.close()
+
+            human_payload = _api_write_auth_mod.build_signed_write_envelope(
+                target_path="/v1/nullabook/post",
+                payload={
+                    "nullabook_peer_id": local_peer_id,
+                    "content": "Human-operated post under the same profile.",
+                    "origin_kind": "ai",
+                    "origin_channel": "spoofed",
+                    "origin_peer_id": "spoofed-peer",
+                },
+            )
+            conn = http.client.HTTPConnection(host, port, timeout=5)
+            conn.request(
+                "POST",
+                "/v1/nullabook/post",
+                body=json.dumps(human_payload),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-NullaBook-Token": reg.token,
+                },
+            )
+            response = conn.getresponse()
+            body = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(response.status, 200)
+            self.assertEqual(body["result"]["origin_kind"], "human")
+            self.assertEqual(body["result"]["origin_channel"], "nullabook_token")
+            self.assertEqual(body["result"]["origin_peer_id"], local_peer_id)
             conn.close()
         finally:
             server.shutdown()
