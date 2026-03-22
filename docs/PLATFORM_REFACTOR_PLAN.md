@@ -1,8 +1,10 @@
 # NULLA Platform Refactor Plan
 
-Verified against `main` on 2026-03-20.
+Verified against `main` on 2026-03-22.
 
 This is not a rewrite fantasy. It is the current extraction plan for turning the repo into a sharper platform without breaking the working alpha lanes.
+
+This doc used to undersell the current trunk because the line-count snapshot was stale. It now reflects the real blast-radius map on `main`, not the older pre-extraction numbers.
 
 The rule for every phase:
 
@@ -23,18 +25,26 @@ The repo shape is still carrying too much risk in a small set of giant files. Th
 
 The biggest files on the current trunk are:
 
-| File | Lines |
-|------|-------|
-| `apps/nulla_agent.py` | 11437 |
-| `core/brain_hive_dashboard.py` | 5917 |
-| `core/tool_intent_executor.py` | 2721 |
-| `core/public_hive_bridge.py` | 2200 |
-| `core/local_operator_actions.py` | 1630 |
-| `core/control_plane_workspace.py` | 1316 |
-| `apps/nulla_api_server.py` | 941 |
-| `apps/brain_hive_watch_server.py` | 868 |
+| File | Lines | Current reality |
+|------|-------|-----------------|
+| `core/brain_hive_dashboard.py` | 6262 | still the biggest unsplit public/runtime mixed surface |
+| `apps/nulla_agent.py` | 5632 | heavily reduced, still too large, still the main runtime monolith |
+| `core/tool_intent_executor.py` | 1654 | smaller, but still a hot execution choke point |
+| `apps/nulla_daemon.py` | 1589 | still unsplit and still high blast radius |
+| `core/public_hive_bridge.py` | 1490 | reduced, but still too mixed |
+| `apps/meet_and_greet_server.py` | 1449 | still mixes route/auth/write concerns |
+| `apps/nulla_api_server.py` | 970 | still broad for an entry surface |
+| `core/control_plane_workspace.py` | 558 | materially reduced, no longer top-tier risk |
+| `core/local_operator_actions.py` | 392 | materially reduced, mostly facade now |
+| `apps/brain_hive_watch_server.py` | 243 | already thin, no longer a real monolith |
 
 These are the current blast-radius centers. Split these before inventing more layers.
+
+## Current Phase Status
+
+- completed enough to stop pretending they are still untouched: `core/local_operator_actions.py`, `core/control_plane_workspace.py`, `apps/brain_hive_watch_server.py`
+- materially improved but still active: `core/tool_intent_executor.py`, `core/public_hive_bridge.py`, `apps/nulla_agent.py`
+- still the next serious targets: `core/brain_hive_dashboard.py`, `apps/nulla_daemon.py`, `apps/nulla_api_server.py`, `apps/meet_and_greet_server.py`
 
 ## Keep / Split / Rewrite / Quarantine
 
@@ -48,17 +58,18 @@ Keep:
 
 Split next:
 
+- `core/brain_hive_dashboard.py`
 - `apps/nulla_agent.py`
+- `apps/nulla_daemon.py`
+- `apps/meet_and_greet_server.py`
+- `apps/nulla_api_server.py`
 - `core/tool_intent_executor.py`
 - `core/public_hive_bridge.py`
-- `core/local_operator_actions.py`
-- `core/control_plane_workspace.py`
-- `core/brain_hive_dashboard.py`
 
 Rewrite selectively:
 
 - `apps/nulla_api_server.py` into route modules first, ASGI later
-- `apps/brain_hive_watch_server.py` into watch-route/cache/TLS modules first
+- `apps/meet_and_greet_server.py` into route/auth/quota/TLS modules first
 
 Quarantine in narrative and architecture priority:
 
@@ -68,6 +79,12 @@ Quarantine in narrative and architecture priority:
 ## Phase Order
 
 ### Phase 1 - Extract `core/execution/` from `core/tool_intent_executor.py`
+
+Status on trunk:
+
+- `core/execution/__init__.py`, `constants.py`, `models.py`, and `planner.py` are already live
+- `core/tool_intent_executor.py` is down to 1654 lines
+- the split is not complete until dispatcher/render/policy boundaries are extracted or proven unnecessary
 
 Create:
 
@@ -117,6 +134,12 @@ pytest -q \
 
 ### Phase 2 - Split `core/local_operator_actions.py` into `core/operator/`
 
+Status on trunk:
+
+- `core/operator/` is already live with models, parser, registry, approvals, handlers, and storage helpers
+- `core/local_operator_actions.py` is down to 392 lines
+- this is no longer a top-tier monolith unless new work starts growing the facade again
+
 Create:
 
 - `core/operator/__init__.py`
@@ -160,6 +183,12 @@ pytest -q \
 ```
 
 ### Phase 3 - Refactor `core/public_hive_bridge.py` into `core/public_hive/`
+
+Status on trunk:
+
+- `core/public_hive/__init__.py`, `bootstrap.py`, `client.py`, `config.py`, and `truth.py` are already live
+- `core/public_hive_bridge.py` is down to 1490 lines
+- topic/profile/publish/privacy service extraction is still incomplete
 
 Create:
 
@@ -213,6 +242,13 @@ pytest -q \
 
 ### Phase 4 - Thin `apps/nulla_agent.py` into a composition root
 
+Status on trunk:
+
+- this phase is actively in progress, not hypothetical
+- `apps/nulla_agent.py` is down to 5632 lines from the older 11k+ state
+- extracted runtime seams now include checkpoints, fast paths, response shaping, presence, builder support/controller, NullaBook, memory runtime, orchestrator helpers, Hive runtime/topics/followups, and turn dispatch/frontdoor/reasoning
+- the file is still too large, but the old doc numbers are no longer true
+
 Target packages:
 
 - `core/runtime/`
@@ -256,6 +292,12 @@ pytest -q \
 
 ### Phase 5 - Split dashboard and web-server surfaces
 
+Status on trunk:
+
+- `apps/brain_hive_watch_server.py` is already thin at 243 lines and backed by `core/web/watch/`
+- `core/brain_hive_dashboard.py` remains the biggest unsplit public/runtime file
+- `apps/nulla_api_server.py` and `apps/meet_and_greet_server.py` are still open
+
 Split next:
 
 - `core/brain_hive_dashboard.py` -> `core/dashboard/queries.py`, `view_models.py`, `templates.py`, `render.py`
@@ -288,6 +330,12 @@ pytest -q \
 ```
 
 ### Phase 6 - Split `core/control_plane_workspace.py`
+
+Status on trunk:
+
+- `core/control_plane/metrics_views.py`, `policies.py`, `queue_views.py`, `runtime_views.py`, `schemas.py`, and `templates.py` are already live
+- `core/control_plane_workspace.py` is down to 558 lines
+- this phase is mostly complete; only finish deeper repo/sync separation if the file starts re-coupling again
 
 Create:
 
