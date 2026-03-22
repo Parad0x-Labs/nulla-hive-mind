@@ -6,6 +6,7 @@ REPO="${NULLA_GITHUB_REPO:-nulla-hive-mind}"
 REF="${NULLA_GITHUB_REF:-main}"
 INSTALL_DIR="${NULLA_INSTALL_DIR:-$HOME/nulla-hive-mind}"
 ARCHIVE_URL="${NULLA_ARCHIVE_URL:-https://github.com/${OWNER}/${REPO}/archive/refs/heads/${REF}.tar.gz}"
+ARCHIVE_SHA256="${NULLA_ARCHIVE_SHA256:-}"
 TMP_DIR=""
 AUTO_START=1
 
@@ -30,6 +31,7 @@ Options:
   --ref <git-ref>          Git branch or tag to fetch (default: ${REF})
   --dir <install-dir>      Target install folder (default: ${INSTALL_DIR})
   --archive-url <url>      Override the source archive URL
+  --sha256 <hex>           Verify the downloaded archive against a SHA-256 digest
   --no-start               Install but do not launch NULLA
   --help, -h               Show this help
 
@@ -39,6 +41,7 @@ Environment overrides:
   NULLA_GITHUB_REF
   NULLA_INSTALL_DIR
   NULLA_ARCHIVE_URL
+  NULLA_ARCHIVE_SHA256
 EOF
 }
 
@@ -62,6 +65,11 @@ parse_args() {
         [[ $# -gt 0 ]] || { say "ERROR: --archive-url requires a value."; exit 2; }
         ARCHIVE_URL="$1"
         ;;
+      --sha256)
+        shift
+        [[ $# -gt 0 ]] || { say "ERROR: --sha256 requires a value."; exit 2; }
+        ARCHIVE_SHA256="$1"
+        ;;
       --no-start)
         AUTO_START=0
         ;;
@@ -77,6 +85,45 @@ parse_args() {
     esac
     shift
   done
+}
+
+
+compute_sha256() {
+  local path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${path}" | awk '{print $1}'
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${path}" | awk '{print $1}'
+    return 0
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 -r "${path}" | awk '{print $1}'
+    return 0
+  fi
+  say "ERROR: Cannot verify archive checksum because sha256sum, shasum, and openssl are unavailable."
+  exit 1
+}
+
+
+verify_archive_checksum() {
+  local archive_path="$1"
+  local expected
+  expected="$(printf '%s' "${ARCHIVE_SHA256}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  if [[ -z "${expected}" ]]; then
+    say "WARNING: Downloaded archive is not checksum-verified. Set --sha256 or NULLA_ARCHIVE_SHA256 to verify it."
+    return 0
+  fi
+  local actual
+  actual="$(compute_sha256 "${archive_path}")"
+  if [[ "${actual}" != "${expected}" ]]; then
+    say "ERROR: Archive checksum mismatch."
+    say "Expected: ${expected}"
+    say "Actual:   ${actual}"
+    exit 1
+  fi
+  say "Archive checksum verified."
 }
 
 
@@ -111,6 +158,7 @@ download_and_extract() {
   local archive_path="${TMP_DIR}/nulla.tar.gz"
   say "Downloading NULLA from ${ARCHIVE_URL}"
   curl -fsSL "${ARCHIVE_URL}" -o "${archive_path}"
+  verify_archive_checksum "${archive_path}"
 
   say "Extracting to ${INSTALL_DIR}"
   tar -xzf "${archive_path}" --strip-components=1 -C "${INSTALL_DIR}"

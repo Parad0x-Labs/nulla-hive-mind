@@ -83,3 +83,29 @@ def test_installers_use_module_entrypoints_and_runtime_extra_without_pythonpath_
     assert "ops/ensure_public_hive_auth.py" not in sh_installer
     assert "ops\\ensure_public_hive_auth.py" not in bat_installer
     assert (REPO_ROOT / "ops" / "ensure_public_hive_auth.py").exists()
+
+
+def test_bootstrap_scripts_support_checksum_verification_and_docs_do_not_pipe_remote_scripts() -> None:
+    sh_bootstrap = (REPO_ROOT / "installer" / "bootstrap_nulla.sh").read_text(encoding="utf-8")
+    ps_bootstrap = (REPO_ROOT / "installer" / "bootstrap_nulla.ps1").read_text(encoding="utf-8")
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    install_doc = (REPO_ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
+
+    assert "--sha256" in sh_bootstrap
+    assert "NULLA_ARCHIVE_SHA256" in sh_bootstrap
+    assert "sha256sum" in sh_bootstrap or "shasum" in sh_bootstrap
+    assert "Archive checksum verified." in sh_bootstrap
+
+    assert "ArchiveSha256" in ps_bootstrap
+    assert "NULLA_ARCHIVE_SHA256" in ps_bootstrap
+    assert "Get-FileHash -Algorithm SHA256" in ps_bootstrap
+    assert "Archive checksum verified." in ps_bootstrap
+
+    assert "| bash" not in readme
+    assert "| iex" not in readme
+    assert "| bash" not in install_doc
+    assert "| iex" not in install_doc
+    assert "curl -fsSLo bootstrap_nulla.sh" in readme
+    assert "Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1" in readme
+    assert "curl -fsSLo bootstrap_nulla.sh" in install_doc
+    assert "Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1" in install_doc

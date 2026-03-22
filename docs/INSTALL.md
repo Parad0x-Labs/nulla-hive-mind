@@ -7,13 +7,15 @@ This is the canonical install and quickstart doc.
 macOS / Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh | bash
+curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh
+bash bootstrap_nulla.sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.ps1 | iex
+Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1
+powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1
 ```
 
 Manual local shortcut:
@@ -34,6 +36,8 @@ bash Install_And_Run_NULLA.sh
 6. starts the NULLA API server on `127.0.0.1:11435`
 
 If you want the shortest user path, this is it.
+
+If you already have a verified archive digest, pass it to the bootstrap script with `--sha256` on macOS/Linux or `-ArchiveSha256` on Windows so the download is checked before extraction.
 
 ## First URLs
 

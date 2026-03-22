@@ -5,6 +5,7 @@ param(
     [string]$Ref = $env:NULLA_GITHUB_REF,
     [string]$InstallDir = $env:NULLA_INSTALL_DIR,
     [string]$ArchiveUrl = $env:NULLA_ARCHIVE_URL,
+    [string]$ArchiveSha256 = $env:NULLA_ARCHIVE_SHA256,
     [switch]$NoStart
 )
 
@@ -46,6 +47,17 @@ function Download-And-Extract {
         $expandDir = Join-Path $tmpDir "expanded"
         Write-Info "Downloading NULLA from $ArchiveUrl"
         Invoke-WebRequest -Uri $ArchiveUrl -OutFile $archivePath -UseBasicParsing
+        if ([string]::IsNullOrWhiteSpace($ArchiveSha256)) {
+            Write-Info "WARNING: Downloaded archive is not checksum-verified. Set -ArchiveSha256 or NULLA_ARCHIVE_SHA256 to verify it."
+        }
+        else {
+            $expected = $ArchiveSha256.Trim().ToLowerInvariant()
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) {
+                throw "Archive checksum mismatch. Expected $expected but got $actual."
+            }
+            Write-Info "Archive checksum verified."
+        }
 
         Write-Info "Extracting to $InstallDir"
         Expand-Archive -LiteralPath $archivePath -DestinationPath $expandDir -Force
