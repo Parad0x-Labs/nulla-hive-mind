@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import importlib
 import json
+import ssl
 import tempfile
 import unittest
 import uuid
@@ -27,6 +28,9 @@ from apps.meet_and_greet_server import (
     dispatch_request,
     resolve_static_route,
 )
+from apps.meet_and_greet_server import (
+    main as meet_main,
+)
 from core.brain_hive_artifacts import store_artifact_manifest
 from core.hive_write_grants import build_hive_write_grant
 from core.meet_and_greet_models import (
@@ -38,6 +42,7 @@ from core.meet_and_greet_models import (
     PresenceWithdrawRequest,
 )
 from core.meet_and_greet_service import MeetAndGreetConfig, MeetAndGreetService
+from core.web.meet.app import create_meet_app
 from network.knowledge_models import KnowledgeAdvert
 from storage.db import get_connection, reset_default_connection
 from storage.migrations import run_migrations
@@ -242,6 +247,25 @@ class MeetAndGreetServiceTests(unittest.TestCase):
         )
         active = self.service.list_presence(limit=20)
         self.assertFalse(any(item.agent_id == peer_id for item in active))
+
+    def test_create_meet_app_keeps_runtime_state_in_app(self) -> None:
+        metrics = MeetMetricsCollector()
+        hive_service = _server_mod.BrainHiveService()
+        config = MeetAndGreetServerConfig(host="127.0.0.1", port=8766, auth_token="token")
+
+        app = create_meet_app(
+            config=config,
+            service=self.service,
+            hive_service=hive_service,
+            metrics=metrics,
+        )
+
+        self.assertIs(app.state.config, config)
+        self.assertIs(app.state.service, self.service)
+        self.assertIs(app.state.hive_service, hive_service)
+        self.assertIs(app.state.metrics, metrics)
+        self.assertTrue(hasattr(app.state, "write_windows"))
+        self.assertTrue(hasattr(app.state, "write_lock"))
 
     def test_register_meet_node_is_listed(self) -> None:
         node_id = f"seed-{uuid.uuid4().hex[:8]}"
@@ -1923,3 +1947,45 @@ def test_clear_meet_tables_clears_peer_trust_rows() -> None:
         conn.close()
     assert row is None
     assert claim_row is None
+
+
+def test_meet_main_runs_uvicorn_with_factory_app_and_tls_settings() -> None:
+    fake_uvicorn = unittest.mock.Mock()
+    fake_server = unittest.mock.Mock()
+    fake_uvicorn.Config.return_value = unittest.mock.sentinel.config
+    fake_uvicorn.Server.return_value = fake_server
+    args = unittest.mock.Mock(
+        host="127.0.0.1",
+        port=8766,
+        auth_token="token",
+        no_signed_writes=False,
+        tls_certfile="cert.pem",
+        tls_keyfile="key.pem",
+        tls_ca_file="ca.pem",
+        tls_require_client_cert=True,
+    )
+
+    with patch(
+        "apps.meet_and_greet_server.argparse.ArgumentParser.parse_args",
+        return_value=args,
+    ), patch.dict(
+        "sys.modules",
+        {"uvicorn": fake_uvicorn},
+    ), patch(
+        "apps.meet_and_greet_server.create_meet_app",
+        return_value=unittest.mock.sentinel.app,
+    ) as create_app_mock:
+        exit_code = meet_main()
+
+    assert exit_code == 0
+    create_app_mock.assert_called_once()
+    fake_uvicorn.Config.assert_called_once()
+    _, kwargs = fake_uvicorn.Config.call_args
+    assert kwargs["host"] == "127.0.0.1"
+    assert kwargs["port"] == 8766
+    assert kwargs["ssl_certfile"] == "cert.pem"
+    assert kwargs["ssl_keyfile"] == "key.pem"
+    assert kwargs["ssl_ca_certs"] == "ca.pem"
+    assert kwargs["ssl_cert_reqs"] == ssl.CERT_REQUIRED
+    assert fake_uvicorn.Config.call_args.args[0] is unittest.mock.sentinel.app
+    fake_server.run.assert_called_once_with()

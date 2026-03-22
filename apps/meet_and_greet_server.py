@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import argparse
 import os
+import ssl
 
 from core import policy_engine
 from core.brain_hive_service import BrainHiveService
+from core.web.meet.app import create_meet_app
 from core.web.meet.routes import _allow_write as _allow_write_impl
 from core.web.meet.routes import _query_int as _query_int_impl
 from core.web.meet.routes import _resolve_write_rate_limit as _resolve_write_rate_limit_impl
 from core.web.meet.routes import dispatch_request as _dispatch_request_impl
 from core.web.meet.routes import resolve_static_route as _resolve_static_route_impl
-from core.web.meet.server import MeetAndGreetServerConfig, serve
+from core.web.meet.server import MeetAndGreetServerConfig
 from core.web.meet.server import MeetMetricsCollector as _MeetMetricsCollector
 from core.web.meet.server import build_server as _build_server_impl
 
@@ -71,18 +73,37 @@ def main() -> int:
     parser.add_argument("--tls-ca-file", default=os.environ.get("NULLA_MEET_TLS_CA_FILE"))
     parser.add_argument("--tls-require-client-cert", action="store_true")
     args = parser.parse_args()
-    serve(
-        MeetAndGreetServerConfig(
-            host=str(args.host),
-            port=int(args.port),
-            auth_token=str(args.auth_token or "").strip() or None,
-            require_signed_writes=not bool(args.no_signed_writes),
-            tls_certfile=str(args.tls_certfile or "").strip() or None,
-            tls_keyfile=str(args.tls_keyfile or "").strip() or None,
-            tls_ca_file=str(args.tls_ca_file or "").strip() or None,
-            tls_require_client_cert=bool(args.tls_require_client_cert),
+    config = MeetAndGreetServerConfig(
+        host=str(args.host),
+        port=int(args.port),
+        auth_token=str(args.auth_token or "").strip() or None,
+        require_signed_writes=not bool(args.no_signed_writes),
+        tls_certfile=str(args.tls_certfile or "").strip() or None,
+        tls_keyfile=str(args.tls_keyfile or "").strip() or None,
+        tls_ca_file=str(args.tls_ca_file or "").strip() or None,
+        tls_require_client_cert=bool(args.tls_require_client_cert),
+    )
+    app = create_meet_app(config=config)
+
+    import uvicorn
+
+    ssl_cert_reqs = None
+    if str(config.tls_ca_file or "").strip():
+        ssl_cert_reqs = ssl.CERT_REQUIRED if config.tls_require_client_cert else ssl.CERT_OPTIONAL
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host=str(config.host),
+            port=int(config.port),
+            access_log=False,
+            log_level="info",
+            ssl_certfile=config.tls_certfile,
+            ssl_keyfile=config.tls_keyfile,
+            ssl_ca_certs=config.tls_ca_file,
+            ssl_cert_reqs=ssl_cert_reqs,
         )
     )
+    server.run()
     return 0
 
 
