@@ -9,8 +9,6 @@ import unittest
 from unittest.mock import patch
 from urllib import request
 
-from starlette.testclient import TestClient
-
 from apps.brain_hive_watch_server import (
     BrainHiveWatchServerConfig,
     _proxy_nullabook_get,
@@ -31,6 +29,7 @@ from core.brain_hive_dashboard import (
 )
 from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
 from core.web.watch.app import create_watch_app
+from tests.asgi_harness import asgi_request
 
 
 class BrainHiveWatchServerTests(unittest.TestCase):
@@ -127,12 +126,11 @@ class BrainHiveWatchServerTests(unittest.TestCase):
             ssl_context_for_url=lambda *args, **kwargs: None,
         )
 
-        with TestClient(app) as client:
-            response = client.get("/healthz", headers={"X-Request-ID": "req-watch-123"})
+        status, headers, _ = asgi_request(app, method="GET", path="/healthz", headers={"X-Request-ID": "req-watch-123"})
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.headers["X-Request-ID"], "req-watch-123")
-        self.assertEqual(response.headers["X-Correlation-ID"], "req-watch-123")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-request-id"], "req-watch-123")
+        self.assertEqual(headers["x-correlation-id"], "req-watch-123")
 
     def test_serve_runs_uvicorn_with_factory_app_and_tls_settings(self) -> None:
         cfg = BrainHiveWatchServerConfig(

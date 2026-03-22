@@ -13,7 +13,6 @@ from threading import Thread
 from unittest.mock import patch
 
 import pytest
-from starlette.testclient import TestClient
 
 import apps.meet_and_greet_server as _server_mod
 import core.api_write_auth as _api_write_auth_mod
@@ -47,6 +46,7 @@ from core.web.meet.app import create_meet_app
 from network.knowledge_models import KnowledgeAdvert
 from storage.db import get_connection, reset_default_connection
 from storage.migrations import run_migrations
+from tests.asgi_harness import asgi_request
 
 
 def _now() -> datetime:
@@ -276,12 +276,11 @@ class MeetAndGreetServiceTests(unittest.TestCase):
             metrics=MeetMetricsCollector(),
         )
 
-        with TestClient(app) as client:
-            response = client.get("/v1/health", headers={"X-Request-ID": "req-meet-123"})
+        status, headers, _ = asgi_request(app, method="GET", path="/v1/health", headers={"X-Request-ID": "req-meet-123"})
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.headers["X-Request-ID"], "req-meet-123")
-        self.assertEqual(response.headers["X-Correlation-ID"], "req-meet-123")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-request-id"], "req-meet-123")
+        self.assertEqual(headers["x-correlation-id"], "req-meet-123")
 
     def test_register_meet_node_is_listed(self) -> None:
         node_id = f"seed-{uuid.uuid4().hex[:8]}"
