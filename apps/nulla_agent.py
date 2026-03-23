@@ -2034,116 +2034,22 @@ class NullaAgent(
         )
 
     def _maybe_run_idle_commons_once(self) -> None:
-        prefs = load_preferences()
-        if not bool(getattr(prefs, "social_commons", True)):
-            return
-        now = time.time()
-        with self._activity_lock:
-            idle_for_seconds = now - float(self._last_user_activity_ts)
-            since_last_commons = now - float(self._last_idle_commons_ts)
-            seed_index = int(self._idle_commons_seed_index)
-        if idle_for_seconds < 300.0:
-            return
-        if since_last_commons < 900.0:
-            return
-
-        session_id = self._idle_commons_session_id()
-        commons = self.curiosity.run_idle_commons(
-            session_id=session_id,
-            task_id="agent-commons",
-            trace_id="agent-commons",
-            seed_index=seed_index,
-        )
-        publish_result: dict[str, Any] | None = None
-        try:
-            publish_result = self.public_hive_bridge.publish_agent_commons_update(
-                topic=str(dict(commons.get("topic") or {}).get("topic") or ""),
-                topic_kind=str(dict(commons.get("topic") or {}).get("topic_kind") or "technical"),
-                summary=str(commons.get("summary") or ""),
-                public_body=str(commons.get("public_body") or commons.get("summary") or ""),
-                topic_tags=[str(tag) for tag in list(commons.get("topic_tags") or [])[:8]],
-            )
-        except Exception as exc:
-            audit_logger.log(
-                "idle_commons_publish_error",
-                target_id=session_id,
-                target_type="session",
-                details={"error": str(exc), "candidate_id": commons.get("candidate_id")},
-            )
-        if publish_result and str(publish_result.get("topic_id") or "").strip():
-            self.hive_activity_tracker.note_watched_topic(
-                session_id=session_id,
-                topic_id=str(publish_result.get("topic_id") or "").strip(),
-            )
-        with self._activity_lock:
-            self._last_idle_commons_ts = now
-            self._idle_commons_seed_index = (seed_index + 1) % 64
-        audit_logger.log(
-            "idle_commons_cycle_complete",
-            target_id=session_id,
-            target_type="session",
-            details={
-                "idle_for_seconds": round(idle_for_seconds, 2),
-                "candidate_id": commons.get("candidate_id"),
-                "topic_id": str((publish_result or {}).get("topic_id") or ""),
-                "publish_status": str((publish_result or {}).get("status") or "local_only"),
-                "topic": dict(commons.get("topic") or {}).get("topic"),
-            },
+        agent_presence_runtime.maybe_run_idle_commons_once(
+            self,
+            load_preferences_fn=load_preferences,
+            time_fn=time.time,
+            audit_log_fn=audit_logger.log,
         )
 
     def _maybe_run_autonomous_hive_research_once(self) -> None:
-        prefs = load_preferences()
-        if not bool(getattr(prefs, "accept_hive_tasks", True)):
-            return
-        if not bool(getattr(prefs, "idle_research_assist", True)):
-            return
-        if not self.public_hive_bridge.enabled():
-            return
-
-        now = time.time()
-        with self._activity_lock:
-            idle_for_seconds = now - float(self._last_user_activity_ts)
-            since_last_research = now - float(self._last_idle_hive_research_ts)
-        if idle_for_seconds < 240.0:
-            return
-        if since_last_research < 900.0:
-            return
-
-        queue_rows = self.public_hive_bridge.list_public_research_queue(limit=12)
-        signal = pick_autonomous_research_signal(queue_rows)
-        if not signal:
-            return
-
-        auto_session_id = f"auto-research:{signal.get('topic_id') or ''!s}"
-        self._sync_public_presence(
-            status="busy",
-            source_context={"surface": "background", "platform": "openclaw", "lane": "autonomous_research"},
+        agent_presence_runtime.maybe_run_autonomous_hive_research_once(
+            self,
+            load_preferences_fn=load_preferences,
+            time_fn=time.time,
+            pick_signal_fn=pick_autonomous_research_signal,
+            research_topic_fn=research_topic_from_signal,
+            audit_log_fn=audit_logger.log,
         )
-        try:
-            result = research_topic_from_signal(
-                signal,
-                public_hive_bridge=self.public_hive_bridge,
-                curiosity=self.curiosity,
-                hive_activity_tracker=self.hive_activity_tracker,
-                session_id=auto_session_id,
-                auto_claim=True,
-            )
-            audit_logger.log(
-                "idle_hive_research_cycle_complete",
-                target_id=str(signal.get("topic_id") or auto_session_id),
-                target_type="topic",
-                details=result.to_dict(),
-            )
-            with self._activity_lock:
-                self._last_idle_hive_research_ts = now
-            if result.ok and result.topic_id:
-                with contextlib.suppress(Exception):
-                    self.hive_activity_tracker.note_watched_topic(session_id=auto_session_id, topic_id=result.topic_id)
-        finally:
-            self._sync_public_presence(
-                status=self._idle_public_presence_status(),
-                source_context={"surface": "background", "platform": "openclaw", "lane": "autonomous_research"},
-            )
 
     def _mark_user_activity(self) -> None:
         with self._activity_lock:

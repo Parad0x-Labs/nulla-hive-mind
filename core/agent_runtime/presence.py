@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from typing import Any
 
@@ -124,6 +125,132 @@ def idle_commons_loop(
                 target_type="agent",
                 details={"error": str(exc)},
             )
+
+
+def maybe_run_idle_commons_once(
+    agent: Any,
+    *,
+    load_preferences_fn: Callable[[], Any],
+    time_fn: Callable[[], float],
+    audit_log_fn: Callable[..., Any],
+) -> None:
+    prefs = load_preferences_fn()
+    if not bool(getattr(prefs, "social_commons", True)):
+        return
+    now = time_fn()
+    with agent._activity_lock:
+        idle_for_seconds = now - float(agent._last_user_activity_ts)
+        since_last_commons = now - float(agent._last_idle_commons_ts)
+        seed_index = int(agent._idle_commons_seed_index)
+    if idle_for_seconds < 300.0:
+        return
+    if since_last_commons < 900.0:
+        return
+
+    session_id = agent._idle_commons_session_id()
+    commons = agent.curiosity.run_idle_commons(
+        session_id=session_id,
+        task_id="agent-commons",
+        trace_id="agent-commons",
+        seed_index=seed_index,
+    )
+    publish_result: dict[str, Any] | None = None
+    try:
+        publish_result = agent.public_hive_bridge.publish_agent_commons_update(
+            topic=str(dict(commons.get("topic") or {}).get("topic") or ""),
+            topic_kind=str(dict(commons.get("topic") or {}).get("topic_kind") or "technical"),
+            summary=str(commons.get("summary") or ""),
+            public_body=str(commons.get("public_body") or commons.get("summary") or ""),
+            topic_tags=[str(tag) for tag in list(commons.get("topic_tags") or [])[:8]],
+        )
+    except Exception as exc:
+        audit_log_fn(
+            "idle_commons_publish_error",
+            target_id=session_id,
+            target_type="session",
+            details={"error": str(exc), "candidate_id": commons.get("candidate_id")},
+        )
+    if publish_result and str(publish_result.get("topic_id") or "").strip():
+        agent.hive_activity_tracker.note_watched_topic(
+            session_id=session_id,
+            topic_id=str(publish_result.get("topic_id") or "").strip(),
+        )
+    with agent._activity_lock:
+        agent._last_idle_commons_ts = now
+        agent._idle_commons_seed_index = (seed_index + 1) % 64
+    audit_log_fn(
+        "idle_commons_cycle_complete",
+        target_id=session_id,
+        target_type="session",
+        details={
+            "idle_for_seconds": round(idle_for_seconds, 2),
+            "candidate_id": commons.get("candidate_id"),
+            "topic_id": str((publish_result or {}).get("topic_id") or ""),
+            "publish_status": str((publish_result or {}).get("status") or "local_only"),
+            "topic": dict(commons.get("topic") or {}).get("topic"),
+        },
+    )
+
+
+def maybe_run_autonomous_hive_research_once(
+    agent: Any,
+    *,
+    load_preferences_fn: Callable[[], Any],
+    time_fn: Callable[[], float],
+    pick_signal_fn: Callable[[list[dict[str, Any]]], dict[str, Any] | None],
+    research_topic_fn: Callable[..., Any],
+    audit_log_fn: Callable[..., Any],
+) -> None:
+    prefs = load_preferences_fn()
+    if not bool(getattr(prefs, "accept_hive_tasks", True)):
+        return
+    if not bool(getattr(prefs, "idle_research_assist", True)):
+        return
+    if not agent.public_hive_bridge.enabled():
+        return
+
+    now = time_fn()
+    with agent._activity_lock:
+        idle_for_seconds = now - float(agent._last_user_activity_ts)
+        since_last_research = now - float(agent._last_idle_hive_research_ts)
+    if idle_for_seconds < 240.0:
+        return
+    if since_last_research < 900.0:
+        return
+
+    queue_rows = agent.public_hive_bridge.list_public_research_queue(limit=12)
+    signal = pick_signal_fn(queue_rows)
+    if not signal:
+        return
+
+    auto_session_id = f"auto-research:{signal.get('topic_id') or ''!s}"
+    lane_context = {"surface": "background", "platform": "openclaw", "lane": "autonomous_research"}
+    agent._sync_public_presence(status="busy", source_context=lane_context)
+    try:
+        result = research_topic_fn(
+            signal,
+            public_hive_bridge=agent.public_hive_bridge,
+            curiosity=agent.curiosity,
+            hive_activity_tracker=agent.hive_activity_tracker,
+            session_id=auto_session_id,
+            auto_claim=True,
+        )
+        audit_log_fn(
+            "idle_hive_research_cycle_complete",
+            target_id=str(signal.get("topic_id") or auto_session_id),
+            target_type="topic",
+            details=result.to_dict(),
+        )
+        with agent._activity_lock:
+            agent._last_idle_hive_research_ts = now
+        if result.ok and result.topic_id:
+            with contextlib.suppress(Exception):
+                agent.hive_activity_tracker.note_watched_topic(session_id=auto_session_id, topic_id=result.topic_id)
+    finally:
+        agent._sync_public_presence(
+            status=agent._idle_public_presence_status(),
+            source_context=lane_context,
+        )
 
 
 def idle_commons_session_id(*, get_local_peer_id_fn: Callable[[], str]) -> str:

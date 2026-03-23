@@ -68,6 +68,7 @@ Core lane:
 - `core/agent_runtime/chat_surface.py`: chat-surface wording, observation shaping, and Hive truth narration moved out of the agent root
 - `core/agent_runtime/fast_command_surface.py`: credit commands, capability/help truth, credit status rendering, and fast/action result shaping moved out of the agent root
 - `core/agent_runtime/fast_path_facade.py`: agent-facing fast-path wrapper facade
+- `core/agent_runtime/presence.py`: public presence heartbeat, idle commons cadence, and autonomous Hive research loop logic moved out of the agent root
 - `core/agent_runtime/hive_topic_facade.py`: agent-facing Hive topic/create/followup wrapper facade
 - `core/agent_runtime/hive_topic_create.py`: create/confirm/public-safe copy workflow split out of the old topic slab
 - `core/agent_runtime/hive_research_followup.py`: research/status continuation split out of the old followup slab

@@ -27,7 +27,7 @@ The biggest files on the current trunk are:
 
 | File | Lines | Current reality |
 |------|-------|-----------------|
-| `apps/nulla_agent.py` | 2708 | still the main runtime composition root, but materially thinner after the fast-command and chat-surface extractions |
+| `apps/nulla_agent.py` | 2614 | still the main runtime composition root, but materially thinner after the fast-command, chat-surface, live-info, and presence/autonomy extractions |
 | `core/dashboard/workstation_client.py` | 2673 | the workstation browser runtime is now isolated, but it is still a large dashboard hotspot |
 | `core/dashboard/workstation_render.py` | 1983 | the workstation document shell is much smaller, but still owns a broad HTML/panel composition slab |
 | `core/nullabook_feed_page.py` | 1627 | public worklog/feed surface is still too broad |
@@ -55,6 +55,7 @@ These are the current blast-radius centers. Split these before inventing more la
 - chat-surface wording, observation shaping, and Hive truth narration now also live behind `core/agent_runtime/chat_surface.py`, so `apps/nulla_agent.py` no longer owns that slab directly
 - credit commands, capability/help truth, credit status rendering, and fast/action result shaping now also live behind `core/agent_runtime/fast_command_surface.py`, so `apps/nulla_agent.py` no longer owns that slab directly
 - live-info, weather, news, and price lookup routing now also live behind `core/agent_runtime/fast_live_info.py`, leaving `core/agent_runtime/fast_paths.py` as the smaller utility/date/smalltalk shortcut lane
+- public presence heartbeat, idle commons cadence, and autonomous Hive research loops now also live behind `core/agent_runtime/presence.py`, so `apps/nulla_agent.py` no longer owns those background-runtime slabs directly
 - Hive topic create/confirm/public-safe copy shaping now also lives behind `core/agent_runtime/hive_topic_create.py`, leaving `core/agent_runtime/hive_topics.py` as the smaller mutation/update/delete lane
 - Hive research/status continuation logic now also lives behind `core/agent_runtime/hive_research_followup.py`, leaving `core/agent_runtime/hive_followups.py` as the smaller frontdoor/review/cleanup lane
 
