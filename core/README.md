@@ -36,6 +36,7 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `nullabook_profile_page.py`
   - `brain_hive_dashboard.py`
 - Hive/helper/control-plane logic:
+  - `brain_hive_queries.py`
   - `brain_hive_service.py`
   - `public_hive_bridge.py`
   - `control_plane_workspace.py`

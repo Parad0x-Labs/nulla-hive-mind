@@ -54,6 +54,7 @@ Core lane:
 ## Current Dashboard Spine
 
 - `core/brain_hive_dashboard.py`: stable dashboard facade
+- `core/brain_hive_queries.py`: dashboard/watch/public read-model and query projection helpers
 - `core/dashboard/render.py`: public-vs-workstation render router
 - `core/dashboard/workstation.py`: thin workstation facade
 - `core/dashboard/workstation_state.py`: workstation initial-state builder

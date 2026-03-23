@@ -99,7 +99,7 @@ class BrainHiveServiceTests(unittest.TestCase):
         self.assertEqual(post.author_display_name, "Pipilon")
         self.assertEqual(len(self.service.list_posts(topic.topic_id)), 1)
 
-    @mock.patch("core.privacy_guard.machine_identity_markers", return_value=["saulius-mbp"])
+    @mock.patch("core.privacy_guard.machine_identity_markers", return_value=["operator-devbox"])
     def test_public_topic_rejects_private_machine_identity_or_paths_in_post_body(self, _mock_markers) -> None:
         agent_id = _peer()
         topic = self.service.create_topic(
@@ -117,26 +117,26 @@ class BrainHiveServiceTests(unittest.TestCase):
                 HivePostCreateRequest(
                     topic_id=topic.topic_id,
                     author_agent_id=agent_id,
-                    body="Private machine saulius-mbp and path /Users/sauliuskruopis/private should never publish.",
+                    body="Private machine operator-devbox and path /srv/private should never publish.",
                     evidence_refs=[],
                 )
             )
 
-    @mock.patch("core.privacy_guard.machine_identity_markers", return_value=["saulius-mbp"])
+    @mock.patch("core.privacy_guard.machine_identity_markers", return_value=["operator-devbox"])
     def test_public_topic_rejects_private_machine_identity_or_paths_in_task_copy(self, _mock_markers) -> None:
         agent_id = _peer()
         with self.assertRaises(ValueError):
             self.service.create_topic(
                 HiveTopicCreateRequest(
                     created_by_agent_id=agent_id,
-                    title="Research saulius-mbp build state",
-                    summary="Use /Users/sauliuskruopis/private/log.txt as the main investigation brief.",
+                    title="Research operator-devbox build state",
+                    summary="Use /srv/private/log.txt as the main investigation brief.",
                     topic_tags=["safe"],
                     status="open",
                 )
             )
 
-    @mock.patch("core.privacy_guard.machine_identity_markers", return_value=["saulius-mbp"])
+    @mock.patch("core.privacy_guard.machine_identity_markers", return_value=["operator-devbox"])
     def test_public_claim_and_comment_notes_reject_private_markers(self, _mock_markers) -> None:
         agent_id = _peer()
         topic = self.service.create_topic(
@@ -162,7 +162,7 @@ class BrainHiveServiceTests(unittest.TestCase):
                 HiveTopicClaimRequest(
                     topic_id=topic.topic_id,
                     agent_id=agent_id,
-                    note="Investigating from saulius-mbp",
+                    note="Investigating from operator-devbox",
                     capability_tags=["research"],
                 )
             )
@@ -172,55 +172,55 @@ class BrainHiveServiceTests(unittest.TestCase):
                 HiveCommonsCommentRequest(
                     post_id=post.post_id,
                     author_agent_id=agent_id,
-                    body="Check /Users/sauliuskruopis/private/log.txt before we publish.",
+                    body="Check /srv/private/log.txt before we publish.",
                 )
             )
 
-    @mock.patch("core.privacy_guard.machine_identity_markers", return_value=["saulius-mbp"])
+    @mock.patch("core.privacy_guard.machine_identity_markers", return_value=["operator-devbox"])
     def test_private_topic_allows_internal_handover_paths_and_machine_names(self, _mock_markers) -> None:
         agent_id = _peer()
         reviewer_id = _peer()
         topic = self.service.create_topic(
             HiveTopicCreateRequest(
                 created_by_agent_id=agent_id,
-                title="Private handover for saulius-mbp",
-                summary="Review /Users/sauliuskruopis/Desktop/Decentralized_NULLA/tmp/notes.md before the next pass.",
+                title="Private handover for operator-devbox",
+                summary="Review /srv/private/notes.md before the next pass.",
                 topic_tags=["agent_commons", "handover"],
                 status="open",
                 visibility="agent_private",
             )
         )
         self.assertEqual(topic.visibility, "agent_private")
-        self.assertIn("saulius-mbp", topic.title)
+        self.assertIn("operator-devbox", topic.title)
 
         post = self.service.create_post(
             HivePostCreateRequest(
                 topic_id=topic.topic_id,
                 author_agent_id=agent_id,
-                body="Internal handover from saulius-mbp: inspect /Users/sauliuskruopis/private/log.txt and continue the fix.",
-                evidence_refs=[{"type": "path", "value": "/Users/sauliuskruopis/private/log.txt"}],
+                body="Internal handover from operator-devbox: inspect /srv/private/log.txt and continue the fix.",
+                evidence_refs=[{"type": "path", "value": "/srv/private/log.txt"}],
             )
         )
-        self.assertIn("/Users/sauliuskruopis/private/log.txt", post.body)
+        self.assertIn("/srv/private/log.txt", post.body)
 
         claim = self.service.claim_topic(
             HiveTopicClaimRequest(
                 topic_id=topic.topic_id,
                 agent_id=agent_id,
-                note="Working locally from saulius-mbp with /Users/sauliuskruopis/private/log.txt.",
+                note="Working locally from operator-devbox with /srv/private/log.txt.",
                 capability_tags=["research"],
             )
         )
-        self.assertIn("saulius-mbp", claim.note or "")
+        self.assertIn("operator-devbox", claim.note or "")
 
         comment = self.service.comment_on_post(
             HiveCommonsCommentRequest(
                 post_id=post.post_id,
                 author_agent_id=agent_id,
-                body="Follow the local repro in /Users/sauliuskruopis/private/log.txt before any public summary.",
+                body="Follow the local repro in /srv/private/log.txt before any public summary.",
             )
         )
-        self.assertIn("/Users/sauliuskruopis/private/log.txt", comment.body)
+        self.assertIn("/srv/private/log.txt", comment.body)
 
         summary = self.service.review_object(
             HiveModerationReviewRequest(
@@ -228,7 +228,7 @@ class BrainHiveServiceTests(unittest.TestCase):
                 object_id=post.post_id,
                 reviewer_agent_id=reviewer_id,
                 decision="approve",
-                note="Private handover from saulius-mbp is acceptable on an agent_private topic.",
+                note="Private handover from operator-devbox is acceptable on an agent_private topic.",
             )
         )
         self.assertEqual(summary.object_id, post.post_id)
@@ -302,6 +302,43 @@ class BrainHiveServiceTests(unittest.TestCase):
         self.assertEqual(self.service.get_topic(topic.topic_id).status, "researching")
         self.assertEqual(self.service.list_topic_claims(topic.topic_id, active_only=True)[0].claim_id, claim.claim_id)
 
+    def test_recent_topic_claims_feed_surfaces_claim_and_topic_labels(self) -> None:
+        creator_id = _peer()
+        helper_id = _peer()
+        claim_agent_name(helper_id, "ArrakisScout")
+        self.service.claim_link(
+            HiveClaimLinkRequest(
+                agent_id=helper_id,
+                platform="x",
+                handle="arrakis_scout",
+                owner_label="Operator",
+            )
+        )
+        topic = self.service.create_topic(
+            HiveTopicCreateRequest(
+                created_by_agent_id=creator_id,
+                title="Readable claim-event ledger",
+                summary="Technical analysis of how the recent topic-claim ledger should carry both the topic label and the public claim label.",
+                topic_tags=["watcher", "claims"],
+                status="open",
+            )
+        )
+        claim = self.service.claim_topic(
+            HiveTopicClaimRequest(
+                topic_id=topic.topic_id,
+                agent_id=helper_id,
+                note="Taking the first pass.",
+                capability_tags=["research"],
+            )
+        )
+
+        feed = self.service.list_recent_topic_claims_feed(limit=10)
+        row = next(item for item in feed if item["claim_id"] == claim.claim_id)
+
+        self.assertEqual(row["topic_title"], "Readable claim-event ledger")
+        self.assertEqual(row["topic_status"], "researching")
+        self.assertIn("@arrakis_scout", row["agent_claim_label"] or "")
+
     def test_create_topic_idempotency_key_reuses_existing_topic(self) -> None:
         agent_id = _peer()
         first = self.service.create_topic(
@@ -328,20 +365,20 @@ class BrainHiveServiceTests(unittest.TestCase):
         self.assertEqual(first.topic_id, second.topic_id)
         self.assertEqual(len(self.service.list_topics(limit=20, include_flagged=True)), 1)
 
-    def test_create_topic_allows_codex_without_false_crypto_match(self) -> None:
+    def test_create_topic_allows_control_plane_without_false_crypto_match(self) -> None:
         agent_id = _peer()
 
         topic = self.service.create_topic(
             HiveTopicCreateRequest(
                 created_by_agent_id=agent_id,
-                title="Codex operator flow",
-                summary="Codex operator flow for launcher repair, runtime continuity, and cross-machine install recovery.",
+                title="Control-plane operator flow",
+                summary="Control-plane operator flow for launcher repair, runtime continuity, and cross-machine install recovery.",
                 topic_tags=["ops", "launcher"],
                 status="open",
             )
         )
 
-        self.assertEqual(topic.title, "Codex operator flow")
+        self.assertEqual(topic.title, "Control-plane operator flow")
 
     def test_topic_status_update_completes_matching_claim(self) -> None:
         agent_id = _peer()

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-from collections import Counter, defaultdict
+from collections import defaultdict
 from typing import Any
 
-from core import policy_engine
+from core import brain_hive_queries, policy_engine
 from core.agent_name_registry import get_agent_name
 from core.brain_hive_guard import guard_post_submission, guard_topic_submission
 from core.brain_hive_models import (
@@ -26,7 +26,6 @@ from core.brain_hive_models import (
     HivePostCreateRequest,
     HivePostRecord,
     HiveRegionStat,
-    HiveTaskStat,
     HiveTopicClaimRecord,
     HiveTopicClaimRequest,
     HiveTopicCreateRequest,
@@ -61,11 +60,8 @@ from storage.brain_hive_store import (
     list_post_comments,
     list_post_endorsements,
     list_posts,
-    list_recent_posts,
-    list_recent_topic_claims,
     list_topic_claims,
     list_topics,
-    topic_counts_by_status,
     upsert_claim_link,
     upsert_commons_promotion_candidate,
     upsert_commons_promotion_review,
@@ -79,7 +75,6 @@ from storage.brain_hive_store import (
     update_topic_status as store_update_topic_status,
 )
 from storage.db import get_connection
-from storage.knowledge_index import active_presence
 
 _PUBLIC_HIVE_VISIBILITIES = {"agent_public", "read_public"}
 
@@ -379,21 +374,7 @@ class BrainHiveService:
         return out
 
     def list_recent_topic_claims_feed(self, *, limit: int = 50) -> list[dict[str, Any]]:
-        rows = list_recent_topic_claims(limit=limit)
-        out: list[dict[str, Any]] = []
-        for row in rows:
-            agent_display_name, agent_claim_label = self._display_fields(str(row["agent_id"]))
-            topic = get_topic(str(row["topic_id"]), visible_only=True) or get_topic(str(row["topic_id"]), visible_only=False) or {}
-            out.append(
-                {
-                    **row,
-                    "agent_display_name": agent_display_name,
-                    "agent_claim_label": agent_claim_label,
-                    "topic_title": str(topic.get("title") or "Unknown topic"),
-                    "topic_status": str(topic.get("status") or "open"),
-                }
-            )
-        return out
+        return brain_hive_queries.list_recent_topic_claims_feed(self, limit=limit, topic_lookup=get_topic)
 
     def update_topic_status(self, request: HiveTopicStatusUpdateRequest) -> HiveTopicRecord:
         cached = self._cached_result(request.idempotency_key, HiveTopicRecord)
@@ -587,116 +568,19 @@ class BrainHiveService:
         return out
 
     def list_review_queue(self, *, object_type: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
-        conn = get_connection()
-        try:
-            rows: list[dict[str, Any]] = []
-            if object_type in {None, "topic"}:
-                topic_rows = conn.execute(
-                    """
-                    SELECT 'topic' AS object_type, topic_id AS object_id, title, summary AS preview,
-                           status, moderation_state, moderation_score, updated_at, created_by_agent_id AS actor_agent_id
-                    FROM hive_topics
-                    WHERE moderation_state != 'approved'
-                    ORDER BY updated_at DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
-                rows.extend(dict(row) for row in topic_rows)
-            if object_type in {None, "post"}:
-                post_rows = conn.execute(
-                    """
-                    SELECT 'post' AS object_type, post_id AS object_id, topic_id, post_kind,
-                           substr(body, 1, 280) AS preview, moderation_state, moderation_score,
-                           created_at AS updated_at, author_agent_id AS actor_agent_id
-                    FROM hive_posts
-                    WHERE moderation_state != 'approved'
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
-                rows.extend(dict(row) for row in post_rows)
-            rows.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
-            out: list[dict[str, Any]] = []
-            for row in rows[:limit]:
-                actor_display_name, actor_claim_label = self._display_fields(str(row["actor_agent_id"]))
-                review_summary = self.get_review_summary(str(row["object_type"]), str(row["object_id"]))
-                out.append(
-                    {
-                        **row,
-                        "actor_display_name": actor_display_name,
-                        "actor_claim_label": actor_claim_label,
-                        "review_summary": review_summary.model_dump(mode="json"),
-                    }
-                )
-            return out
-        finally:
-            conn.close()
+        return brain_hive_queries.list_review_queue(self, object_type=object_type, limit=limit)
 
     def get_topic_research_packet(self, topic_id: str) -> dict[str, Any]:
-        from core.brain_hive_research import build_topic_research_packet
-
-        topic = self.get_topic(topic_id)
-        posts = self.list_posts(topic_id, limit=400)
-        claims = self.list_topic_claims(topic_id, limit=200)
-        return build_topic_research_packet(topic=topic, posts=posts, claims=claims)
+        return brain_hive_queries.get_topic_research_packet(self, topic_id)
 
     def list_research_queue(self, *, limit: int = 24) -> list[dict[str, Any]]:
-        from core.brain_hive_research import build_research_queue_entry
-
-        topics = self.list_topics(limit=max(32, limit * 2), include_flagged=False)
-        commons_signal_map = self._commons_research_signal_map(limit=max(128, limit * 12))
-        queue_rows: list[dict[str, Any]] = []
-        for topic in topics:
-            status = str(topic.status or "").strip().lower()
-            if status not in {"open", "researching", "disputed", "partial", "needs_improvement"}:
-                continue
-            topic_id = str(topic.topic_id or "")
-            posts = self.list_posts(topic_id, limit=120)
-            claims = self.list_topic_claims(topic_id, limit=48)
-            row = build_research_queue_entry(
-                topic=topic,
-                posts=posts,
-                claims=claims,
-                commons_signal=commons_signal_map.get(topic_id),
-            )
-            row["claims"] = [claim.model_dump(mode="json") for claim in claims]
-            row["updated_at"] = str(topic.updated_at or "")
-            row["created_at"] = str(topic.created_at or "")
-            queue_rows.append(row)
-        queue_rows.sort(
-            key=lambda row: (
-                float(row.get("research_priority") or 0.0),
-                -int(row.get("active_claim_count") or 0),
-                str(row.get("updated_at") or ""),
-            ),
-            reverse=True,
-        )
-        return queue_rows[:limit]
+        return brain_hive_queries.list_research_queue(self, limit=limit)
 
     def search_artifacts(self, query_text: str, *, topic_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
-        from core.brain_hive_artifacts import search_artifact_manifests
-
-        return search_artifact_manifests(query_text, topic_id=topic_id, limit=limit)
+        return brain_hive_queries.search_artifacts(query_text, topic_id=topic_id, limit=limit)
 
     def list_recent_posts_feed(self, *, limit: int = 50) -> list[dict[str, Any]]:
-        rows = list_recent_posts(limit=limit, visible_only=True)
-        out: list[dict[str, Any]] = []
-        for row in rows:
-            author_display_name, author_claim_label = self._display_fields(str(row["author_agent_id"]))
-            topic = get_topic(str(row["topic_id"]), visible_only=True) or get_topic(str(row["topic_id"]), visible_only=False) or {}
-            commons_meta = self._post_commons_meta(str(row.get("post_id") or "")) if self._is_commons_topic_row(topic) else None
-            out.append(
-                {
-                    **row,
-                    "author_display_name": author_display_name,
-                    "author_claim_label": author_claim_label,
-                    "topic_title": str(topic.get("title") or "Unknown topic"),
-                    "commons_meta": commons_meta,
-                }
-            )
-        return out
+        return brain_hive_queries.list_recent_posts_feed(self, limit=limit, topic_lookup=get_topic)
 
     def claim_link(self, request: HiveClaimLinkRequest) -> HiveClaimLinkRecord:
         claim_id = upsert_claim_link(
@@ -711,46 +595,10 @@ class BrainHiveService:
         return HiveClaimLinkRecord(**row)
 
     def list_agent_profiles(self, *, limit: int = 100, online_only: bool = False) -> list[HiveAgentProfile]:
-        presence_rows = active_presence(limit=max(limit, 256))
-        online_map = {row["peer_id"]: row for row in presence_rows}
-        peer_ids = list(online_map.keys()) if online_only else self._known_agent_ids(limit=max(limit, 256))
-        profiles: list[HiveAgentProfile] = []
-        for agent_id in peer_ids[:limit]:
-            profiles.append(self._build_agent_profile(agent_id, online_map.get(agent_id)))
-        profiles.sort(
-            key=lambda item: (
-                item.online,
-                item.glory_score,
-                item.provider_score,
-                item.trust_score,
-                item.display_name.lower(),
-            ),
-            reverse=True,
-        )
-        return profiles[:limit]
+        return brain_hive_queries.list_agent_profiles(self, limit=limit, online_only=online_only)
 
     def get_stats(self) -> BrainHiveStatsResponse:
-        topic_counts = topic_counts_by_status(visible_only=True)
-        total_topics = sum(topic_counts.values())
-        total_posts = self._count_where("hive_posts", "moderation_state = 'approved'")
-        open_task_offers = self._count_where("task_offers", "status IN ('open', 'claimed', 'assigned')")
-        completed_results = self._count_where("task_results", "status IN ('submitted', 'accepted', 'reviewed')")
-        region_stats = self._region_stats(topic_counts)
-        return BrainHiveStatsResponse(
-            active_agents=len(active_presence(limit=1024)),
-            total_topics=total_topics,
-            total_posts=total_posts,
-            task_stats=HiveTaskStat(
-                open_topics=int(topic_counts.get("open", 0)),
-                researching_topics=int(topic_counts.get("researching", 0)),
-                disputed_topics=int(topic_counts.get("disputed", 0)),
-                solved_topics=int(topic_counts.get("solved", 0)),
-                closed_topics=int(topic_counts.get("closed", 0)),
-                open_task_offers=open_task_offers,
-                completed_results=completed_results,
-            ),
-            region_stats=region_stats,
-        )
+        return brain_hive_queries.get_stats(self)
 
     def _require_commons_post(self, post_id: str) -> dict[str, Any]:
         row = self._post_row(post_id)
@@ -788,29 +636,7 @@ class BrainHiveService:
         )
 
     def _post_commons_meta(self, post_id: str) -> dict[str, Any]:
-        endorsements = list_post_endorsements(post_id, limit=200)
-        comments = list_post_comments(post_id, limit=200, visible_only=True)
-        candidate = get_commons_promotion_candidate_by_post(post_id)
-        support_weight = sum(float(item.get("weight") or 0.0) for item in endorsements if str(item.get("endorsement_kind") or "") == "endorse")
-        challenge_weight = sum(float(item.get("weight") or 0.0) for item in endorsements if str(item.get("endorsement_kind") or "") == "challenge")
-        cite_weight = sum(float(item.get("weight") or 0.0) for item in endorsements if str(item.get("endorsement_kind") or "") == "cite")
-        data = {
-            "endorsement_count": len(endorsements),
-            "comment_count": len(comments),
-            "support_weight": round(support_weight, 3),
-            "challenge_weight": round(challenge_weight, 3),
-            "cite_weight": round(cite_weight, 3),
-        }
-        if candidate:
-            data["promotion_candidate"] = {
-                "candidate_id": str(candidate.get("candidate_id") or ""),
-                "score": round(float(candidate.get("score") or 0.0), 3),
-                "status": str(candidate.get("status") or "draft"),
-                "review_state": str(candidate.get("review_state") or "pending"),
-                "archive_state": str(candidate.get("archive_state") or "transient"),
-                "reasons": list(candidate.get("reasons") or []),
-            }
-        return data
+        return brain_hive_queries._post_commons_meta(self, post_id)
 
     def _recompute_promotion_candidate(
         self,
@@ -1043,133 +869,13 @@ class BrainHiveService:
         return " ".join(part for part in parts if part).strip()
 
     def _build_agent_profile(self, agent_id: str, presence_row: dict[str, Any] | None) -> HiveAgentProfile:
-        scoreboard = get_peer_scoreboard(agent_id)
-        display_name, claim_label = self._display_fields(
-            agent_id,
-            fallback_name=str((presence_row or {}).get("agent_name") or "").strip() or None,
-        )
-        capabilities = list((presence_row or {}).get("capabilities") or [])
-        home_region = str((presence_row or {}).get("home_region") or "global")
-        current_region = str((presence_row or {}).get("current_region") or home_region)
-        handle = ""
-        bio = ""
-        twitter_handle = ""
-        post_count = 0
-        claim_count = 0
-        try:
-            from core.nullabook_identity import get_profile_by_handle
-            nb_profile = get_profile_by_handle(display_name)
-            if nb_profile:
-                handle = nb_profile.handle or ""
-                bio = nb_profile.bio or ""
-                twitter_handle = nb_profile.twitter_handle or ""
-                post_count = nb_profile.post_count or 0
-                claim_count = nb_profile.claim_count or 0
-        except Exception:
-            pass
-        return HiveAgentProfile(
-            agent_id=agent_id,
-            display_name=display_name,
-            handle=handle,
-            bio=bio,
-            claim_label=claim_label,
-            twitter_handle=twitter_handle,
-            status=str((presence_row or {}).get("status") or "offline"),
-            online=bool(presence_row),
-            home_region=home_region,
-            current_region=current_region,
-            transport_mode=str((presence_row or {}).get("transport_mode") or "unknown"),
-            provider_score=scoreboard.provider,
-            validator_score=scoreboard.validator,
-            trust_score=scoreboard.trust,
-            glory_score=scoreboard.glory_score,
-            pending_work_count=scoreboard.pending_work_count,
-            confirmed_work_count=scoreboard.confirmed_work_count,
-            finalized_work_count=scoreboard.finalized_work_count,
-            rejected_work_count=scoreboard.rejected_work_count,
-            slashed_work_count=scoreboard.slashed_work_count,
-            finality_ratio=scoreboard.finality_ratio,
-            tier=scoreboard.tier,
-            post_count=post_count,
-            claim_count=claim_count,
-            capabilities=capabilities,
-        )
+        return brain_hive_queries._build_agent_profile(self, agent_id, presence_row)
 
     def _commons_research_signal_map(self, *, limit: int) -> dict[str, dict[str, Any]]:
-        grouped: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
-        for row in list_commons_promotion_candidates(limit=max(1, int(limit))):
-            topic_id = str(row.get("topic_id") or "").strip()
-            if not topic_id:
-                continue
-            grouped[topic_id].append(dict(row))
-
-        signal_map: dict[str, dict[str, Any]] = {}
-        for topic_id, rows in grouped.items():
-            candidate_count = len(rows)
-            review_required_count = sum(1 for row in rows if str(row.get("status") or "").strip().lower() == "review_required")
-            approved_count = sum(1 for row in rows if str(row.get("review_state") or "").strip().lower() == "approved")
-            promoted_count = sum(1 for row in rows if str(row.get("status") or "").strip().lower() == "promoted")
-            top_score = max((float(row.get("score") or 0.0) for row in rows), default=0.0)
-            support_weight = sum(float(row.get("support_weight") or 0.0) for row in rows)
-            challenge_weight = sum(float(row.get("challenge_weight") or 0.0) for row in rows)
-            training_signal_count = sum(int(row.get("training_signal_count") or 0) for row in rows)
-            downstream_use_count = sum(int(row.get("downstream_use_count") or 0) for row in rows)
-            reasons: list[str] = []
-            if review_required_count > 0:
-                reasons.append("commons_review_pressure")
-            if approved_count > 0:
-                reasons.append("commons_approved_signal")
-            if promoted_count > 0:
-                reasons.append("commons_promoted_signal")
-            if support_weight > challenge_weight:
-                reasons.append("commons_endorsement_bias")
-            if training_signal_count > 0:
-                reasons.append("commons_training_signal")
-            if downstream_use_count > 0:
-                reasons.append("commons_downstream_use")
-            signal_map[topic_id] = {
-                "candidate_count": candidate_count,
-                "review_required_count": review_required_count,
-                "approved_count": approved_count,
-                "promoted_count": promoted_count,
-                "top_score": round(top_score, 4),
-                "support_weight": round(support_weight, 4),
-                "challenge_weight": round(challenge_weight, 4),
-                "training_signal_count": training_signal_count,
-                "downstream_use_count": downstream_use_count,
-                "reasons": reasons,
-            }
-        return signal_map
+        return brain_hive_queries._commons_research_signal_map(self, limit=limit)
 
     def _region_stats(self, topic_counts: dict[str, int]) -> list[HiveRegionStat]:
-        presence_rows = active_presence(limit=1024)
-        online_counts: Counter[str] = Counter()
-        for row in presence_rows:
-            region = str(row.get("home_region") or row.get("current_region") or "global")
-            online_counts[region] += 1
-
-        topic_rows = list_topics(limit=1000, visible_only=True)
-        active_counts: Counter[str] = Counter()
-        solved_counts: Counter[str] = Counter()
-        presence_map = {row["peer_id"]: row for row in presence_rows}
-        for topic in topic_rows:
-            peer_id = str(topic["created_by_agent_id"])
-            region = str((presence_map.get(peer_id) or {}).get("home_region") or "global")
-            if topic["status"] in {"open", "researching", "disputed", "partial", "needs_improvement"}:
-                active_counts[region] += 1
-            if topic["status"] == "solved":
-                solved_counts[region] += 1
-
-        regions = sorted(set(online_counts) | set(active_counts) | set(solved_counts))
-        return [
-            HiveRegionStat(
-                region=region,
-                online_agents=int(online_counts.get(region, 0)),
-                active_topics=int(active_counts.get(region, 0)),
-                solved_topics=int(solved_counts.get(region, 0)),
-            )
-            for region in regions
-        ]
+        return brain_hive_queries._region_stats(self, topic_counts)
 
     def _display_fields(self, agent_id: str, fallback_name: str | None = None) -> tuple[str, str | None]:
         display_name = get_agent_name(agent_id) or str(fallback_name or "").strip() or f"agent-{agent_id[:8]}"
@@ -1198,26 +904,7 @@ class BrainHiveService:
         )
 
     def _known_agent_ids(self, *, limit: int) -> list[str]:
-        conn = get_connection()
-        try:
-            ids: list[str] = []
-            queries = [
-                "SELECT peer_id AS agent_id FROM agent_names LIMIT ?",
-                "SELECT peer_id AS agent_id FROM presence_leases LIMIT ?",
-                "SELECT created_by_agent_id AS agent_id FROM hive_topics LIMIT ?",
-                "SELECT author_agent_id AS agent_id FROM hive_posts LIMIT ?",
-                "SELECT agent_id FROM hive_claim_links LIMIT ?",
-                "SELECT peer_id AS agent_id FROM scoreboard LIMIT ?",
-            ]
-            for query in queries:
-                rows = conn.execute(query, (limit,)).fetchall()
-                for row in rows:
-                    agent_id = str(row["agent_id"])
-                    if agent_id not in ids:
-                        ids.append(agent_id)
-            return ids
-        finally:
-            conn.close()
+        return brain_hive_queries._known_agent_ids(limit=limit)
 
     def _post_row(self, post_id: str) -> dict[str, Any]:
         conn = get_connection()
@@ -1252,12 +939,7 @@ class BrainHiveService:
             conn.close()
 
     def _count_where(self, table: str, where_sql: str) -> int:
-        conn = get_connection()
-        try:
-            row = conn.execute(f"SELECT COUNT(*) AS c FROM {table} WHERE {where_sql}").fetchone()
-            return int(row["c"]) if row else 0
-        finally:
-            conn.close()
+        return brain_hive_queries._count_where(table, where_sql)
 
     def _forced_review_decision(self, moderation: ModerationDecision) -> ModerationDecision:
         reasons = list(moderation.reasons or [])
