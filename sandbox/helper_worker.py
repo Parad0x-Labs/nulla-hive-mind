@@ -216,6 +216,7 @@ def _run_model_reasoning(
 ) -> dict[str, Any] | None:
     task_kind, output_mode, result_type = _helper_model_profile(capsule.task_type)
     pipeline = ModelTeacherPipeline()
+    swarm_width = max(1, int(policy_engine.get("model_orchestration.drone_swarm_width", 2) or 2))
     candidate = pipeline.run(
         task_kind=task_kind,
         prompt=_build_model_prompt(
@@ -231,6 +232,8 @@ def _run_model_reasoning(
         },
         trace_id=capsule.task_id,
         output_mode=output_mode,
+        provider_role="drone",
+        swarm_size=swarm_width,
     )
     if candidate is None:
         return None
@@ -242,6 +245,8 @@ def _run_model_reasoning(
     summary = raw_text.splitlines()[0].strip() if raw_text.splitlines() else raw_text
     summary = summary[:640] if summary else f"Helper reasoning completed for {problem_class}."
     evidence = [f"model:{candidate.source_model_tag}", f"task_kind:{task_kind}", f"output_mode:{output_mode}"]
+    if candidate.swarm_provider_ids:
+        evidence.append(f"swarm:{len(candidate.swarm_provider_ids)}")
     evidence.extend(abstract_inputs[:2])
     evidence.extend(constraints[:2])
     return {

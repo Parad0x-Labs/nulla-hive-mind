@@ -103,6 +103,13 @@ _DEFAULT_POLICY = {
         "local_worker_pool_target": 0,
         "local_worker_pool_max": 10,
     },
+    "model_orchestration": {
+        "drone_provider_hint": "qwen",
+        "queen_provider_hint": "kimi",
+        "drone_swarm_width": 2,
+        "queen_swarm_width": 1,
+        "queen_allow_paid_fallback": True,
+    },
     "observability": {
         "log_level": "INFO",
         "json_logs": True,

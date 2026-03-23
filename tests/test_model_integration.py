@@ -187,6 +187,76 @@ class ModelIntegrationTests(unittest.TestCase):
         self.assertEqual(candidate.provider_name, "helper-http")
         self.assertIn("license_name", candidate.provenance)
 
+    def test_teacher_pipeline_drone_swarm_picks_best_candidate_and_tracks_swarm(self) -> None:
+        self.registry.register_manifest(
+            {
+                "provider_name": "local-qwen-http",
+                "model_name": "qwen2.5:14b",
+                "source_type": "http",
+                "adapter_type": "local_qwen_provider",
+                "license_name": "Apache-2.0",
+                "license_url_or_reference": "https://www.apache.org/licenses/LICENSE-2.0",
+                "weight_location": "user-supplied",
+                "redistribution_allowed": True,
+                "runtime_dependency": "ollama",
+                "capabilities": ["format", "structured_json"],
+                "runtime_config": {"base_url": "http://127.0.0.1:11434"},
+                "metadata": {"deployment_class": "local", "orchestration_role": "drone"},
+                "enabled": True,
+            }
+        )
+        self.registry.register_manifest(
+            {
+                "provider_name": "local-qwen-alt",
+                "model_name": "qwen2.5:7b",
+                "source_type": "http",
+                "adapter_type": "local_qwen_provider",
+                "license_name": "Apache-2.0",
+                "license_url_or_reference": "https://www.apache.org/licenses/LICENSE-2.0",
+                "weight_location": "user-supplied",
+                "redistribution_allowed": True,
+                "runtime_dependency": "ollama",
+                "capabilities": ["format", "structured_json"],
+                "runtime_config": {"base_url": "http://127.0.0.1:22434"},
+                "metadata": {"deployment_class": "local", "orchestration_role": "drone"},
+                "enabled": True,
+            }
+        )
+        pipeline = ModelTeacherPipeline(self.registry)
+
+        strong_response = mock.Mock(output_text="Normalized: harden your Telegram setup first", confidence=0.86)
+        weak_response = mock.Mock(output_text="Maybe do a thing", confidence=0.42)
+
+        def build_adapter(manifest):
+            adapter = mock.Mock()
+            if manifest.provider_name == "local-qwen-http":
+                adapter.invoke.return_value = strong_response
+            else:
+                adapter.invoke.return_value = weak_response
+            adapter.get_license_metadata.return_value = {
+                "provider_name": manifest.provider_name,
+                "model_name": manifest.model_name,
+                "license_name": manifest.license_name,
+                "license_reference": manifest.resolved_license_reference,
+            }
+            return adapter
+
+        with mock.patch.object(self.registry, "build_adapter", side_effect=build_adapter):
+            candidate = pipeline.run(
+                task_kind="normalization_assist",
+                prompt="pls harden tg setup",
+                output_mode="summary_block",
+                provider_role="drone",
+                swarm_size=2,
+            )
+
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate.provider_name, "local-qwen-http")
+        self.assertEqual(candidate.provider_role, "drone")
+        self.assertEqual(len(candidate.swarm_provider_ids), 2)
+        self.assertIn("swarm_provider_ids", candidate.provenance)
+
     def test_register_from_file_loads_sample_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             sample = Path(tmpdir) / "providers.json"

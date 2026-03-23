@@ -53,3 +53,24 @@ def test_helper_worker_falls_back_to_template_when_model_unavailable():
         outcome = run_task_capsule(_capsule(), helper_agent_id="helper-node-1234567890")
     assert "Research capsule reviewed for" in outcome.result.summary
     assert outcome.result.result_type == "research_summary"
+
+
+def test_helper_worker_requests_drone_lane_swarm_reasoning():
+    run_migrations()
+    candidate = TeacherCandidate(
+        task_kind="summarization",
+        provider_name="local",
+        model_name="qwen-lite",
+        output_text="Use regional clusters and bounded deltas.",
+        confidence=0.84,
+        source_model_tag="local:qwen-lite",
+        provenance={},
+        provider_role="drone",
+        swarm_provider_ids=["local:qwen-lite", "local:qwen-mini"],
+    )
+    with patch("sandbox.helper_worker.ModelTeacherPipeline.run", return_value=candidate) as run_mock:
+        outcome = run_task_capsule(_capsule(), helper_agent_id="helper-node-1234567890")
+    assert outcome.result.summary.startswith("Use regional clusters")
+    _, kwargs = run_mock.call_args
+    assert kwargs["provider_role"] == "drone"
+    assert int(kwargs["swarm_size"]) >= 1

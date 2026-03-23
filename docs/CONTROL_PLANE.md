@@ -32,6 +32,7 @@ Normal startup stages:
 6. configure logging if the surface needs it
 7. resolve backend/model selection if the surface needs it
 8. surface hardware tier + provider audit truth through the runtime backbone when the surface needs it
+9. route role-aware provider selection through `core/provider_routing.py` when the surface wants explicit drone/queen behavior
 9. launch the selected surface
 
 That context is defined in `core/runtime_context.py`.
@@ -99,11 +100,13 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 - route startup through `RuntimeContext` + `bootstrap_runtime_mode(...)`
 - route operator/chat startup truth through `build_runtime_backbone(...)`
 - keep tool metadata behind explicit contracts
+- keep provider-role routing behind `core/provider_routing.py` so local drones and higher-tier synthesis providers stay selectable without rewiring callers
 - keep memory behind the `core.persistent_memory` facade and `core/memory/` internals
 - keep chat/date/live-info fast-path wrappers behind `core/agent_runtime/fast_path_facade.py` and the real shortcut logic inside `core/agent_runtime/fast_paths.py`
 - keep Hive topic/create/followup wrappers behind `core/agent_runtime/hive_topic_facade.py` and the real topic workflow logic inside `core/agent_runtime/hive_topics.py` and `core/agent_runtime/hive_followups.py`
 - keep builder workflow/scaffold wrappers behind `core/agent_runtime/builder_facade.py` and the real builder logic inside `core/agent_runtime/builder/`
 - keep research/live-web/tool-loop wrappers behind `core/agent_runtime/research_tool_loop_facade.py` and the real tool execution contracts behind `core/tool_intent_executor.py`
+- keep helper drone candidate fan-out behind `core/model_teacher_pipeline.py` so provider swarms stay bounded and policy-shaped instead of leaking into every caller
 - keep dashboard routing behind `core.brain_hive_dashboard` and `core/dashboard/render.py`, with workstation state/render isolated in `core/dashboard/workstation_state.py` and `core/dashboard/workstation_render.py`
 - keep public-hive auth/bootstrap behind `core.public_hive_bridge` facades and `core/public_hive/auth.py` internals
 - keep feature/store/network-specific logic behind package boundaries
@@ -114,4 +117,5 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 - split the largest mixed-responsibility runtime and dashboard modules
 - reduce direct storage/bootstrap calls outside the canonical startup path
 - make orchestration/task lifecycle more explicit and shared across surfaces
+- extend the new provider-role routing beyond helper/teacher flows into more of the slow-lane synthesis paths
 - keep public/operator/web logic from bleeding into the runtime core

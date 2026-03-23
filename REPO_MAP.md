@@ -36,10 +36,11 @@ Core lane:
 2. `docs/SYSTEM_SPINE.md`
 3. `docs/CONTROL_PLANE.md`
 4. `core/runtime_backbone.py`
-5. `docs/PLATFORM_REFACTOR_PLAN.md`
-6. `docs/PROOF_PATH.md`
-7. `docs/STATUS.md`
-8. `CONTRIBUTING.md`
+5. `core/provider_routing.py`
+6. `docs/PLATFORM_REFACTOR_PLAN.md`
+7. `docs/PROOF_PATH.md`
+8. `docs/STATUS.md`
+9. `CONTRIBUTING.md`
 
 ## Package Maps
 
@@ -60,10 +61,12 @@ Core lane:
 ## Current Agent Runtime Spine
 
 - `apps/nulla_agent.py`: still the main runtime composition root
+- `core/provider_routing.py`: role-aware provider routing for local drone lanes vs higher-tier synthesis lanes
 - `core/agent_runtime/fast_path_facade.py`: agent-facing fast-path wrapper facade
 - `core/agent_runtime/hive_topic_facade.py`: agent-facing Hive topic/create/followup wrapper facade
 - `core/agent_runtime/builder_facade.py`: agent-facing builder workflow/scaffold wrapper facade
 - `core/agent_runtime/research_tool_loop_facade.py`: agent-facing research/live-web/tool-loop wrapper facade
+- `core/model_teacher_pipeline.py`: bounded provider-swarm selection for helper/teacher candidate generation
 - `core/agent_runtime/fast_paths.py`: live shortcut logic for smalltalk, utility time/date, and fresh-info routing
 
 ## What Lives At Root On Purpose

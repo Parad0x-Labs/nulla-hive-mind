@@ -29,7 +29,8 @@
       },
       "metadata": {
         "runtime_family": "openai_compatible",
-        "deployment_class": "local"
+        "deployment_class": "local",
+        "orchestration_role": "drone"
       },
       "enabled": false
     },
@@ -64,7 +65,8 @@
       },
       "metadata": {
         "runtime_family": "openai_compatible",
-        "deployment_class": "cloud"
+        "deployment_class": "cloud",
+        "orchestration_role": "queen"
       },
       "enabled": false
     },

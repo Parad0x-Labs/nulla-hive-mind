@@ -47,6 +47,7 @@ These are the current blast-radius centers. Split these before inventing more la
 - materially improved but still active: `core/public_hive_bridge.py`, `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/agent_runtime/hive_topics.py`, `core/agent_runtime/fast_paths.py`
 - still the next serious targets: `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/public_hive_bridge.py`, `core/agent_runtime/hive_topics.py`, `core/agent_runtime/fast_paths.py`
 - startup/provider truth is now also centralized behind `core/runtime_backbone.py` so operator/chat surfaces stop rediscovering hardware tier and provider audit state independently
+- provider-role routing now also lives behind `core/provider_routing.py`, and the helper/teacher lane can run a bounded local-first drone swarm before selecting a winner
 
 ## Keep / Split / Rewrite / Quarantine
 
@@ -259,6 +260,7 @@ Status on trunk:
 - Hive topic/create/followup wrapper glue now also lives behind `core/agent_runtime/hive_topic_facade.py`, so `apps/nulla_agent.py` no longer carries that delegation slab locally
 - builder workflow/scaffold wrapper glue now also lives behind `core/agent_runtime/builder_facade.py`, so `apps/nulla_agent.py` no longer carries that delegation slab locally
 - research/live-web/tool-loop wrapper glue now also lives behind `core/agent_runtime/research_tool_loop_facade.py`, so `apps/nulla_agent.py` no longer carries that delegation slab locally
+- provider swarm/routing glue for the helper lane now also lives behind `core/provider_routing.py` and `core/model_teacher_pipeline.py`, so provider-role decisions stop leaking into callers
 - the file is still too large, but the old doc numbers are no longer true
 
 Target packages:
