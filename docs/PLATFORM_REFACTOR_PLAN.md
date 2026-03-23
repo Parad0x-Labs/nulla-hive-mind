@@ -28,7 +28,7 @@ The biggest files on the current trunk are:
 | File | Lines | Current reality |
 |------|-------|-----------------|
 | `apps/nulla_agent.py` | 5632 | still the main runtime monolith and the largest remaining blast-radius center |
-| `core/dashboard/workstation.py` | 4693 | the workstation dashboard rendering slab is now the real dashboard hotspot |
+| `core/dashboard/workstation_render.py` | 4646 | the workstation dashboard document/rendering slab is now the real dashboard hotspot |
 | `core/agent_runtime/hive_topics.py` | 2038 | Hive topic creation/update/delete logic is still too concentrated |
 | `core/nullabook_feed_page.py` | 1627 | public worklog/feed surface is still too broad |
 | `core/brain_hive_service.py` | 1353 | service boundary exists, but it still owns too much dashboard-facing behavior |
@@ -44,8 +44,8 @@ These are the current blast-radius centers. Split these before inventing more la
 ## Current Phase Status
 
 - completed enough to stop pretending they are still untouched: `core/local_operator_actions.py`, `core/control_plane_workspace.py`, `apps/brain_hive_watch_server.py`, `apps/nulla_daemon.py`, `apps/nulla_api_server.py`, `apps/meet_and_greet_server.py`, `core/brain_hive_dashboard.py`, `core/persistent_memory.py`
-- materially improved but still active: `core/public_hive_bridge.py`, `apps/nulla_agent.py`, `core/dashboard/workstation.py`, `core/agent_runtime/hive_topics.py`, `core/agent_runtime/fast_paths.py`
-- still the next serious targets: `apps/nulla_agent.py`, `core/dashboard/workstation.py`, `core/public_hive_bridge.py`, `core/agent_runtime/hive_topics.py`, `core/agent_runtime/fast_paths.py`
+- materially improved but still active: `core/public_hive_bridge.py`, `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/agent_runtime/hive_topics.py`, `core/agent_runtime/fast_paths.py`
+- still the next serious targets: `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/public_hive_bridge.py`, `core/agent_runtime/hive_topics.py`, `core/agent_runtime/fast_paths.py`
 - startup/provider truth is now also centralized behind `core/runtime_backbone.py` so operator/chat surfaces stop rediscovering hardware tier and provider audit state independently
 
 ## Keep / Split / Rewrite / Quarantine
@@ -62,7 +62,7 @@ Split next:
 
 - `core/brain_hive_dashboard.py`
 - `apps/nulla_agent.py`
-- `core/dashboard/workstation.py`
+- `core/dashboard/workstation_render.py`
 - `core/agent_runtime/hive_topics.py`
 - `core/agent_runtime/fast_paths.py`
 - `core/tool_intent_executor.py`
@@ -72,7 +72,7 @@ Rewrite selectively:
 
 - `apps/nulla_agent.py` into clearer orchestration and runtime service seams
 - `core/public_hive_bridge.py` into explicit public-hive workflow and policy services
-- `core/dashboard/workstation.py` into query/view-model/render slices instead of one presentation slab
+- `core/dashboard/workstation_render.py` into query/view-model/render slices instead of one presentation slab
 
 Quarantine in narrative and architecture priority:
 
@@ -313,11 +313,13 @@ Status on trunk:
 - `apps/nulla_api_server.py` and `apps/meet_and_greet_server.py` are already thin facades
 - `core/brain_hive_dashboard.py` is down to 156 lines and now fronts `core/dashboard/`
 - `core/dashboard/render.py` is down to 346 lines and now routes public vs workstation rendering
-- the real dashboard hotspot is now `core/dashboard/workstation.py` at 4693 lines
+- `core/dashboard/workstation.py` is down to 30 lines and now only assembles workstation state + document helpers
+- `core/dashboard/workstation_state.py` is the extracted workstation initial-state builder at 48 lines
+- the real dashboard hotspot is now `core/dashboard/workstation_render.py` at 4646 lines
 
 Split next:
 
-- `core/dashboard/workstation.py` -> `queries.py`, `view_models.py`, `templates.py`, `render_sections.py`
+- `core/dashboard/workstation_render.py` -> `queries.py`, `view_models.py`, `templates.py`, `render_sections.py`
 - `apps/brain_hive_watch_server.py` -> `core/web/watch/routes_public.py`, `routes_topic.py`, `cache.py`, `tls.py`, `responses.py`
 - keep `apps/nulla_api_server.py` and `apps/meet_and_greet_server.py` thin; do not re-bloat the facades
 

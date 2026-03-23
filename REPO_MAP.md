@@ -53,7 +53,9 @@ Core lane:
 
 - `core/brain_hive_dashboard.py`: stable dashboard facade
 - `core/dashboard/render.py`: public-vs-workstation render router
-- `core/dashboard/workstation.py`: current workstation rendering hotspot
+- `core/dashboard/workstation.py`: thin workstation facade
+- `core/dashboard/workstation_state.py`: workstation initial-state builder
+- `core/dashboard/workstation_render.py`: current workstation rendering hotspot
 
 ## What Lives At Root On Purpose
 
