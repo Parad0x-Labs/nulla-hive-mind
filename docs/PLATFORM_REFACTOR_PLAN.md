@@ -28,7 +28,7 @@ The biggest files on the current trunk are:
 | File | Lines | Current reality |
 |------|-------|-----------------|
 | `core/dashboard/workstation_render.py` | 4646 | the workstation dashboard document/rendering slab is now the biggest remaining hotspot |
-| `apps/nulla_agent.py` | 3486 | still the main runtime composition root and a top remaining blast-radius center |
+| `apps/nulla_agent.py` | 3012 | still the main runtime composition root, but materially thinner after the chat-surface wording extraction |
 | `core/agent_runtime/hive_topics.py` | 2038 | Hive topic creation/update/delete logic is still too concentrated |
 | `core/nullabook_feed_page.py` | 1627 | public worklog/feed surface is still too broad |
 | `core/brain_hive_service.py` | 1353 | service boundary exists, but it still owns too much dashboard-facing behavior |
@@ -48,6 +48,7 @@ These are the current blast-radius centers. Split these before inventing more la
 - still the next serious targets: `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/public_hive_bridge.py`, `core/agent_runtime/hive_topics.py`, `core/agent_runtime/fast_paths.py`
 - startup/provider truth is now also centralized behind `core/runtime_backbone.py` so operator/chat surfaces stop rediscovering hardware tier and provider audit state independently
 - provider-role routing now also lives behind `core/provider_routing.py`, and both the helper/teacher lane and the main model execution router now honor bounded drone/queen provider roles without broad caller rewiring
+- chat-surface wording, observation shaping, and Hive truth narration now also live behind `core/agent_runtime/chat_surface.py`, so `apps/nulla_agent.py` no longer owns that slab directly
 
 ## Keep / Split / Rewrite / Quarantine
 
@@ -255,12 +256,13 @@ pytest -q \
 Status on trunk:
 
 - this phase is actively in progress, not hypothetical
-- `apps/nulla_agent.py` is down to 3486 lines from the older 11k+ state
+- `apps/nulla_agent.py` is down to 3012 lines from the older 11k+ state
 - extracted runtime seams now include checkpoints, fast paths, response shaping, presence, builder support/controller, NullaBook, memory runtime, orchestrator helpers, Hive runtime/topics/followups, and turn dispatch/frontdoor/reasoning
 - fast-path wrapper glue now lives behind `core/agent_runtime/fast_path_facade.py`, so `apps/nulla_agent.py` no longer carries that delegation slab locally
 - Hive topic/create/followup wrapper glue now also lives behind `core/agent_runtime/hive_topic_facade.py`, so `apps/nulla_agent.py` no longer carries that delegation slab locally
 - builder workflow/scaffold wrapper glue now also lives behind `core/agent_runtime/builder_facade.py`, so `apps/nulla_agent.py` no longer carries that delegation slab locally
 - research/live-web/tool-loop wrapper glue now also lives behind `core/agent_runtime/research_tool_loop_facade.py`, so `apps/nulla_agent.py` no longer carries that delegation slab locally
+- chat-surface wording/observation/Hive truth glue now also lives behind `core/agent_runtime/chat_surface.py`, so `apps/nulla_agent.py` no longer carries that 800-line surface-shaping slab locally
 - provider swarm/routing glue for the helper lane now also lives behind `core/provider_routing.py` and `core/model_teacher_pipeline.py`, so provider-role decisions stop leaking into callers
 - the file is still too large, but the old doc numbers are no longer true
 

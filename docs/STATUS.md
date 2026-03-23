@@ -16,22 +16,24 @@ The current `main` checkpoint materially improved ten areas:
    Built packages now include the runtime roots they actually import, the install/bootstrap path uses real module entrypoints instead of brittle layout assumptions, and Docker/compose health semantics now line up with the documented `/healthz` surface.
 5. **Research and tool-loop boundaries**
    Live web lookup, adaptive research, curiosity evidence, and the research tool loop are no longer welded into the `apps/nulla_agent.py` root. The runtime still has large hotspots, but this lane is now behind a clearer facade.
-6. **Memory and public-Hive modularity**
+6. **Chat-surface wording boundaries**
+   Chat-surface wording, observation shaping, and Hive truth narration are no longer welded into the `apps/nulla_agent.py` root either. That lane now lives behind `core/agent_runtime/chat_surface.py`, which cuts the agent composition root down again and keeps user-surface wording changes more local.
+7. **Memory and public-Hive modularity**
    Persistent memory is now behind a thin facade over `core/memory/`, and public-Hive write workflows are split behind `core/public_hive/` instead of staying trapped in broad mixed modules.
-7. **Hive task lifecycle and public-write integrity**
+8. **Hive task lifecycle and public-write integrity**
    Long `Task:` / `Goal:` prompts, preview/confirm flow, moderation, review/reward, write grants, and public write protections have deeper regression coverage and less stale-state leakage.
-8. **Public web and proof-path clarity**
+9. **Public web and proof-path clarity**
    Public top-level routes now resolve as `Worklog`, `Tasks`, `Operators`, `Proof`, `Coordination`, and `Status`; stale public route language and placeholder plumbing were reduced; and the repo/docs now expose a clearer one-system proof path.
-9. **Security and key-storage posture**
+10. **Security and key-storage posture**
    The signer lane now supports keyring-backed storage with cleaner fallback/rotation hygiene, and the repo’s public/docs hygiene checks explicitly guard against path leaks and key artifact regressions.
-10. **Regression and acceptance gates**
+11. **Regression and acceptance gates**
    The repo now carries a sharded local full-suite path, clean-wheel smoke/install validation, GitHub CI, and the fast LLM acceptance gate as enforced truth surfaces instead of relying on a source checkout alone.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1240 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1245 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -56,7 +58,7 @@ Current test gate on this checkpoint:
 | **Proof-of-useful-work** | **Works** | Glory scores, receipts, evidence-based grading, and partial-result paths are present. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. |
 | **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection, built-wheel smoke coverage, and aligned `/healthz` startup checks. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1240 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1245 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist. Not yet proven at scale over internet. |
 | **DHT routing** | **Partial** | Code exists. Not hardened as public routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
@@ -90,8 +92,8 @@ Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1240 passed, 13 skipped, 12 xfailed, 16 xpassed` |
-| Passing | 1240 |
+| Full suite result | `1245 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Passing | 1245 |
 | Skipped | 13 |
 | Expected failures (xfail) | 12 |
 | Unexpected passes (xpass) | 16 |

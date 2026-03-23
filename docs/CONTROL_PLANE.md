@@ -104,6 +104,7 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 - keep the main model execution router behind `core/memory_first_router.py` so chat/research synthesis can honor provider roles without leaking provider-selection policy into callers
 - keep memory behind the `core.persistent_memory` facade and `core/memory/` internals
 - keep chat/date/live-info fast-path wrappers behind `core/agent_runtime/fast_path_facade.py` and the real shortcut logic inside `core/agent_runtime/fast_paths.py`
+- keep chat-surface wording, observation shaping, and Hive truth narration behind `core/agent_runtime/chat_surface.py` so user-facing wording changes stay local
 - keep Hive topic/create/followup wrappers behind `core/agent_runtime/hive_topic_facade.py` and the real topic workflow logic inside `core/agent_runtime/hive_topics.py` and `core/agent_runtime/hive_followups.py`
 - keep builder workflow/scaffold wrappers behind `core/agent_runtime/builder_facade.py` and the real builder logic inside `core/agent_runtime/builder/`
 - keep research/live-web/tool-loop wrappers behind `core/agent_runtime/research_tool_loop_facade.py` and the real tool execution contracts behind `core/tool_intent_executor.py`
