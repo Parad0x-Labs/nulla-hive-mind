@@ -7,13 +7,12 @@ from adapters.base_adapter import ModelRequest
 from core import audit_logger, policy_engine
 from core.cache_freshness_policy import default_ttl_seconds, freshness_score, should_revalidate
 from core.candidate_knowledge_lane import build_task_hash, get_exact_candidate, record_candidate_output
-from core.model_failover import select_with_failover
-from core.model_health import record_provider_failure, record_provider_success
+from core.model_health import circuit_is_open, record_provider_failure, record_provider_success
 from core.model_registry import ModelRegistry
-from core.model_selection_policy import ModelSelectionRequest
 from core.model_trust import output_trust_score
 from core.output_validator import validate_provider_output
 from core.prompt_normalizer import normalize_prompt
+from core.provider_routing import ProviderRole, rank_provider_candidates
 from core.task_router import model_execution_profile
 
 _STRUCTURED_OUTPUT_MODES = {"json_object", "action_plan", "tool_intent", "summary_block"}
@@ -130,6 +129,7 @@ class MemoryFirstRouter:
             task_kind=task_kind,
             output_mode=output_mode,
             allow_paid_fallback=bool(profile.get("allow_paid_fallback", False)),
+            provider_role=_provider_role_for_request(profile.get("provider_role")),
             surface=surface,
             source_context=source_context,
         )
@@ -161,6 +161,7 @@ class MemoryFirstRouter:
             task_kind="tool_intent",
             output_mode="tool_intent",
             allow_paid_fallback=False,
+            provider_role="drone",
             surface=surface,
             source_context=source_context,
         )
@@ -177,30 +178,42 @@ class MemoryFirstRouter:
         task_kind: str,
         output_mode: str,
         allow_paid_fallback: bool,
+        provider_role: ProviderRole,
         surface: str,
         source_context: dict[str, Any] | None,
     ) -> ModelExecutionDecision:
-        selection_request = ModelSelectionRequest(
+        resolved_allow_paid = bool(allow_paid_fallback) and not policy_engine.local_only_mode()
+        ranked_manifests = rank_provider_candidates(
+            self.registry,
             task_kind=task_kind,
             output_mode=output_mode,
-            preferred_source_types=["http", "local_path", "subprocess"],
-            allow_paid_fallback=bool(allow_paid_fallback) and not policy_engine.local_only_mode(),
+            role=provider_role,
+            allow_paid_fallback=resolved_allow_paid,
+            swarm_size=4,
             min_trust=0.45,
         )
         attempted: list[str] = []
         failover_used = False
 
-        while True:
-            decision = select_with_failover(self.registry, selection_request, attempted_provider_ids=attempted)
-            manifest = decision.selected
-            if not manifest:
-                return ModelExecutionDecision(
-                    source="no_provider_available",
-                    task_hash=task_hash,
-                    used_model=False,
-                    failover_used=failover_used,
-                    details={"attempted": decision.attempted_provider_ids, "reason": decision.reason},
-                )
+        if not ranked_manifests:
+            return ModelExecutionDecision(
+                source="no_provider_available",
+                task_hash=task_hash,
+                used_model=False,
+                failover_used=failover_used,
+                details={
+                    "attempted": attempted,
+                    "reason": "no_ranked_provider",
+                    "provider_role": provider_role,
+                    "ranked_candidates": [],
+                },
+            )
+
+        for manifest in ranked_manifests:
+            if circuit_is_open(manifest.provider_id):
+                attempted.append(manifest.provider_id)
+                failover_used = True
+                continue
 
             adapter = self.registry.build_adapter(manifest)
             health = adapter.health_check()
@@ -337,8 +350,27 @@ class MemoryFirstRouter:
                 candidate_id=candidate_id,
                 failover_used=failover_used,
                 validation_state="valid" if validation.ok else "contract_failed",
-                details={"warnings": validation.warnings, "contract_error": validation.error},
+                details={
+                    "warnings": validation.warnings,
+                    "contract_error": validation.error,
+                    "provider_role": provider_role,
+                    "ranked_candidates": [entry.provider_id for entry in ranked_manifests],
+                    "attempted": attempted,
+                },
             )
+
+        return ModelExecutionDecision(
+            source="no_provider_available",
+            task_hash=task_hash,
+            used_model=False,
+            failover_used=failover_used,
+            details={
+                "attempted": attempted,
+                "reason": "all_ranked_providers_failed",
+                "provider_role": provider_role,
+                "ranked_candidates": [entry.provider_id for entry in ranked_manifests],
+            },
+        )
 
 
 def _memory_is_good_enough(context_result: Any, classification: dict[str, Any]) -> bool:
@@ -366,3 +398,10 @@ def _force_model_on_chat_surface(
         return True
     source_surface = str((source_context or {}).get("surface", "") or "").strip().lower()
     return source_surface in _CHAT_TRUTH_SURFACES
+
+
+def _provider_role_for_request(role: object) -> ProviderRole:
+    candidate = str(role or "auto").strip().lower()
+    if candidate in {"drone", "queen"}:
+        return candidate
+    return "auto"

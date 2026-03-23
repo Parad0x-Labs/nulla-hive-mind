@@ -848,23 +848,23 @@ def model_execution_profile(
     planner_style_requested: bool = False,
 ) -> dict[str, Any]:
     mapping = {
-        "dependency_resolution": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": True},
-        "debugging": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": True},
-        "config": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": False},
-        "security_hardening": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": True},
-        "system_design": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": True},
-        "integration_orchestration": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": True},
-        "research": {"task_kind": "summarization", "output_mode": "summary_block", "allow_paid_fallback": True},
-        "file_inspection": {"task_kind": "summarization", "output_mode": "summary_block", "allow_paid_fallback": False},
-        "shell_guidance": {"task_kind": "summarization", "output_mode": "summary_block", "allow_paid_fallback": False},
-        "unknown": {"task_kind": "normalization_assist", "output_mode": "summary_block", "allow_paid_fallback": False},
-        "chat_conversation": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False},
-        "chat_research": {"task_kind": "summarization", "output_mode": "plain_text", "allow_paid_fallback": True},
-        "general_advisory": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False},
-        "business_advisory": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False},
-        "food_nutrition": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False},
-        "relationship_advisory": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False},
-        "creative_ideation": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False},
+        "dependency_resolution": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": True, "provider_role": "queen"},
+        "debugging": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": True, "provider_role": "queen"},
+        "config": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": False, "provider_role": "auto"},
+        "security_hardening": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": True, "provider_role": "queen"},
+        "system_design": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": True, "provider_role": "queen"},
+        "integration_orchestration": {"task_kind": "action_plan", "output_mode": "action_plan", "allow_paid_fallback": True, "provider_role": "queen"},
+        "research": {"task_kind": "summarization", "output_mode": "summary_block", "allow_paid_fallback": True, "provider_role": "queen"},
+        "file_inspection": {"task_kind": "summarization", "output_mode": "summary_block", "allow_paid_fallback": False, "provider_role": "auto"},
+        "shell_guidance": {"task_kind": "summarization", "output_mode": "summary_block", "allow_paid_fallback": False, "provider_role": "auto"},
+        "unknown": {"task_kind": "normalization_assist", "output_mode": "summary_block", "allow_paid_fallback": False, "provider_role": "auto"},
+        "chat_conversation": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False, "provider_role": "auto"},
+        "chat_research": {"task_kind": "summarization", "output_mode": "plain_text", "allow_paid_fallback": True, "provider_role": "queen"},
+        "general_advisory": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False, "provider_role": "auto"},
+        "business_advisory": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False, "provider_role": "auto"},
+        "food_nutrition": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False, "provider_role": "auto"},
+        "relationship_advisory": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False, "provider_role": "auto"},
+        "creative_ideation": {"task_kind": "normalization_assist", "output_mode": "plain_text", "allow_paid_fallback": False, "provider_role": "auto"},
     }
     normalized_task_class = str(task_class or "unknown").strip().lower() or "unknown"
     base_profile = dict(mapping.get(normalized_task_class, mapping["unknown"]))
@@ -875,11 +875,13 @@ def model_execution_profile(
                 "task_kind": "action_plan",
                 "output_mode": "action_plan",
                 "allow_paid_fallback": bool(base_profile.get("allow_paid_fallback", False)),
+                "provider_role": str(base_profile.get("provider_role", "auto") or "auto"),
             }
         return {
             "task_kind": "normalization_assist",
             "output_mode": "plain_text",
             "allow_paid_fallback": bool(base_profile.get("allow_paid_fallback", False)),
+            "provider_role": str(base_profile.get("provider_role", "auto") or "auto"),
         }
 
     return base_profile

@@ -39,8 +39,8 @@ class ProviderFailoverTests(unittest.TestCase):
             quality_flags=[],
         )
 
-    def _register_providers(self) -> None:
-        self.registry.register_manifest(
+    def _register_providers(self):
+        local_manifest = self.registry.register_manifest(
             {
                 "provider_name": "local-qwen-http",
                 "model_name": "qwen-local",
@@ -55,9 +55,10 @@ class ProviderFailoverTests(unittest.TestCase):
                 "capabilities": ["summarize", "structured_json"],
                 "runtime_config": {"base_url": "http://127.0.0.1:1234"},
                 "enabled": True,
+                "metadata": {"orchestration_role": "drone"},
             }
         )
-        self.registry.register_manifest(
+        cloud_manifest = self.registry.register_manifest(
             {
                 "provider_name": "cloud-fallback-http",
                 "model_name": "cloud",
@@ -72,11 +73,13 @@ class ProviderFailoverTests(unittest.TestCase):
                 "capabilities": ["summarize", "structured_json", "long_context"],
                 "runtime_config": {"base_url": "https://provider.example", "api_key_env": "NULLA_CLOUD_API_KEY"},
                 "enabled": True,
+                "metadata": {"orchestration_role": "queen"},
             }
         )
+        return local_manifest, cloud_manifest
 
     def test_local_provider_failure_triggers_safe_failover(self) -> None:
-        self._register_providers()
+        local_manifest, cloud_manifest = self._register_providers()
         task = create_task_record("design swarm topology with resilient regions")
         classification = classify(task.task_summary, context=self.interpretation.as_context())
         context_result = TieredContextResult(
@@ -108,7 +111,10 @@ class ProviderFailoverTests(unittest.TestCase):
                 return local_adapter
             return cloud_adapter
 
-        with mock.patch.object(self.registry, "build_adapter", side_effect=build_adapter):
+        with mock.patch(
+            "core.memory_first_router.rank_provider_candidates",
+            return_value=[local_manifest, cloud_manifest],
+        ) as rank_candidates, mock.patch.object(self.registry, "build_adapter", side_effect=build_adapter):
             result = self.router.resolve(
                 task=task,
                 classification=classification,
@@ -120,7 +126,9 @@ class ProviderFailoverTests(unittest.TestCase):
         self.assertTrue(result.used_model)
         self.assertTrue(result.failover_used)
         self.assertEqual(result.provider_name, "cloud-fallback-http")
+        self.assertEqual(rank_candidates.call_args.kwargs["role"], "queen")
         self.assertEqual(get_provider_health("local-qwen-http:qwen-local").consecutive_failures, 1)
+        self.assertEqual(result.details["provider_role"], "queen")
 
     def test_circuit_breaker_trips_and_recovers_after_cooldown(self) -> None:
         state = record_provider_failure(

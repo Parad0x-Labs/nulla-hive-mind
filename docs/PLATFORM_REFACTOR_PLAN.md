@@ -47,7 +47,7 @@ These are the current blast-radius centers. Split these before inventing more la
 - materially improved but still active: `core/public_hive_bridge.py`, `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/agent_runtime/hive_topics.py`, `core/agent_runtime/fast_paths.py`
 - still the next serious targets: `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/public_hive_bridge.py`, `core/agent_runtime/hive_topics.py`, `core/agent_runtime/fast_paths.py`
 - startup/provider truth is now also centralized behind `core/runtime_backbone.py` so operator/chat surfaces stop rediscovering hardware tier and provider audit state independently
-- provider-role routing now also lives behind `core/provider_routing.py`, and the helper/teacher lane can run a bounded local-first drone swarm before selecting a winner
+- provider-role routing now also lives behind `core/provider_routing.py`, and both the helper/teacher lane and the main model execution router now honor bounded drone/queen provider roles without broad caller rewiring
 
 ## Keep / Split / Rewrite / Quarantine
 
@@ -194,6 +194,7 @@ Status on trunk:
 - `core/public_hive/writes.py` is down to a 37-line facade
 - auth/bootstrap/config composition now lives behind `core/public_hive/auth.py`
 - topic/profile/read/privacy boundaries are still the remaining cleanup surface
+- the main slow-lane model router now reads `provider_role` from `core/task_router.py` and resolves ranked candidates through `core/provider_routing.py` inside `core/memory_first_router.py`
 
 Create:
 

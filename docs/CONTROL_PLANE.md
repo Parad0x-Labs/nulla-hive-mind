@@ -32,7 +32,7 @@ Normal startup stages:
 6. configure logging if the surface needs it
 7. resolve backend/model selection if the surface needs it
 8. surface hardware tier + provider audit truth through the runtime backbone when the surface needs it
-9. route role-aware provider selection through `core/provider_routing.py` when the surface wants explicit drone/queen behavior
+9. route role-aware provider selection through `core/provider_routing.py` when the surface needs explicit drone/queen behavior
 9. launch the selected surface
 
 That context is defined in `core/runtime_context.py`.
@@ -101,6 +101,7 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 - route operator/chat startup truth through `build_runtime_backbone(...)`
 - keep tool metadata behind explicit contracts
 - keep provider-role routing behind `core/provider_routing.py` so local drones and higher-tier synthesis providers stay selectable without rewiring callers
+- keep the main model execution router behind `core/memory_first_router.py` so chat/research synthesis can honor provider roles without leaking provider-selection policy into callers
 - keep memory behind the `core.persistent_memory` facade and `core/memory/` internals
 - keep chat/date/live-info fast-path wrappers behind `core/agent_runtime/fast_path_facade.py` and the real shortcut logic inside `core/agent_runtime/fast_paths.py`
 - keep Hive topic/create/followup wrappers behind `core/agent_runtime/hive_topic_facade.py` and the real topic workflow logic inside `core/agent_runtime/hive_topics.py` and `core/agent_runtime/hive_followups.py`
@@ -117,5 +118,5 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 - split the largest mixed-responsibility runtime and dashboard modules
 - reduce direct storage/bootstrap calls outside the canonical startup path
 - make orchestration/task lifecycle more explicit and shared across surfaces
-- extend the new provider-role routing beyond helper/teacher flows into more of the slow-lane synthesis paths
+- keep the remaining agent orchestration and workstation rendering hotspots shrinking behind the new provider-role and runtime facades
 - keep public/operator/web logic from bleeding into the runtime core

@@ -320,6 +320,96 @@ class ModelExecutionLayerTests(unittest.TestCase):
         self.assertEqual(decision.validation_state, "valid")
         self.assertEqual(decision.structured_output["summary"], "Grounded summary")
 
+    def test_role_aware_summary_execution_prefers_queen_lane(self) -> None:
+        local_manifest = self.registry.register_manifest(
+            {
+                "provider_name": "local-qwen-http",
+                "model_name": "qwen-local",
+                "source_type": "http",
+                "adapter_type": "local_qwen_provider",
+                "license_name": "Apache-2.0",
+                "license_reference": "https://www.apache.org/licenses/LICENSE-2.0",
+                "weight_location": "user-supplied",
+                "weights_bundled": False,
+                "redistribution_allowed": True,
+                "runtime_dependency": "openai-compatible-local-runtime",
+                "capabilities": ["summarize", "structured_json"],
+                "runtime_config": {"base_url": "http://127.0.0.1:1234"},
+                "enabled": True,
+                "metadata": {"orchestration_role": "drone"},
+            }
+        )
+        queen_manifest = self.registry.register_manifest(
+            {
+                "provider_name": "kimi-cloud-http",
+                "model_name": "kimi-latest",
+                "source_type": "http",
+                "adapter_type": "openai_compatible",
+                "license_name": "Provider",
+                "license_reference": "user-managed",
+                "weight_location": "external",
+                "weights_bundled": False,
+                "redistribution_allowed": False,
+                "runtime_dependency": "remote-openai-compatible-provider",
+                "capabilities": ["summarize", "structured_json", "long_context"],
+                "runtime_config": {"base_url": "https://kimi.example", "api_key_env": "KIMI_API_KEY"},
+                "enabled": True,
+                "metadata": {"orchestration_role": "queen"},
+            }
+        )
+        task, interpretation, classification, context_result = self._chat_turn_inputs("research the latest qwen release notes")
+        local_adapter = mock.Mock()
+        local_adapter.health_check.return_value = {"ok": True}
+        local_adapter.estimate_cost_class.return_value = "free_local"
+        local_adapter.get_license_metadata.return_value = {}
+        local_adapter.run_structured_task.return_value = ModelResponse(
+            output_text='{"summary":"Local answer","bullets":["Use local lane"]}',
+            confidence=0.61,
+        )
+        queen_adapter = mock.Mock()
+        queen_adapter.health_check.return_value = {"ok": True}
+        queen_adapter.estimate_cost_class.return_value = "paid_cloud"
+        queen_adapter.get_license_metadata.return_value = {}
+        queen_adapter.run_structured_task.return_value = ModelResponse(
+            output_text='{"summary":"Queen answer","bullets":["Use stronger synthesis"]}',
+            confidence=0.84,
+        )
+
+        def _build_adapter(manifest):
+            if manifest.provider_id == queen_manifest.provider_id:
+                return queen_adapter
+            if manifest.provider_id == local_manifest.provider_id:
+                return local_adapter
+            raise AssertionError(f"unexpected provider {manifest.provider_id}")
+
+        with mock.patch(
+            "core.memory_first_router.model_execution_profile",
+            return_value={
+                "task_kind": "summarization",
+                "output_mode": "summary_block",
+                "allow_paid_fallback": True,
+                "provider_role": "queen",
+            },
+        ), mock.patch(
+            "core.memory_first_router.rank_provider_candidates",
+            return_value=[queen_manifest, local_manifest],
+        ) as rank_candidates, mock.patch.object(self.registry, "build_adapter", side_effect=_build_adapter):
+            decision = self.router.resolve(
+                task=task,
+                classification=classification,
+                interpretation=interpretation,
+                context_result=context_result,
+                persona=self.persona,
+                force_model=True,
+                surface="openclaw",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertEqual(rank_candidates.call_args.kwargs["role"], "queen")
+        self.assertEqual(decision.provider_name, queen_manifest.provider_name)
+        self.assertEqual(decision.details["provider_role"], "queen")
+        self.assertEqual(decision.details["ranked_candidates"][0], queen_manifest.provider_id)
+
     def test_ungrounded_live_lookup_summary_is_downgraded(self) -> None:
         task = create_task_record("check hive mind tasks")
         classification = {"task_class": "research", "confidence_hint": 0.72}
@@ -344,7 +434,7 @@ class ModelExecutionLayerTests(unittest.TestCase):
         self.assertLessEqual(plan.confidence, 0.38)
 
     def test_tool_intent_uses_structured_model_path(self) -> None:
-        self.registry.register_manifest(
+        local_manifest = self.registry.register_manifest(
             {
                 "provider_name": "local-qwen-http",
                 "model_name": "qwen-local",
@@ -389,7 +479,10 @@ class ModelExecutionLayerTests(unittest.TestCase):
             confidence=0.78,
         )
 
-        with mock.patch.object(self.registry, "build_adapter", return_value=adapter):
+        with mock.patch(
+            "core.memory_first_router.rank_provider_candidates",
+            return_value=[local_manifest],
+        ) as rank_candidates, mock.patch.object(self.registry, "build_adapter", return_value=adapter):
             decision = self.router.resolve_tool_intent(
                 task=task,
                 classification=classification,
@@ -402,8 +495,10 @@ class ModelExecutionLayerTests(unittest.TestCase):
 
         adapter.run_structured_task.assert_called_once()
         adapter.run_text_task.assert_not_called()
+        self.assertEqual(rank_candidates.call_args.kwargs["role"], "drone")
         self.assertEqual(decision.validation_state, "valid")
         self.assertEqual(decision.structured_output["intent"], "web.search")
+        self.assertEqual(decision.details["provider_role"], "drone")
 
 
 if __name__ == "__main__":

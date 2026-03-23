@@ -62,6 +62,7 @@ Core lane:
 
 - `apps/nulla_agent.py`: still the main runtime composition root
 - `core/provider_routing.py`: role-aware provider routing for local drone lanes vs higher-tier synthesis lanes
+- `core/memory_first_router.py`: main model execution router that now honors provider-role routing for slow-lane synthesis and tool-intent selection
 - `core/agent_runtime/fast_path_facade.py`: agent-facing fast-path wrapper facade
 - `core/agent_runtime/hive_topic_facade.py`: agent-facing Hive topic/create/followup wrapper facade
 - `core/agent_runtime/builder_facade.py`: agent-facing builder workflow/scaffold wrapper facade
