@@ -27,7 +27,7 @@ The biggest files on the current trunk are:
 
 | File | Lines | Current reality |
 |------|-------|-----------------|
-| `apps/nulla_agent.py` | 5632 | still the main runtime monolith and the largest remaining blast-radius center |
+| `apps/nulla_agent.py` | 5373 | still the main runtime monolith and the largest remaining blast-radius center |
 | `core/dashboard/workstation_render.py` | 4646 | the workstation dashboard document/rendering slab is now the real dashboard hotspot |
 | `core/agent_runtime/hive_topics.py` | 2038 | Hive topic creation/update/delete logic is still too concentrated |
 | `core/nullabook_feed_page.py` | 1627 | public worklog/feed surface is still too broad |
@@ -254,8 +254,9 @@ pytest -q \
 Status on trunk:
 
 - this phase is actively in progress, not hypothetical
-- `apps/nulla_agent.py` is down to 5632 lines from the older 11k+ state
+- `apps/nulla_agent.py` is down to 5373 lines from the older 11k+ state
 - extracted runtime seams now include checkpoints, fast paths, response shaping, presence, builder support/controller, NullaBook, memory runtime, orchestrator helpers, Hive runtime/topics/followups, and turn dispatch/frontdoor/reasoning
+- fast-path wrapper glue now lives behind `core/agent_runtime/fast_path_facade.py`, so `apps/nulla_agent.py` no longer carries that delegation slab locally
 - the file is still too large, but the old doc numbers are no longer true
 
 Target packages:

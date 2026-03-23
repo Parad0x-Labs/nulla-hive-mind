@@ -17,7 +17,6 @@ from typing import Any
 
 from core import audit_logger, feedback_engine, policy_engine
 from core.agent_runtime import checkpoints as agent_checkpoint_runtime
-from core.agent_runtime import fast_paths as agent_fast_paths
 from core.agent_runtime import hive_followups as agent_hive_followups
 from core.agent_runtime import hive_runtime as agent_hive_runtime
 from core.agent_runtime import hive_topics as agent_hive_topics
@@ -32,6 +31,7 @@ from core.agent_runtime import turn_reasoning as agent_turn_reasoning
 from core.agent_runtime.builder import controller as agent_builder_controller
 from core.agent_runtime.builder import scaffolds as agent_builder_scaffolds
 from core.agent_runtime.builder import support as agent_builder_support
+from core.agent_runtime.fast_path_facade import FastPathFacadeMixin
 from core.autonomous_topic_research import pick_autonomous_research_signal, research_topic_from_signal
 from core.candidate_knowledge_lane import get_candidate_by_id
 from core.channel_actions import dispatch_outbound_post_intent, parse_channel_post_intent
@@ -170,7 +170,7 @@ class ChatTurnResult:
     allow_planner_style: bool = False
 
 
-class NullaAgent:
+class NullaAgent(FastPathFacadeMixin):
     ResponseClass = ResponseClass
     ChatTurnResult = ChatTurnResult
 
@@ -1860,265 +1860,6 @@ class NullaAgent:
 
     def _resume_request_key(self, text: str) -> str:
         return " ".join(str(text or "").strip().lower().split())
-
-    def _smalltalk_fast_path(self, normalized_input: str, *, source_surface: str, session_id: str) -> str | None:
-        return agent_fast_paths.smalltalk_fast_path(
-            self,
-            normalized_input,
-            source_surface=source_surface,
-            session_id=session_id,
-        )
-
-    def _evaluative_conversation_fast_path(self, normalized_input: str, *, source_surface: str) -> str | None:
-        return agent_fast_paths.evaluative_conversation_fast_path(
-            self,
-            normalized_input,
-            source_surface=source_surface,
-        )
-
-    def _looks_like_evaluative_turn(self, normalized_input: str) -> bool:
-        return agent_fast_paths.looks_like_evaluative_turn(normalized_input)
-
-    def _date_time_fast_path(
-        self,
-        normalized_input: str,
-        *,
-        source_surface: str,
-        session_id: str = "",
-        source_context: dict[str, object] | None = None,
-    ) -> str | None:
-        return agent_fast_paths.date_time_fast_path(
-            self,
-            normalized_input,
-            source_surface=source_surface,
-            session_id=session_id,
-            source_context=source_context,
-        )
-
-    def _direct_math_fast_path(self, normalized_input: str, *, source_surface: str) -> str | None:
-        return agent_fast_paths.direct_math_fast_path(
-            normalized_input,
-            source_surface=source_surface,
-        )
-
-    def _extract_utility_timezone(self, cleaned_input: str) -> tuple[str, str]:
-        return agent_fast_paths.extract_utility_timezone(cleaned_input)
-
-    def _utility_now_for_timezone(self, timezone_name: str) -> datetime:
-        return agent_fast_paths.utility_now_for_timezone(timezone_name)
-
-    def _recent_utility_context(
-        self,
-        *,
-        session_id: str,
-        source_context: dict[str, object] | None,
-    ) -> dict[str, str]:
-        return agent_fast_paths.recent_utility_context(
-            session_id=session_id,
-            source_context=source_context,
-        )
-
-    def _contextual_time_followup_timezone(
-        self,
-        cleaned_input: str,
-        *,
-        recent_utility_context: dict[str, str] | None,
-    ) -> tuple[str, str]:
-        return agent_fast_paths.contextual_time_followup_timezone(
-            cleaned_input,
-            recent_utility_context=recent_utility_context,
-        )
-
-    def _looks_like_malformed_time_followup(
-        self,
-        cleaned_input: str,
-        *,
-        effective_timezone: str,
-        recent_utility_context: dict[str, str] | None,
-    ) -> bool:
-        return agent_fast_paths.looks_like_malformed_time_followup(
-            cleaned_input,
-            effective_timezone=effective_timezone,
-            recent_utility_context=recent_utility_context,
-        )
-
-    def _ui_command_fast_path(self, normalized_input: str, *, source_surface: str) -> str | None:
-        return agent_fast_paths.ui_command_fast_path(
-            normalized_input,
-            source_surface=source_surface,
-        )
-
-    def _startup_sequence_fast_path(self, user_input: str) -> str | None:
-        return agent_fast_paths.startup_sequence_fast_path(user_input)
-
-    def _credit_status_fast_path(self, normalized_input: str, *, source_surface: str) -> str | None:
-        return agent_fast_paths.credit_status_fast_path(
-            self,
-            normalized_input,
-            source_surface=source_surface,
-        )
-
-    def _maybe_handle_companion_memory_fast_path(
-        self,
-        user_input: str,
-        *,
-        session_id: str,
-        source_context: dict[str, object] | None,
-    ) -> dict[str, Any] | None:
-        return agent_fast_paths.maybe_handle_companion_memory_fast_path(
-            self,
-            user_input,
-            session_id=session_id,
-            source_context=source_context,
-        )
-
-    @staticmethod
-    def _looks_like_companion_continuation_request(lowered: str) -> bool:
-        return agent_fast_paths.looks_like_companion_continuation_request(lowered)
-
-    @staticmethod
-    def _looks_like_personalized_plan_request(lowered: str) -> bool:
-        return agent_fast_paths.looks_like_personalized_plan_request(lowered)
-
-    def _render_companion_continuation_response(
-        self,
-        *,
-        session_id: str,
-        query_text: str,
-        profile: dict[str, Any],
-    ) -> str:
-        return agent_fast_paths.render_companion_continuation_response(
-            session_id=session_id,
-            query_text=query_text,
-            profile=profile,
-        )
-
-    def _render_personalized_plan_response(self, *, query_text: str, profile: dict[str, Any]) -> str:
-        return agent_fast_paths.render_personalized_plan_response(
-            query_text=query_text,
-            profile=profile,
-        )
-
-    @staticmethod
-    def _dense_memory_next_step(*, project_label: str, summary_text: str, preferred_stack: str) -> str:
-        return agent_fast_paths.dense_memory_next_step(
-            project_label=project_label,
-            summary_text=summary_text,
-            preferred_stack=preferred_stack,
-        )
-
-    def _maybe_handle_live_info_fast_path(
-        self,
-        user_input: str,
-        *,
-        session_id: str,
-        source_context: dict[str, object] | None,
-        interpretation: Any,
-    ) -> dict[str, Any] | None:
-        return agent_fast_paths.maybe_handle_live_info_fast_path(
-            self,
-            user_input,
-            session_id=session_id,
-            source_context=source_context,
-            interpretation=interpretation,
-            response_class=ResponseClass.UTILITY_ANSWER,
-        )
-
-    def _live_info_search_notes(
-        self,
-        *,
-        query: str,
-        live_mode: str,
-        interpretation: Any,
-    ) -> list[dict[str, Any]]:
-        return agent_fast_paths.live_info_search_notes(
-            self,
-            query=query,
-            live_mode=live_mode,
-            interpretation=interpretation,
-        )
-
-    @staticmethod
-    def _try_live_quote_note(query: str) -> dict[str, Any] | None:
-        return agent_fast_paths.try_live_quote_note(query)
-
-    def _live_info_mode(self, text: str, *, interpretation: Any) -> str:
-        return agent_fast_paths.live_info_mode(
-            self,
-            text,
-            interpretation=interpretation,
-        )
-
-    def _requires_ultra_fresh_insufficient_evidence(self, text: str) -> bool:
-        return agent_fast_paths.requires_ultra_fresh_insufficient_evidence(text)
-
-    def _ultra_fresh_insufficient_evidence_response(self, *, query: str) -> str:
-        return agent_fast_paths.ultra_fresh_insufficient_evidence_response(query=query)
-
-    def _looks_like_builder_request(self, lowered: str) -> bool:
-        return agent_fast_paths.looks_like_builder_request(lowered)
-
-    def _looks_like_generic_workspace_bootstrap_request(self, lowered: str) -> bool:
-        return agent_fast_paths.looks_like_generic_workspace_bootstrap_request(
-            self,
-            lowered,
-        )
-
-    def _looks_like_explicit_workspace_file_request(self, query_text: str) -> bool:
-        return agent_fast_paths.looks_like_explicit_workspace_file_request(query_text)
-
-    def _looks_like_exact_workspace_readback_request(self, query_text: str) -> bool:
-        return agent_fast_paths.looks_like_exact_workspace_readback_request(query_text)
-
-    def _extract_requested_builder_root(self, query_text: str) -> str:
-        return agent_fast_paths.extract_requested_builder_root(query_text)
-
-    def _normalize_live_info_query(self, text: str, *, mode: str) -> str:
-        return agent_fast_paths.normalize_live_info_query(
-            text,
-            mode=mode,
-        )
-
-    def _render_live_info_response(self, *, query: str, notes: list[dict[str, Any]], mode: str) -> str:
-        return agent_fast_paths.render_live_info_response(
-            query=query,
-            notes=notes,
-            mode=mode,
-        )
-
-    def _first_live_quote(self, notes: list[dict[str, Any]]) -> Any | None:
-        return agent_fast_paths.first_live_quote(notes)
-
-    def _render_weather_response(self, *, query: str, notes: list[dict[str, Any]]) -> str:
-        return agent_fast_paths.render_weather_response(
-            query=query,
-            notes=notes,
-        )
-
-    def _render_news_response(self, *, query: str, notes: list[dict[str, Any]]) -> str:
-        return agent_fast_paths.render_news_response(
-            query=query,
-            notes=notes,
-        )
-
-    def _unresolved_price_lookup_response(self, *, query: str, notes: list[dict[str, Any]], mode: str) -> str:
-        return agent_fast_paths.unresolved_price_lookup_response(
-            query=query,
-            notes=notes,
-            mode=mode,
-        )
-
-    def _notes_include_grounded_price_signal(self, notes: list[dict[str, Any]]) -> bool:
-        return agent_fast_paths.notes_include_grounded_price_signal(notes)
-
-    def _extract_price_lookup_subject(self, query: str) -> str:
-        return agent_fast_paths.extract_price_lookup_subject(query)
-
-    def _live_info_failure_text(self, *, query: str, mode: str) -> str:
-        return agent_fast_paths.live_info_failure_text(
-            query=query,
-            mode=mode,
-        )
 
     _nullabook_pending: dict[str, dict[str, str]]
 
