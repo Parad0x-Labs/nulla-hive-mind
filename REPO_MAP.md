@@ -49,6 +49,12 @@ Core lane:
 - `tools/README.md`: explicit tool-contract boundary
 - `network/README.md`: transport/auth/routing boundary
 
+## Current Dashboard Spine
+
+- `core/brain_hive_dashboard.py`: stable dashboard facade
+- `core/dashboard/render.py`: public-vs-workstation render router
+- `core/dashboard/workstation.py`: current workstation rendering hotspot
+
 ## What Lives At Root On Purpose
 
 - Cross-platform launchers such as `Start_NULLA.*`, `Talk_To_NULLA.*`, and `OpenClaw_NULLA.*`

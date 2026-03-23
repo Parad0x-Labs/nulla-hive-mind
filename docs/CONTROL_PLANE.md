@@ -85,7 +85,7 @@ This surface is meant to answer:
 These are real risks and should be split before wider expansion:
 
 - `apps/nulla_agent.py`
-- `core/dashboard/render.py`
+- `core/dashboard/workstation.py`
 - `core/agent_runtime/hive_topics.py`
 - `core/agent_runtime/fast_paths.py`
 - `core/public_hive_bridge.py`
@@ -100,6 +100,7 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 - route operator/chat startup truth through `build_runtime_backbone(...)`
 - keep tool metadata behind explicit contracts
 - keep memory behind the `core.persistent_memory` facade and `core/memory/` internals
+- keep dashboard routing behind `core.brain_hive_dashboard` and `core/dashboard/render.py`, with workstation rendering isolated in `core/dashboard/workstation.py`
 - keep public-hive auth/bootstrap behind `core.public_hive_bridge` facades and `core/public_hive/auth.py` internals
 - keep feature/store/network-specific logic behind package boundaries
 - prefer adapters/facades over direct rewrites of giant mixed modules
