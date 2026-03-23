@@ -100,6 +100,7 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 - route operator/chat startup truth through `build_runtime_backbone(...)`
 - keep tool metadata behind explicit contracts
 - keep memory behind the `core.persistent_memory` facade and `core/memory/` internals
+- keep public-hive auth/bootstrap behind `core.public_hive_bridge` facades and `core/public_hive/auth.py` internals
 - keep feature/store/network-specific logic behind package boundaries
 - prefer adapters/facades over direct rewrites of giant mixed modules
 

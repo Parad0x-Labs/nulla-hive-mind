@@ -34,7 +34,7 @@ The biggest files on the current trunk are:
 | `core/brain_hive_service.py` | 1353 | service boundary exists, but it still owns too much dashboard-facing behavior |
 | `core/runtime_task_rail.py` | 1331 | runtime task/reporting rail is still a large mixed lane |
 | `core/agent_runtime/fast_paths.py` | 1314 | too many chat/runtime shortcuts still live together |
-| `core/public_hive_bridge.py` | 786 | much smaller, but still the main public-hive facade and still too mixed |
+| `core/public_hive_bridge.py` | 774 | much smaller, but still the main public-hive facade and still too mixed |
 | `core/persistent_memory.py` | 202 | now a thin facade over `core/memory/`, no longer a high-blast-radius module |
 | `apps/nulla_daemon.py` | 420 | now a thin facade over `core/daemon/`, no longer a top-tier monolith |
 
@@ -188,10 +188,11 @@ pytest -q \
 
 Status on trunk:
 
-- `core/public_hive/__init__.py`, `bootstrap.py`, `client.py`, `config.py`, `truth.py`, `topic_writes.py`, `publication.py`, and `moderation.py` are already live
-- `core/public_hive_bridge.py` is down to 786 lines
+- `core/public_hive/__init__.py`, `auth.py`, `bootstrap.py`, `client.py`, `config.py`, `truth.py`, `topic_writes.py`, `publication.py`, and `moderation.py` are already live
+- `core/public_hive_bridge.py` is down to 774 lines
 - `core/public_hive/writes.py` is down to a 37-line facade
-- topic/profile/read/bootstrap/privacy boundaries are still the remaining cleanup surface
+- auth/bootstrap/config composition now lives behind `core/public_hive/auth.py`
+- topic/profile/read/privacy boundaries are still the remaining cleanup surface
 
 Create:
 
