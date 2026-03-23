@@ -89,9 +89,11 @@ These are real risks and should be split before wider expansion:
 - `core/dashboard/workstation_client.py`
 - `core/dashboard/workstation_render.py`
 - `core/agent_runtime/hive_topic_create.py`
-- `core/agent_runtime/fast_paths.py`
-- `core/public_hive_bridge.py`
 - `core/nullabook_feed_page.py`
+- `core/brain_hive_service.py`
+- `core/runtime_task_rail.py`
+- `core/public_hive_bridge.py`
+- `core/agent_runtime/hive_research_followup.py`
 
 They currently mix too many responsibilities and force wide retest surfaces after relatively small changes.
 
@@ -104,7 +106,9 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 - keep provider-role routing behind `core/provider_routing.py` so local drones and higher-tier synthesis providers stay selectable without rewiring callers
 - keep the main model execution router behind `core/memory_first_router.py` so chat/research synthesis can honor provider roles without leaking provider-selection policy into callers
 - keep memory behind the `core.persistent_memory` facade and `core/memory/` internals
-- keep chat/date/live-info fast-path wrappers behind `core/agent_runtime/fast_path_facade.py` and the real shortcut logic inside `core/agent_runtime/fast_paths.py`
+- keep agent-facing fast-path wrappers behind `core/agent_runtime/fast_path_facade.py`
+- keep utility/date/smalltalk shortcut logic inside `core/agent_runtime/fast_paths.py`
+- keep fresh-info, weather, news, and price lookup routing inside `core/agent_runtime/fast_live_info.py`
 - keep chat-surface wording, observation shaping, and Hive truth narration behind `core/agent_runtime/chat_surface.py` so user-facing wording changes stay local
 - keep credit commands, capability/help truth, credit status rendering, and fast/action result shaping behind `core/agent_runtime/fast_command_surface.py` so command-surface changes stay local
 - keep Hive topic/create/followup wrappers behind `core/agent_runtime/hive_topic_facade.py`, with create/confirm/public-safe copy logic in `core/agent_runtime/hive_topic_create.py`, mutation/update/delete logic in `core/agent_runtime/hive_topics.py`, research/status continuation logic in `core/agent_runtime/hive_research_followup.py`, and frontdoor/review/cleanup glue in `core/agent_runtime/hive_followups.py`
@@ -121,5 +125,5 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 - split the largest mixed-responsibility runtime and dashboard modules
 - reduce direct storage/bootstrap calls outside the canonical startup path
 - make orchestration/task lifecycle more explicit and shared across surfaces
-- keep the remaining agent orchestration, workstation browser runtime, and Hive create/research-followup hotspots shrinking behind the new provider-role and runtime facades
+- keep the remaining agent orchestration, workstation browser runtime, public-feed, and Hive create/research-followup hotspots shrinking behind the new provider-role and runtime facades
 - keep public/operator/web logic from bleeding into the runtime core

@@ -74,7 +74,8 @@ Core lane:
 - `core/agent_runtime/builder_facade.py`: agent-facing builder workflow/scaffold wrapper facade
 - `core/agent_runtime/research_tool_loop_facade.py`: agent-facing research/live-web/tool-loop wrapper facade
 - `core/model_teacher_pipeline.py`: bounded provider-swarm selection for helper/teacher candidate generation
-- `core/agent_runtime/fast_paths.py`: live shortcut logic for smalltalk, utility time/date, and fresh-info routing
+- `core/agent_runtime/fast_paths.py`: utility time/date and smalltalk/general shortcut logic after the live-info extraction
+- `core/agent_runtime/fast_live_info.py`: fresh-info, weather, news, and price lookup shortcut logic moved out of the old fast-path slab
 
 ## What Lives At Root On Purpose
 

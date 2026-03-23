@@ -31,12 +31,13 @@ The biggest files on the current trunk are:
 | `core/dashboard/workstation_client.py` | 2673 | the workstation browser runtime is now isolated, but it is still a large dashboard hotspot |
 | `core/dashboard/workstation_render.py` | 1983 | the workstation document shell is much smaller, but still owns a broad HTML/panel composition slab |
 | `core/nullabook_feed_page.py` | 1627 | public worklog/feed surface is still too broad |
-| `core/agent_runtime/hive_topic_create.py` | 1607 | Hive topic create/confirm/public-brief shaping is now isolated, but still a large workflow hotspot |
+| `core/agent_runtime/hive_topic_create.py` | 1605 | Hive topic create/confirm/public-brief shaping is now isolated, but still a large workflow hotspot |
 | `core/brain_hive_service.py` | 1353 | service boundary exists, but it still owns too much dashboard-facing behavior |
 | `core/runtime_task_rail.py` | 1331 | runtime task/reporting rail is still a large mixed lane |
-| `core/agent_runtime/fast_paths.py` | 1314 | too many chat/runtime shortcuts still live together |
+| `core/agent_runtime/fast_paths.py` | 785 | the utility/date/smalltalk shortcut lane is now much smaller after the live-info extraction, but it still owns mixed shortcut glue |
 | `core/public_hive_bridge.py` | 774 | much smaller, but still the main public-hive facade and still too mixed |
 | `core/agent_runtime/hive_research_followup.py` | 739 | Hive research/status followup logic is now isolated, but it still owns a broad continuation slab |
+| `core/agent_runtime/fast_live_info.py` | 553 | fresh-info, weather, news, and price lookup routing are now isolated, but still concentrated in one shortcut slab |
 | `core/agent_runtime/hive_topics.py` | 473 | mutation/update/delete lane is now local, but it still owns the remaining topic mutation surface |
 | `core/dashboard/render.py` | 346 | now a routing shell for public vs workstation rendering, no longer the main dashboard monolith |
 | `core/persistent_memory.py` | 202 | now a thin facade over `core/memory/`, no longer a high-blast-radius module |
@@ -47,12 +48,13 @@ These are the current blast-radius centers. Split these before inventing more la
 ## Current Phase Status
 
 - completed enough to stop pretending they are still untouched: `core/local_operator_actions.py`, `core/control_plane_workspace.py`, `apps/brain_hive_watch_server.py`, `apps/nulla_daemon.py`, `apps/nulla_api_server.py`, `apps/meet_and_greet_server.py`, `core/brain_hive_dashboard.py`, `core/persistent_memory.py`
-- materially improved but still active: `core/public_hive_bridge.py`, `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/dashboard/workstation_client.py`, `core/agent_runtime/hive_topic_create.py`, `core/agent_runtime/hive_research_followup.py`, `core/agent_runtime/fast_paths.py`
-- still the next serious targets: `apps/nulla_agent.py`, `core/dashboard/workstation_client.py`, `core/agent_runtime/hive_topic_create.py`, `core/agent_runtime/fast_paths.py`, `core/public_hive_bridge.py`, `core/agent_runtime/hive_research_followup.py`, `core/nullabook_feed_page.py`
+- materially improved but still active: `core/public_hive_bridge.py`, `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/dashboard/workstation_client.py`, `core/agent_runtime/hive_topic_create.py`, `core/agent_runtime/hive_research_followup.py`, `core/agent_runtime/fast_paths.py`, `core/agent_runtime/fast_live_info.py`
+- still the next serious targets: `apps/nulla_agent.py`, `core/dashboard/workstation_client.py`, `core/agent_runtime/hive_topic_create.py`, `core/nullabook_feed_page.py`, `core/brain_hive_service.py`, `core/runtime_task_rail.py`, `core/public_hive_bridge.py`, `core/agent_runtime/hive_research_followup.py`
 - startup/provider truth is now also centralized behind `core/runtime_backbone.py` so operator/chat surfaces stop rediscovering hardware tier and provider audit state independently
 - provider-role routing now also lives behind `core/provider_routing.py`, and both the helper/teacher lane and the main model execution router now honor bounded drone/queen provider roles without broad caller rewiring
 - chat-surface wording, observation shaping, and Hive truth narration now also live behind `core/agent_runtime/chat_surface.py`, so `apps/nulla_agent.py` no longer owns that slab directly
 - credit commands, capability/help truth, credit status rendering, and fast/action result shaping now also live behind `core/agent_runtime/fast_command_surface.py`, so `apps/nulla_agent.py` no longer owns that slab directly
+- live-info, weather, news, and price lookup routing now also live behind `core/agent_runtime/fast_live_info.py`, leaving `core/agent_runtime/fast_paths.py` as the smaller utility/date/smalltalk shortcut lane
 - Hive topic create/confirm/public-safe copy shaping now also lives behind `core/agent_runtime/hive_topic_create.py`, leaving `core/agent_runtime/hive_topics.py` as the smaller mutation/update/delete lane
 - Hive research/status continuation logic now also lives behind `core/agent_runtime/hive_research_followup.py`, leaving `core/agent_runtime/hive_followups.py` as the smaller frontdoor/review/cleanup lane
 
@@ -73,9 +75,10 @@ Split next:
 - `core/dashboard/workstation_render.py`
 - `core/agent_runtime/hive_topic_create.py`
 - `core/agent_runtime/hive_research_followup.py`
-- `core/agent_runtime/fast_paths.py`
-- `core/public_hive_bridge.py`
 - `core/nullabook_feed_page.py`
+- `core/brain_hive_service.py`
+- `core/runtime_task_rail.py`
+- `core/public_hive_bridge.py`
 
 Rewrite selectively:
 
@@ -85,6 +88,9 @@ Rewrite selectively:
 - `core/dashboard/workstation_render.py` into document-shell/render-section slices instead of one presentation slab
 - `core/agent_runtime/hive_topic_create.py` into create-draft parsing, confirmation state, and public-safe copy services instead of one workflow slab
 - `core/agent_runtime/hive_research_followup.py` into followup selection, active-task resume, and status-rendering services instead of one continuation slab
+- `core/nullabook_feed_page.py` into feed query, card shaping, and route/render services instead of one public-surface slab
+- `core/brain_hive_service.py` into service contracts, read models, and workflow adapters instead of one dashboard-facing service slab
+- `core/runtime_task_rail.py` into task models, event shaping, and report rendering instead of one mixed task/report lane
 
 Quarantine in narrative and architecture priority:
 

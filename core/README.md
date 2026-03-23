@@ -47,10 +47,11 @@ These files currently carry too much blast radius:
 - `dashboard/workstation_client.py`
 - `dashboard/workstation_render.py`
 - `agent_runtime/hive_topic_create.py`
-- `agent_runtime/fast_paths.py`
+- `agent_runtime/hive_research_followup.py`
 - `public_hive_bridge.py`
 - `nullabook_feed_page.py`
 - `brain_hive_service.py`
+- `runtime_task_rail.py`
 
 Do not casually grow them.
 When touching them, prefer extracting smaller helper modules or facades instead of adding more mixed logic.

@@ -4,7 +4,7 @@ Brutally honest status matrix. Updated 2026-03-23.
 
 ## Latest Stabilization Checkpoint
 
-The current `main` checkpoint materially improved fifteen areas:
+The current `main` checkpoint materially improved sixteen areas:
 
 1. **Provider routing and model orchestration**
    NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
@@ -36,12 +36,14 @@ The current `main` checkpoint materially improved fifteen areas:
    Hive topic create/confirm/public-safe copy shaping is no longer welded into `core/agent_runtime/hive_topics.py`. The create lane now lives behind `core/agent_runtime/hive_topic_create.py`, leaving `core/agent_runtime/hive_topics.py` as the smaller mutation/update/delete lane.
 15. **Hive followup workflow split**
    Hive research/status continuation logic is no longer welded into `core/agent_runtime/hive_followups.py`. That lane now lives behind `core/agent_runtime/hive_research_followup.py`, leaving `core/agent_runtime/hive_followups.py` as the smaller frontdoor/review/cleanup surface.
+16. **Live-info fast-path split**
+   Fresh-info, weather, news, and price lookup routing are no longer welded into `core/agent_runtime/fast_paths.py`. That lane now lives behind `core/agent_runtime/fast_live_info.py`, leaving `core/agent_runtime/fast_paths.py` as the smaller utility/date/smalltalk shortcut lane.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1254 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1256 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -66,7 +68,7 @@ Current test gate on this checkpoint:
 | **Proof-of-useful-work** | **Works** | Glory scores, receipts, evidence-based grading, and partial-result paths are present. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. |
 | **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection, built-wheel smoke coverage, and aligned `/healthz` startup checks. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1254 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1256 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist. Not yet proven at scale over internet. |
 | **DHT routing** | **Partial** | Code exists. Not hardened as public routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
@@ -100,12 +102,12 @@ Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1254 passed, 13 skipped, 12 xfailed, 16 xpassed` |
-| Passing | 1254 |
+| Full suite result | `1256 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Passing | 1256 |
 | Skipped | 13 |
 | Expected failures (xfail) | 12 |
 | Unexpected passes (xpass) | 16 |
-| Test files | 200 |
+| Test files | 203 |
 
 Run `python3 ops/pytest_shards.py --workers 6 --label <label> --pytest-arg=--tb=short` to reproduce the current full local gate.
 
@@ -154,7 +156,7 @@ What doesn't work yet:
 
 The immediate priorities are:
 
-1. Finish the alpha-to-beta hardening on the biggest remaining hotspots: `apps/nulla_agent.py`, `core/dashboard/workstation_client.py`, `core/agent_runtime/hive_topic_create.py`, `core/agent_runtime/fast_paths.py`, `core/public_hive_bridge.py`, and `core/agent_runtime/hive_research_followup.py`
+1. Finish the alpha-to-beta hardening on the biggest remaining hotspots: `apps/nulla_agent.py`, `core/dashboard/workstation_client.py`, `core/agent_runtime/hive_topic_create.py`, `core/nullabook_feed_page.py`, `core/brain_hive_service.py`, `core/runtime_task_rail.py`, `core/public_hive_bridge.py`, `core/agent_runtime/hive_research_followup.py`, and `core/agent_runtime/fast_live_info.py`
 2. Companion behavior that feels less template-driven and more genuinely adaptive
 3. WAN transport hardening and public multi-node proof
 4. Better observability, readiness, and storage realism beyond the local-only default
