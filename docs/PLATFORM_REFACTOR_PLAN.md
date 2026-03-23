@@ -31,7 +31,8 @@ The biggest files on the current trunk are:
 | `core/dashboard/workstation_client.py` | 2673 | the workstation browser runtime is now isolated, but it is still a large dashboard hotspot |
 | `core/dashboard/workstation_render.py` | 1983 | the workstation document shell is much smaller, but still owns a broad HTML/panel composition slab |
 | `core/nullabook_feed_page.py` | 1627 | public worklog/feed surface is still too broad |
-| `core/agent_runtime/hive_topic_create.py` | 1605 | Hive topic create/confirm/public-brief shaping is now isolated, but still a large workflow hotspot |
+| `core/agent_runtime/hive_topic_create.py` | 1265 | Hive topic create/confirm workflow is now smaller after the public-copy extraction, but it is still a large workflow hotspot |
+| `core/agent_runtime/hive_topic_public_copy.py` | 359 | public-safe copy shaping, transcript rejection, and tag normalization are now isolated behind a dedicated policy/helper lane |
 | `core/brain_hive_service.py` | 1353 | service boundary exists, but it still owns too much dashboard-facing behavior |
 | `core/runtime_task_rail.py` | 1331 | runtime task/reporting rail is still a large mixed lane |
 | `core/agent_runtime/fast_paths.py` | 785 | the utility/date/smalltalk shortcut lane is now much smaller after the live-info extraction, but it still owns mixed shortcut glue |
@@ -56,7 +57,8 @@ These are the current blast-radius centers. Split these before inventing more la
 - credit commands, capability/help truth, credit status rendering, and fast/action result shaping now also live behind `core/agent_runtime/fast_command_surface.py`, so `apps/nulla_agent.py` no longer owns that slab directly
 - live-info, weather, news, and price lookup routing now also live behind `core/agent_runtime/fast_live_info.py`, leaving `core/agent_runtime/fast_paths.py` as the smaller utility/date/smalltalk shortcut lane
 - public presence heartbeat, idle commons cadence, and autonomous Hive research loops now also live behind `core/agent_runtime/presence.py`, so `apps/nulla_agent.py` no longer owns those background-runtime slabs directly
-- Hive topic create/confirm/public-safe copy shaping now also lives behind `core/agent_runtime/hive_topic_create.py`, leaving `core/agent_runtime/hive_topics.py` as the smaller mutation/update/delete lane
+- Hive topic create/confirm workflow now also lives behind `core/agent_runtime/hive_topic_create.py`, leaving `core/agent_runtime/hive_topics.py` as the smaller mutation/update/delete lane
+- public-safe copy shaping, transcript rejection, and tag normalization now also live behind `core/agent_runtime/hive_topic_public_copy.py`, so `core/agent_runtime/hive_topic_create.py` no longer owns that policy/helper slab directly
 - Hive research/status continuation logic now also lives behind `core/agent_runtime/hive_research_followup.py`, leaving `core/agent_runtime/hive_followups.py` as the smaller frontdoor/review/cleanup lane
 
 ## Keep / Split / Rewrite / Quarantine
@@ -75,6 +77,7 @@ Split next:
 - `core/dashboard/workstation_client.py`
 - `core/dashboard/workstation_render.py`
 - `core/agent_runtime/hive_topic_create.py`
+- `core/agent_runtime/hive_topic_public_copy.py`
 - `core/agent_runtime/hive_research_followup.py`
 - `core/nullabook_feed_page.py`
 - `core/brain_hive_service.py`
@@ -87,7 +90,8 @@ Rewrite selectively:
 - `core/public_hive_bridge.py` into explicit public-hive workflow and policy services
 - `core/dashboard/workstation_client.py` into browser-runtime/view-model/render-helper slices instead of one browser slab
 - `core/dashboard/workstation_render.py` into document-shell/render-section slices instead of one presentation slab
-- `core/agent_runtime/hive_topic_create.py` into create-draft parsing, confirmation state, and public-safe copy services instead of one workflow slab
+- `core/agent_runtime/hive_topic_create.py` into create-draft parsing and confirmation-state services instead of one workflow slab
+- keep public-safe copy policy inside `core/agent_runtime/hive_topic_public_copy.py`
 - `core/agent_runtime/hive_research_followup.py` into followup selection, active-task resume, and status-rendering services instead of one continuation slab
 - `core/nullabook_feed_page.py` into feed query, card shaping, and route/render services instead of one public-surface slab
 - `core/brain_hive_service.py` into service contracts, read models, and workflow adapters instead of one dashboard-facing service slab
@@ -274,7 +278,7 @@ pytest -q \
 Status on trunk:
 
 - this phase is actively in progress, not hypothetical
-- `apps/nulla_agent.py` is down to 2708 lines from the older 11k+ state
+- `apps/nulla_agent.py` is down to 2614 lines from the older 11k+ state
 - extracted runtime seams now include checkpoints, fast paths, response shaping, presence, builder support/controller, NullaBook, memory runtime, orchestrator helpers, Hive runtime/topics/create/followups, and turn dispatch/frontdoor/reasoning
 - fast-path wrapper glue now lives behind `core/agent_runtime/fast_path_facade.py`, so `apps/nulla_agent.py` no longer carries that delegation slab locally
 - Hive topic/create/followup wrapper glue now also lives behind `core/agent_runtime/hive_topic_facade.py`, so `apps/nulla_agent.py` no longer carries that delegation slab locally

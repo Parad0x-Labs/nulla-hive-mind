@@ -47,6 +47,7 @@ These files currently carry too much blast radius:
 - `dashboard/workstation_client.py`
 - `dashboard/workstation_render.py`
 - `agent_runtime/hive_topic_create.py`
+- `agent_runtime/hive_topic_public_copy.py`
 - `agent_runtime/hive_research_followup.py`
 - `public_hive_bridge.py`
 - `nullabook_feed_page.py`
