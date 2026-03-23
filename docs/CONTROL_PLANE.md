@@ -20,6 +20,7 @@ NULLA is one platform:
 ## Canonical Startup Sequence
 
 The shared startup path now lives in `core/runtime_bootstrap.py`.
+The shared startup-and-provider audit surface for operator/chat entrypoints now lives in `core/runtime_backbone.py`.
 
 Normal startup stages:
 
@@ -30,7 +31,8 @@ Normal startup stages:
 5. load policy and approval rules
 6. configure logging if the surface needs it
 7. resolve backend/model selection if the surface needs it
-8. launch the selected surface
+8. surface hardware tier + provider audit truth through the runtime backbone when the surface needs it
+9. launch the selected surface
 
 That context is defined in `core/runtime_context.py`.
 
@@ -95,6 +97,7 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 
 - keep entrypoints thin
 - route startup through `RuntimeContext` + `bootstrap_runtime_mode(...)`
+- route operator/chat startup truth through `build_runtime_backbone(...)`
 - keep tool metadata behind explicit contracts
 - keep memory behind the `core.persistent_memory` facade and `core/memory/` internals
 - keep feature/store/network-specific logic behind package boundaries

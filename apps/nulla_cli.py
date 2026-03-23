@@ -24,11 +24,10 @@ from core.identity_lifecycle import identity_lifecycle_snapshot
 from core.identity_manager import load_active_persona
 from core.local_worker_pool import resolve_local_worker_capacity
 from core.lora_training_pipeline import promote_adaptation_job, run_adaptation_job
-from core.model_registry import ModelRegistry
 from core.nulla_user_summary import build_user_summary, render_user_summary
 from core.release_channel import release_manifest_snapshot
+from core.runtime_backbone import build_provider_registry_snapshot, build_runtime_backbone
 from core.runtime_bootstrap import (
-    bootstrap_runtime_mode,
     bootstrap_storage_environment,
 )
 from core.runtime_context import build_runtime_context
@@ -53,7 +52,7 @@ def _bootstrap_cli_storage() -> None:
 def cmd_up() -> int:
     # 1. Boot the canonical runtime environment first.
     try:
-        boot = bootstrap_runtime_mode(
+        backbone = build_runtime_backbone(
             mode="cli_up",
             resolve_backend=True,
         )
@@ -62,8 +61,7 @@ def cmd_up() -> int:
         return 1
 
     # 2. Surface provider warnings after policy/bootstrap is loaded.
-    model_registry = ModelRegistry()
-    provider_warnings = model_registry.startup_warnings()
+    provider_warnings = list(backbone.provider_snapshot.warnings)
     if provider_warnings:
         print("Model provider warnings:")
         for warning in provider_warnings:
@@ -76,7 +74,7 @@ def cmd_up() -> int:
     peer_id = get_local_peer_id()
 
     # 5. Auto-detect backend
-    selection = boot.backend_selection
+    selection = backbone.boot.backend_selection
     if selection is None:
         print("Nulla could not start: no supported backend found.")
         print("Install at least one supported runtime: mlx, torch, or onnxruntime.")
@@ -160,8 +158,8 @@ def cmd_summary(json_mode: bool = False, limit: int = 5) -> int:
 
 def cmd_providers(json_mode: bool = False) -> int:
     _bootstrap_cli_storage()
-    registry = ModelRegistry()
-    rows = registry.provider_audit_rows()
+    snapshot = build_provider_registry_snapshot()
+    rows = list(snapshot.audit_rows)
     if json_mode:
         import json
 

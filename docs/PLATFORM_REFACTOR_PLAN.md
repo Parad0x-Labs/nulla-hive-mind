@@ -45,6 +45,7 @@ These are the current blast-radius centers. Split these before inventing more la
 - completed enough to stop pretending they are still untouched: `core/local_operator_actions.py`, `core/control_plane_workspace.py`, `apps/brain_hive_watch_server.py`, `apps/nulla_daemon.py`, `apps/nulla_api_server.py`, `apps/meet_and_greet_server.py`, `core/brain_hive_dashboard.py`, `core/persistent_memory.py`
 - materially improved but still active: `core/public_hive_bridge.py`, `apps/nulla_agent.py`, `core/dashboard/render.py`, `core/agent_runtime/hive_topics.py`, `core/agent_runtime/fast_paths.py`
 - still the next serious targets: `apps/nulla_agent.py`, `core/dashboard/render.py`, `core/public_hive_bridge.py`, `core/agent_runtime/hive_topics.py`, `core/agent_runtime/fast_paths.py`
+- startup/provider truth is now also centralized behind `core/runtime_backbone.py` so operator/chat surfaces stop rediscovering hardware tier and provider audit state independently
 
 ## Keep / Split / Rewrite / Quarantine
 

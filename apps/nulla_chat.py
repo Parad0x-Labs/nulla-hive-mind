@@ -4,14 +4,12 @@ import argparse
 
 from apps.nulla_agent import NullaAgent
 from core.compute_mode import ComputeModeDaemon
-from core.hardware_tier import probe_machine, select_qwen_tier, tier_summary
-from core.model_registry import ModelRegistry
 from core.onboarding import get_agent_display_name, is_first_boot, run_onboarding_interactive
-from core.runtime_bootstrap import bootstrap_runtime_mode
+from core.runtime_backbone import build_runtime_backbone
 
 
 def _bootstrap_agent(*, persona_id: str, device: str) -> NullaAgent:
-    boot = bootstrap_runtime_mode(
+    backbone = build_runtime_backbone(
         mode="chat",
         force_policy_reload=True,
         resolve_backend=True,
@@ -20,9 +18,9 @@ def _bootstrap_agent(*, persona_id: str, device: str) -> NullaAgent:
     if is_first_boot():
         run_onboarding_interactive()
 
-    probe = probe_machine()
-    tier = select_qwen_tier(probe)
-    hw_info = tier_summary(probe)
+    probe = backbone.local_model_profile.probe
+    tier = backbone.local_model_profile.tier
+    hw_info = backbone.local_model_profile.summary
     vram_part = f" ({hw_info['vram_gb']}GB VRAM)" if hw_info.get("vram_gb") else ""
     print(
         f"Hardware: {hw_info['accelerator']} | RAM {hw_info['ram_gb']}GB | "
@@ -38,14 +36,13 @@ def _bootstrap_agent(*, persona_id: str, device: str) -> NullaAgent:
         f"GPU mem fraction: {budget.gpu_memory_fraction:.0%}"
     )
 
-    model_registry = ModelRegistry()
-    provider_warnings = model_registry.startup_warnings()
+    provider_warnings = list(backbone.provider_snapshot.warnings)
     if provider_warnings:
         print("Model provider warnings:")
         for warning in provider_warnings:
             print(f" - {warning}")
 
-    selection = boot.backend_selection
+    selection = backbone.boot.backend_selection
     if selection is None:
         raise RuntimeError("Chat bootstrap did not resolve a backend selection.")
     if selection.backend_name == "remote_only":
