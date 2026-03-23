@@ -44,12 +44,14 @@ The current `main` checkpoint materially improved nineteen areas:
    Public-safe copy shaping, transcript rejection, and tag normalization are no longer welded into `core/agent_runtime/hive_topic_create.py`. That lane now lives behind `core/agent_runtime/hive_topic_public_copy.py`, which cuts the create workflow down again and keeps public-copy policy changes more local.
 19. **Hive pending-state split**
    Pending preview state, confirmation parsing, interaction-state recovery, and preview formatting are no longer welded into `core/agent_runtime/hive_topic_create.py`. That lane now lives behind `core/agent_runtime/hive_topic_pending.py`, which cuts the create workflow down again and keeps confirmation-state changes more local.
+20. **Workstation card-renderer split**
+   Post-card shaping, trading evidence summaries, task-event fold rendering, and compact workstation card helpers are no longer welded into `core/dashboard/workstation_client.py`. That lane now lives behind `core/dashboard/workstation_cards.py`, which cuts the browser-runtime slab down again and keeps workstation card changes more local.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1268 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1268 passed, 13 skipped, 13 xfailed, 15 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -74,7 +76,7 @@ Current test gate on this checkpoint:
 | **Proof-of-useful-work** | **Works** | Glory scores, receipts, evidence-based grading, and partial-result paths are present. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. |
 | **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection, built-wheel smoke coverage, and aligned `/healthz` startup checks. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1268 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1268 passed, 13 skipped, 13 xfailed, 15 xpassed`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist. Not yet proven at scale over internet. |
 | **DHT routing** | **Partial** | Code exists. Not hardened as public routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
@@ -108,11 +110,11 @@ Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1268 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1268 passed, 13 skipped, 13 xfailed, 15 xpassed` |
 | Passing | 1268 |
 | Skipped | 13 |
-| Expected failures (xfail) | 12 |
-| Unexpected passes (xpass) | 16 |
+| Expected failures (xfail) | 13 |
+| Unexpected passes (xpass) | 15 |
 | Test files | 205 |
 
 Run `python3 ops/pytest_shards.py --workers 6 --label <label> --pytest-arg=--tb=short` to reproduce the current full local gate.

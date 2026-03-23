@@ -28,7 +28,8 @@ The biggest files on the current trunk are:
 | File | Lines | Current reality |
 |------|-------|-----------------|
 | `apps/nulla_agent.py` | 2614 | still the main runtime composition root, but materially thinner after the fast-command, chat-surface, live-info, and presence/autonomy extractions |
-| `core/dashboard/workstation_client.py` | 2673 | the workstation browser runtime is now isolated, but it is still a large dashboard hotspot |
+| `core/dashboard/workstation_client.py` | 2383 | the workstation browser runtime is now isolated, and the card/fold renderer slab is now split out, but it is still a large dashboard hotspot |
+| `core/dashboard/workstation_cards.py` | 295 | workstation card/fold render helpers are now isolated behind a dedicated browser-render helper lane |
 | `core/dashboard/workstation_render.py` | 1983 | the workstation document shell is much smaller, but still owns a broad HTML/panel composition slab |
 | `core/nullabook_feed_page.py` | 1627 | public worklog/feed surface is still too broad |
 | `core/agent_runtime/hive_topic_create.py` | 869 | Hive topic create/publish workflow is now much smaller after the public-copy and pending-state extractions, but it is still a workflow hotspot |
@@ -62,6 +63,7 @@ These are the current blast-radius centers. Split these before inventing more la
 - public-safe copy shaping, transcript rejection, and tag normalization now also live behind `core/agent_runtime/hive_topic_public_copy.py`, so `core/agent_runtime/hive_topic_create.py` no longer owns that policy/helper slab directly
 - pending preview state, confirmation parsing, history recovery, and preview formatting now also live behind `core/agent_runtime/hive_topic_pending.py`, so `core/agent_runtime/hive_topic_create.py` no longer owns that interaction-state slab directly
 - Hive research/status continuation logic now also lives behind `core/agent_runtime/hive_research_followup.py`, leaving `core/agent_runtime/hive_followups.py` as the smaller frontdoor/review/cleanup lane
+- workstation card/fold rendering, post-card shaping, and trading-evidence summary helpers now also live behind `core/dashboard/workstation_cards.py`, so `core/dashboard/workstation_client.py` no longer owns that render-helper slab directly
 
 ## Keep / Split / Rewrite / Quarantine
 
@@ -78,6 +80,7 @@ Split next:
 - `apps/nulla_agent.py`
 - `core/dashboard/workstation_client.py`
 - `core/dashboard/workstation_render.py`
+- `core/dashboard/workstation_cards.py`
 - `core/agent_runtime/hive_topic_create.py`
 - `core/agent_runtime/hive_topic_pending.py`
 - `core/agent_runtime/hive_topic_public_copy.py`
@@ -92,6 +95,7 @@ Rewrite selectively:
 - `apps/nulla_agent.py` into clearer orchestration and runtime service seams
 - `core/public_hive_bridge.py` into explicit public-hive workflow and policy services
 - `core/dashboard/workstation_client.py` into browser-runtime/view-model/render-helper slices instead of one browser slab
+- keep shared card/fold render helpers inside `core/dashboard/workstation_cards.py`
 - `core/dashboard/workstation_render.py` into document-shell/render-section slices instead of one presentation slab
 - `core/agent_runtime/hive_topic_create.py` into create-draft parsing and publish services instead of one workflow slab
 - keep confirmation-state flow inside `core/agent_runtime/hive_topic_pending.py`
@@ -351,11 +355,13 @@ Status on trunk:
 - `core/dashboard/workstation.py` is down to 30 lines and now only assembles workstation state + document helpers
 - `core/dashboard/workstation_state.py` is the extracted workstation initial-state builder at 48 lines
 - `core/dashboard/workstation_render.py` is down to 1983 lines and now owns the workstation document shell instead of the whole browser runtime
-- `core/dashboard/workstation_client.py` now owns the extracted workstation browser runtime at 2673 lines
+- `core/dashboard/workstation_client.py` is down to 2383 lines and now owns the slimmer workstation browser runtime after the card/fold helper extraction
+- `core/dashboard/workstation_cards.py` now owns the extracted workstation card/fold renderer helpers at 295 lines
 
 Split next:
 
-- `core/dashboard/workstation_client.py` -> `browser_runtime.py`, `inspectors.py`, `overview_cards.py`, `nullabook_surface.py`
+- `core/dashboard/workstation_client.py` -> `browser_runtime.py`, `inspectors.py`, `nullabook_surface.py`
+- keep shared card/fold renderer helpers in `core/dashboard/workstation_cards.py`
 - `core/dashboard/workstation_render.py` -> `templates.py`, `render_sections.py`
 - `apps/brain_hive_watch_server.py` -> `core/web/watch/routes_public.py`, `routes_topic.py`, `cache.py`, `tls.py`, `responses.py`
 - keep `apps/nulla_api_server.py` and `apps/meet_and_greet_server.py` thin; do not re-bloat the facades

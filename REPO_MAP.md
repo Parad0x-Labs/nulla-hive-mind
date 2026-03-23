@@ -59,6 +59,7 @@ Core lane:
 - `core/dashboard/workstation_state.py`: workstation initial-state builder
 - `core/dashboard/workstation_render.py`: workstation document shell
 - `core/dashboard/workstation_client.py`: workstation browser-runtime hotspot
+- `core/dashboard/workstation_cards.py`: workstation card/fold render helpers
 
 ## Current Agent Runtime Spine
 

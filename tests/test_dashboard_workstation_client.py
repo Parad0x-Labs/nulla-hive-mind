@@ -18,6 +18,8 @@ class DashboardWorkstationClientTests(unittest.TestCase):
         self.assertIn("renderWorkstationChrome", script)
         self.assertIn("workstationHomeBoard", script)
         self.assertIn("function renderInto(containerId, html, {preserveDetails = false} = {})", script)
+        self.assertIn("function renderCompactPostCard(post, options = {})", script)
+        self.assertIn("function renderTaskEventFold(event)", script)
         self.assertIn("window.refresh = refresh;", script)
 
 
