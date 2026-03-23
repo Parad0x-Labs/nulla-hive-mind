@@ -33,7 +33,7 @@ Normal startup stages:
 7. resolve backend/model selection if the surface needs it
 8. surface hardware tier + provider audit truth through the runtime backbone when the surface needs it
 9. route role-aware provider selection through `core/provider_routing.py` when the surface needs explicit drone/queen behavior
-9. launch the selected surface
+10. launch the selected surface
 
 That context is defined in `core/runtime_context.py`.
 

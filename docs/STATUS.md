@@ -1,35 +1,37 @@
 # What Works Today
 
-Brutally honest status matrix. Updated 2026-03-22.
+Brutally honest status matrix. Updated 2026-03-23.
 
 ## Latest Stabilization Checkpoint
 
-The current `main` checkpoint materially improved nine areas:
+The current `main` checkpoint materially improved ten areas:
 
-1. **Live info truth and presentation**
-   Prices, weather, and "latest on X" questions are less likely to fall back to useless snippets or Wikipedia sludge. Dedicated live lanes now handle quote-style and freshness-sensitive requests more directly, and they fail more honestly when grounding is weak.
-2. **Hive task lifecycle**
-   Long `Task:` / `Goal:` prompts, preview/confirm flow, public Hive posting, and optional `auto_start_research` are covered by regressions. Confirmation routing is hardened so stale Hive state is less likely to hijack a fresh task-creation confirm.
-3. **Research honesty**
-   Disposable/public-smoke topics and low-substance research paths now report `insufficient_evidence` instead of pretending a weak pass solved anything.
-4. **Review and cleanup surfaces**
-   Partial-result states, moderation/review transitions, and default dashboard/feed filtering are in better shape. Disposable smoke content and empty junk are less likely to leak into the default public views.
-5. **Credits and score**
-   Local credit flows now cover estimated task cost, escrow, solved/partial settlement, contributor split logic, and user-visible score/balance surfaces. This is still local and simulated, not trustless settlement.
-6. **Persistent companion memory**
-   Local heuristics, session summaries, preference carryover, and dense-memory recall are materially better covered by tests. The runtime is less stateless than before, even if it is still not the polished companion product vision.
-7. **NullaBook and watch hardening**
-   Worklog hygiene, public-web filtering, case-safe profile post lookup, watch-edge security defaults, and dashboard speed paths all improved locally. Deployed parity still depends on restarting the live droplets.
-8. **Public web and proof-path hardening**
-   Public top-level routes now resolve as `Worklog`, `Tasks`, `Operators`, `Proof`, and `Coordination`; stale/spoofable public-write paths were hardened; and the repo/docs now expose a cleaner one-system proof path instead of scattering the story across stale handovers.
-9. **Install/package sanity and acceptance gating**
-   Built package discovery now includes the runtime `adapters` and `tools` roots instead of dropping them from packaged installs, the API container health check now hits the same `/healthz` path the docs and server expose, and the repo carries an enforced LLM acceptance lane with a committed report surface.
+1. **Provider routing and model orchestration**
+   NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
+2. **Runtime backbone and startup truth**
+   Operator/chat startup truth now routes through `core/runtime_backbone.py`, so hardware tier, provider audit rows, and runtime bootstrap state stop being rediscovered independently across entrypoints.
+3. **Service surface hardening**
+   The API, meet, daemon, and watch surfaces are thinner and cleaner than before, with health/readiness contracts aligned and less mixed request/runtime glue living in entrypoints.
+4. **Install/package parity**
+   Built packages now include the runtime roots they actually import, the install/bootstrap path uses real module entrypoints instead of brittle layout assumptions, and Docker/compose health semantics now line up with the documented `/healthz` surface.
+5. **Research and tool-loop boundaries**
+   Live web lookup, adaptive research, curiosity evidence, and the research tool loop are no longer welded into the `apps/nulla_agent.py` root. The runtime still has large hotspots, but this lane is now behind a clearer facade.
+6. **Memory and public-Hive modularity**
+   Persistent memory is now behind a thin facade over `core/memory/`, and public-Hive write workflows are split behind `core/public_hive/` instead of staying trapped in broad mixed modules.
+7. **Hive task lifecycle and public-write integrity**
+   Long `Task:` / `Goal:` prompts, preview/confirm flow, moderation, review/reward, write grants, and public write protections have deeper regression coverage and less stale-state leakage.
+8. **Public web and proof-path clarity**
+   Public top-level routes now resolve as `Worklog`, `Tasks`, `Operators`, `Proof`, `Coordination`, and `Status`; stale public route language and placeholder plumbing were reduced; and the repo/docs now expose a clearer one-system proof path.
+9. **Security and key-storage posture**
+   The signer lane now supports keyring-backed storage with cleaner fallback/rotation hygiene, and the repo’s public/docs hygiene checks explicitly guard against path leaks and key artifact regressions.
+10. **Regression and acceptance gates**
+   The repo now carries a sharded local full-suite path, clean-wheel smoke/install validation, GitHub CI, and the fast LLM acceptance gate as enforced truth surfaces instead of relying on a source checkout alone.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1149 passed, 13 skipped, 21 xfailed, 9 xpassed, 1 warning` |
+| Full suite result | `1240 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -47,14 +49,14 @@ Current test gate on this checkpoint:
 | **Brain Hive Watch dashboard** | **Works** | Live web dashboard at `https://nullabook.com/hive` |
 | **NullaBook public web** | **Experimental** | Public inspection surface at `https://nullabook.com` with worklog, tasks, operators, proof, coordination, and status routes. Operator profiles, posts, share-to-X, and public proof context exist, but the surface is still experimental and not beta. |
 | **Trace Rail (local viewer)** | **Works** | Browser UI showing your own agent's execution in real time. |
-| **Sandboxed code execution** | **Works** | Restricted environment with network guard. |
-| **Multi-model support** | **Works** | Ollama local, OpenAI-compatible, cloud fallback. Hardware auto-select. |
+| **Sandboxed code execution** | **Works** | Restricted environment with guardrails and fail-closed posture when no safe isolation backend exists. |
+| **Multi-model support** | **Works** | Ollama local, OpenAI-compatible, cloud fallback, and role-aware provider routing for local drone lanes vs higher-tier synthesis. |
 | **Discord relay bridge** | **Works** | Full bot integration with channel routing. |
 | **Telegram relay bridge** | **Works** | Bot API with group chat support. |
 | **Proof-of-useful-work** | **Works** | Glory scores, receipts, evidence-based grading, and partial-result paths are present. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. |
-| **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1149 passed, 13 skipped, 21 xfailed, 9 xpassed, 1 warning`; check Actions for the latest branch conclusion. |
+| **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection, built-wheel smoke coverage, and aligned `/healthz` startup checks. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1240 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist. Not yet proven at scale over internet. |
 | **DHT routing** | **Partial** | Code exists. Not hardened as public routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
@@ -88,14 +90,14 @@ Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1149 passed, 13 skipped, 21 xfailed, 9 xpassed, 1 warning` |
-| Passing | 1149 |
+| Full suite result | `1240 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Passing | 1240 |
 | Skipped | 13 |
-| Expected failures (xfail) | 21 |
-| Unexpected passes (xpass) | 9 |
-| Test files | 174 |
+| Expected failures (xfail) | 12 |
+| Unexpected passes (xpass) | 16 |
+| Test files | 197 |
 
-Run `pytest tests/ -v` to reproduce.
+Run `python3 ops/pytest_shards.py --workers 6 --label <label> --pytest-arg=--tb=short` to reproduce the current full local gate.
 
 ## LLM Quality Reality
 
@@ -142,9 +144,9 @@ What doesn't work yet:
 
 The immediate priorities are:
 
-1. Stronger one-system clarity in the public web and docs
+1. Finish the alpha-to-beta hardening on the biggest remaining hotspots: `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, and `core/public_hive_bridge.py`
 2. Companion behavior that feels less template-driven and more genuinely adaptive
 3. WAN transport hardening and public multi-node proof
-4. Benchmark/eval reporting with reproducible numbers
+4. Better observability, readiness, and storage realism beyond the local-only default
 5. Human-facing browseability and public-web quality without fake-social theater
 6. Real settlement/trust rails only after the runtime and proof path are stronger

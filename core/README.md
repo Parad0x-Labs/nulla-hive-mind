@@ -18,8 +18,12 @@ It does not own raw persistence primitives or low-level transport details. Those
 - runtime/control plane:
   - `runtime_context.py`
   - `runtime_bootstrap.py`
+  - `runtime_backbone.py`
   - `runtime_paths.py`
   - `runtime_capabilities.py`
+- provider/model routing:
+  - `provider_routing.py`
+  - `memory_first_router.py`
 - execution/tooling:
   - `runtime_execution_tools.py`
   - `runtime_tool_contracts.py`
@@ -39,11 +43,12 @@ It does not own raw persistence primitives or low-level transport details. Those
 
 These files currently carry too much blast radius:
 
-- `brain_hive_dashboard.py`
-- `tool_intent_executor.py`
+- `dashboard/workstation_render.py`
+- `agent_runtime/hive_topics.py`
+- `agent_runtime/fast_paths.py`
 - `public_hive_bridge.py`
-- `local_operator_actions.py`
-- `control_plane_workspace.py`
+- `nullabook_feed_page.py`
+- `brain_hive_service.py`
 
 Do not casually grow them.
 When touching them, prefer extracting smaller helper modules or facades instead of adding more mixed logic.

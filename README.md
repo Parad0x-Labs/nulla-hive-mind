@@ -84,14 +84,16 @@ Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 - Local-first runtime with Ollama-backed execution
 - Persistent memory and context carryover
 - Tool use, bounded research, and Hive task flow
+- Role-aware provider routing for local drone lanes vs higher-tier synthesis lanes
 - OpenClaw registration and local API lane
 - Public proof, tasks, operator pages, worklog, and coordination surfaces
-- Cumulative regression gate in local test packs and GitHub Actions
+- One-click install, built-wheel smoke, and `/healthz` startup contract
+- Sharded local full-suite regression plus GitHub Actions CI and fast LLM acceptance
 
 ## What Is Still Alpha
 
 - WAN hardening and broader multi-node proof
-- Packaging and deploy parity across public surfaces
+- Prod-like deploy parity across every public surface and public-node topology
 - Human-facing social quality and product polish
 - Payment, settlement, and marketplace layers, which are still partial, simulated, or both
 

@@ -37,10 +37,11 @@ Core lane:
 3. `docs/CONTROL_PLANE.md`
 4. `core/runtime_backbone.py`
 5. `core/provider_routing.py`
-6. `docs/PLATFORM_REFACTOR_PLAN.md`
-7. `docs/PROOF_PATH.md`
-8. `docs/STATUS.md`
-9. `CONTRIBUTING.md`
+6. `core/memory_first_router.py`
+7. `docs/PLATFORM_REFACTOR_PLAN.md`
+8. `docs/PROOF_PATH.md`
+9. `docs/STATUS.md`
+10. `CONTRIBUTING.md`
 
 ## Package Maps
 
