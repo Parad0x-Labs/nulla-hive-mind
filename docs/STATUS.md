@@ -4,7 +4,7 @@ Brutally honest status matrix. Updated 2026-03-23.
 
 ## Latest Stabilization Checkpoint
 
-The current `main` checkpoint materially improved eighteen areas:
+The current `main` checkpoint materially improved nineteen areas:
 
 1. **Provider routing and model orchestration**
    NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
@@ -42,12 +42,14 @@ The current `main` checkpoint materially improved eighteen areas:
    Public presence heartbeat, idle commons cadence, and autonomous Hive research loops are no longer welded into the `apps/nulla_agent.py` root. That background-runtime lane now lives behind `core/agent_runtime/presence.py`, which cuts the agent composition root down again and keeps presence/autonomy changes more local.
 18. **Hive public-copy split**
    Public-safe copy shaping, transcript rejection, and tag normalization are no longer welded into `core/agent_runtime/hive_topic_create.py`. That lane now lives behind `core/agent_runtime/hive_topic_public_copy.py`, which cuts the create workflow down again and keeps public-copy policy changes more local.
+19. **Hive pending-state split**
+   Pending preview state, confirmation parsing, interaction-state recovery, and preview formatting are no longer welded into `core/agent_runtime/hive_topic_create.py`. That lane now lives behind `core/agent_runtime/hive_topic_pending.py`, which cuts the create workflow down again and keeps confirmation-state changes more local.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1263 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1268 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -58,7 +60,7 @@ Current test gate on this checkpoint:
 | **Local agent loop** | **Works** | Input → classify → route → execute → respond. Fully functional. |
 | **Persistent memory** | **Works** | Conversations, preferences, context survive restarts. SQLite-backed. |
 | **Research pipeline** | **Works** | Query generation → web search → evidence scoring → artifact delivery. Honesty gates now keep weak passes in `insufficient_evidence` instead of fake solved, and artifact packaging is better covered. |
-| **Brain Hive task queue** | **Works** | Create topics, preview/confirm, claim work, deliver results, grade quality. Long `Task:` / `Goal:` prompts and auto-start are materially harder to derail, and the create/mutation/followup lanes are now more local. |
+| **Brain Hive task queue** | **Works** | Create topics, preview/confirm, claim work, deliver results, grade quality. Long `Task:` / `Goal:` prompts and auto-start are materially harder to derail, and the create/mutation/followup plus pending/confirmation lanes are now more local. |
 | **Review / partial-result flow** | **Works** | Approve, reject, partial, and cleanup states are covered locally and reflected more consistently in service/dashboard flows. |
 | **LAN peer discovery** | **Works** | Agents find each other on local network via meet nodes. |
 | **Encrypted P2P communication** | **Works** | TLS on all non-loopback connections. Signed write envelopes. |
@@ -72,7 +74,7 @@ Current test gate on this checkpoint:
 | **Proof-of-useful-work** | **Works** | Glory scores, receipts, evidence-based grading, and partial-result paths are present. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. |
 | **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection, built-wheel smoke coverage, and aligned `/healthz` startup checks. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1263 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1268 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist. Not yet proven at scale over internet. |
 | **DHT routing** | **Partial** | Code exists. Not hardened as public routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
@@ -106,12 +108,12 @@ Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1263 passed, 13 skipped, 12 xfailed, 16 xpassed` |
-| Passing | 1263 |
+| Full suite result | `1268 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Passing | 1268 |
 | Skipped | 13 |
 | Expected failures (xfail) | 12 |
 | Unexpected passes (xpass) | 16 |
-| Test files | 204 |
+| Test files | 205 |
 
 Run `python3 ops/pytest_shards.py --workers 6 --label <label> --pytest-arg=--tb=short` to reproduce the current full local gate.
 
