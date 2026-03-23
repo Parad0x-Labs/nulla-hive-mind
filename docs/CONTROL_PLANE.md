@@ -88,7 +88,7 @@ These are real risks and should be split before wider expansion:
 - `apps/nulla_agent.py`
 - `core/dashboard/workstation_client.py`
 - `core/dashboard/workstation_render.py`
-- `core/agent_runtime/hive_topics.py`
+- `core/agent_runtime/hive_topic_create.py`
 - `core/agent_runtime/fast_paths.py`
 - `core/public_hive_bridge.py`
 - `core/nullabook_feed_page.py`
@@ -107,7 +107,7 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 - keep chat/date/live-info fast-path wrappers behind `core/agent_runtime/fast_path_facade.py` and the real shortcut logic inside `core/agent_runtime/fast_paths.py`
 - keep chat-surface wording, observation shaping, and Hive truth narration behind `core/agent_runtime/chat_surface.py` so user-facing wording changes stay local
 - keep credit commands, capability/help truth, credit status rendering, and fast/action result shaping behind `core/agent_runtime/fast_command_surface.py` so command-surface changes stay local
-- keep Hive topic/create/followup wrappers behind `core/agent_runtime/hive_topic_facade.py` and the real topic workflow logic inside `core/agent_runtime/hive_topics.py` and `core/agent_runtime/hive_followups.py`
+- keep Hive topic/create/followup wrappers behind `core/agent_runtime/hive_topic_facade.py`, with create/confirm/public-safe copy logic in `core/agent_runtime/hive_topic_create.py`, mutation/update/delete logic in `core/agent_runtime/hive_topics.py`, and followup logic in `core/agent_runtime/hive_followups.py`
 - keep builder workflow/scaffold wrappers behind `core/agent_runtime/builder_facade.py` and the real builder logic inside `core/agent_runtime/builder/`
 - keep research/live-web/tool-loop wrappers behind `core/agent_runtime/research_tool_loop_facade.py` and the real tool execution contracts behind `core/tool_intent_executor.py`
 - keep helper drone candidate fan-out behind `core/model_teacher_pipeline.py` so provider swarms stay bounded and policy-shaped instead of leaking into every caller
@@ -121,5 +121,5 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 - split the largest mixed-responsibility runtime and dashboard modules
 - reduce direct storage/bootstrap calls outside the canonical startup path
 - make orchestration/task lifecycle more explicit and shared across surfaces
-- keep the remaining agent orchestration and workstation browser/document hotspots shrinking behind the new provider-role and runtime facades
+- keep the remaining agent orchestration, workstation browser runtime, and Hive create/followup hotspots shrinking behind the new provider-role and runtime facades
 - keep public/operator/web logic from bleeding into the runtime core
