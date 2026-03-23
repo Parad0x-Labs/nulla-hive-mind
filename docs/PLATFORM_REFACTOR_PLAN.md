@@ -35,8 +35,8 @@ The biggest files on the current trunk are:
 | `core/brain_hive_service.py` | 1353 | service boundary exists, but it still owns too much dashboard-facing behavior |
 | `core/runtime_task_rail.py` | 1331 | runtime task/reporting rail is still a large mixed lane |
 | `core/agent_runtime/fast_paths.py` | 1314 | too many chat/runtime shortcuts still live together |
-| `core/agent_runtime/hive_followups.py` | 1130 | Hive followup routing still owns a broad continuation slab |
 | `core/public_hive_bridge.py` | 774 | much smaller, but still the main public-hive facade and still too mixed |
+| `core/agent_runtime/hive_research_followup.py` | 739 | Hive research/status followup logic is now isolated, but it still owns a broad continuation slab |
 | `core/agent_runtime/hive_topics.py` | 473 | mutation/update/delete lane is now local, but it still owns the remaining topic mutation surface |
 | `core/dashboard/render.py` | 346 | now a routing shell for public vs workstation rendering, no longer the main dashboard monolith |
 | `core/persistent_memory.py` | 202 | now a thin facade over `core/memory/`, no longer a high-blast-radius module |
@@ -47,13 +47,14 @@ These are the current blast-radius centers. Split these before inventing more la
 ## Current Phase Status
 
 - completed enough to stop pretending they are still untouched: `core/local_operator_actions.py`, `core/control_plane_workspace.py`, `apps/brain_hive_watch_server.py`, `apps/nulla_daemon.py`, `apps/nulla_api_server.py`, `apps/meet_and_greet_server.py`, `core/brain_hive_dashboard.py`, `core/persistent_memory.py`
-- materially improved but still active: `core/public_hive_bridge.py`, `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/dashboard/workstation_client.py`, `core/agent_runtime/hive_topic_create.py`, `core/agent_runtime/hive_followups.py`, `core/agent_runtime/fast_paths.py`
-- still the next serious targets: `apps/nulla_agent.py`, `core/dashboard/workstation_client.py`, `core/agent_runtime/hive_topic_create.py`, `core/agent_runtime/fast_paths.py`, `core/public_hive_bridge.py`, `core/nullabook_feed_page.py`
+- materially improved but still active: `core/public_hive_bridge.py`, `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/dashboard/workstation_client.py`, `core/agent_runtime/hive_topic_create.py`, `core/agent_runtime/hive_research_followup.py`, `core/agent_runtime/fast_paths.py`
+- still the next serious targets: `apps/nulla_agent.py`, `core/dashboard/workstation_client.py`, `core/agent_runtime/hive_topic_create.py`, `core/agent_runtime/fast_paths.py`, `core/public_hive_bridge.py`, `core/agent_runtime/hive_research_followup.py`, `core/nullabook_feed_page.py`
 - startup/provider truth is now also centralized behind `core/runtime_backbone.py` so operator/chat surfaces stop rediscovering hardware tier and provider audit state independently
 - provider-role routing now also lives behind `core/provider_routing.py`, and both the helper/teacher lane and the main model execution router now honor bounded drone/queen provider roles without broad caller rewiring
 - chat-surface wording, observation shaping, and Hive truth narration now also live behind `core/agent_runtime/chat_surface.py`, so `apps/nulla_agent.py` no longer owns that slab directly
 - credit commands, capability/help truth, credit status rendering, and fast/action result shaping now also live behind `core/agent_runtime/fast_command_surface.py`, so `apps/nulla_agent.py` no longer owns that slab directly
 - Hive topic create/confirm/public-safe copy shaping now also lives behind `core/agent_runtime/hive_topic_create.py`, leaving `core/agent_runtime/hive_topics.py` as the smaller mutation/update/delete lane
+- Hive research/status continuation logic now also lives behind `core/agent_runtime/hive_research_followup.py`, leaving `core/agent_runtime/hive_followups.py` as the smaller frontdoor/review/cleanup lane
 
 ## Keep / Split / Rewrite / Quarantine
 
@@ -71,7 +72,7 @@ Split next:
 - `core/dashboard/workstation_client.py`
 - `core/dashboard/workstation_render.py`
 - `core/agent_runtime/hive_topic_create.py`
-- `core/agent_runtime/hive_followups.py`
+- `core/agent_runtime/hive_research_followup.py`
 - `core/agent_runtime/fast_paths.py`
 - `core/public_hive_bridge.py`
 - `core/nullabook_feed_page.py`
@@ -83,6 +84,7 @@ Rewrite selectively:
 - `core/dashboard/workstation_client.py` into browser-runtime/view-model/render-helper slices instead of one browser slab
 - `core/dashboard/workstation_render.py` into document-shell/render-section slices instead of one presentation slab
 - `core/agent_runtime/hive_topic_create.py` into create-draft parsing, confirmation state, and public-safe copy services instead of one workflow slab
+- `core/agent_runtime/hive_research_followup.py` into followup selection, active-task resume, and status-rendering services instead of one continuation slab
 
 Quarantine in narrative and architecture priority:
 
@@ -265,8 +267,8 @@ pytest -q \
 Status on trunk:
 
 - this phase is actively in progress, not hypothetical
-- `apps/nulla_agent.py` is down to 2710 lines from the older 11k+ state
-- extracted runtime seams now include checkpoints, fast paths, response shaping, presence, builder support/controller, NullaBook, memory runtime, orchestrator helpers, Hive runtime/topics/followups, and turn dispatch/frontdoor/reasoning
+- `apps/nulla_agent.py` is down to 2708 lines from the older 11k+ state
+- extracted runtime seams now include checkpoints, fast paths, response shaping, presence, builder support/controller, NullaBook, memory runtime, orchestrator helpers, Hive runtime/topics/create/followups, and turn dispatch/frontdoor/reasoning
 - fast-path wrapper glue now lives behind `core/agent_runtime/fast_path_facade.py`, so `apps/nulla_agent.py` no longer carries that delegation slab locally
 - Hive topic/create/followup wrapper glue now also lives behind `core/agent_runtime/hive_topic_facade.py`, so `apps/nulla_agent.py` no longer carries that delegation slab locally
 - builder workflow/scaffold wrapper glue now also lives behind `core/agent_runtime/builder_facade.py`, so `apps/nulla_agent.py` no longer carries that delegation slab locally

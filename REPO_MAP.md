@@ -70,6 +70,7 @@ Core lane:
 - `core/agent_runtime/fast_path_facade.py`: agent-facing fast-path wrapper facade
 - `core/agent_runtime/hive_topic_facade.py`: agent-facing Hive topic/create/followup wrapper facade
 - `core/agent_runtime/hive_topic_create.py`: create/confirm/public-safe copy workflow split out of the old topic slab
+- `core/agent_runtime/hive_research_followup.py`: research/status continuation split out of the old followup slab
 - `core/agent_runtime/builder_facade.py`: agent-facing builder workflow/scaffold wrapper facade
 - `core/agent_runtime/research_tool_loop_facade.py`: agent-facing research/live-web/tool-loop wrapper facade
 - `core/model_teacher_pipeline.py`: bounded provider-swarm selection for helper/teacher candidate generation
