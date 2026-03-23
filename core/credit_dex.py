@@ -8,7 +8,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core import audit_logger
-from network.signer import get_local_peer_id as local_peer_id
+from network import signer
+
+
+def local_peer_id() -> str:
+    """Resolve the local peer id lazily so signer reloads and test patches take effect."""
+    return signer.get_local_peer_id()
 
 
 @dataclass(order=True)

@@ -216,7 +216,13 @@ def validate_live_quote_payload(payload: dict[str, object]) -> tuple[bool, str]:
     return True, "ok"
 
 
-def build_gate_steps(pack_key: str, *, include_full_pytest: bool = True, extra_pytest_args: Sequence[str] = ()) -> tuple[GateStep, ...]:
+def build_gate_steps(
+    pack_key: str,
+    *,
+    include_full_pytest: bool = True,
+    extra_pytest_args: Sequence[str] = (),
+    full_workers: int = 1,
+) -> tuple[GateStep, ...]:
     sequence = pack_sequence_through(pack_key)
     current_pack = SMOKE_PACKS[sequence[-1]]
     targeted_command = ("pytest", "-q", *current_pack.targets, *extra_pytest_args)
@@ -226,7 +232,21 @@ def build_gate_steps(pack_key: str, *, include_full_pytest: bool = True, extra_p
         GateStep(label=f"{'+'.join(sequence)} cumulative packs", command=cumulative_command),
     ]
     if include_full_pytest:
-        steps.append(GateStep(label="full pytest", command=("pytest", "-q")))
+        if int(full_workers) > 1:
+            steps.append(
+                GateStep(
+                    label=f"full pytest ({int(full_workers)} shards)",
+                    command=(
+                        sys.executable,
+                        "ops/pytest_shards.py",
+                        "--workers",
+                        str(int(full_workers)),
+                        *tuple(f"--pytest-arg={item}" for item in extra_pytest_args),
+                    ),
+                )
+            )
+        else:
+            steps.append(GateStep(label="full pytest", command=("pytest", "-q", *extra_pytest_args)))
     return tuple(steps)
 
 
@@ -271,6 +291,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=[],
         help="Extra argument forwarded to targeted and cumulative pytest commands. Repeat as needed.",
     )
+    parser.add_argument(
+        "--full-workers",
+        type=int,
+        default=1,
+        help="When >1, run the final full pytest gate through ops/pytest_shards.py with this many workers.",
+    )
     args = parser.parse_args(argv)
 
     if args.list:
@@ -283,6 +309,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.through,
         include_full_pytest=not bool(args.skip_full_pytest),
         extra_pytest_args=tuple(str(item) for item in args.pytest_arg),
+        full_workers=max(1, int(args.full_workers)),
     )
     for step in steps:
         rc = _run_step(step, cwd=repo_root, dry_run=bool(args.dry_run))

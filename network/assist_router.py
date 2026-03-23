@@ -25,6 +25,7 @@ from core.liquefy_bridge import stream_telemetry_event
 from core.task_capsule import TaskCapsule, verify_task_capsule
 from core.task_state_machine import current_state, transition
 from core.trace_id import ensure_trace
+from network import signer
 from network.assist_models import (
     CapabilityAd,
     TaskAssign,
@@ -48,12 +49,16 @@ from network.protocol import (
 )
 from network.quarantine import note_peer_violation
 from network.rate_limiter import allow as rate_allow
-from network.signer import get_local_peer_id as local_peer_id
 from storage.db import get_connection
 
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def local_peer_id() -> str:
+    """Resolve the local peer id lazily so signer reloads and test patches take effect."""
+    return signer.get_local_peer_id()
 
 def build_find_node_message(target_id: str) -> bytes:
     from network.protocol import FindNodePayload

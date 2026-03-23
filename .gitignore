@@ -71,6 +71,7 @@ docs/HANDOVER_2026-03-14_HIVE_SURFACES_AND_RUNTIME_TRUTH.md
 ops/*
 !ops/llm_eval.py
 !ops/ensure_public_hive_auth.py
+!ops/pytest_shards.py
 tests/test_overnight_reports.py
 tests/test_repo_hygiene_check.py
 tests/test_channel_gateway.py

@@ -7,12 +7,15 @@ Runner:
 - `python3 ops/cumulative_stabilization.py --list`
 - `python3 ops/cumulative_stabilization.py --through A`
 - `python3 ops/cumulative_stabilization.py --through C`
+- `python3 ops/cumulative_stabilization.py --through C --full-workers 4`
+- `python3 ops/pytest_shards.py --workers 4`
 
 Gate rule for step `N`:
 
 1. Run the targeted pack for `N`.
 2. Run the cumulative pack union `A..N`.
 3. Run full `pytest -q`.
+   If wall-clock matters, run the same full file set through `ops/pytest_shards.py` with isolated runtime homes instead of weakening the gate.
 4. Run the affected real local smoke flows.
 5. If public surfaces were touched, run tagged live public smoke and cleanup verification.
 

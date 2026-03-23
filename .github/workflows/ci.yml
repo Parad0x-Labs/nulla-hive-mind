@@ -34,7 +34,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
       - name: Run tests
-        run: python -m pytest -q --tb=short
+        run: python ops/pytest_shards.py --workers 4 --pytest-arg=--tb=short
 
   build:
     runs-on: ubuntu-latest

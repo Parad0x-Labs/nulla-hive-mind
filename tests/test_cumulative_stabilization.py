@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 
 from ops.cumulative_stabilization import (
@@ -72,6 +73,19 @@ def test_build_gate_steps_for_b_contains_targeted_then_cumulative_then_full() ->
     assert "tests/test_nulla_hive_task_flow.py" in steps[1].command
     assert "tests/test_web_research_runtime.py" in steps[1].command
     assert steps[2].command == ("pytest", "-q")
+
+
+def test_build_gate_steps_supports_sharded_full_gate() -> None:
+    steps = build_gate_steps("B", full_workers=4, extra_pytest_args=("--tb=short",))
+
+    assert steps[2].label == "full pytest (4 shards)"
+    assert steps[2].command[:4] == (
+        sys.executable,
+        "ops/pytest_shards.py",
+        "--workers",
+        "4",
+    )
+    assert "--pytest-arg=--tb=short" in steps[2].command
 
 
 def test_pack_g_covers_browser_and_public_entry_surfaces() -> None:
