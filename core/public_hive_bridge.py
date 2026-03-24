@@ -9,6 +9,28 @@ from core.public_hive import PublicHiveBridgeConfig
 from core.public_hive import auth as public_hive_auth
 from core.public_hive import bridge_support as _public_hive_bridge_support
 from core.public_hive.bridge import PublicHiveBridge
+from core.public_hive.bridge_facade_auth import (
+    public_hive_has_auth as _public_hive_has_auth,
+)
+from core.public_hive.bridge_facade_auth import (
+    public_hive_write_enabled as _public_hive_write_enabled,
+)
+from core.public_hive.bridge_facade_auth import (
+    public_hive_write_requires_auth as _public_hive_write_requires_auth,
+)
+from core.public_hive.bridge_facade_auth import (
+    url_requires_auth as _url_requires_auth_impl,
+)
+from core.public_hive.bridge_facade_bootstrap import (
+    ensure_public_hive_auth as _ensure_public_hive_auth,
+)
+from core.public_hive.bridge_facade_bootstrap import (
+    sync_public_hive_auth_from_ssh as _sync_public_hive_auth_from_ssh,
+)
+from core.public_hive.bridge_facade_bootstrap import (
+    write_public_hive_agent_bootstrap as _write_public_hive_agent_bootstrap,
+)
+from core.public_hive.bridge_facade_config import load_public_hive_bridge_config as _load_public_hive_bridge_config
 from core.runtime_paths import PROJECT_ROOT, config_path
 
 __all__ = [
@@ -23,7 +45,7 @@ __all__ = [
 
 
 def load_public_hive_bridge_config() -> PublicHiveBridgeConfig:
-    return public_hive_auth.load_public_hive_bridge_config(
+    return _load_public_hive_bridge_config(
         ensure_public_hive_agent_bootstrap_fn=ensure_public_hive_agent_bootstrap,
         load_json_file_fn=_load_json_file,
         load_agent_bootstrap_fn=_load_agent_bootstrap,
@@ -78,7 +100,7 @@ def write_public_hive_agent_bootstrap(
     tls_ca_file: str | None = None,
     tls_insecure_skip_verify: bool | None = None,
 ) -> Path | None:
-    return public_hive_auth.write_public_hive_agent_bootstrap(
+    return _write_public_hive_agent_bootstrap(
         target_path=target_path,
         project_root=project_root,
         meet_seed_urls=meet_seed_urls,
@@ -110,7 +132,7 @@ def sync_public_hive_auth_from_ssh(
     target_path: Path | None = None,
     runner: Any | None = None,
 ) -> dict[str, Any]:
-    return _public_hive_bridge_support.sync_public_hive_auth_from_ssh(
+    return _sync_public_hive_auth_from_ssh(
         ssh_key_path=ssh_key_path,
         project_root=project_root,
         watch_host=watch_host,
@@ -120,28 +142,16 @@ def sync_public_hive_auth_from_ssh(
         runner=runner or subprocess.run,
         clean_token_fn=_clean_token,
         write_public_hive_agent_bootstrap_fn=write_public_hive_agent_bootstrap,
+        sync_public_hive_auth_from_ssh_impl=_public_hive_bridge_support.sync_public_hive_auth_from_ssh,
     )
 
 
-def public_hive_has_auth(config: PublicHiveBridgeConfig | None = None, *, payload: dict[str, Any] | None = None) -> bool:
-    return public_hive_auth.public_hive_has_auth(config, payload=payload)
-
-
-def public_hive_write_requires_auth(
-    config: PublicHiveBridgeConfig | None = None,
-    *,
-    seed_urls: list[str] | tuple[str, ...] | None = None,
-    topic_target_url: str | None = None,
-) -> bool:
-    return public_hive_auth.public_hive_write_requires_auth(
-        config,
-        seed_urls=seed_urls,
-        topic_target_url=topic_target_url,
-    )
+public_hive_has_auth = _public_hive_has_auth
+public_hive_write_requires_auth = _public_hive_write_requires_auth
 
 
 def public_hive_write_enabled(config: PublicHiveBridgeConfig | None = None) -> bool:
-    return public_hive_auth.public_hive_write_enabled(
+    return _public_hive_write_enabled(
         config,
         load_public_hive_bridge_config_fn=load_public_hive_bridge_config,
     )
@@ -165,7 +175,7 @@ def ensure_public_hive_auth(
     remote_config_path: str = "",
     require_auth: bool = False,
 ) -> dict[str, Any]:
-    return public_hive_auth.ensure_public_hive_auth(
+    return _ensure_public_hive_auth(
         project_root=project_root,
         target_path=target_path,
         watch_host=watch_host,
@@ -184,7 +194,4 @@ def ensure_public_hive_auth(
         find_public_hive_ssh_key_fn=find_public_hive_ssh_key,
         sync_public_hive_auth_from_ssh_fn=sync_public_hive_auth_from_ssh,
     )
-
-
-def _url_requires_auth(url: str) -> bool:
-    return public_hive_auth.url_requires_auth(url)
+_url_requires_auth = _url_requires_auth_impl
