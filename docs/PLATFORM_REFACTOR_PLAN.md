@@ -48,7 +48,8 @@ The biggest files on the current trunk are:
 | `core/brain_hive_commons_state.py` | 150 | shared commons topic classification, commons post validation, commons meta shaping, downstream-use counts, and research-signal aggregation are now isolated behind a dedicated state/signal seam |
 | `core/brain_hive_review_workflow.py` | 155 | weighted review, quorum, and applied-state transitions are now isolated behind a dedicated moderation workflow lane |
 | `core/brain_hive_topic_lifecycle.py` | 187 | topic claim, claim-backed status transition, creator edit, and creator delete logic are now isolated behind a dedicated lifecycle lane |
-| `core/runtime_task_rail.py` | 1331 | runtime task/reporting rail is still a large mixed lane |
+| `core/runtime_task_rail.py` | 719 | runtime task/reporting rail shell is much smaller after the browser-runtime extraction, but it still owns mixed document shell and rail composition |
+| `core/runtime_task_rail_client.py` | 617 | trace-rail browser runtime, session summary derivation, event rendering, and polling logic are now isolated behind a dedicated client seam |
 | `core/agent_runtime/fast_paths.py` | 785 | the utility/date/smalltalk shortcut lane is now much smaller after the live-info extraction, but it still owns mixed shortcut glue |
 | `core/public_hive_bridge.py` | 774 | much smaller, but still the main public-hive facade and still too mixed |
 | `core/agent_runtime/hive_research_followup.py` | 739 | Hive research/status followup logic is now isolated, but it still owns a broad continuation slab |
@@ -71,6 +72,7 @@ These are the current blast-radius centers. Split these before inventing more la
 - credit commands, capability/help truth, credit status rendering, and fast/action result shaping now also live behind `core/agent_runtime/fast_command_surface.py`, so `apps/nulla_agent.py` no longer owns that slab directly
 - live-info, weather, news, and price lookup routing now also live behind `core/agent_runtime/fast_live_info.py`, leaving `core/agent_runtime/fast_paths.py` as the smaller utility/date/smalltalk shortcut lane
 - public presence heartbeat, idle commons cadence, and autonomous Hive research loops now also live behind `core/agent_runtime/presence.py`, so `apps/nulla_agent.py` no longer owns those background-runtime slabs directly
+- trace-rail browser runtime, session/event polling, and session-summary/event rendering now also live behind `core/runtime_task_rail_client.py`, so `core/runtime_task_rail.py` no longer owns that browser-runtime slab directly
 - Hive topic create/publish workflow now also lives behind `core/agent_runtime/hive_topic_create.py`, leaving `core/agent_runtime/hive_topics.py` as the smaller mutation/update/delete lane
 - public-safe copy shaping, transcript rejection, and tag normalization now also live behind `core/agent_runtime/hive_topic_public_copy.py`, so `core/agent_runtime/hive_topic_create.py` no longer owns that policy/helper slab directly
 - pending preview state, confirmation parsing, history recovery, and preview formatting now also live behind `core/agent_runtime/hive_topic_pending.py`, so `core/agent_runtime/hive_topic_create.py` no longer owns that interaction-state slab directly
@@ -132,7 +134,8 @@ Rewrite selectively:
 - keep search query sync, filter state, search result rendering, and search bootstrap inside `core/nullabook_feed_search_runtime.py` instead of leaking it back into the page shell
 - `core/brain_hive_service.py` into service contracts, read models, and workflow adapters instead of one dashboard-facing service slab
 - keep read/query projections inside `core/brain_hive_queries.py`, keep shared commons state/signal helpers inside `core/brain_hive_commons_state.py`, keep commons-promotion workflow inside `core/brain_hive_commons_promotion.py`, keep commons endorsements/comments/listing inside `core/brain_hive_commons_interactions.py`, keep moderation review/quorum/apply flow inside `core/brain_hive_review_workflow.py`, keep topic claim/update/delete lifecycle inside `core/brain_hive_topic_lifecycle.py`, keep write-side guard/hydration/idempotency helpers inside `core/brain_hive_write_support.py`, keep topic/post create-get-list behavior inside `core/brain_hive_topic_post_frontdoor.py`, and keep pushing `core/brain_hive_service.py` toward the remaining service-private identity/review glue instead of one dashboard-facing service block
-- `core/runtime_task_rail.py` into task models, event shaping, and report rendering instead of one mixed task/report lane
+- keep trace-rail browser runtime, polling loop, and event/session rendering inside `core/runtime_task_rail_client.py`
+- `core/runtime_task_rail.py` into a thinner report/document shell plus explicit task-summary/event-shaping helpers instead of one mixed task/report lane
 
 Quarantine in narrative and architecture priority:
 

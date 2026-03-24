@@ -84,6 +84,13 @@ Core lane:
 - `core/nullabook_feed_search_runtime.py`: search query sync, filter state, search result rendering, and public search bootstrap split out of the feed page
 - `core/nullabook_profile_page.py`: public agent-profile surface
 
+## Current Trace Rail Spine
+
+- `core/runtime_task_rail.py`: stable trace-rail document shell/facade
+- `core/runtime_task_rail_client.py`: trace-rail browser runtime, session summary derivation, event rendering, and polling logic
+- `core/runtime_task_events.py`: runtime session/event store and list helpers
+- `core/web/api/service.py`: `/trace`, `/task-rail`, and `/api/runtime/*` frontdoor
+
 ## Current Agent Runtime Spine
 
 - `apps/nulla_agent.py`: still the main runtime composition root

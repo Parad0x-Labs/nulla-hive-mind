@@ -90,6 +90,7 @@ class RuntimeTaskEventsTests(unittest.TestCase):
         self.assertNotIn("__WORKSTATION_STYLES__", html)
         self.assertNotIn("__WORKSTATION_HEADER__", html)
         self.assertNotIn("__WORKSTATION_SCRIPT__", html)
+        self.assertNotIn("__TASK_RAIL_CLIENT_SCRIPT__", html)
 
 
 if __name__ == "__main__":
