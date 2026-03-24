@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest import mock
 
 from apps.nulla_agent import NullaAgent
-from core.agent_runtime import checkpoints
+from core.agent_runtime import (
+    checkpoints,
+    runtime_checkpoint_io_adapter,
+    runtime_checkpoint_lane_policy,
+)
 
 
 def _build_agent() -> NullaAgent:
@@ -37,6 +42,25 @@ def test_prepare_runtime_checkpoint_uses_app_level_runtime_continuity_functions(
     )
     assert bundle["state"] == "created"
     assert bundle["source_context"]["runtime_checkpoint_id"] == "runtime-checkpoint-1"
+
+
+def test_prepare_runtime_checkpoint_adapter_uses_app_level_runtime_continuity_functions() -> None:
+    agent = _build_agent()
+
+    with mock.patch("apps.nulla_agent.latest_resumable_checkpoint", return_value=None), mock.patch(
+        "apps.nulla_agent.create_runtime_checkpoint",
+        return_value={"checkpoint_id": "runtime-checkpoint-1"},
+    ):
+        direct_bundle = runtime_checkpoint_io_adapter.prepare_runtime_checkpoint(
+            agent,
+            session_id="session-123",
+            raw_user_input="inspect tool receipts",
+            effective_input="inspect tool receipts",
+            source_context={"surface": "openclaw"},
+        )
+
+    assert direct_bundle["state"] == "created"
+    assert direct_bundle["source_context"]["runtime_checkpoint_id"] == "runtime-checkpoint-1"
 
 
 def test_resolve_runtime_task_uses_app_level_task_accessors() -> None:
@@ -121,4 +145,30 @@ def test_merge_runtime_source_contexts_facade_matches_extracted_module() -> None
         agent,
         primary,
         secondary,
+    )
+    assert agent._merge_runtime_source_contexts(primary, secondary) == runtime_checkpoint_io_adapter.merge_runtime_source_contexts(
+        agent,
+        primary,
+        secondary,
+    )
+
+
+def test_should_keep_ai_first_chat_lane_facade_matches_extracted_policy() -> None:
+    agent = _build_agent()
+    classification = {"task_class": "debugging"}
+    interpretation = SimpleNamespace(as_context=lambda: {}, topic_hints=[])
+
+    assert agent._should_keep_ai_first_chat_lane(
+        user_input="think through this bug and explain the cause",
+        classification=classification,
+        interpretation=interpretation,
+        source_context={"surface": "channel"},
+        checkpoint_state={},
+    ) == runtime_checkpoint_lane_policy.should_keep_ai_first_chat_lane(
+        agent,
+        user_input="think through this bug and explain the cause",
+        classification=classification,
+        interpretation=interpretation,
+        source_context={"surface": "channel"},
+        checkpoint_state={},
     )

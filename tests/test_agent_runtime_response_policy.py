@@ -3,7 +3,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from apps.nulla_agent import ChatTurnResult, NullaAgent, ResponseClass
-from core.agent_runtime import response_policy
+from core.agent_runtime import (
+    response_policy,
+    response_policy_classification,
+    response_policy_tool_history,
+    response_policy_visibility,
+)
 
 
 def test_fast_path_response_class_facade_matches_extracted_policy() -> None:
@@ -17,6 +22,7 @@ def test_fast_path_response_class_facade_matches_extracted_policy() -> None:
         reason="hive_research_followup",
         response="Research result: 1 new local research result landed.",
     )
+    assert response_policy.fast_path_response_class is response_policy_classification.fast_path_response_class
 
 
 def test_should_attach_hive_footer_facade_matches_extracted_policy() -> None:
@@ -34,6 +40,7 @@ def test_should_attach_hive_footer_facade_matches_extracted_policy() -> None:
         result,
         source_context={"surface": "openclaw", "platform": "openclaw"},
     )
+    assert response_policy.should_attach_hive_footer is response_policy_visibility.should_attach_hive_footer
 
 
 def test_normalize_tool_history_message_facade_matches_extracted_policy() -> None:
@@ -48,6 +55,7 @@ def test_normalize_tool_history_message_facade_matches_extracted_policy() -> Non
     }
 
     assert agent._normalize_tool_history_message(item) == response_policy.normalize_tool_history_message(agent, item)
+    assert response_policy.normalize_tool_history_message is response_policy_tool_history.normalize_tool_history_message
 
 
 def test_append_tool_result_to_source_context_dedupes_observation_messages() -> None:
