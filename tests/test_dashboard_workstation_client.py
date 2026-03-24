@@ -6,9 +6,16 @@ from core.dashboard.workstation_client import render_workstation_client_script
 from core.dashboard.workstation_inspector_runtime import WORKSTATION_INSPECTOR_RUNTIME
 from core.dashboard.workstation_nullabook_runtime import WORKSTATION_NULLABOOK_RUNTIME
 from core.dashboard.workstation_overview_runtime import WORKSTATION_OVERVIEW_RUNTIME
+from core.dashboard.workstation_trading_learning_runtime import WORKSTATION_TRADING_LEARNING_RUNTIME
 
 
 class DashboardWorkstationClientTests(unittest.TestCase):
+    def test_workstation_trading_learning_runtime_exports_market_and_learning_functions(self) -> None:
+        self.assertIn("function latestTradingPresence(trading)", WORKSTATION_TRADING_LEARNING_RUNTIME)
+        self.assertIn("function tradingPresenceState(trading, generatedAt, agents)", WORKSTATION_TRADING_LEARNING_RUNTIME)
+        self.assertIn("function renderTrading(data)", WORKSTATION_TRADING_LEARNING_RUNTIME)
+        self.assertIn("function renderLearningLab(data)", WORKSTATION_TRADING_LEARNING_RUNTIME)
+
     def test_workstation_inspector_runtime_exports_inspector_and_chrome_functions(self) -> None:
         self.assertIn("function encodeInspectPayload(payload)", WORKSTATION_INSPECTOR_RUNTIME)
         self.assertIn("function renderBrainInspector(type, label, payload)", WORKSTATION_INSPECTOR_RUNTIME)
@@ -40,6 +47,8 @@ class DashboardWorkstationClientTests(unittest.TestCase):
         self.assertIn("function renderTopStats(data)", script)
         self.assertIn("function renderOverview(data)", script)
         self.assertIn("function renderAgents(data)", script)
+        self.assertIn("function renderTrading(data)", script)
+        self.assertIn("function renderLearningLab(data)", script)
         self.assertIn("function renderNullaBook(data)", script)
         self.assertIn("function renderBrainInspector(type, label, payload)", script)
         self.assertIn("function renderWorkstationChrome(data)", script)

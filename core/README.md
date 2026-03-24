@@ -51,6 +51,7 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `dashboard/workstation_overview_runtime.py`
   - `dashboard/workstation_nullabook_runtime.py`
   - `dashboard/workstation_inspector_runtime.py`
+  - `dashboard/workstation_trading_learning_runtime.py`
   - `dashboard/workstation_cards.py`
   - `dashboard/workstation_render.py`
 - Hive/helper/control-plane logic:
@@ -74,7 +75,6 @@ It does not own raw persistence primitives or low-level transport details. Those
 These files currently carry too much blast radius:
 
 - `apps/nulla_agent.py`
-- `dashboard/workstation_client.py`
 - `dashboard/workstation_cards.py`
 - `dashboard/workstation_render.py`
 - `agent_runtime/hive_topic_create.py`

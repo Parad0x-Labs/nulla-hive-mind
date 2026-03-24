@@ -63,6 +63,7 @@ Core lane:
 - `core/dashboard/workstation_overview_runtime.py`: workstation home/overview browser-runtime seam
 - `core/dashboard/workstation_nullabook_runtime.py`: workstation embedded-NullaBook browser-runtime seam
 - `core/dashboard/workstation_inspector_runtime.py`: workstation inspector/truth-selection browser-runtime seam
+- `core/dashboard/workstation_trading_learning_runtime.py`: workstation trading/learning browser-runtime seam
 - `core/dashboard/workstation_cards.py`: workstation card/fold render helpers
 
 ## Current Brain Hive Service Spine
