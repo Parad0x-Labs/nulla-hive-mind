@@ -145,10 +145,16 @@ Core lane:
 - `core/public_hive/bridge_topics.py`: thin grouped topic facade over the extracted read/review/write/publication mixins
 - `core/public_hive/bridge_topic_reads.py`: topic/research read helpers split out of the grouped bridge topic facade
 - `core/public_hive/bridge_topic_reviews.py`: review queue and moderation-review helpers split out of the grouped bridge topic facade
-- `core/public_hive/bridge_topic_writes.py`: topic CRUD, claims, progress/result submission, and status helpers split out of the grouped bridge topic facade
+- `core/public_hive/bridge_topic_writes.py`: thin grouped bridge-write facade over lifecycle, claim, and post/result write helpers
+- `core/public_hive/bridge_topic_lifecycle_writes.py`: topic CRUD and status transition write helpers split out of the grouped bridge-write facade
+- `core/public_hive/bridge_topic_claim_writes.py`: topic-claim write helper split out of the grouped bridge-write facade
+- `core/public_hive/bridge_topic_post_writes.py`: progress/result/update write helpers split out of the grouped bridge-write facade
 - `core/public_hive/bridge_topic_publication.py`: task publication and related-topic/commons lookup helpers split out of the grouped bridge topic facade
 - `core/public_hive/bridge_transport.py`: auth-token lookup, write-grant attachment, SSL context, and HTTP helper flows split out of the bridge facade
-- `core/public_hive_bridge.py`: smaller compatibility/auth/bootstrap facade kept stable for callers while the package split continues
+- `core/public_hive_bridge.py`: stable compatibility/auth/bootstrap facade that now delegates through extracted compat facade helpers and bridge support
+- `core/public_hive/bridge_facade_auth.py`: public-Hive compat auth/write-enable helper facade
+- `core/public_hive/bridge_facade_config.py`: public-Hive compat config/bootstrap loading facade
+- `core/public_hive/bridge_facade_bootstrap.py`: public-Hive compat bootstrap/write/auth sync facade
 - `core/public_hive/bridge_support.py`: public-Hive bootstrap discovery and SSH sync support seam
 - `core/public_hive/auth.py`: auth/bootstrap/config loading and SSH sync helpers
 - `core/public_hive/client.py`: HTTP transport, auth-token selection, TLS context, and route-scoped write-grant attachment
@@ -222,14 +228,20 @@ Core lane:
 - `core/agent_runtime/hive_topic_pending_history.py`: pending preview history recovery
 - `core/agent_runtime/hive_topic_preview_render.py`: pending preview rendering and preview text shaping
 - `core/agent_runtime/hive_topic_public_copy.py`: thin public-safe copy facade
-- `core/agent_runtime/hive_topic_public_copy_privacy.py`: public-safe copy shaping and transcript rejection
+- `core/agent_runtime/hive_topic_public_copy_privacy.py`: thin public-copy privacy facade over extracted safety and transcript helpers
+- `core/agent_runtime/hive_topic_public_copy_safety.py`: public-safe copy shaping, redaction, and privacy admission helpers
+- `core/agent_runtime/hive_topic_public_copy_transcript.py`: transcript detection and structured-brief parsing helpers
 - `core/agent_runtime/hive_topic_public_copy_tags.py`: public-safe tag inference and normalization
 - `core/agent_runtime/hive_topics.py`: thin legacy Hive-topic mutation facade
 - `core/agent_runtime/hive_topic_mutation_detection.py`: Hive-topic mutation detection and update-draft parsing
 - `core/agent_runtime/hive_topic_mutation_runtime.py`: thin Hive-topic mutation facade
 - `core/agent_runtime/hive_topic_mutation_resolver.py`: Hive-topic mutation topic-resolution seam
-- `core/agent_runtime/hive_topic_update_runtime.py`: Hive-topic update execution seam
-- `core/agent_runtime/hive_topic_delete_runtime.py`: Hive-topic delete execution seam
+- `core/agent_runtime/hive_topic_update_runtime.py`: thin Hive-topic update facade over preflight and effects helpers
+- `core/agent_runtime/hive_topic_update_preflight.py`: Hive-topic update target resolution and preflight validation
+- `core/agent_runtime/hive_topic_update_effects.py`: Hive-topic update execution effects and user-surface response shaping
+- `core/agent_runtime/hive_topic_delete_runtime.py`: thin Hive-topic delete facade over preflight and effects helpers
+- `core/agent_runtime/hive_topic_delete_preflight.py`: Hive-topic delete target resolution and permission/state checks
+- `core/agent_runtime/hive_topic_delete_effects.py`: Hive-topic delete execution effects and user-surface response shaping
 - `core/agent_runtime/hive_research_followup.py`: thin research/status continuation facade over extracted followup helpers
 - `core/agent_runtime/hive_research_hints.py`: Hive followup hint extraction and history hint helpers
 - `core/agent_runtime/hive_research_resume.py`: active-task resume and research-start followup handling
@@ -242,7 +254,9 @@ Core lane:
 - `core/agent_runtime/fast_paths_companion.py`: companion-memory and personalized-plan shortcut helpers
 - `core/agent_runtime/fast_paths_builder.py`: builder/file-request/root-extraction shortcut helpers
 - `core/agent_runtime/fast_live_info.py`: thin fresh-info shortcut facade
-- `core/agent_runtime/fast_live_info_router.py`: fresh-info, weather, news, and price lookup routing seam
+- `core/agent_runtime/fast_live_info_router.py`: thin live-info router facade over mode-policy and runtime helpers
+- `core/agent_runtime/fast_live_info_mode_policy.py`: live-info mode classification, freshness rules, and lookup-failure wording
+- `core/agent_runtime/fast_live_info_runtime.py`: live-info fast-path execution, fallback search handling, and chat-surface wording handoff
 - `core/agent_runtime/fast_live_info_search.py`: fresh-info search execution seam
 - `core/agent_runtime/fast_live_info_rendering.py`: fresh-info result-rendering seam
 - `core/agent_runtime/fast_live_info_price.py`: fresh-info price-grounding seam

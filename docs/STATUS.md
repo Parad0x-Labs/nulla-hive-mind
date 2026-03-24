@@ -4,7 +4,7 @@ Current status matrix. Updated 2026-03-24.
 
 ## Latest Stabilization Checkpoint
 
-The current `main` checkpoint materially improved sixty-nine areas:
+The current `main` checkpoint materially improved seventy-four areas:
 
 1. **Provider routing and model orchestration**
    NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
@@ -144,12 +144,22 @@ The current `main` checkpoint materially improved sixty-nine areas:
    The last secondary dashboard runtime aggregators are thinner too. `core/dashboard/workstation_overview_home_runtime.py` now delegates to `core/dashboard/workstation_overview_home_board_runtime.py` and `core/dashboard/workstation_overview_notes_runtime.py`, and `core/dashboard/workstation_learning_program_trading_cards_runtime.py` now delegates to `core/dashboard/workstation_learning_program_trading_overview_runtime.py`, `core/dashboard/workstation_learning_program_trading_market_runtime.py`, and `core/dashboard/workstation_learning_program_trading_activity_runtime.py`.
 69. **Dashboard and public style leaf split**
    The remaining one-layer-down style holders are thinner too. `core/dashboard/workstation_render_nullabook_fabric_styles.py` now delegates to telemetry, timeline, cards, and onboarding leaves; `core/nullabook_feed_base_styles.py` now delegates to layout, skeleton, and interaction leaves; and `core/runtime_task_rail_panel_styles.py` now delegates to shell, session, and trace leaves.
+70. **Dashboard board/feed leaf split**
+   The remaining dashboard home-board and embedded-feed leaves are thinner too. `core/dashboard/workstation_overview_home_board_runtime.py` now delegates to `core/dashboard/workstation_overview_home_board_items_runtime.py` and `core/dashboard/workstation_overview_home_board_render_runtime.py`, and `core/dashboard/workstation_render_nullabook_feed_styles.py` now delegates to `core/dashboard/workstation_render_nullabook_feed_layout_styles.py` and `core/dashboard/workstation_render_nullabook_feed_post_styles.py`.
+71. **Agent live-info router leaf split**
+   The extracted live-info router is no longer a one-layer-down slab. `core/agent_runtime/fast_live_info_router.py` is now the thin facade over `core/agent_runtime/fast_live_info_mode_policy.py` and `core/agent_runtime/fast_live_info_runtime.py`, while the original `core/agent_runtime/fast_live_info.py` import surface stays stable.
+72. **Hive public-copy privacy leaf split**
+   The extracted public-copy privacy lane is no longer a one-layer-down slab. `core/agent_runtime/hive_topic_public_copy_privacy.py` is now the thin facade over `core/agent_runtime/hive_topic_public_copy_safety.py` and `core/agent_runtime/hive_topic_public_copy_transcript.py`, which isolates redaction/admission logic from transcript detection.
+73. **Hive mutation runtime leaf split**
+   The extracted update/delete mutation lanes are no longer one-layer-down slabs either. `core/agent_runtime/hive_topic_update_runtime.py` and `core/agent_runtime/hive_topic_delete_runtime.py` now act as thin facades over their respective preflight and effects helpers, which keeps mutation entrypoints stable while making update/delete changes more local.
+74. **Public-Hive compat and write leaf split**
+   The extracted public-Hive compat and write lanes are thinner again. `core/public_hive_bridge.py` now delegates through `core/public_hive/bridge_facade_auth.py`, `core/public_hive/bridge_facade_config.py`, and `core/public_hive/bridge_facade_bootstrap.py`, while `core/public_hive/bridge_topic_writes.py` is now the thin grouped write facade over lifecycle, claim, and post/result write helpers.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1346 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1355 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -174,7 +184,7 @@ Current test gate on this checkpoint:
 | **Contribution scoring** | **Works** | Glory scores, local credits, receipts, evidence-based grading, and partial-result paths are present. Credits here are local work/participation accounting, not blockchain tokens. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. |
 | **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection, built-wheel smoke coverage, and aligned `/healthz` startup checks. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1346 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1355 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist. Not yet proven at scale over internet. |
 | **DHT routing** | **Partial** | Code exists. Not hardened as public routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
@@ -210,7 +220,7 @@ Credits in this repo are local proof-of-work / proof-of-participation accounting
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1346 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1355 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Passing | 1346 |
 | Skipped | 13 |
 | Expected failures (xfail) | 12 |
@@ -264,7 +274,7 @@ What doesn't work yet:
 
 The immediate priorities are:
 
-1. Finish the alpha-to-beta hardening on the biggest remaining hotspots: `core/agent_runtime/fast_live_info_router.py`, `core/agent_runtime/hive_topic_public_copy_privacy.py`, `core/public_hive_bridge.py`, `core/public_hive/bridge_topic_writes.py`, `core/agent_runtime/hive_topic_update_runtime.py`, `core/agent_runtime/hive_topic_delete_runtime.py`, `core/dashboard/workstation_overview_home_board_runtime.py`, `core/dashboard/workstation_render_nullabook_feed_styles.py`, and `core/dashboard/workstation_render_nullabook_directory_styles.py`
+1. Finish the alpha-to-beta hardening on the biggest remaining helper slabs: `core/public_hive_bridge.py`, `core/public_hive/bridge_support.py`, `core/public_hive/bridge_facade_bootstrap.py`, `core/public_hive/bridge_topic_post_writes.py`, `core/agent_runtime/fast_live_info_mode_policy.py`, `core/agent_runtime/fast_live_info_runtime.py`, `core/agent_runtime/hive_topic_public_copy_safety.py`, `core/agent_runtime/hive_topic_update_effects.py`, `core/agent_runtime/hive_topic_delete_effects.py`, and `core/dashboard/workstation_render_nullabook_directory_styles.py`
 2. Companion behavior that feels less template-driven and more genuinely adaptive
 3. WAN transport hardening and public multi-node proof
 4. Better observability, readiness, and storage realism beyond the local-only default

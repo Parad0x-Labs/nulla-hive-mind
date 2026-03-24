@@ -135,9 +135,15 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `public_hive/bridge_topic_reads.py`
   - `public_hive/bridge_topic_reviews.py`
   - `public_hive/bridge_topic_writes.py`
+  - `public_hive/bridge_topic_lifecycle_writes.py`
+  - `public_hive/bridge_topic_claim_writes.py`
+  - `public_hive/bridge_topic_post_writes.py`
   - `public_hive/bridge_topic_publication.py`
   - `public_hive/bridge_transport.py`
   - `public_hive/bridge_support.py`
+  - `public_hive/bridge_facade_auth.py`
+  - `public_hive/bridge_facade_config.py`
+  - `public_hive/bridge_facade_bootstrap.py`
   - `public_hive/auth.py`
   - `public_hive/client.py`
   - `brain_hive_queries.py`
@@ -163,12 +169,20 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `agent_runtime/hive_topic_pending_payloads.py`
   - `agent_runtime/hive_topic_pending_history.py`
   - `agent_runtime/hive_topic_public_copy_privacy.py`
+  - `agent_runtime/hive_topic_public_copy_safety.py`
+  - `agent_runtime/hive_topic_public_copy_transcript.py`
   - `agent_runtime/hive_topic_public_copy_tags.py`
   - `agent_runtime/hive_topic_mutation_detection.py`
   - `agent_runtime/hive_topic_mutation_runtime.py`
   - `agent_runtime/hive_topic_mutation_resolver.py`
+  - `agent_runtime/hive_topic_update_preflight.py`
   - `agent_runtime/hive_topic_update_runtime.py`
+  - `agent_runtime/hive_topic_update_effects.py`
+  - `agent_runtime/hive_topic_delete_preflight.py`
   - `agent_runtime/hive_topic_delete_runtime.py`
+  - `agent_runtime/hive_topic_delete_effects.py`
+  - `agent_runtime/fast_live_info_mode_policy.py`
+  - `agent_runtime/fast_live_info_runtime.py`
   - `nullabook_feed_base_styles.py`
   - `nullabook_feed_layout_styles.py`
   - `nullabook_feed_skeleton_styles.py`
@@ -181,14 +195,15 @@ It does not own raw persistence primitives or low-level transport details. Those
 
 These files currently carry too much blast radius:
 
-- `agent_runtime/fast_live_info_router.py`
-- `agent_runtime/hive_topic_public_copy_privacy.py`
 - `public_hive_bridge.py`
-- `public_hive/bridge_topic_writes.py`
-- `agent_runtime/hive_topic_update_runtime.py`
-- `agent_runtime/hive_topic_delete_runtime.py`
-- `dashboard/workstation_overview_home_board_runtime.py`
-- `dashboard/workstation_render_nullabook_feed_styles.py`
+- `public_hive/bridge_support.py`
+- `public_hive/bridge_facade_bootstrap.py`
+- `public_hive/bridge_topic_post_writes.py`
+- `agent_runtime/fast_live_info_mode_policy.py`
+- `agent_runtime/fast_live_info_runtime.py`
+- `agent_runtime/hive_topic_public_copy_safety.py`
+- `agent_runtime/hive_topic_update_effects.py`
+- `agent_runtime/hive_topic_delete_effects.py`
 - `dashboard/workstation_render_nullabook_directory_styles.py`
 
 Do not casually grow them.

@@ -132,7 +132,7 @@ The current trunk still has a short list of blast-radius centers plus a few newl
 | `core/agent_runtime/hive_topic_pending_history.py` | 36 | pending preview history recovery now lives behind a dedicated pending-store seam |
 | `core/agent_runtime/hive_topic_preview_render.py` | 77 | pending preview rendering and preview text shaping now live behind a dedicated preview-render seam |
 | `core/agent_runtime/hive_topic_public_copy.py` | 39 | now the thin public-copy facade over the extracted privacy/tag helper lanes |
-| `core/agent_runtime/hive_topic_public_copy_privacy.py` | 214 | public-safe copy shaping and transcript rejection now live behind a dedicated privacy/policy seam |
+| `core/agent_runtime/hive_topic_public_copy_privacy.py` | 23 | now the thin public-copy privacy facade over extracted safety and transcript helpers |
 | `core/agent_runtime/hive_topic_public_copy_tags.py` | 157 | tag inference and tag normalization now live behind a dedicated public-copy helper seam |
 | `core/brain_hive_service.py` | 229 | service boundary is materially thinner after the read/query, commons-promotion, review-workflow, topic-lifecycle, commons-interaction, commons-state, write-support, topic/post frontdoor, and identity/review/idempotency extractions; the remaining risk is service-facade re-coupling |
 | `core/brain_hive_topic_post_frontdoor.py` | 141 | base topic/post create, get, and list behavior is now isolated behind a dedicated Brain Hive frontdoor seam while keeping the service facade stable |
@@ -161,13 +161,13 @@ The current trunk still has a short list of blast-radius centers plus a few newl
 | `core/public_hive/bridge_topics.py` | 15 | now the thin grouped topic facade over the extracted read/review/write/publication mixins |
 | `core/public_hive/bridge_topic_reads.py` | 59 | public-Hive topic/research read projections now live behind a dedicated bridge-read seam |
 | `core/public_hive/bridge_topic_reviews.py` | 35 | public-Hive review queue and moderation-review dispatch now live behind a dedicated bridge-review seam |
-| `core/public_hive/bridge_topic_writes.py` | 187 | topic CRUD, claims, progress/result submission, and status updates now live behind a dedicated bridge-write seam |
+| `core/public_hive/bridge_topic_writes.py` | 13 | now the thin bridge-write facade over extracted lifecycle, claim, and post/result write helpers |
 | `core/public_hive/bridge_topic_publication.py` | 53 | task publication and related-topic/commons lookup helpers now live behind a dedicated publication seam |
-| `core/public_hive_bridge.py` | 190 | compatibility/auth/bootstrap facade is thinner after bootstrap/discovery and SSH sync support moved into `core/public_hive/bridge_support.py`, but it still needs to stay thin |
+| `core/public_hive_bridge.py` | 197 | compatibility/auth/bootstrap facade now delegates through extracted facade-auth/config/bootstrap helpers while preserving stable caller-facing patch points |
 | `core/public_hive/bridge_support.py` | 141 | public-Hive bootstrap discovery, local bootstrap writes, and SSH sync helpers now live behind a dedicated compat-support seam |
 | `core/agent_runtime/hive_research_followup.py` | 27 | now the thin research/status followup facade over extracted hint/resume/status helpers |
 | `core/agent_runtime/fast_live_info.py` | 40 | now the thin live-info facade over router, search, rendering, and price leaves |
-| `core/agent_runtime/fast_live_info_router.py` | 324 | fresh-info, weather, news, and price shortcut routing now live behind a dedicated live-info router seam |
+| `core/agent_runtime/fast_live_info_router.py` | 19 | now the thin live-info router facade over extracted mode-policy and runtime helpers |
 | `core/agent_runtime/fast_live_info_search.py` | 51 | live-info search runner and result packaging now live behind a dedicated live-info seam |
 | `core/agent_runtime/fast_live_info_rendering.py` | 108 | live-info result text/render shaping now lives behind a dedicated live-info seam |
 | `core/agent_runtime/fast_live_info_price.py` | 84 | price grounding and quote rendering now live behind a dedicated live-info seam |
@@ -175,8 +175,8 @@ The current trunk still has a short list of blast-radius centers plus a few newl
 | `core/agent_runtime/hive_topic_mutation_detection.py` | 84 | mutation request routing, update/delete intent detection, and update-draft parsing now live behind a dedicated mutation seam |
 | `core/agent_runtime/hive_topic_mutation_runtime.py` | 15 | now the thin Hive-topic mutation facade over resolver, update, and delete leaves |
 | `core/agent_runtime/hive_topic_mutation_resolver.py` | 46 | topic resolution for Hive-topic update/delete requests now lives behind a dedicated mutation seam |
-| `core/agent_runtime/hive_topic_update_runtime.py` | 170 | Hive-topic update execution now lives behind a dedicated mutation seam |
-| `core/agent_runtime/hive_topic_delete_runtime.py` | 150 | Hive-topic delete execution now lives behind a dedicated mutation seam |
+| `core/agent_runtime/hive_topic_update_runtime.py` | 36 | now the thin Hive-topic update facade over extracted preflight and effects helpers |
+| `core/agent_runtime/hive_topic_delete_runtime.py` | 33 | now the thin Hive-topic delete facade over extracted preflight and effects helpers |
 | `core/dashboard/render.py` | 346 | now a routing shell for public vs workstation rendering, no longer the main dashboard monolith |
 | `core/persistent_memory.py` | 202 | now a thin facade over `core/memory/`, no longer a high-blast-radius module |
 | `apps/nulla_daemon.py` | 420 | now a thin facade over `core/daemon/`, no longer a top-tier monolith |
@@ -187,7 +187,7 @@ These are the current blast-radius centers. Split these before inventing more la
 
 - completed enough to stop pretending they are still untouched: `core/local_operator_actions.py`, `core/control_plane_workspace.py`, `apps/brain_hive_watch_server.py`, `apps/nulla_daemon.py`, `apps/nulla_api_server.py`, `apps/meet_and_greet_server.py`, `core/brain_hive_dashboard.py`, `core/persistent_memory.py`
 - materially improved but still active: `core/public_hive/bridge.py`, `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/dashboard/workstation_client.py`, `core/nullabook_feed_page.py`, `core/nullabook_feed_surface_runtime.py`, `core/brain_hive_service.py`, `core/agent_runtime/hive_research_followup.py`, `core/agent_runtime/fast_paths.py`, `core/public_hive_bridge.py`
-- still the next serious targets: `core/agent_runtime/fast_live_info_router.py`, `core/agent_runtime/hive_topic_public_copy_privacy.py`, `core/public_hive_bridge.py`, `core/public_hive/bridge_topic_writes.py`, `core/agent_runtime/hive_topic_update_runtime.py`, `core/agent_runtime/hive_topic_delete_runtime.py`, `core/dashboard/workstation_overview_home_board_runtime.py`, `core/dashboard/workstation_render_nullabook_feed_styles.py`, `core/dashboard/workstation_render_nullabook_directory_styles.py`
+- still the next serious targets: `core/public_hive_bridge.py`, `core/public_hive/bridge_support.py`, `core/public_hive/bridge_facade_bootstrap.py`, `core/public_hive/bridge_topic_post_writes.py`, `core/agent_runtime/fast_live_info_mode_policy.py`, `core/agent_runtime/fast_live_info_runtime.py`, `core/agent_runtime/hive_topic_public_copy_safety.py`, `core/agent_runtime/hive_topic_update_effects.py`, `core/agent_runtime/hive_topic_delete_effects.py`, and `core/dashboard/workstation_render_nullabook_directory_styles.py`
 - startup/provider state is now also centralized behind `core/runtime_backbone.py` so operator/chat surfaces stop rediscovering hardware tier and provider audit state independently
 - provider-role routing now also lives behind `core/provider_routing.py`, and both the helper/teacher lane and the main model execution router now honor bounded drone/queen provider roles without broad caller rewiring
 - chat-surface wording, observation shaping, and Hive status narration now also live behind `core/agent_runtime/chat_surface.py`, and the agent-facing wrapper surface now also lives behind `core/agent_runtime/chat_surface_facade.py`, so `apps/nulla_agent.py` no longer owns that slab directly
@@ -196,7 +196,7 @@ These are the current blast-radius centers. Split these before inventing more la
 - public-Hive capability/help wrappers, task export, footer support, public capability ledger shaping, and transport-mode helpers now also live behind `core/agent_runtime/public_hive_support.py`, so `apps/nulla_agent.py` no longer owns that outward support slab directly
 - task-class updates, task-outcome persistence, verified-action shard promotion, and local shard persistence now also live behind `core/agent_runtime/task_persistence_support.py`, so `apps/nulla_agent.py` no longer owns that persistence/support slab directly
 - proceed/resume request normalization, explicit resume detection, and generic proceed-message matching now also live behind `core/agent_runtime/proceed_intent_support.py`, so `apps/nulla_agent.py` no longer owns that intent-policy slab directly
-- live-info, weather, news, and price lookup routing now live behind `core/agent_runtime/fast_live_info_router.py`, `core/agent_runtime/fast_live_info_search.py`, `core/agent_runtime/fast_live_info_rendering.py`, and `core/agent_runtime/fast_live_info_price.py`, leaving `core/agent_runtime/fast_live_info.py` as the thin shortcut facade and `core/agent_runtime/fast_paths.py` as the smaller utility/date/smalltalk shortcut lane
+- live-info, weather, news, and price lookup routing now live behind `core/agent_runtime/fast_live_info_router.py`, `core/agent_runtime/fast_live_info_mode_policy.py`, `core/agent_runtime/fast_live_info_runtime.py`, `core/agent_runtime/fast_live_info_search.py`, `core/agent_runtime/fast_live_info_rendering.py`, and `core/agent_runtime/fast_live_info_price.py`, leaving `core/agent_runtime/fast_live_info.py` as the thin shortcut facade and `core/agent_runtime/fast_paths.py` as the smaller utility/date/smalltalk shortcut lane
 - public presence heartbeat, idle commons cadence, and autonomous Hive research loops now also live behind `core/agent_runtime/presence.py`, so `apps/nulla_agent.py` no longer owns those background-runtime slabs directly
 - trace-rail browser runtime, session/event polling, and session-summary/event rendering now also live behind `core/runtime_task_rail_client.py`, so `core/runtime_task_rail.py` no longer owns that browser-runtime slab directly
 - trace-rail session summary derivation now also lives behind `core/runtime_task_rail_summary_client.py`, so `core/runtime_task_rail_client.py` no longer owns that logic hub directly
@@ -247,9 +247,11 @@ These are the current blast-radius centers. Split these before inventing more la
 - trace-rail shell HTML and CSS now also live behind `core/runtime_task_rail_shell.py`, `core/runtime_task_rail_styles.py`, `core/runtime_task_rail_panel_styles.py`, `core/runtime_task_rail_trace_styles.py`, `core/runtime_task_rail_event_feed_styles.py`, and `core/runtime_task_rail_workbench_styles.py`, leaving `core/runtime_task_rail_assets.py` and `core/runtime_task_rail_styles.py` as thin asset facades
 - public-Hive presence/profile/post sync, topic CRUD/claims/progress/moderation/search flows, and bridge transport helpers now also live behind `core/public_hive/bridge_presence.py`, `core/public_hive/bridge_topics.py`, and `core/public_hive/bridge_transport.py`, so `core/public_hive/bridge.py` is now just the thin caller-facing facade
 - public-Hive topic reads, review queue/moderation, write workflows, and task-publication helpers now also live behind `core/public_hive/bridge_topic_reads.py`, `core/public_hive/bridge_topic_reviews.py`, `core/public_hive/bridge_topic_writes.py`, and `core/public_hive/bridge_topic_publication.py`, so `core/public_hive/bridge_topics.py` is now just the thin grouped topic facade
+- public-Hive topic writes now also fan out to `core/public_hive/bridge_topic_lifecycle_writes.py`, `core/public_hive/bridge_topic_claim_writes.py`, and `core/public_hive/bridge_topic_post_writes.py`, so `core/public_hive/bridge_topic_writes.py` is now just the thin grouped write facade
 - Hive followup hint/resume/status helpers now also live behind `core/agent_runtime/hive_research_hints.py`, `core/agent_runtime/hive_research_resume.py`, and `core/agent_runtime/hive_research_status.py`, while fast-path utility/companion/builder helpers now also live behind `core/agent_runtime/fast_paths_utility.py`, `core/agent_runtime/fast_paths_companion.py`, and `core/agent_runtime/fast_paths_builder.py`, and the remaining Brain Hive identity/review/idempotency glue now also lives behind `core/brain_hive_identity.py`, `core/brain_hive_review_state.py`, and `core/brain_hive_idempotency.py`
-- public-Hive compatibility/bootstrap support now also lives behind `core/public_hive/bridge_support.py`, so `core/public_hive_bridge.py` is thinner and stays focused on the stable caller-facing compat/auth/bootstrap facade
-- Hive-topic mutation resolution, update execution, and delete execution now also live behind `core/agent_runtime/hive_topic_mutation_resolver.py`, `core/agent_runtime/hive_topic_update_runtime.py`, and `core/agent_runtime/hive_topic_delete_runtime.py`, leaving `core/agent_runtime/hive_topic_mutation_runtime.py` as the thin mutation facade
+- public-Hive compatibility/bootstrap support now also lives behind `core/public_hive/bridge_support.py`, `core/public_hive/bridge_facade_auth.py`, `core/public_hive/bridge_facade_config.py`, and `core/public_hive/bridge_facade_bootstrap.py`, so `core/public_hive_bridge.py` stays focused on the stable caller-facing compat/auth/bootstrap facade without re-growing mixed helper logic
+- Hive-topic mutation resolution, update execution, and delete execution now also live behind `core/agent_runtime/hive_topic_mutation_resolver.py`, `core/agent_runtime/hive_topic_update_runtime.py`, `core/agent_runtime/hive_topic_update_preflight.py`, `core/agent_runtime/hive_topic_update_effects.py`, `core/agent_runtime/hive_topic_delete_runtime.py`, `core/agent_runtime/hive_topic_delete_preflight.py`, and `core/agent_runtime/hive_topic_delete_effects.py`, leaving `core/agent_runtime/hive_topic_mutation_runtime.py` as the thin mutation facade
+- public-copy privacy policy now also fans out to `core/agent_runtime/hive_topic_public_copy_safety.py` and `core/agent_runtime/hive_topic_public_copy_transcript.py`, so `core/agent_runtime/hive_topic_public_copy_privacy.py` is now just the thin privacy facade
 - workstation overview home/runtime composition now also lives behind `core/dashboard/workstation_overview_home_board_runtime.py` and `core/dashboard/workstation_overview_notes_runtime.py`, leaving `core/dashboard/workstation_overview_home_runtime.py` as the thin overview/home facade
 - workstation trading-program cards now also live behind `core/dashboard/workstation_learning_program_trading_overview_runtime.py`, `core/dashboard/workstation_learning_program_trading_market_runtime.py`, and `core/dashboard/workstation_learning_program_trading_activity_runtime.py`, leaving `core/dashboard/workstation_learning_program_trading_cards_runtime.py` as the thin trading-card facade
 - embedded NullaBook fabric CSS now also lives behind `core/dashboard/workstation_render_nullabook_fabric_telemetry_styles.py`, `core/dashboard/workstation_render_nullabook_fabric_timeline_styles.py`, `core/dashboard/workstation_render_nullabook_fabric_cards_styles.py`, and `core/dashboard/workstation_render_nullabook_fabric_onboarding_styles.py`, leaving `core/dashboard/workstation_render_nullabook_fabric_styles.py` as the thin fabric-style aggregator
@@ -268,12 +270,15 @@ Keep:
 
 Split next:
 
-- `core/agent_runtime/fast_live_info_router.py`
-- `core/agent_runtime/hive_topic_public_copy_privacy.py`
 - `core/public_hive_bridge.py`
-- `core/public_hive/bridge_topic_writes.py`
-- `core/agent_runtime/hive_topic_update_runtime.py`
-- `core/agent_runtime/hive_topic_delete_runtime.py`
+- `core/public_hive/bridge_support.py`
+- `core/public_hive/bridge_facade_bootstrap.py`
+- `core/public_hive/bridge_topic_post_writes.py`
+- `core/agent_runtime/fast_live_info_mode_policy.py`
+- `core/agent_runtime/fast_live_info_runtime.py`
+- `core/agent_runtime/hive_topic_public_copy_safety.py`
+- `core/agent_runtime/hive_topic_update_effects.py`
+- `core/agent_runtime/hive_topic_delete_effects.py`
 - `core/dashboard/workstation_overview_home_board_runtime.py`
 - `core/dashboard/workstation_render_nullabook_feed_styles.py`
 - `core/dashboard/workstation_render_nullabook_directory_styles.py`
@@ -432,15 +437,15 @@ pytest -q \
 Status on trunk:
 
 - `core/public_hive/__init__.py`, `auth.py`, `bootstrap.py`, `bridge.py`, `client.py`, `config.py`, `truth.py`, `topic_writes.py`, `publication.py`, and `moderation.py` are already live
-- `core/public_hive_bridge.py` is down to 190 lines
+- `core/public_hive_bridge.py` is down to 197 lines and now delegates through extracted compat facade helpers
 - `core/public_hive/bridge_support.py` now owns the extracted bootstrap/discovery and SSH sync support lane at 141 lines
 - `core/public_hive/bridge.py` is down to 37 lines and now acts as the thin caller-facing bridge facade
 - `core/public_hive/bridge_presence.py` now owns the extracted presence/profile/post sync lane at 115 lines
-- `core/public_hive/bridge_topics.py` is now the 15-line grouped topic facade over `core/public_hive/bridge_topic_reads.py` (59), `core/public_hive/bridge_topic_reviews.py` (35), `core/public_hive/bridge_topic_writes.py` (187), and `core/public_hive/bridge_topic_publication.py` (53)
+- `core/public_hive/bridge_topics.py` is now the 15-line grouped topic facade over `core/public_hive/bridge_topic_reads.py` (59), `core/public_hive/bridge_topic_reviews.py` (35), `core/public_hive/bridge_topic_writes.py` (13), and `core/public_hive/bridge_topic_publication.py` (53)
 - `core/public_hive/bridge_transport.py` now owns the extracted auth-token/write-grant/SSL/HTTP helper lane at 55 lines
 - `core/public_hive/writes.py` is down to a 37-line facade
 - auth/bootstrap/config composition now lives behind `core/public_hive/auth.py`
-- the remaining public-Hive risk is now mostly `core/public_hive_bridge.py` and `core/public_hive/bridge_topic_writes.py`, not the grouped topic facade
+- the remaining public-Hive risk is now mostly `core/public_hive_bridge.py`, `core/public_hive/bridge_support.py`, `core/public_hive/bridge_facade_bootstrap.py`, and `core/public_hive/bridge_topic_post_writes.py`, not the grouped topic facade
 - the main slow-lane model router now reads `provider_role` from `core/task_router.py` and resolves ranked candidates through `core/provider_routing.py` inside `core/memory_first_router.py`
 
 Create:
@@ -594,7 +599,7 @@ Status on trunk:
 - `core/agent_runtime/hive_topic_create.py` is now the 41-line create facade over `core/agent_runtime/hive_topic_create_preflight.py` (182) and the 136-line `core/agent_runtime/hive_topic_publish_flow.py`, which now delegates to `core/agent_runtime/hive_topic_publish_failures.py` (59), `core/agent_runtime/hive_topic_publish_transport.py` (70), and `core/agent_runtime/hive_topic_publish_effects.py` (100)
 - `core/agent_runtime/hive_topic_drafting.py` is now the 15-line drafting facade over `core/agent_runtime/hive_topic_draft_parsing.py` (143) and the 27-line `core/agent_runtime/hive_topic_draft_variants.py`, which now delegates to `core/agent_runtime/hive_topic_draft_duplicate_detection.py` (50), `core/agent_runtime/hive_topic_draft_builder.py` (104), and `core/agent_runtime/hive_topic_draft_intents.py` (116)
 - `core/agent_runtime/hive_topic_pending.py` is now the 22-line pending facade over `core/agent_runtime/hive_topic_pending_confirmation.py` (148), the 102-line `core/agent_runtime/hive_topic_pending_store.py`, and `core/agent_runtime/hive_topic_preview_render.py` (77); the pending-store facade now delegates to `core/agent_runtime/hive_topic_pending_payloads.py` (51) and `core/agent_runtime/hive_topic_pending_history.py` (36)
-- `core/agent_runtime/hive_topics.py` is now the 44-line legacy mutation facade over `core/agent_runtime/hive_topic_mutation_detection.py` (84) and the 15-line `core/agent_runtime/hive_topic_mutation_runtime.py`; that mutation facade now delegates to `core/agent_runtime/hive_topic_mutation_resolver.py` (46), `core/agent_runtime/hive_topic_update_runtime.py` (170), and `core/agent_runtime/hive_topic_delete_runtime.py` (150)
+- `core/agent_runtime/hive_topics.py` is now the 44-line legacy mutation facade over `core/agent_runtime/hive_topic_mutation_detection.py` (84) and the 15-line `core/agent_runtime/hive_topic_mutation_runtime.py`; that mutation facade now delegates to `core/agent_runtime/hive_topic_mutation_resolver.py` (46), `core/agent_runtime/hive_topic_update_runtime.py` (36), `core/agent_runtime/hive_topic_update_preflight.py` (51), `core/agent_runtime/hive_topic_update_effects.py` (109), `core/agent_runtime/hive_topic_delete_runtime.py` (33), `core/agent_runtime/hive_topic_delete_preflight.py` (59), and `core/agent_runtime/hive_topic_delete_effects.py` (123)
 
 Split next:
 
