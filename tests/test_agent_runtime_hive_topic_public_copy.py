@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from apps.nulla_agent import NullaAgent
 from core.agent_runtime import hive_topic_create, hive_topic_public_copy
+from core.agent_runtime.hive_topic_public_copy_privacy import (
+    prepare_public_hive_topic_copy as privacy_prepare_public_hive_topic_copy,
+)
+from core.agent_runtime.hive_topic_public_copy_tags import (
+    infer_hive_topic_tags as tag_infer_hive_topic_tags,
+)
 
 
 def _build_agent() -> NullaAgent:
@@ -11,6 +17,8 @@ def _build_agent() -> NullaAgent:
 def test_hive_topic_public_copy_exports_stay_available_from_hive_topic_create() -> None:
     assert hive_topic_create.prepare_public_hive_topic_copy is hive_topic_public_copy.prepare_public_hive_topic_copy
     assert hive_topic_create.infer_hive_topic_tags is hive_topic_public_copy.infer_hive_topic_tags
+    assert hive_topic_public_copy.prepare_public_hive_topic_copy is privacy_prepare_public_hive_topic_copy
+    assert hive_topic_public_copy.infer_hive_topic_tags is tag_infer_hive_topic_tags
 
 
 def test_prepare_public_hive_topic_copy_blocks_raw_transcripts_without_structured_brief() -> None:

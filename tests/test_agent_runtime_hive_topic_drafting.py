@@ -3,6 +3,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from core.agent_runtime import hive_topic_drafting
+from core.agent_runtime.hive_topic_draft_builder import (
+    build_hive_create_pending_variants as builder_build_hive_create_pending_variants,
+)
+from core.agent_runtime.hive_topic_draft_duplicate_detection import (
+    check_hive_duplicate as duplicate_check_hive_duplicate,
+)
+from core.agent_runtime.hive_topic_draft_intents import (
+    wants_hive_create_auto_start as intent_wants_hive_create_auto_start,
+)
 
 
 class _DraftingAgent:
@@ -110,6 +119,7 @@ def test_build_hive_create_pending_variants_keeps_original_variant_when_distinct
     assert set(pending["variants"]) == {"improved", "original"}
     assert pending["variants"]["improved"]["preview_note"] == "improved preview"
     assert pending["variants"]["original"]["preview_note"] == "original preview"
+    assert hive_topic_drafting.build_hive_create_pending_variants is builder_build_hive_create_pending_variants
 
 
 def test_check_hive_duplicate_prefers_recent_overlap() -> None:
@@ -140,6 +150,7 @@ def test_check_hive_duplicate_prefers_recent_overlap() -> None:
 
     assert duplicate is not None
     assert duplicate["topic_id"] == "recent-topic"
+    assert hive_topic_drafting.check_hive_duplicate is duplicate_check_hive_duplicate
 
 
 def test_looks_like_hive_topic_drafting_request_blocks_script_first_prompt() -> None:
@@ -153,3 +164,4 @@ def test_wants_hive_create_auto_start_detects_research_phrase() -> None:
     assert hive_topic_drafting.wants_hive_create_auto_start(
         "create it and start researching right away",
     )
+    assert hive_topic_drafting.wants_hive_create_auto_start is intent_wants_hive_create_auto_start

@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest import mock
 
 from apps.nulla_agent import NullaAgent
-from core.agent_runtime import hive_topics
+from core.agent_runtime import hive_topic_mutation_detection, hive_topic_mutation_runtime, hive_topics
 
 
 def _build_agent() -> NullaAgent:
@@ -156,3 +156,13 @@ def test_maybe_handle_hive_topic_mutation_request_uses_app_level_update_override
         session_id="hive-mutation-session",
         source_context={"surface": "openclaw"},
     )
+
+
+def test_hive_topic_mutation_exports_stay_available_from_legacy_module() -> None:
+    assert hive_topics.maybe_handle_hive_topic_mutation_request is hive_topic_mutation_detection.maybe_handle_hive_topic_mutation_request
+    assert hive_topics.looks_like_hive_topic_update_request is hive_topic_mutation_detection.looks_like_hive_topic_update_request
+    assert hive_topics.looks_like_hive_topic_delete_request is hive_topic_mutation_detection.looks_like_hive_topic_delete_request
+    assert hive_topics.extract_hive_topic_update_draft is hive_topic_mutation_detection.extract_hive_topic_update_draft
+    assert hive_topics.resolve_hive_topic_for_mutation is hive_topic_mutation_runtime.resolve_hive_topic_for_mutation
+    assert hive_topics.handle_hive_topic_update_request is hive_topic_mutation_runtime.handle_hive_topic_update_request
+    assert hive_topics.handle_hive_topic_delete_request is hive_topic_mutation_runtime.handle_hive_topic_delete_request

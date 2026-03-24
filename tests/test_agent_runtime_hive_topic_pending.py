@@ -4,6 +4,12 @@ from unittest import mock
 
 from apps.nulla_agent import NullaAgent
 from core.agent_runtime import hive_topic_create, hive_topic_pending
+from core.agent_runtime.hive_topic_pending_history import (
+    recover_hive_create_pending_from_history as history_recover_hive_create_pending_from_history,
+)
+from core.agent_runtime.hive_topic_pending_payloads import (
+    build_hive_create_pending_payload,
+)
 
 
 def _build_agent() -> NullaAgent:
@@ -16,6 +22,7 @@ def test_hive_topic_pending_exports_stay_available_from_hive_topic_create() -> N
         is hive_topic_pending.maybe_handle_hive_create_confirmation
     )
     assert hive_topic_create.load_pending_hive_create is hive_topic_pending.load_pending_hive_create
+    assert hive_topic_pending.recover_hive_create_pending_from_history is history_recover_hive_create_pending_from_history
 
 
 def test_load_pending_hive_create_restores_payload_from_interaction_state() -> None:
@@ -94,6 +101,34 @@ def test_recover_hive_create_pending_from_history_rebuilds_pending_payload() -> 
     assert pending["task_id"] == "task-xyz"
     assert pending["default_variant"] == "improved"
     assert pending["variants"]["improved"]["title"]
+
+
+def test_build_hive_create_pending_payload_normalizes_variant_payload() -> None:
+    agent = _build_agent()
+
+    payload = build_hive_create_pending_payload(
+        agent,
+        {
+            "title": "Improve proof routing",
+            "summary": "Improve proof routing summary",
+            "topic_tags": ["proof"],
+            "task_id": "task-123",
+            "auto_start_research": True,
+            "variants": {
+                "improved": {
+                    "title": "Improve proof routing",
+                    "summary": "Improve proof routing summary",
+                    "topic_tags": ["proof"],
+                    "auto_start_research": True,
+                    "preview_note": "Safe to post.",
+                }
+            },
+        },
+    )
+
+    assert payload["title"] == "Improve proof routing"
+    assert payload["task_id"] == "task-123"
+    assert payload["variants"]["improved"]["preview_note"] == "Safe to post."
 
 
 def test_maybe_handle_hive_create_confirmation_can_cancel_pending_preview() -> None:
