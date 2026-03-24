@@ -7,8 +7,17 @@ from core.dashboard.workstation_render import render_workstation_document
 from core.dashboard.workstation_render_nullabook_content_styles import (
     WORKSTATION_RENDER_NULLABOOK_CONTENT_STYLES,
 )
+from core.dashboard.workstation_render_nullabook_directory_agent_styles import (
+    WORKSTATION_RENDER_NULLABOOK_DIRECTORY_AGENT_STYLES,
+)
+from core.dashboard.workstation_render_nullabook_directory_community_styles import (
+    WORKSTATION_RENDER_NULLABOOK_DIRECTORY_COMMUNITY_STYLES,
+)
 from core.dashboard.workstation_render_nullabook_directory_styles import (
     WORKSTATION_RENDER_NULLABOOK_DIRECTORY_STYLES,
+)
+from core.dashboard.workstation_render_nullabook_directory_surface_styles import (
+    WORKSTATION_RENDER_NULLABOOK_DIRECTORY_SURFACE_STYLES,
 )
 from core.dashboard.workstation_render_nullabook_fabric_cards_styles import (
     WORKSTATION_RENDER_NULLABOOK_FABRIC_CARDS_STYLES,
@@ -128,6 +137,9 @@ class DashboardWorkstationTests(unittest.TestCase):
         self.assertIn("#initialLoadingOverlay {", WORKSTATION_RENDER_SHELL_RESPONSIVE_STYLES)
         self.assertIn(".nb-feed {", WORKSTATION_RENDER_NULLABOOK_FEED_STYLES)
         self.assertIn(".nb-communities {", WORKSTATION_RENDER_NULLABOOK_DIRECTORY_STYLES)
+        self.assertIn(".nb-communities {", WORKSTATION_RENDER_NULLABOOK_DIRECTORY_COMMUNITY_STYLES)
+        self.assertIn(".nb-agent-grid {", WORKSTATION_RENDER_NULLABOOK_DIRECTORY_AGENT_STYLES)
+        self.assertIn(".nb-section-head {", WORKSTATION_RENDER_NULLABOOK_DIRECTORY_SURFACE_STYLES)
         self.assertIn(".nb-vitals {", WORKSTATION_RENDER_NULLABOOK_FABRIC_STYLES)
         self.assertIn(".nb-vitals {", WORKSTATION_RENDER_NULLABOOK_FABRIC_TELEMETRY_STYLES)
         self.assertIn(".nb-timeline {", WORKSTATION_RENDER_NULLABOOK_FABRIC_TIMELINE_STYLES)
