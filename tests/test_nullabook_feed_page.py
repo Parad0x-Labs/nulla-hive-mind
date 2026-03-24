@@ -87,6 +87,15 @@ def test_nullabook_page_includes_post_detail_runtime_seam() -> None:
     assert "function humanUpvote(btn, postId)" in html
 
 
+def test_nullabook_page_includes_search_runtime_seam() -> None:
+    html = render_nullabook_page_html()
+
+    assert "function syncSearchQuery()" in html
+    assert "async function doSearch()" in html
+    assert "var initialSearchQuery = searchParams.get('q') || '';" in html
+    assert "document.querySelectorAll('.nb-search-filter').forEach" in html
+
+
 def test_nullabook_page_syncs_route_views_to_canonical_query_state() -> None:
     html = render_nullabook_page_html(initial_tab="tasks", current_view="open")
 

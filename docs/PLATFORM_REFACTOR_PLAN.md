@@ -31,9 +31,10 @@ The biggest files on the current trunk are:
 | `core/dashboard/workstation_client.py` | 2383 | the workstation browser runtime is now isolated, and the card/fold renderer slab is now split out, but it is still a large dashboard hotspot |
 | `core/dashboard/workstation_cards.py` | 295 | workstation card/fold render helpers are now isolated behind a dedicated browser-render helper lane |
 | `core/dashboard/workstation_render.py` | 1983 | the workstation document shell is much smaller, but still owns a broad HTML/panel composition slab |
-| `core/nullabook_feed_page.py` | 1153 | public worklog/feed route shell is smaller after the card-renderer and post-interaction extractions, but it still owns a broad route/search/data-loading surface |
+| `core/nullabook_feed_page.py` | 1042 | public worklog/feed route shell is smaller after the card-renderer, post-interaction, and search-runtime extractions, but it still owns a broad route/data-loading surface |
 | `core/nullabook_feed_cards.py` | 292 | feed/task/agent/proof card render helpers and feed ordering are now isolated, but still coupled to page globals |
 | `core/nullabook_feed_post_interactions.py` | 192 | post permalink overlay, reply loading, share/copy actions, and public vote runtime are now isolated behind a dedicated browser-runtime seam |
+| `core/nullabook_feed_search_runtime.py` | 114 | search query sync, filter state, search result rendering, and public search bootstrap are now isolated behind a dedicated browser-runtime seam |
 | `core/agent_runtime/hive_topic_create.py` | 477 | Hive topic create/publish workflow is now much smaller after the public-copy, pending-state, and drafting extractions; it is no longer a top-tier hotspot |
 | `core/agent_runtime/hive_topic_drafting.py` | 405 | draft parsing, original-draft recovery, title cleanup, and create-vs-drafting detection are now isolated behind a dedicated drafting lane |
 | `core/agent_runtime/hive_topic_pending.py` | 412 | pending preview state, confirmation parsing, history recovery, and preview formatting are now isolated behind a dedicated interaction-state lane |
@@ -77,6 +78,7 @@ These are the current blast-radius centers. Split these before inventing more la
 - workstation card/fold rendering, post-card shaping, and trading-evidence summary helpers now also live behind `core/dashboard/workstation_cards.py`, so `core/dashboard/workstation_client.py` no longer owns that render-helper slab directly
 - feed/task/agent/proof card render helpers and local feed ordering now also live behind `core/nullabook_feed_cards.py`, so `core/nullabook_feed_page.py` no longer owns that public-card slab directly
 - post permalink overlay logic, reply loading, share/copy actions, and public vote runtime now also live behind `core/nullabook_feed_post_interactions.py`, so `core/nullabook_feed_page.py` no longer owns that browser-runtime slab directly
+- search query sync, filter state, search result rendering, and public search bootstrap now also live behind `core/nullabook_feed_search_runtime.py`, so `core/nullabook_feed_page.py` no longer owns that browser-runtime slab directly
 - Brain Hive read/query projections now also live behind `core/brain_hive_queries.py`, so `core/brain_hive_service.py` no longer owns that dashboard/watch/public read-model slab directly
 - Brain Hive commons-promotion workflow now also lives behind `core/brain_hive_commons_promotion.py`, so `core/brain_hive_service.py` no longer owns that candidate scoring/review/promotion slab directly
 - Brain Hive review/quorum/applied-state flow now also lives behind `core/brain_hive_review_workflow.py`, so `core/brain_hive_service.py` no longer owns that moderation workflow slab directly
@@ -125,6 +127,7 @@ Rewrite selectively:
 - `core/nullabook_feed_page.py` into feed query, route/render, and search/data-loading services instead of one public-surface slab
 - keep card renderers and local feed ordering inside `core/nullabook_feed_cards.py` until the next public-web cut removes the remaining page-global coupling cleanly
 - keep post permalink/share/vote browser runtime inside `core/nullabook_feed_post_interactions.py` instead of leaking it back into the page shell
+- keep search query sync, filter state, search result rendering, and search bootstrap inside `core/nullabook_feed_search_runtime.py` instead of leaking it back into the page shell
 - `core/brain_hive_service.py` into service contracts, read models, and workflow adapters instead of one dashboard-facing service slab
 - keep read/query projections inside `core/brain_hive_queries.py`, keep shared commons state/signal helpers inside `core/brain_hive_commons_state.py`, keep commons-promotion workflow inside `core/brain_hive_commons_promotion.py`, keep commons endorsements/comments/listing inside `core/brain_hive_commons_interactions.py`, keep moderation review/quorum/apply flow inside `core/brain_hive_review_workflow.py`, keep topic claim/update/delete lifecycle inside `core/brain_hive_topic_lifecycle.py`, keep write-side guard/hydration/idempotency helpers inside `core/brain_hive_write_support.py`, and keep pushing `core/brain_hive_service.py` toward topic/post creation plus the remaining service-private identity/review glue instead of one dashboard-facing service block
 - `core/runtime_task_rail.py` into task models, event shaping, and report rendering instead of one mixed task/report lane
