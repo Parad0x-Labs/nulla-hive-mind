@@ -32,7 +32,7 @@ The biggest files on the current trunk are:
 | `core/dashboard/workstation_cards.py` | 295 | workstation card/fold render helpers are now isolated behind a dedicated browser-render helper lane |
 | `core/dashboard/workstation_render.py` | 1983 | the workstation document shell is much smaller, but still owns a broad HTML/panel composition slab |
 | `core/nullabook_feed_page.py` | 1042 | public worklog/feed route shell is smaller after the card-renderer, post-interaction, and search-runtime extractions, but it still owns a broad route/data-loading surface |
-| `core/nullabook_feed_cards.py` | 292 | feed/task/agent/proof card render helpers and feed ordering are now isolated, but still coupled to page globals |
+| `core/nullabook_feed_cards.py` | 289 | feed/task/agent/proof card render helpers and feed ordering are now isolated, but still coupled to page globals |
 | `core/nullabook_feed_post_interactions.py` | 192 | post permalink overlay, reply loading, share/copy actions, and public vote runtime are now isolated behind a dedicated browser-runtime seam |
 | `core/nullabook_feed_search_runtime.py` | 114 | search query sync, filter state, search result rendering, and public search bootstrap are now isolated behind a dedicated browser-runtime seam |
 | `core/agent_runtime/hive_topic_create.py` | 477 | Hive topic create/publish workflow is now much smaller after the public-copy, pending-state, and drafting extractions; it is no longer a top-tier hotspot |
@@ -45,11 +45,11 @@ The biggest files on the current trunk are:
 | `core/brain_hive_queries.py` | 366 | dashboard/watch/public read models are now isolated, and commons meta/signal helpers are now split out behind a shared commons-state seam |
 | `core/brain_hive_commons_promotion.py` | 361 | commons-candidate scoring, review, promotion, and promoted-topic shaping are now isolated behind a dedicated workflow lane, with shared commons-state helpers split out |
 | `core/brain_hive_commons_interactions.py` | 111 | commons endorsements, comments, and listing helpers are now isolated behind a dedicated interaction workflow lane |
-| `core/brain_hive_commons_state.py` | 150 | shared commons topic classification, commons post validation, commons meta shaping, downstream-use counts, and research-signal aggregation are now isolated behind a dedicated state/signal seam |
-| `core/brain_hive_review_workflow.py` | 155 | weighted review, quorum, and applied-state transitions are now isolated behind a dedicated moderation workflow lane |
-| `core/brain_hive_topic_lifecycle.py` | 187 | topic claim, claim-backed status transition, creator edit, and creator delete logic are now isolated behind a dedicated lifecycle lane |
+| `core/brain_hive_commons_state.py` | 152 | shared commons topic classification, commons post validation, commons meta shaping, downstream-use counts, and research-signal aggregation are now isolated behind a dedicated state/signal seam |
+| `core/brain_hive_review_workflow.py` | 156 | weighted review, quorum, and applied-state transitions are now isolated behind a dedicated moderation workflow lane |
+| `core/brain_hive_topic_lifecycle.py` | 188 | topic claim, claim-backed status transition, creator edit, and creator delete logic are now isolated behind a dedicated lifecycle lane |
 | `core/runtime_task_rail.py` | 719 | runtime task/reporting rail shell is much smaller after the browser-runtime extraction, but it still owns mixed document shell and rail composition |
-| `core/runtime_task_rail_client.py` | 455 | trace-rail browser runtime, event rendering, and polling logic are now isolated behind a dedicated client seam, but it still owns mixed client-state/render coupling |
+| `core/runtime_task_rail_client.py` | 452 | trace-rail browser runtime, event rendering, and polling logic are now isolated behind a dedicated client seam, but it still owns mixed client-state/render coupling |
 | `core/runtime_task_rail_summary_client.py` | 172 | trace-rail session summary derivation is now isolated behind a dedicated summary seam |
 | `core/agent_runtime/fast_paths.py` | 785 | the utility/date/smalltalk shortcut lane is now much smaller after the live-info extraction, but it still owns mixed shortcut glue |
 | `core/public_hive_bridge.py` | 774 | much smaller, but still the main public-hive facade and still too mixed |
@@ -92,6 +92,7 @@ These are the current blast-radius centers. Split these before inventing more la
 - Brain Hive shared commons topic classification, commons meta shaping, downstream-use counts, and research-signal aggregation now also live behind `core/brain_hive_commons_state.py`, so `core/brain_hive_service.py` no longer acts as the hidden glue between queries, promotion, and commons interactions for that seam
 - Brain Hive public-visibility guard checks, post-row hydration, forced-review shaping, and Hive idempotent receipt helpers now also live behind `core/brain_hive_write_support.py`, so sibling Brain Hive write workflows stop bouncing through hidden service-private helpers for that seam
 - Brain Hive base topic/post create, get, and list behavior now also lives behind `core/brain_hive_topic_post_frontdoor.py`, so `core/brain_hive_service.py` no longer owns that frontdoor lane directly while the service facade and the old module-level `get_topic` seam stay stable
+- front-door docs and package metadata now also state the product center more honestly: credits are explicitly local work/participation accounting instead of blockchain/token language, marketplace/settlement claims are more clearly quarantined, and the tracked archive/docs lane had leaked absolute local paths plus token-shaped values scrubbed
 
 ## Keep / Split / Rewrite / Quarantine
 

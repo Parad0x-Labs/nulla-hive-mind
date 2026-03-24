@@ -1,6 +1,6 @@
 # NULLA Starter Kit
 
-Last updated: 2026-03-20
+Last updated: 2026-03-24
 
 This file is now the short operator quickstart, not a second giant source-of-truth.
 

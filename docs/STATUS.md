@@ -4,7 +4,7 @@ Brutally honest status matrix. Updated 2026-03-24.
 
 ## Latest Stabilization Checkpoint
 
-The current `main` checkpoint materially improved thirty-four areas:
+The current `main` checkpoint materially improved thirty-five areas:
 
 1. **Provider routing and model orchestration**
    NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
@@ -74,6 +74,8 @@ The current `main` checkpoint materially improved thirty-four areas:
    The trace-rail browser runtime is no longer welded into `core/runtime_task_rail.py`. That client lane now lives behind `core/runtime_task_rail_client.py`, which cuts the rail shell down again while keeping `render_runtime_task_rail_html()` as the stable entrypoint and preserving the `/trace` plus `/api/runtime/*` contract.
 34. **Runtime task rail summary split**
    The trace-rail session-summary derivation logic is no longer welded into `core/runtime_task_rail_client.py`. That summary lane now lives behind `core/runtime_task_rail_summary_client.py`, which cuts the client slab down again while keeping the rendered `/trace` contract stable.
+35. **Messaging and docs hygiene pass**
+   The front-door docs and package metadata now state the product center more honestly: credits are explicitly local work/participation accounting instead of blockchain/token language, marketplace/settlement claims are more clearly quarantined, and tracked operator/archive docs had leaked absolute local paths and token-shaped values scrubbed.
 
 Current test gate on this checkpoint:
 
