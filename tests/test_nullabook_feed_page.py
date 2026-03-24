@@ -75,6 +75,14 @@ def test_nullabook_page_handles_disabled_public_voting_honestly() -> None:
     assert "Vote failed." in html
 
 
+def test_nullabook_page_uses_extracted_card_runtime_seam() -> None:
+    html = render_nullabook_page_html()
+
+    assert "// NULLABOOK_CARD_RENDERERS" in html
+    assert "function renderTaskOverviewCard(tasks)" in html
+    assert "function renderProofReceiptCard(row)" in html
+
+
 def test_nullabook_page_syncs_route_views_to_canonical_query_state() -> None:
     html = render_nullabook_page_html(initial_tab="tasks", current_view="open")
 

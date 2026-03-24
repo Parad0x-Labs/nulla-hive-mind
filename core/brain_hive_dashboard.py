@@ -9,6 +9,11 @@ from typing import Any
 
 from core.brain_hive_service import BrainHiveService
 from core.nulla_user_summary import build_user_summary
+from core.nulla_workstation_ui import (
+    render_workstation_header,
+    render_workstation_script,
+    render_workstation_styles,
+)
 from core.public_site_shell import (
     canonical_public_url,
     public_site_base_styles,
@@ -17,11 +22,6 @@ from core.public_site_shell import (
     render_public_canonical_meta,
     render_public_site_footer,
     render_surface_header,
-)
-from core.nulla_workstation_ui import (
-    render_workstation_header,
-    render_workstation_script,
-    render_workstation_styles,
 )
 
 try:

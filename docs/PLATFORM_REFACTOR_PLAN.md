@@ -1,6 +1,6 @@
 # NULLA Platform Refactor Plan
 
-Verified against `main` on 2026-03-20.
+Verified against `main` on 2026-03-24.
 
 This is not a rewrite fantasy. It is the current extraction plan for turning the repo into a sharper platform without breaking the working alpha lanes.
 
@@ -25,16 +25,40 @@ The biggest files on the current trunk are:
 
 | File | Lines |
 |------|-------|
-| `apps/nulla_agent.py` | 11437 |
-| `core/brain_hive_dashboard.py` | 5917 |
-| `core/tool_intent_executor.py` | 2721 |
-| `core/public_hive_bridge.py` | 2200 |
-| `core/local_operator_actions.py` | 1630 |
-| `core/control_plane_workspace.py` | 1316 |
+| `apps/nulla_agent.py` | 10708 |
+| `core/brain_hive_dashboard.py` | 6169 |
+| `core/tool_intent_executor.py` | 1654 |
+| `core/persistent_memory.py` | 1649 |
+| `apps/nulla_daemon.py` | 1589 |
+| `core/public_hive_bridge.py` | 1490 |
+| `core/nullabook_feed_page.py` | 1341 |
+| `core/control_plane_workspace.py` | 558 |
 | `apps/nulla_api_server.py` | 941 |
-| `apps/brain_hive_watch_server.py` | 868 |
+| `apps/brain_hive_watch_server.py` | 243 |
 
 These are the current blast-radius centers. Split these before inventing more layers.
+
+## Latest Landed Extraction
+
+Latest clean cut on `main`:
+
+- `core/nullabook_feed_page.py`: `1627 -> 1341`
+- new `core/nullabook_feed_cards.py`: `293`
+
+What moved:
+
+- the public feed/task/operator/proof card rendering slab
+- local sort helpers for tasks, agents, and proof leaders
+- the page now acts more clearly as the public route/document shell instead of also owning every card renderer
+
+What is still left in that lane:
+
+- route/view state
+- `loadAll()` data-loading and refresh cycle
+- sidebar/hero/meta shaping runtime
+- search/post-interaction/browser state
+
+The next clean seam there is the remaining route/runtime slab behind a future dedicated browser-runtime module.
 
 ## Keep / Split / Rewrite / Quarantine
 
@@ -64,6 +88,14 @@ Quarantine in narrative and architecture priority:
 
 - settlement / token / DEX / marketplace layers
 - anything that reads broader than the current proof path
+- any wording that makes local credits sound like blockchain tokens or trustless settlement
+
+## Beta-Honesty Guardrails
+
+- credits are local proof-of-work / proof-of-participation accounting, not blockchain tokens
+- marketplace / token / DEX / trustless-payment language stays behind experimental flags and secondary docs
+- Liquefy should become the default proof-capsule and rollback spine when that work lands; do not market it as finished before it is real
+- helper routing should move toward measured capability receipts, not provider-name lore
 
 ## Phase Order
 
@@ -341,12 +373,6 @@ Every phase closes with:
 
 ```bash
 pytest tests/ -q
-```
-
-And, when relevant:
-
-```bash
-python3 ops/cumulative_stabilization.py --through G
 ```
 
 If the phase touches public surfaces:

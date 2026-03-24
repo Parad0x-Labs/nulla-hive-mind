@@ -1,16 +1,16 @@
 # NULLA Starter Kit
 
-Last updated: 2026-03-20
+Last updated: 2026-03-24
 
 This file is now the short operator quickstart, not a second giant source-of-truth.
 
 If you want the current explanation path, use:
 
-1. [`README.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/README.md)
-2. [`docs/INSTALL.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/INSTALL.md)
-3. [`docs/STATUS.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/STATUS.md)
-4. [`docs/SYSTEM_SPINE.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/SYSTEM_SPINE.md)
-5. [`docs/PROOF_PATH.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/PROOF_PATH.md)
+1. [`README.md`](README.md)
+2. [`docs/INSTALL.md`](docs/INSTALL.md)
+3. [`docs/STATUS.md`](docs/STATUS.md)
+4. [`docs/SYSTEM_SPINE.md`](docs/SYSTEM_SPINE.md)
+5. [`docs/PROOF_PATH.md`](docs/PROOF_PATH.md)
 
 ## System Identity
 
@@ -39,7 +39,8 @@ Partial / still evolving:
 - WAN-hard networking and full adversarial proof
 - broader public-web polish and browseability
 - stronger live eval/benchmark proof
-- trustless payment rails
+- proof/rollback hardening and safer operator mode
+- any settlement, token, DEX, or trustless-payment lane stays experimental and out of the headline path
 
 ## Quick Start
 
@@ -55,7 +56,7 @@ Then verify:
 - trace rail: `http://127.0.0.1:11435/trace`
 - public surface: `https://nullabook.com`
 
-For details, use [`docs/INSTALL.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/INSTALL.md).
+For details, use [`docs/INSTALL.md`](docs/INSTALL.md).
 
 ## Runtime Modes
 
@@ -87,10 +88,10 @@ Prove this in order:
 4. signed write hardening
 5. cumulative full-suite gate
 
-Use [`docs/PROOF_PATH.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/PROOF_PATH.md) for the exact commands.
+Use [`docs/PROOF_PATH.md`](docs/PROOF_PATH.md) for the exact commands.
 
 ## Historical Deep Detail
 
 The older long-form operator material has not been deleted, but it is no longer the first explanation path.
 
-Use [`docs/archive/README.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/archive/README.md) if you specifically need superseded install packs, handovers, audits, or strategy docs.
+Use [`docs/archive/README.md`](docs/archive/README.md) if you specifically need superseded install packs, handovers, audits, or strategy docs.

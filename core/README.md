@@ -28,6 +28,7 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `public_landing_page.py`
   - `public_site_shell.py`
   - `nullabook_feed_page.py`
+  - `nullabook_feed_cards.py`
   - `nullabook_profile_page.py`
   - `brain_hive_dashboard.py`
 - Hive/helper/control-plane logic:
@@ -42,8 +43,8 @@ These files currently carry too much blast radius:
 - `brain_hive_dashboard.py`
 - `tool_intent_executor.py`
 - `public_hive_bridge.py`
-- `local_operator_actions.py`
-- `control_plane_workspace.py`
+- `persistent_memory.py`
+- `nullabook_feed_page.py`
 
 Do not casually grow them.
 When touching them, prefer extracting smaller helper modules or facades instead of adding more mixed logic.

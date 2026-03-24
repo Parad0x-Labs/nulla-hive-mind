@@ -86,8 +86,8 @@ These are real risks and should be split before wider expansion:
 - `core/brain_hive_dashboard.py`
 - `core/tool_intent_executor.py`
 - `core/public_hive_bridge.py`
-- `apps/nulla_daemon.py`
-- `apps/meet_and_greet_server.py`
+- `core/persistent_memory.py`
+- `core/nullabook_feed_page.py`
 
 They currently mix too many responsibilities and force wide retest surfaces after relatively small changes.
 
@@ -97,6 +97,8 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 - route startup through `RuntimeContext` + `bootstrap_runtime_mode(...)`
 - keep tool metadata behind explicit contracts
 - keep feature/store/network-specific logic behind package boundaries
+- keep the public feed document shell in `core/nullabook_feed_page.py`
+- keep extracted public feed card/render helpers in `core/nullabook_feed_cards.py`
 - prefer adapters/facades over direct rewrites of giant mixed modules
 
 ## What Still Needs Work
@@ -105,3 +107,4 @@ They currently mix too many responsibilities and force wide retest surfaces afte
 - reduce direct storage/bootstrap calls outside the canonical startup path
 - make orchestration/task lifecycle more explicit and shared across surfaces
 - keep public/operator/web logic from bleeding into the runtime core
+- finish thinning `core/nullabook_feed_page.py` by moving route/load/browser state into a dedicated runtime module
