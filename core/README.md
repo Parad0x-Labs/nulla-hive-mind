@@ -79,12 +79,20 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `dashboard/workstation_overview_runtime.py`
   - `dashboard/workstation_overview_movement_runtime.py`
   - `dashboard/workstation_overview_surface_runtime.py`
+  - `dashboard/workstation_overview_stats_runtime.py`
+  - `dashboard/workstation_overview_proof_runtime.py`
+  - `dashboard/workstation_overview_streams_runtime.py`
+  - `dashboard/workstation_overview_home_runtime.py`
   - `dashboard/workstation_nullabook_runtime.py`
   - `dashboard/workstation_inspector_runtime.py`
   - `dashboard/workstation_trading_learning_runtime.py`
   - `dashboard/workstation_trading_presence_runtime.py`
   - `dashboard/workstation_trading_surface_runtime.py`
   - `dashboard/workstation_learning_program_cards_runtime.py`
+  - `dashboard/workstation_learning_program_shared_runtime.py`
+  - `dashboard/workstation_learning_program_trading_cards_runtime.py`
+  - `dashboard/workstation_learning_program_knowledge_cards_runtime.py`
+  - `dashboard/workstation_learning_program_topic_cards_runtime.py`
   - `dashboard/workstation_learning_program_runtime.py`
   - `dashboard/workstation_cards.py`
   - `dashboard/workstation_card_normalizers.py`
@@ -94,6 +102,10 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `runtime_task_rail_assets.py`
   - `runtime_task_rail_shell.py`
   - `runtime_task_rail_styles.py`
+  - `runtime_task_rail_panel_styles.py`
+  - `runtime_task_rail_trace_styles.py`
+  - `runtime_task_rail_event_feed_styles.py`
+  - `runtime_task_rail_workbench_styles.py`
   - `runtime_task_rail_client.py`
   - `runtime_task_rail_polling.py`
   - `runtime_task_rail_event_render.py`
@@ -123,24 +135,37 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `brain_hive_idempotency.py`
   - `public_hive_bridge.py`
   - `control_plane_workspace.py`
+  - `agent_runtime/hive_topic_publish_failures.py`
+  - `agent_runtime/hive_topic_publish_transport.py`
+  - `agent_runtime/hive_topic_publish_effects.py`
+  - `agent_runtime/hive_topic_draft_duplicate_detection.py`
+  - `agent_runtime/hive_topic_draft_builder.py`
+  - `agent_runtime/hive_topic_draft_intents.py`
+  - `agent_runtime/hive_topic_pending_payloads.py`
+  - `agent_runtime/hive_topic_pending_history.py`
+  - `agent_runtime/hive_topic_public_copy_privacy.py`
+  - `agent_runtime/hive_topic_public_copy_tags.py`
+  - `agent_runtime/hive_topic_mutation_detection.py`
+  - `agent_runtime/hive_topic_mutation_runtime.py`
+  - `nullabook_feed_base_styles.py`
+  - `nullabook_feed_sidebar_styles.py`
+  - `nullabook_feed_search_styles.py`
+  - `nullabook_feed_overlay_styles.py`
 
 ## Highest-Risk Modules
 
 These files currently carry too much blast radius:
 
-- `dashboard/workstation_overview_surface_runtime.py`
-- `dashboard/workstation_learning_program_cards_runtime.py`
-- `dashboard/workstation_render_shell_components.py`
-- `dashboard/workstation_render_shell_layout.py`
-- `dashboard/workstation_render_nullabook_content_styles.py`
-- `agent_runtime/hive_topic_publish_flow.py`
-- `agent_runtime/hive_topic_draft_variants.py`
-- `agent_runtime/hive_topic_pending_store.py`
-- `agent_runtime/hive_topic_public_copy.py`
+- `dashboard/workstation_overview_home_runtime.py`
+- `dashboard/workstation_learning_program_trading_cards_runtime.py`
+- `dashboard/workstation_render_nullabook_fabric_styles.py`
+- `agent_runtime/hive_topic_mutation_runtime.py`
+- `agent_runtime/hive_topic_public_copy_privacy.py`
+- `agent_runtime/fast_live_info.py`
 - `public_hive_bridge.py`
 - `public_hive/bridge_topic_writes.py`
-- `nullabook_feed_styles.py`
-- `runtime_task_rail_styles.py`
+- `nullabook_feed_base_styles.py`
+- `runtime_task_rail_panel_styles.py`
 
 Do not casually grow them.
 When touching them, prefer extracting smaller helper modules or facades instead of adding more mixed logic.

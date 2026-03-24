@@ -71,13 +71,21 @@ Core lane:
 - `core/dashboard/workstation_client.py`: remaining workstation browser-runtime shell
 - `core/dashboard/workstation_overview_runtime.py`: thin workstation home/overview facade
 - `core/dashboard/workstation_overview_movement_runtime.py`: workstation peer/activity movement summary seam
-- `core/dashboard/workstation_overview_surface_runtime.py`: workstation overview/home rendering seam
+- `core/dashboard/workstation_overview_surface_runtime.py`: thin workstation overview/home rendering facade
+- `core/dashboard/workstation_overview_stats_runtime.py`: workstation overview top-stat seam
+- `core/dashboard/workstation_overview_proof_runtime.py`: workstation overview proof/reward seam
+- `core/dashboard/workstation_overview_streams_runtime.py`: workstation overview task/activity stream seam
+- `core/dashboard/workstation_overview_home_runtime.py`: workstation overview/home composition seam
 - `core/dashboard/workstation_nullabook_runtime.py`: workstation embedded-NullaBook browser-runtime seam
 - `core/dashboard/workstation_inspector_runtime.py`: workstation inspector/truth-selection browser-runtime seam
 - `core/dashboard/workstation_trading_learning_runtime.py`: thin workstation trading/learning facade
 - `core/dashboard/workstation_trading_presence_runtime.py`: workstation trading presence/pulse seam
 - `core/dashboard/workstation_trading_surface_runtime.py`: workstation trading card/surface seam
-- `core/dashboard/workstation_learning_program_cards_runtime.py`: workstation learning-program card seam
+- `core/dashboard/workstation_learning_program_cards_runtime.py`: thin workstation learning-program card facade
+- `core/dashboard/workstation_learning_program_shared_runtime.py`: shared workstation learning-program helpers
+- `core/dashboard/workstation_learning_program_trading_cards_runtime.py`: workstation trading-program card seam
+- `core/dashboard/workstation_learning_program_knowledge_cards_runtime.py`: workstation knowledge-program card seam
+- `core/dashboard/workstation_learning_program_topic_cards_runtime.py`: workstation active-topic card seam
 - `core/dashboard/workstation_learning_program_runtime.py`: workstation learning-program chrome seam
 - `core/dashboard/workstation_cards.py`: thin workstation card/fold facade
 - `core/dashboard/workstation_card_normalizers.py`: workstation card payload normalization seam
@@ -106,7 +114,11 @@ Core lane:
 - `core/nullabook_feed_shell.py`: public feed chrome, hero chips, route labels, and initial surface markup
 - `core/nullabook_feed_document.py`: thin NullaBook document assembler
 - `core/nullabook_feed_markup.py`: public feed document markup shell
-- `core/nullabook_feed_styles.py`: public feed document CSS shell
+- `core/nullabook_feed_styles.py`: thin public feed document CSS facade
+- `core/nullabook_feed_base_styles.py`: public feed base/layout CSS shell
+- `core/nullabook_feed_sidebar_styles.py`: public feed sidebar/hero CSS shell
+- `core/nullabook_feed_search_styles.py`: public feed search/filter CSS shell
+- `core/nullabook_feed_overlay_styles.py`: public feed overlay/modal CSS shell
 - `core/nullabook_feed_surface_runtime.py`: route/view state, hero/sidebar shaping, and public feed/dashboard loading split out of the feed page
 - `core/nullabook_feed_cards.py`: feed/task/agent/proof card render helpers and local feed ordering split out of the feed page
 - `core/nullabook_feed_post_interactions.py`: post permalink overlay, reply loading, share/copy actions, and public vote runtime split out of the feed page
@@ -133,7 +145,11 @@ Core lane:
 - `core/runtime_task_rail_document.py`: trace-rail document assembly and shell composition
 - `core/runtime_task_rail_assets.py`: compatibility asset seam for trace-rail shell/styles
 - `core/runtime_task_rail_shell.py`: trace-rail HTML shell payload
-- `core/runtime_task_rail_styles.py`: trace-rail CSS payload
+- `core/runtime_task_rail_styles.py`: thin trace-rail CSS facade
+- `core/runtime_task_rail_panel_styles.py`: trace-rail panel/shell CSS
+- `core/runtime_task_rail_trace_styles.py`: trace-rail trace/timeline CSS
+- `core/runtime_task_rail_event_feed_styles.py`: trace-rail event feed/status CSS
+- `core/runtime_task_rail_workbench_styles.py`: trace-rail workbench/footer CSS
 - `core/runtime_task_rail_client.py`: thin trace-rail browser-runtime facade
 - `core/runtime_task_rail_polling.py`: trace-rail fetch/poll/session-state client logic
 - `core/runtime_task_rail_event_render.py`: trace-rail event-row and session-render helpers
@@ -172,15 +188,28 @@ Core lane:
 - `core/agent_runtime/hive_topic_facade.py`: agent-facing Hive topic/create/followup wrapper facade
 - `core/agent_runtime/hive_topic_create.py`: thin create facade over the extracted preflight and publish lanes
 - `core/agent_runtime/hive_topic_create_preflight.py`: request preflight, duplicate warning, pending-preview setup, and preview response assembly
-- `core/agent_runtime/hive_topic_publish_flow.py`: confirmed publish, admission retry, credit reservation, watched-topic updates, and optional auto-research start
+- `core/agent_runtime/hive_topic_publish_flow.py`: thin confirmed-publish coordinator
+- `core/agent_runtime/hive_topic_publish_failures.py`: publish failure text and failed action-result shaping
+- `core/agent_runtime/hive_topic_publish_transport.py`: publish transport, admission retry, and error/status mapping
+- `core/agent_runtime/hive_topic_publish_effects.py`: publish success text, credit reservation, watched-topic updates, and auto-research start
 - `core/agent_runtime/hive_topic_drafting.py`: thin drafting facade over the extracted parse and variant-policy lanes
 - `core/agent_runtime/hive_topic_draft_parsing.py`: structured/raw draft parsing and title extraction
-- `core/agent_runtime/hive_topic_draft_variants.py`: duplicate scan, variant assembly, normalization, and create-vs-drafting policy
+- `core/agent_runtime/hive_topic_draft_variants.py`: thin drafting-policy facade
+- `core/agent_runtime/hive_topic_draft_duplicate_detection.py`: draft duplicate scan and warning shaping
+- `core/agent_runtime/hive_topic_draft_builder.py`: draft variant assembly and normalization
+- `core/agent_runtime/hive_topic_draft_intents.py`: create-vs-drafting and auto-start intent policy
 - `core/agent_runtime/hive_topic_pending.py`: thin pending facade over the extracted confirmation/store/preview lanes
 - `core/agent_runtime/hive_topic_pending_confirmation.py`: confirmation parsing and confirm/cancel dispatch
-- `core/agent_runtime/hive_topic_pending_store.py`: pending preview persistence, history recovery, and pending-state detection
+- `core/agent_runtime/hive_topic_pending_store.py`: thin pending-store facade
+- `core/agent_runtime/hive_topic_pending_payloads.py`: pending preview payload shaping
+- `core/agent_runtime/hive_topic_pending_history.py`: pending preview history recovery
 - `core/agent_runtime/hive_topic_preview_render.py`: pending preview rendering and preview text shaping
-- `core/agent_runtime/hive_topic_public_copy.py`: public-safe copy shaping, transcript rejection, and tag normalization split out of the create workflow
+- `core/agent_runtime/hive_topic_public_copy.py`: thin public-safe copy facade
+- `core/agent_runtime/hive_topic_public_copy_privacy.py`: public-safe copy shaping and transcript rejection
+- `core/agent_runtime/hive_topic_public_copy_tags.py`: public-safe tag inference and normalization
+- `core/agent_runtime/hive_topics.py`: thin legacy Hive-topic mutation facade
+- `core/agent_runtime/hive_topic_mutation_detection.py`: Hive-topic mutation detection and update-draft parsing
+- `core/agent_runtime/hive_topic_mutation_runtime.py`: Hive-topic mutation resolution and update/delete execution
 - `core/agent_runtime/hive_research_followup.py`: thin research/status continuation facade over extracted followup helpers
 - `core/agent_runtime/hive_research_hints.py`: Hive followup hint extraction and history hint helpers
 - `core/agent_runtime/hive_research_resume.py`: active-task resume and research-start followup handling
