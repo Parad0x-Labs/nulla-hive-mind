@@ -5,6 +5,7 @@ from core.public_hive import (
     bridge_facade_bootstrap_auth,
     bridge_facade_bootstrap_sync,
     bridge_facade_bootstrap_write,
+    bridge_facade_compat,
     bridge_support,
     bridge_support_env,
     bridge_support_paths,
@@ -33,3 +34,12 @@ def test_public_hive_bridge_bootstrap_facade_reexports_split_helpers() -> None:
     assert bridge_facade_bootstrap.write_public_hive_agent_bootstrap is bridge_facade_bootstrap_write.write_public_hive_agent_bootstrap
     assert bridge_facade_bootstrap.sync_public_hive_auth_from_ssh is bridge_facade_bootstrap_sync.sync_public_hive_auth_from_ssh
     assert bridge_facade_bootstrap.ensure_public_hive_auth is bridge_facade_bootstrap_auth.ensure_public_hive_auth
+
+
+def test_public_hive_bridge_compat_facade_exposes_impl_lanes() -> None:
+    assert callable(bridge_facade_compat.load_public_hive_bridge_config_impl)
+    assert callable(bridge_facade_compat.ensure_public_hive_agent_bootstrap_impl)
+    assert callable(bridge_facade_compat.write_public_hive_agent_bootstrap_impl)
+    assert callable(bridge_facade_compat.sync_public_hive_auth_from_ssh_impl)
+    assert callable(bridge_facade_compat.public_hive_write_enabled_impl)
+    assert callable(bridge_facade_compat.ensure_public_hive_auth_impl)
