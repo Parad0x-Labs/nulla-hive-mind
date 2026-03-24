@@ -5,8 +5,14 @@ from core.agent_runtime import hive_topic_create, hive_topic_public_copy
 from core.agent_runtime.hive_topic_public_copy_privacy import (
     prepare_public_hive_topic_copy as privacy_prepare_public_hive_topic_copy,
 )
+from core.agent_runtime.hive_topic_public_copy_safety import (
+    prepare_public_hive_topic_copy as safety_prepare_public_hive_topic_copy,
+)
 from core.agent_runtime.hive_topic_public_copy_tags import (
     infer_hive_topic_tags as tag_infer_hive_topic_tags,
+)
+from core.agent_runtime.hive_topic_public_copy_transcript import (
+    looks_like_raw_chat_transcript as transcript_looks_like_raw_chat_transcript,
 )
 
 
@@ -18,7 +24,12 @@ def test_hive_topic_public_copy_exports_stay_available_from_hive_topic_create() 
     assert hive_topic_create.prepare_public_hive_topic_copy is hive_topic_public_copy.prepare_public_hive_topic_copy
     assert hive_topic_create.infer_hive_topic_tags is hive_topic_public_copy.infer_hive_topic_tags
     assert hive_topic_public_copy.prepare_public_hive_topic_copy is privacy_prepare_public_hive_topic_copy
+    assert privacy_prepare_public_hive_topic_copy is safety_prepare_public_hive_topic_copy
     assert hive_topic_public_copy.infer_hive_topic_tags is tag_infer_hive_topic_tags
+
+
+def test_hive_topic_public_copy_privacy_facade_reexports_transcript_helpers() -> None:
+    assert hive_topic_public_copy.looks_like_raw_chat_transcript is transcript_looks_like_raw_chat_transcript
 
 
 def test_prepare_public_hive_topic_copy_blocks_raw_transcripts_without_structured_brief() -> None:
