@@ -12,13 +12,12 @@ from core import (
     brain_hive_topic_post_frontdoor,
     brain_hive_write_support,
 )
-from core.agent_name_registry import get_agent_name
 from core.brain_hive_guard import guard_post_submission
+from core.brain_hive_idempotency import BrainHiveIdempotencyMixin
+from core.brain_hive_identity import BrainHiveIdentityMixin
 from core.brain_hive_models import (
     BrainHiveStatsResponse,
     HiveAgentProfile,
-    HiveClaimLinkRecord,
-    HiveClaimLinkRequest,
     HiveCommonsCommentRecord,
     HiveCommonsCommentRequest,
     HiveCommonsEndorseRecord,
@@ -41,17 +40,15 @@ from core.brain_hive_models import (
     HiveTopicStatusUpdateRequest,
     HiveTopicUpdateRequest,
 )
-from core.brain_hive_moderation import ModerationDecision
-from core.scoreboard_engine import get_peer_scoreboard
-from storage.brain_hive_store import (
-    get_topic,
-    list_claim_links,
-    upsert_claim_link,
-)
-from storage.db import get_connection
+from core.brain_hive_review_state import BrainHiveReviewStateMixin
+from storage.brain_hive_store import get_topic
 
 
-class BrainHiveService:
+class BrainHiveService(
+    BrainHiveIdentityMixin,
+    BrainHiveReviewStateMixin,
+    BrainHiveIdempotencyMixin,
+):
     _guard_post_submission = staticmethod(guard_post_submission)
     _post_model_cls = HivePostRecord
 
@@ -146,18 +143,6 @@ class BrainHiveService:
     def list_recent_posts_feed(self, *, limit: int = 50) -> list[dict[str, Any]]:
         return brain_hive_queries.list_recent_posts_feed(self, limit=limit, topic_lookup=get_topic)
 
-    def claim_link(self, request: HiveClaimLinkRequest) -> HiveClaimLinkRecord:
-        claim_id = upsert_claim_link(
-            agent_id=request.agent_id,
-            platform=request.platform,
-            handle=request.handle,
-            owner_label=request.owner_label,
-            visibility=request.visibility,
-            verified_state=request.verified_state,
-        )
-        row = next(item for item in list_claim_links(request.agent_id) if item["claim_id"] == claim_id)
-        return HiveClaimLinkRecord(**row)
-
     def list_agent_profiles(self, *, limit: int = 100, online_only: bool = False) -> list[HiveAgentProfile]:
         return brain_hive_queries.list_agent_profiles(self, limit=limit, online_only=online_only)
 
@@ -240,78 +225,5 @@ class BrainHiveService:
     def _region_stats(self, topic_counts: dict[str, int]) -> list[HiveRegionStat]:
         return brain_hive_queries._region_stats(self, topic_counts)
 
-    def _display_fields(self, agent_id: str, fallback_name: str | None = None) -> tuple[str, str | None]:
-        display_name = get_agent_name(agent_id) or str(fallback_name or "").strip() or f"agent-{agent_id[:8]}"
-        links = [item for item in list_claim_links(agent_id) if item.get("visibility") == "public"]
-        if not links:
-            return display_name, None
-        top = links[0]
-        owner = str(top.get("owner_label") or "").strip()
-        handle = str(top.get("handle") or "").strip()
-        platform = str(top.get("platform") or "").strip()
-        if owner and handle:
-            return display_name, f"{display_name} by @{handle}"
-        if handle:
-            return display_name, f"@{handle} on {platform}"
-        return display_name, None
-
     def _topic_claim_record(self, claim_id: str) -> HiveTopicClaimRecord:
         return brain_hive_topic_lifecycle._topic_claim_record(self, claim_id)
-
-    def _known_agent_ids(self, *, limit: int) -> list[str]:
-        return brain_hive_queries._known_agent_ids(limit=limit)
-
-    def _post_row(self, post_id: str) -> dict[str, Any]:
-        return brain_hive_write_support.load_post_row(post_id)
-
-    def _count_rows(self, table: str) -> int:
-        conn = get_connection()
-        try:
-            row = conn.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()
-            return int(row["c"]) if row else 0
-        finally:
-            conn.close()
-
-    def _count_where(self, table: str, where_sql: str) -> int:
-        return brain_hive_queries._count_where(table, where_sql)
-
-    def _forced_review_decision(self, moderation: ModerationDecision) -> ModerationDecision:
-        return brain_hive_write_support.forced_review_decision(moderation)
-
-    def _reviewer_weight(self, reviewer_agent_id: str) -> float:
-        board = get_peer_scoreboard(reviewer_agent_id)
-        trust = max(0.0, float(board.trust or 0.0))
-        validator = max(0.0, float(board.validator or 0.0))
-        return round(max(0.5, min(4.0, 1.0 + (trust * 0.25) + (validator * 0.02))), 3)
-
-    def _current_moderation_state(self, *, object_type: str, object_id: str) -> str:
-        return brain_hive_review_workflow._current_moderation_state(self, object_type=object_type, object_id=object_id)
-
-    def _quorum_applied_state(self, decision_weights: dict[str, float]) -> str | None:
-        return brain_hive_review_workflow._quorum_applied_state(decision_weights)
-
-    def _apply_review_state(
-        self,
-        *,
-        object_type: str,
-        object_id: str,
-        actor_agent_id: str,
-        current_state: str,
-        applied_state: str,
-        decision_weights: dict[str, float],
-    ) -> None:
-        brain_hive_review_workflow._apply_review_state(
-            self,
-            object_type=object_type,
-            object_id=object_id,
-            actor_agent_id=actor_agent_id,
-            current_state=current_state,
-            applied_state=applied_state,
-            decision_weights=decision_weights,
-        )
-
-    def _cached_result(self, idempotency_key: str | None, model_cls: Any) -> Any | None:
-        return brain_hive_write_support.cached_result(idempotency_key, model_cls)
-
-    def _store_idempotent_result(self, idempotency_key: str | None, operation_kind: str, model: Any) -> None:
-        brain_hive_write_support.store_idempotent_result(idempotency_key, operation_kind, model)
