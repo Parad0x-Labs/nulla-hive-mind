@@ -34,6 +34,11 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `agent_runtime/runtime_checkpoint_io_adapter.py`
   - `agent_runtime/runtime_gate_policy.py`
   - `agent_runtime/nullabook_runtime.py`
+  - `agent_runtime/fast_live_info.py`
+  - `agent_runtime/fast_live_info_router.py`
+  - `agent_runtime/fast_live_info_search.py`
+  - `agent_runtime/fast_live_info_rendering.py`
+  - `agent_runtime/fast_live_info_price.py`
   - `agent_runtime/tool_result_surface.py`
   - `agent_runtime/tool_result_truth_metrics.py`
   - `agent_runtime/tool_result_text_surface.py`
@@ -75,6 +80,11 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `dashboard/workstation_render_nullabook_styles.py`
   - `dashboard/workstation_render_nullabook_content_styles.py`
   - `dashboard/workstation_render_nullabook_mode_styles.py`
+  - `dashboard/workstation_render_nullabook_fabric_styles.py`
+  - `dashboard/workstation_render_nullabook_fabric_telemetry_styles.py`
+  - `dashboard/workstation_render_nullabook_fabric_timeline_styles.py`
+  - `dashboard/workstation_render_nullabook_fabric_cards_styles.py`
+  - `dashboard/workstation_render_nullabook_fabric_onboarding_styles.py`
   - `dashboard/workstation_client.py`
   - `dashboard/workstation_overview_runtime.py`
   - `dashboard/workstation_overview_movement_runtime.py`
@@ -83,6 +93,8 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `dashboard/workstation_overview_proof_runtime.py`
   - `dashboard/workstation_overview_streams_runtime.py`
   - `dashboard/workstation_overview_home_runtime.py`
+  - `dashboard/workstation_overview_home_board_runtime.py`
+  - `dashboard/workstation_overview_notes_runtime.py`
   - `dashboard/workstation_nullabook_runtime.py`
   - `dashboard/workstation_inspector_runtime.py`
   - `dashboard/workstation_trading_learning_runtime.py`
@@ -91,6 +103,9 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `dashboard/workstation_learning_program_cards_runtime.py`
   - `dashboard/workstation_learning_program_shared_runtime.py`
   - `dashboard/workstation_learning_program_trading_cards_runtime.py`
+  - `dashboard/workstation_learning_program_trading_overview_runtime.py`
+  - `dashboard/workstation_learning_program_trading_market_runtime.py`
+  - `dashboard/workstation_learning_program_trading_activity_runtime.py`
   - `dashboard/workstation_learning_program_knowledge_cards_runtime.py`
   - `dashboard/workstation_learning_program_topic_cards_runtime.py`
   - `dashboard/workstation_learning_program_runtime.py`
@@ -103,6 +118,9 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `runtime_task_rail_shell.py`
   - `runtime_task_rail_styles.py`
   - `runtime_task_rail_panel_styles.py`
+  - `runtime_task_rail_panel_shell_styles.py`
+  - `runtime_task_rail_panel_session_styles.py`
+  - `runtime_task_rail_panel_trace_styles.py`
   - `runtime_task_rail_trace_styles.py`
   - `runtime_task_rail_event_feed_styles.py`
   - `runtime_task_rail_workbench_styles.py`
@@ -119,6 +137,7 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `public_hive/bridge_topic_writes.py`
   - `public_hive/bridge_topic_publication.py`
   - `public_hive/bridge_transport.py`
+  - `public_hive/bridge_support.py`
   - `public_hive/auth.py`
   - `public_hive/client.py`
   - `brain_hive_queries.py`
@@ -147,7 +166,13 @@ It does not own raw persistence primitives or low-level transport details. Those
   - `agent_runtime/hive_topic_public_copy_tags.py`
   - `agent_runtime/hive_topic_mutation_detection.py`
   - `agent_runtime/hive_topic_mutation_runtime.py`
+  - `agent_runtime/hive_topic_mutation_resolver.py`
+  - `agent_runtime/hive_topic_update_runtime.py`
+  - `agent_runtime/hive_topic_delete_runtime.py`
   - `nullabook_feed_base_styles.py`
+  - `nullabook_feed_layout_styles.py`
+  - `nullabook_feed_skeleton_styles.py`
+  - `nullabook_feed_interaction_styles.py`
   - `nullabook_feed_sidebar_styles.py`
   - `nullabook_feed_search_styles.py`
   - `nullabook_feed_overlay_styles.py`
@@ -156,16 +181,15 @@ It does not own raw persistence primitives or low-level transport details. Those
 
 These files currently carry too much blast radius:
 
-- `dashboard/workstation_overview_home_runtime.py`
-- `dashboard/workstation_learning_program_trading_cards_runtime.py`
-- `dashboard/workstation_render_nullabook_fabric_styles.py`
-- `agent_runtime/hive_topic_mutation_runtime.py`
+- `agent_runtime/fast_live_info_router.py`
 - `agent_runtime/hive_topic_public_copy_privacy.py`
-- `agent_runtime/fast_live_info.py`
 - `public_hive_bridge.py`
 - `public_hive/bridge_topic_writes.py`
-- `nullabook_feed_base_styles.py`
-- `runtime_task_rail_panel_styles.py`
+- `agent_runtime/hive_topic_update_runtime.py`
+- `agent_runtime/hive_topic_delete_runtime.py`
+- `dashboard/workstation_overview_home_board_runtime.py`
+- `dashboard/workstation_render_nullabook_feed_styles.py`
+- `dashboard/workstation_render_nullabook_directory_styles.py`
 
 Do not casually grow them.
 When touching them, prefer extracting smaller helper modules or facades instead of adding more mixed logic.

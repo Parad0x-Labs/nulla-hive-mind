@@ -68,6 +68,11 @@ Core lane:
 - `core/dashboard/workstation_render_nullabook_styles.py`: tiny NullaBook-mode workstation style aggregator seam
 - `core/dashboard/workstation_render_nullabook_content_styles.py`: embedded NullaBook content/feed CSS seam
 - `core/dashboard/workstation_render_nullabook_mode_styles.py`: embedded NullaBook mode/state CSS seam
+- `core/dashboard/workstation_render_nullabook_fabric_styles.py`: thin embedded-NullaBook fabric-style aggregator seam
+- `core/dashboard/workstation_render_nullabook_fabric_telemetry_styles.py`: embedded NullaBook telemetry/ticker CSS seam
+- `core/dashboard/workstation_render_nullabook_fabric_timeline_styles.py`: embedded NullaBook timeline CSS seam
+- `core/dashboard/workstation_render_nullabook_fabric_cards_styles.py`: embedded NullaBook proof/fabric-card CSS seam
+- `core/dashboard/workstation_render_nullabook_fabric_onboarding_styles.py`: embedded NullaBook onboarding CSS seam
 - `core/dashboard/workstation_client.py`: remaining workstation browser-runtime shell
 - `core/dashboard/workstation_overview_runtime.py`: thin workstation home/overview facade
 - `core/dashboard/workstation_overview_movement_runtime.py`: workstation peer/activity movement summary seam
@@ -75,7 +80,9 @@ Core lane:
 - `core/dashboard/workstation_overview_stats_runtime.py`: workstation overview top-stat seam
 - `core/dashboard/workstation_overview_proof_runtime.py`: workstation overview proof/reward seam
 - `core/dashboard/workstation_overview_streams_runtime.py`: workstation overview task/activity stream seam
-- `core/dashboard/workstation_overview_home_runtime.py`: workstation overview/home composition seam
+- `core/dashboard/workstation_overview_home_runtime.py`: thin workstation overview/home facade
+- `core/dashboard/workstation_overview_home_board_runtime.py`: workstation home-board card/detail seam
+- `core/dashboard/workstation_overview_notes_runtime.py`: workstation watch-station note seam
 - `core/dashboard/workstation_nullabook_runtime.py`: workstation embedded-NullaBook browser-runtime seam
 - `core/dashboard/workstation_inspector_runtime.py`: workstation inspector/truth-selection browser-runtime seam
 - `core/dashboard/workstation_trading_learning_runtime.py`: thin workstation trading/learning facade
@@ -83,7 +90,10 @@ Core lane:
 - `core/dashboard/workstation_trading_surface_runtime.py`: workstation trading card/surface seam
 - `core/dashboard/workstation_learning_program_cards_runtime.py`: thin workstation learning-program card facade
 - `core/dashboard/workstation_learning_program_shared_runtime.py`: shared workstation learning-program helpers
-- `core/dashboard/workstation_learning_program_trading_cards_runtime.py`: workstation trading-program card seam
+- `core/dashboard/workstation_learning_program_trading_cards_runtime.py`: thin workstation trading-program card facade
+- `core/dashboard/workstation_learning_program_trading_overview_runtime.py`: workstation trading-program overview seam
+- `core/dashboard/workstation_learning_program_trading_market_runtime.py`: workstation trading-program market seam
+- `core/dashboard/workstation_learning_program_trading_activity_runtime.py`: workstation trading-program activity seam
 - `core/dashboard/workstation_learning_program_knowledge_cards_runtime.py`: workstation knowledge-program card seam
 - `core/dashboard/workstation_learning_program_topic_cards_runtime.py`: workstation active-topic card seam
 - `core/dashboard/workstation_learning_program_runtime.py`: workstation learning-program chrome seam
@@ -115,7 +125,10 @@ Core lane:
 - `core/nullabook_feed_document.py`: thin NullaBook document assembler
 - `core/nullabook_feed_markup.py`: public feed document markup shell
 - `core/nullabook_feed_styles.py`: thin public feed document CSS facade
-- `core/nullabook_feed_base_styles.py`: public feed base/layout CSS shell
+- `core/nullabook_feed_base_styles.py`: thin public feed base-style aggregator
+- `core/nullabook_feed_layout_styles.py`: public feed base/layout CSS seam
+- `core/nullabook_feed_skeleton_styles.py`: public feed skeleton/loading CSS seam
+- `core/nullabook_feed_interaction_styles.py`: public feed interaction/footer CSS seam
 - `core/nullabook_feed_sidebar_styles.py`: public feed sidebar/hero CSS shell
 - `core/nullabook_feed_search_styles.py`: public feed search/filter CSS shell
 - `core/nullabook_feed_overlay_styles.py`: public feed overlay/modal CSS shell
@@ -136,6 +149,7 @@ Core lane:
 - `core/public_hive/bridge_topic_publication.py`: task publication and related-topic/commons lookup helpers split out of the grouped bridge topic facade
 - `core/public_hive/bridge_transport.py`: auth-token lookup, write-grant attachment, SSL context, and HTTP helper flows split out of the bridge facade
 - `core/public_hive_bridge.py`: smaller compatibility/auth/bootstrap facade kept stable for callers while the package split continues
+- `core/public_hive/bridge_support.py`: public-Hive bootstrap discovery and SSH sync support seam
 - `core/public_hive/auth.py`: auth/bootstrap/config loading and SSH sync helpers
 - `core/public_hive/client.py`: HTTP transport, auth-token selection, TLS context, and route-scoped write-grant attachment
 
@@ -146,7 +160,10 @@ Core lane:
 - `core/runtime_task_rail_assets.py`: compatibility asset seam for trace-rail shell/styles
 - `core/runtime_task_rail_shell.py`: trace-rail HTML shell payload
 - `core/runtime_task_rail_styles.py`: thin trace-rail CSS facade
-- `core/runtime_task_rail_panel_styles.py`: trace-rail panel/shell CSS
+- `core/runtime_task_rail_panel_styles.py`: thin trace-rail panel-style aggregator
+- `core/runtime_task_rail_panel_shell_styles.py`: trace-rail panel/shell CSS seam
+- `core/runtime_task_rail_panel_session_styles.py`: trace-rail session-card CSS seam
+- `core/runtime_task_rail_panel_trace_styles.py`: trace-rail trace-stage CSS seam
 - `core/runtime_task_rail_trace_styles.py`: trace-rail trace/timeline CSS
 - `core/runtime_task_rail_event_feed_styles.py`: trace-rail event feed/status CSS
 - `core/runtime_task_rail_workbench_styles.py`: trace-rail workbench/footer CSS
@@ -209,7 +226,10 @@ Core lane:
 - `core/agent_runtime/hive_topic_public_copy_tags.py`: public-safe tag inference and normalization
 - `core/agent_runtime/hive_topics.py`: thin legacy Hive-topic mutation facade
 - `core/agent_runtime/hive_topic_mutation_detection.py`: Hive-topic mutation detection and update-draft parsing
-- `core/agent_runtime/hive_topic_mutation_runtime.py`: Hive-topic mutation resolution and update/delete execution
+- `core/agent_runtime/hive_topic_mutation_runtime.py`: thin Hive-topic mutation facade
+- `core/agent_runtime/hive_topic_mutation_resolver.py`: Hive-topic mutation topic-resolution seam
+- `core/agent_runtime/hive_topic_update_runtime.py`: Hive-topic update execution seam
+- `core/agent_runtime/hive_topic_delete_runtime.py`: Hive-topic delete execution seam
 - `core/agent_runtime/hive_research_followup.py`: thin research/status continuation facade over extracted followup helpers
 - `core/agent_runtime/hive_research_hints.py`: Hive followup hint extraction and history hint helpers
 - `core/agent_runtime/hive_research_resume.py`: active-task resume and research-start followup handling
@@ -221,7 +241,11 @@ Core lane:
 - `core/agent_runtime/fast_paths_utility.py`: utility time/date/smalltalk/general shortcut helpers
 - `core/agent_runtime/fast_paths_companion.py`: companion-memory and personalized-plan shortcut helpers
 - `core/agent_runtime/fast_paths_builder.py`: builder/file-request/root-extraction shortcut helpers
-- `core/agent_runtime/fast_live_info.py`: fresh-info, weather, news, and price lookup shortcut logic moved out of the old fast-path slab
+- `core/agent_runtime/fast_live_info.py`: thin fresh-info shortcut facade
+- `core/agent_runtime/fast_live_info_router.py`: fresh-info, weather, news, and price lookup routing seam
+- `core/agent_runtime/fast_live_info_search.py`: fresh-info search execution seam
+- `core/agent_runtime/fast_live_info_rendering.py`: fresh-info result-rendering seam
+- `core/agent_runtime/fast_live_info_price.py`: fresh-info price-grounding seam
 
 ## What Lives At Root On Purpose
 

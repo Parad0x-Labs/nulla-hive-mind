@@ -53,7 +53,9 @@ The current trunk still has a short list of blast-radius centers plus a few newl
 | `core/dashboard/workstation_overview_stats_runtime.py` | 119 | workstation home-board top stats now live behind a dedicated overview seam |
 | `core/dashboard/workstation_overview_proof_runtime.py` | 103 | workstation proof/reward/status summaries now live behind a dedicated overview seam |
 | `core/dashboard/workstation_overview_streams_runtime.py` | 137 | workstation activity/task/event stream rendering now lives behind a dedicated overview seam |
-| `core/dashboard/workstation_overview_home_runtime.py` | 191 | workstation overview/home composition now lives behind a dedicated overview seam |
+| `core/dashboard/workstation_overview_home_runtime.py` | 44 | now the thin workstation home/overview facade over the extracted home-board and notes leaves |
+| `core/dashboard/workstation_overview_home_board_runtime.py` | 154 | workstation home-board cards and detail payload shaping now live behind a dedicated overview leaf seam |
+| `core/dashboard/workstation_overview_notes_runtime.py` | 14 | workstation watch-station note rendering now lives behind a dedicated overview leaf seam |
 | `core/dashboard/workstation_nullabook_runtime.py` | 277 | the embedded NullaBook panel rendering and butterfly-canvas runtime are now isolated behind a dedicated browser-runtime seam |
 | `core/dashboard/workstation_inspector_runtime.py` | 239 | inspect payload encoding, inspector truth/debug rendering, workstation chrome shaping, and inspector/tab click binding are now isolated behind a dedicated browser-runtime seam |
 | `core/dashboard/workstation_trading_learning_runtime.py` | 23 | now the thin trading/learning facade over the presence, trading-surface, and learning-program seams |
@@ -61,7 +63,10 @@ The current trunk still has a short list of blast-radius centers plus a few newl
 | `core/dashboard/workstation_trading_surface_runtime.py` | 121 | workstation trading card/surface rendering now lives behind a dedicated browser-runtime seam |
 | `core/dashboard/workstation_learning_program_cards_runtime.py` | 23 | now the thin learning-card facade over the extracted shared/trading/knowledge/topic lanes |
 | `core/dashboard/workstation_learning_program_shared_runtime.py` | 36 | shared learning-program state and helpers now live behind a dedicated browser-runtime seam |
-| `core/dashboard/workstation_learning_program_trading_cards_runtime.py` | 196 | trading-program card rendering now lives behind a dedicated browser-runtime seam |
+| `core/dashboard/workstation_learning_program_trading_cards_runtime.py` | 28 | now the thin trading-program facade over overview, market, and activity leaves |
+| `core/dashboard/workstation_learning_program_trading_overview_runtime.py` | 35 | trading-program overview and decision-funnel rendering now live behind a dedicated learning leaf seam |
+| `core/dashboard/workstation_learning_program_trading_market_runtime.py` | 87 | trading-program pattern-bank, missed-mooner, and hidden-edge rendering now live behind a dedicated learning leaf seam |
+| `core/dashboard/workstation_learning_program_trading_activity_runtime.py` | 91 | trading-program discovery, flow, and recent-call rendering now live behind a dedicated learning leaf seam |
 | `core/dashboard/workstation_learning_program_knowledge_cards_runtime.py` | 79 | knowledge-program card rendering now lives behind a dedicated browser-runtime seam |
 | `core/dashboard/workstation_learning_program_topic_cards_runtime.py` | 87 | active-topic program card rendering now lives behind a dedicated browser-runtime seam |
 | `core/dashboard/workstation_learning_program_runtime.py` | 64 | workstation learning-program shell rendering now lives behind a dedicated browser-runtime seam |
@@ -86,13 +91,20 @@ The current trunk still has a short list of blast-radius centers plus a few newl
 | `core/dashboard/workstation_render_nullabook_content_styles.py` | 19 | now the thin embedded-NullaBook style aggregator over the extracted feed/directory/fabric lanes |
 | `core/dashboard/workstation_render_nullabook_feed_styles.py` | 154 | embedded NullaBook feed CSS now lives behind a dedicated render-style seam |
 | `core/dashboard/workstation_render_nullabook_directory_styles.py` | 131 | embedded NullaBook directory/profile CSS now lives behind a dedicated render-style seam |
-| `core/dashboard/workstation_render_nullabook_fabric_styles.py` | 284 | embedded NullaBook fabric/proof CSS now lives behind a dedicated render-style seam |
+| `core/dashboard/workstation_render_nullabook_fabric_styles.py` | 23 | now the thin embedded-NullaBook fabric-style aggregator over telemetry, timeline, cards, and onboarding leaves |
+| `core/dashboard/workstation_render_nullabook_fabric_telemetry_styles.py` | 87 | embedded NullaBook telemetry/ticker CSS now lives behind a dedicated render-style leaf seam |
+| `core/dashboard/workstation_render_nullabook_fabric_timeline_styles.py` | 70 | embedded NullaBook timeline CSS now lives behind a dedicated render-style leaf seam |
+| `core/dashboard/workstation_render_nullabook_fabric_cards_styles.py` | 64 | embedded NullaBook proof/fabric-card CSS now lives behind a dedicated render-style leaf seam |
+| `core/dashboard/workstation_render_nullabook_fabric_onboarding_styles.py` | 80 | embedded NullaBook onboarding CSS now lives behind a dedicated render-style leaf seam |
 | `core/dashboard/workstation_render_nullabook_mode_styles.py` | 87 | embedded NullaBook mode/state CSS now lives behind a dedicated render-style seam |
 | `core/nullabook_feed_page.py` | 24 | now the thin public feed facade that preserves `render_nullabook_page_html()` while delegating shell/document work |
 | `core/nullabook_feed_document.py` | 80 | now the thin public feed document assembler over the extracted markup/style shells |
 | `core/nullabook_feed_markup.py` | 101 | public feed document markup shell now lives behind a dedicated presentation seam |
 | `core/nullabook_feed_styles.py` | 15 | now the thin public feed CSS aggregator over the extracted base/sidebar/search/overlay lanes |
-| `core/nullabook_feed_base_styles.py` | 173 | public feed layout, cards, and route chrome CSS now lives behind a dedicated presentation seam |
+| `core/nullabook_feed_base_styles.py` | 11 | now the thin public feed base-style aggregator over layout, skeleton, and interaction leaves |
+| `core/nullabook_feed_layout_styles.py` | 89 | public feed layout, cards, and route chrome CSS now live behind a dedicated presentation leaf seam |
+| `core/nullabook_feed_skeleton_styles.py` | 60 | public feed skeleton and loading CSS now live behind a dedicated presentation leaf seam |
+| `core/nullabook_feed_interaction_styles.py` | 38 | public feed interaction/footer/toast CSS now lives behind a dedicated presentation leaf seam |
 | `core/nullabook_feed_sidebar_styles.py` | 81 | public feed sidebar/hero CSS now lives behind a dedicated presentation seam |
 | `core/nullabook_feed_search_styles.py` | 68 | public feed search/filter CSS now lives behind a dedicated presentation seam |
 | `core/nullabook_feed_overlay_styles.py` | 41 | public feed overlay/modal CSS now lives behind a dedicated presentation seam |
@@ -135,7 +147,10 @@ The current trunk still has a short list of blast-radius centers plus a few newl
 | `core/runtime_task_rail_assets.py` | 9 | now the thin trace-rail asset facade over the extracted shell/style payloads |
 | `core/runtime_task_rail_shell.py` | 110 | trace-rail shell HTML payload now lives behind a dedicated asset seam |
 | `core/runtime_task_rail_styles.py` | 15 | now the thin trace-rail CSS aggregator over the extracted panel/trace/event-feed/workbench lanes |
-| `core/runtime_task_rail_panel_styles.py` | 170 | trace-rail shell/panel CSS now lives behind a dedicated asset seam |
+| `core/runtime_task_rail_panel_styles.py` | 17 | now the thin trace-rail panel-style aggregator over shell, session, and trace leaves |
+| `core/runtime_task_rail_panel_shell_styles.py` | 73 | trace-rail panel/shell CSS now lives behind a dedicated asset leaf seam |
+| `core/runtime_task_rail_panel_session_styles.py` | 71 | trace-rail session-card CSS now lives behind a dedicated asset leaf seam |
+| `core/runtime_task_rail_panel_trace_styles.py` | 42 | trace-rail trace-stage header/body CSS now lives behind a dedicated asset leaf seam |
 | `core/runtime_task_rail_trace_styles.py` | 153 | trace-rail trace/timeline CSS now lives behind a dedicated asset seam |
 | `core/runtime_task_rail_event_feed_styles.py` | 137 | trace-rail event feed/status CSS now lives behind a dedicated asset seam |
 | `core/runtime_task_rail_workbench_styles.py` | 110 | trace-rail workbench/footer CSS now lives behind a dedicated asset seam |
@@ -148,12 +163,20 @@ The current trunk still has a short list of blast-radius centers plus a few newl
 | `core/public_hive/bridge_topic_reviews.py` | 35 | public-Hive review queue and moderation-review dispatch now live behind a dedicated bridge-review seam |
 | `core/public_hive/bridge_topic_writes.py` | 187 | topic CRUD, claims, progress/result submission, and status updates now live behind a dedicated bridge-write seam |
 | `core/public_hive/bridge_topic_publication.py` | 53 | task publication and related-topic/commons lookup helpers now live behind a dedicated publication seam |
-| `core/public_hive_bridge.py` | 229 | compatibility/auth/bootstrap facade is smaller after dropping unused truth-helper ballast, but it still needs to stay thin |
+| `core/public_hive_bridge.py` | 190 | compatibility/auth/bootstrap facade is thinner after bootstrap/discovery and SSH sync support moved into `core/public_hive/bridge_support.py`, but it still needs to stay thin |
+| `core/public_hive/bridge_support.py` | 141 | public-Hive bootstrap discovery, local bootstrap writes, and SSH sync helpers now live behind a dedicated compat-support seam |
 | `core/agent_runtime/hive_research_followup.py` | 27 | now the thin research/status followup facade over extracted hint/resume/status helpers |
-| `core/agent_runtime/fast_live_info.py` | 553 | fresh-info, weather, news, and price lookup routing are now isolated, but still concentrated in one shortcut slab |
+| `core/agent_runtime/fast_live_info.py` | 40 | now the thin live-info facade over router, search, rendering, and price leaves |
+| `core/agent_runtime/fast_live_info_router.py` | 324 | fresh-info, weather, news, and price shortcut routing now live behind a dedicated live-info router seam |
+| `core/agent_runtime/fast_live_info_search.py` | 51 | live-info search runner and result packaging now live behind a dedicated live-info seam |
+| `core/agent_runtime/fast_live_info_rendering.py` | 108 | live-info result text/render shaping now lives behind a dedicated live-info seam |
+| `core/agent_runtime/fast_live_info_price.py` | 84 | price grounding and quote rendering now live behind a dedicated live-info seam |
 | `core/agent_runtime/hive_topics.py` | 44 | now the thin legacy Hive-topic facade over the extracted mutation detection/runtime lanes |
 | `core/agent_runtime/hive_topic_mutation_detection.py` | 84 | mutation request routing, update/delete intent detection, and update-draft parsing now live behind a dedicated mutation seam |
-| `core/agent_runtime/hive_topic_mutation_runtime.py` | 359 | topic resolution plus update/delete execution now live behind a dedicated mutation seam |
+| `core/agent_runtime/hive_topic_mutation_runtime.py` | 15 | now the thin Hive-topic mutation facade over resolver, update, and delete leaves |
+| `core/agent_runtime/hive_topic_mutation_resolver.py` | 46 | topic resolution for Hive-topic update/delete requests now lives behind a dedicated mutation seam |
+| `core/agent_runtime/hive_topic_update_runtime.py` | 170 | Hive-topic update execution now lives behind a dedicated mutation seam |
+| `core/agent_runtime/hive_topic_delete_runtime.py` | 150 | Hive-topic delete execution now lives behind a dedicated mutation seam |
 | `core/dashboard/render.py` | 346 | now a routing shell for public vs workstation rendering, no longer the main dashboard monolith |
 | `core/persistent_memory.py` | 202 | now a thin facade over `core/memory/`, no longer a high-blast-radius module |
 | `apps/nulla_daemon.py` | 420 | now a thin facade over `core/daemon/`, no longer a top-tier monolith |
@@ -163,8 +186,8 @@ These are the current blast-radius centers. Split these before inventing more la
 ## Current Phase Status
 
 - completed enough to stop pretending they are still untouched: `core/local_operator_actions.py`, `core/control_plane_workspace.py`, `apps/brain_hive_watch_server.py`, `apps/nulla_daemon.py`, `apps/nulla_api_server.py`, `apps/meet_and_greet_server.py`, `core/brain_hive_dashboard.py`, `core/persistent_memory.py`
-- materially improved but still active: `core/public_hive/bridge.py`, `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/dashboard/workstation_client.py`, `core/nullabook_feed_page.py`, `core/nullabook_feed_surface_runtime.py`, `core/brain_hive_service.py`, `core/agent_runtime/hive_research_followup.py`, `core/agent_runtime/fast_paths.py`, `core/agent_runtime/fast_live_info.py`, `core/public_hive_bridge.py`
-- still the next serious targets: `core/dashboard/workstation_overview_home_runtime.py`, `core/dashboard/workstation_learning_program_trading_cards_runtime.py`, `core/dashboard/workstation_render_nullabook_fabric_styles.py`, `core/agent_runtime/hive_topic_mutation_runtime.py`, `core/agent_runtime/hive_topic_public_copy_privacy.py`, `core/public_hive_bridge.py`, `core/public_hive/bridge_topic_writes.py`, `core/nullabook_feed_base_styles.py`, `core/runtime_task_rail_panel_styles.py`, `core/agent_runtime/fast_live_info.py`
+- materially improved but still active: `core/public_hive/bridge.py`, `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/dashboard/workstation_client.py`, `core/nullabook_feed_page.py`, `core/nullabook_feed_surface_runtime.py`, `core/brain_hive_service.py`, `core/agent_runtime/hive_research_followup.py`, `core/agent_runtime/fast_paths.py`, `core/public_hive_bridge.py`
+- still the next serious targets: `core/agent_runtime/fast_live_info_router.py`, `core/agent_runtime/hive_topic_public_copy_privacy.py`, `core/public_hive_bridge.py`, `core/public_hive/bridge_topic_writes.py`, `core/agent_runtime/hive_topic_update_runtime.py`, `core/agent_runtime/hive_topic_delete_runtime.py`, `core/dashboard/workstation_overview_home_board_runtime.py`, `core/dashboard/workstation_render_nullabook_feed_styles.py`, `core/dashboard/workstation_render_nullabook_directory_styles.py`
 - startup/provider state is now also centralized behind `core/runtime_backbone.py` so operator/chat surfaces stop rediscovering hardware tier and provider audit state independently
 - provider-role routing now also lives behind `core/provider_routing.py`, and both the helper/teacher lane and the main model execution router now honor bounded drone/queen provider roles without broad caller rewiring
 - chat-surface wording, observation shaping, and Hive status narration now also live behind `core/agent_runtime/chat_surface.py`, and the agent-facing wrapper surface now also lives behind `core/agent_runtime/chat_surface_facade.py`, so `apps/nulla_agent.py` no longer owns that slab directly
@@ -173,7 +196,7 @@ These are the current blast-radius centers. Split these before inventing more la
 - public-Hive capability/help wrappers, task export, footer support, public capability ledger shaping, and transport-mode helpers now also live behind `core/agent_runtime/public_hive_support.py`, so `apps/nulla_agent.py` no longer owns that outward support slab directly
 - task-class updates, task-outcome persistence, verified-action shard promotion, and local shard persistence now also live behind `core/agent_runtime/task_persistence_support.py`, so `apps/nulla_agent.py` no longer owns that persistence/support slab directly
 - proceed/resume request normalization, explicit resume detection, and generic proceed-message matching now also live behind `core/agent_runtime/proceed_intent_support.py`, so `apps/nulla_agent.py` no longer owns that intent-policy slab directly
-- live-info, weather, news, and price lookup routing now also live behind `core/agent_runtime/fast_live_info.py`, leaving `core/agent_runtime/fast_paths.py` as the smaller utility/date/smalltalk shortcut lane
+- live-info, weather, news, and price lookup routing now live behind `core/agent_runtime/fast_live_info_router.py`, `core/agent_runtime/fast_live_info_search.py`, `core/agent_runtime/fast_live_info_rendering.py`, and `core/agent_runtime/fast_live_info_price.py`, leaving `core/agent_runtime/fast_live_info.py` as the thin shortcut facade and `core/agent_runtime/fast_paths.py` as the smaller utility/date/smalltalk shortcut lane
 - public presence heartbeat, idle commons cadence, and autonomous Hive research loops now also live behind `core/agent_runtime/presence.py`, so `apps/nulla_agent.py` no longer owns those background-runtime slabs directly
 - trace-rail browser runtime, session/event polling, and session-summary/event rendering now also live behind `core/runtime_task_rail_client.py`, so `core/runtime_task_rail.py` no longer owns that browser-runtime slab directly
 - trace-rail session summary derivation now also lives behind `core/runtime_task_rail_summary_client.py`, so `core/runtime_task_rail_client.py` no longer owns that logic hub directly
@@ -225,6 +248,13 @@ These are the current blast-radius centers. Split these before inventing more la
 - public-Hive presence/profile/post sync, topic CRUD/claims/progress/moderation/search flows, and bridge transport helpers now also live behind `core/public_hive/bridge_presence.py`, `core/public_hive/bridge_topics.py`, and `core/public_hive/bridge_transport.py`, so `core/public_hive/bridge.py` is now just the thin caller-facing facade
 - public-Hive topic reads, review queue/moderation, write workflows, and task-publication helpers now also live behind `core/public_hive/bridge_topic_reads.py`, `core/public_hive/bridge_topic_reviews.py`, `core/public_hive/bridge_topic_writes.py`, and `core/public_hive/bridge_topic_publication.py`, so `core/public_hive/bridge_topics.py` is now just the thin grouped topic facade
 - Hive followup hint/resume/status helpers now also live behind `core/agent_runtime/hive_research_hints.py`, `core/agent_runtime/hive_research_resume.py`, and `core/agent_runtime/hive_research_status.py`, while fast-path utility/companion/builder helpers now also live behind `core/agent_runtime/fast_paths_utility.py`, `core/agent_runtime/fast_paths_companion.py`, and `core/agent_runtime/fast_paths_builder.py`, and the remaining Brain Hive identity/review/idempotency glue now also lives behind `core/brain_hive_identity.py`, `core/brain_hive_review_state.py`, and `core/brain_hive_idempotency.py`
+- public-Hive compatibility/bootstrap support now also lives behind `core/public_hive/bridge_support.py`, so `core/public_hive_bridge.py` is thinner and stays focused on the stable caller-facing compat/auth/bootstrap facade
+- Hive-topic mutation resolution, update execution, and delete execution now also live behind `core/agent_runtime/hive_topic_mutation_resolver.py`, `core/agent_runtime/hive_topic_update_runtime.py`, and `core/agent_runtime/hive_topic_delete_runtime.py`, leaving `core/agent_runtime/hive_topic_mutation_runtime.py` as the thin mutation facade
+- workstation overview home/runtime composition now also lives behind `core/dashboard/workstation_overview_home_board_runtime.py` and `core/dashboard/workstation_overview_notes_runtime.py`, leaving `core/dashboard/workstation_overview_home_runtime.py` as the thin overview/home facade
+- workstation trading-program cards now also live behind `core/dashboard/workstation_learning_program_trading_overview_runtime.py`, `core/dashboard/workstation_learning_program_trading_market_runtime.py`, and `core/dashboard/workstation_learning_program_trading_activity_runtime.py`, leaving `core/dashboard/workstation_learning_program_trading_cards_runtime.py` as the thin trading-card facade
+- embedded NullaBook fabric CSS now also lives behind `core/dashboard/workstation_render_nullabook_fabric_telemetry_styles.py`, `core/dashboard/workstation_render_nullabook_fabric_timeline_styles.py`, `core/dashboard/workstation_render_nullabook_fabric_cards_styles.py`, and `core/dashboard/workstation_render_nullabook_fabric_onboarding_styles.py`, leaving `core/dashboard/workstation_render_nullabook_fabric_styles.py` as the thin fabric-style aggregator
+- public feed base CSS now also lives behind `core/nullabook_feed_layout_styles.py`, `core/nullabook_feed_skeleton_styles.py`, and `core/nullabook_feed_interaction_styles.py`, leaving `core/nullabook_feed_base_styles.py` as the thin base-style aggregator
+- trace-rail panel CSS now also lives behind `core/runtime_task_rail_panel_shell_styles.py`, `core/runtime_task_rail_panel_session_styles.py`, and `core/runtime_task_rail_panel_trace_styles.py`, leaving `core/runtime_task_rail_panel_styles.py` as the thin panel-style aggregator
 
 ## Keep / Split / Rewrite / Quarantine
 
@@ -238,15 +268,15 @@ Keep:
 
 Split next:
 
-- `core/dashboard/workstation_overview_home_runtime.py`
-- `core/dashboard/workstation_learning_program_trading_cards_runtime.py`
-- `core/dashboard/workstation_render_nullabook_fabric_styles.py`
-- `core/agent_runtime/hive_topic_mutation_runtime.py`
+- `core/agent_runtime/fast_live_info_router.py`
 - `core/agent_runtime/hive_topic_public_copy_privacy.py`
-- `core/nullabook_feed_base_styles.py`
-- `core/runtime_task_rail_panel_styles.py`
 - `core/public_hive_bridge.py`
 - `core/public_hive/bridge_topic_writes.py`
+- `core/agent_runtime/hive_topic_update_runtime.py`
+- `core/agent_runtime/hive_topic_delete_runtime.py`
+- `core/dashboard/workstation_overview_home_board_runtime.py`
+- `core/dashboard/workstation_render_nullabook_feed_styles.py`
+- `core/dashboard/workstation_render_nullabook_directory_styles.py`
 
 Rewrite selectively:
 
@@ -402,7 +432,8 @@ pytest -q \
 Status on trunk:
 
 - `core/public_hive/__init__.py`, `auth.py`, `bootstrap.py`, `bridge.py`, `client.py`, `config.py`, `truth.py`, `topic_writes.py`, `publication.py`, and `moderation.py` are already live
-- `core/public_hive_bridge.py` is down to 229 lines
+- `core/public_hive_bridge.py` is down to 190 lines
+- `core/public_hive/bridge_support.py` now owns the extracted bootstrap/discovery and SSH sync support lane at 141 lines
 - `core/public_hive/bridge.py` is down to 37 lines and now acts as the thin caller-facing bridge facade
 - `core/public_hive/bridge_presence.py` now owns the extracted presence/profile/post sync lane at 115 lines
 - `core/public_hive/bridge_topics.py` is now the 15-line grouped topic facade over `core/public_hive/bridge_topic_reads.py` (59), `core/public_hive/bridge_topic_reviews.py` (35), `core/public_hive/bridge_topic_writes.py` (187), and `core/public_hive/bridge_topic_publication.py` (53)
@@ -551,19 +582,19 @@ Status on trunk:
 - `core/dashboard/workstation_state.py` is the extracted workstation initial-state builder at 48 lines
 - `core/dashboard/workstation_render.py` is down to 253 lines and now owns the much thinner workstation document shell after the render-style and tab-markup extractions
 - `core/dashboard/workstation_client.py` is down to 532 lines and now owns the slimmer workstation browser-runtime shell after the card/fold helper, overview/home-runtime, embedded-NullaBook, inspector/truth-selection, and trading/learning extractions
-- `core/dashboard/workstation_overview_runtime.py` is now the 14-line facade over `core/dashboard/workstation_overview_movement_runtime.py` (289) and the 23-line `core/dashboard/workstation_overview_surface_runtime.py`, which now delegates to `core/dashboard/workstation_overview_stats_runtime.py` (119), `core/dashboard/workstation_overview_proof_runtime.py` (103), `core/dashboard/workstation_overview_streams_runtime.py` (137), and `core/dashboard/workstation_overview_home_runtime.py` (191)
+- `core/dashboard/workstation_overview_runtime.py` is now the 14-line facade over `core/dashboard/workstation_overview_movement_runtime.py` (289) and the 23-line `core/dashboard/workstation_overview_surface_runtime.py`, which now delegates to `core/dashboard/workstation_overview_stats_runtime.py` (119), `core/dashboard/workstation_overview_proof_runtime.py` (103), `core/dashboard/workstation_overview_streams_runtime.py` (137), and the 44-line `core/dashboard/workstation_overview_home_runtime.py`; that home facade now delegates to `core/dashboard/workstation_overview_home_board_runtime.py` (154) and `core/dashboard/workstation_overview_notes_runtime.py` (14)
 - `core/dashboard/workstation_nullabook_runtime.py` now owns the extracted embedded-NullaBook runtime lane at 277 lines
 - `core/dashboard/workstation_inspector_runtime.py` now owns the extracted inspector/truth-selection runtime lane at 239 lines
-- `core/dashboard/workstation_trading_learning_runtime.py` is now the 23-line facade over `core/dashboard/workstation_trading_presence_runtime.py` (63), `core/dashboard/workstation_trading_surface_runtime.py` (121), the 23-line `core/dashboard/workstation_learning_program_cards_runtime.py`, and `core/dashboard/workstation_learning_program_runtime.py` (64); `core/dashboard/workstation_learning_program_cards_runtime.py` now delegates to `core/dashboard/workstation_learning_program_shared_runtime.py` (36), `core/dashboard/workstation_learning_program_trading_cards_runtime.py` (196), `core/dashboard/workstation_learning_program_knowledge_cards_runtime.py` (79), and `core/dashboard/workstation_learning_program_topic_cards_runtime.py` (87)
+- `core/dashboard/workstation_trading_learning_runtime.py` is now the 23-line facade over `core/dashboard/workstation_trading_presence_runtime.py` (63), `core/dashboard/workstation_trading_surface_runtime.py` (121), the 23-line `core/dashboard/workstation_learning_program_cards_runtime.py`, and `core/dashboard/workstation_learning_program_runtime.py` (64); `core/dashboard/workstation_learning_program_cards_runtime.py` now delegates to `core/dashboard/workstation_learning_program_shared_runtime.py` (36), the 28-line `core/dashboard/workstation_learning_program_trading_cards_runtime.py`, `core/dashboard/workstation_learning_program_knowledge_cards_runtime.py` (79), and `core/dashboard/workstation_learning_program_topic_cards_runtime.py` (87); that trading-card facade now delegates to `core/dashboard/workstation_learning_program_trading_overview_runtime.py` (35), `core/dashboard/workstation_learning_program_trading_market_runtime.py` (87), and `core/dashboard/workstation_learning_program_trading_activity_runtime.py` (91)
 - `core/dashboard/workstation_cards.py` is now the 8-line facade over `core/dashboard/workstation_card_normalizers.py` (149) and `core/dashboard/workstation_card_render_sections.py` (152)
 - `core/dashboard/workstation_render_tab_markup.py` now owns the extracted dashboard tab navigation plus panel markup at 230 lines
 - `core/dashboard/workstation_render_styles.py` is now the 12-line style aggregator seam
 - `core/dashboard/workstation_render_shell_styles.py` is now the 17-line style aggregator over `core/dashboard/workstation_render_shell_primitives.py` (125), the 23-line `core/dashboard/workstation_render_shell_components.py`, and the 19-line `core/dashboard/workstation_render_shell_layout.py`; those now delegate to `core/dashboard/workstation_render_shell_stat_styles.py` (93), `core/dashboard/workstation_render_shell_card_styles.py` (98), `core/dashboard/workstation_render_shell_learning_styles.py` (139), `core/dashboard/workstation_render_shell_footer_styles.py` (84), `core/dashboard/workstation_render_shell_workbench_styles.py` (165), `core/dashboard/workstation_render_shell_inspector_styles.py` (126), and `core/dashboard/workstation_render_shell_responsive_styles.py` (88)
-- `core/dashboard/workstation_render_nullabook_styles.py` is now the 13-line style aggregator over the 19-line `core/dashboard/workstation_render_nullabook_content_styles.py` and `core/dashboard/workstation_render_nullabook_mode_styles.py` (87); the content aggregator now delegates to `core/dashboard/workstation_render_nullabook_feed_styles.py` (154), `core/dashboard/workstation_render_nullabook_directory_styles.py` (131), and `core/dashboard/workstation_render_nullabook_fabric_styles.py` (284)
+- `core/dashboard/workstation_render_nullabook_styles.py` is now the 13-line style aggregator over the 19-line `core/dashboard/workstation_render_nullabook_content_styles.py` and `core/dashboard/workstation_render_nullabook_mode_styles.py` (87); the content aggregator now delegates to `core/dashboard/workstation_render_nullabook_feed_styles.py` (154), `core/dashboard/workstation_render_nullabook_directory_styles.py` (131), and the 23-line `core/dashboard/workstation_render_nullabook_fabric_styles.py`; that fabric aggregator now delegates to `core/dashboard/workstation_render_nullabook_fabric_telemetry_styles.py` (87), `core/dashboard/workstation_render_nullabook_fabric_timeline_styles.py` (70), `core/dashboard/workstation_render_nullabook_fabric_cards_styles.py` (64), and `core/dashboard/workstation_render_nullabook_fabric_onboarding_styles.py` (80)
 - `core/agent_runtime/hive_topic_create.py` is now the 41-line create facade over `core/agent_runtime/hive_topic_create_preflight.py` (182) and the 136-line `core/agent_runtime/hive_topic_publish_flow.py`, which now delegates to `core/agent_runtime/hive_topic_publish_failures.py` (59), `core/agent_runtime/hive_topic_publish_transport.py` (70), and `core/agent_runtime/hive_topic_publish_effects.py` (100)
 - `core/agent_runtime/hive_topic_drafting.py` is now the 15-line drafting facade over `core/agent_runtime/hive_topic_draft_parsing.py` (143) and the 27-line `core/agent_runtime/hive_topic_draft_variants.py`, which now delegates to `core/agent_runtime/hive_topic_draft_duplicate_detection.py` (50), `core/agent_runtime/hive_topic_draft_builder.py` (104), and `core/agent_runtime/hive_topic_draft_intents.py` (116)
 - `core/agent_runtime/hive_topic_pending.py` is now the 22-line pending facade over `core/agent_runtime/hive_topic_pending_confirmation.py` (148), the 102-line `core/agent_runtime/hive_topic_pending_store.py`, and `core/agent_runtime/hive_topic_preview_render.py` (77); the pending-store facade now delegates to `core/agent_runtime/hive_topic_pending_payloads.py` (51) and `core/agent_runtime/hive_topic_pending_history.py` (36)
-- `core/agent_runtime/hive_topics.py` is now the 44-line legacy mutation facade over `core/agent_runtime/hive_topic_mutation_detection.py` (84) and `core/agent_runtime/hive_topic_mutation_runtime.py` (359)
+- `core/agent_runtime/hive_topics.py` is now the 44-line legacy mutation facade over `core/agent_runtime/hive_topic_mutation_detection.py` (84) and the 15-line `core/agent_runtime/hive_topic_mutation_runtime.py`; that mutation facade now delegates to `core/agent_runtime/hive_topic_mutation_resolver.py` (46), `core/agent_runtime/hive_topic_update_runtime.py` (170), and `core/agent_runtime/hive_topic_delete_runtime.py` (150)
 
 Split next:
 
