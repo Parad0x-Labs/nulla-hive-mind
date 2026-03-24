@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import os
 import subprocess
-import urllib.error
 from pathlib import Path
 from typing import Any
 
 from core.public_hive import PublicHiveBridgeConfig
 from core.public_hive import auth as public_hive_auth
-from core.public_hive import truth as public_hive_truth
 from core.public_hive.bridge import PublicHiveBridge
 from core.runtime_paths import PROJECT_ROOT, config_path
 
@@ -156,22 +154,6 @@ def public_hive_write_enabled(config: PublicHiveBridgeConfig | None = None) -> b
     )
 
 
-def _annotate_public_hive_truth(row: dict[str, Any]) -> dict[str, Any]:
-    return public_hive_truth.annotate_public_hive_truth(row)
-
-
-def _annotate_public_hive_packet_truth(packet: dict[str, Any]) -> dict[str, Any]:
-    return public_hive_truth.annotate_public_hive_packet_truth(packet)
-
-
-def _research_queue_truth_complete(row: dict[str, Any]) -> bool:
-    return public_hive_truth.research_queue_truth_complete(row)
-
-
-def _research_packet_truth_complete(packet: dict[str, Any]) -> bool:
-    return public_hive_truth.research_packet_truth_complete(packet)
-
-
 def _resolve_local_tls_ca_file(tls_ca_file: str | None, *, project_root: str | Path | None = None) -> str | None:
     return public_hive_auth.resolve_local_tls_ca_file(tls_ca_file, project_root=project_root or PROJECT_ROOT)
 
@@ -245,62 +227,3 @@ def _url_requires_auth(url: str) -> bool:
 
 def _normalize_base_url(url: str) -> str:
     return public_hive_auth.normalize_base_url(url)
-
-
-def _normalize_presence_status(value: str) -> str:
-    return public_hive_truth.normalize_presence_status(value)
-
-
-def _task_title(task_summary: str) -> str:
-    return public_hive_truth.task_title(task_summary)
-
-
-def _topic_tags(*, task_class: str, text: str, extra: list[str] | None = None) -> list[str]:
-    return public_hive_truth.topic_tags(task_class=task_class, text=text, extra=extra)
-
-
-def _public_post_body(response: str) -> str:
-    return public_hive_truth.public_post_body(response)
-
-
-def _fallback_public_post_body(*, task_summary: str, task_class: str) -> str:
-    return public_hive_truth.fallback_public_post_body(task_summary=task_summary, task_class=task_class)
-
-
-def _commons_topic_title(topic: str) -> str:
-    return public_hive_truth.commons_topic_title(topic)
-
-
-def _commons_topic_summary(*, topic: str, summary: str) -> str:
-    return public_hive_truth.commons_topic_summary(topic=topic, summary=summary)
-
-
-def _commons_post_body(*, topic: str, summary: str, public_body: str) -> str:
-    return public_hive_truth.commons_post_body(topic=topic, summary=summary, public_body=public_body)
-
-
-def _topic_match_score(
-    *,
-    task_summary: str,
-    task_class: str,
-    topic_tags: list[str],
-    topic: dict[str, Any],
-) -> int:
-    return public_hive_truth.topic_match_score(
-        task_summary=task_summary,
-        task_class=task_class,
-        topic_tags=topic_tags,
-        topic=topic,
-    )
-
-
-def _content_tokens(text: str) -> list[str]:
-    return public_hive_truth.content_tokens(text)
-
-
-def _http_error_detail(exc: urllib.error.HTTPError, *, fallback: str) -> str:
-    return public_hive_truth.http_error_detail(exc, fallback=fallback)
-
-
-def _route_missing(exc: Exception) -> bool:
-    return public_hive_truth.route_missing(exc)

@@ -1,0 +1,18 @@
+from __future__ import annotations
+
+from core.public_hive import bridge_topics
+from core.public_hive.bridge_topic_publication import PublicHiveBridgeTopicPublicationMixin
+from core.public_hive.bridge_topic_reads import PublicHiveBridgeTopicReadsMixin
+from core.public_hive.bridge_topic_reviews import PublicHiveBridgeTopicReviewsMixin
+from core.public_hive.bridge_topic_writes import PublicHiveBridgeTopicWritesMixin
+
+
+def test_public_hive_bridge_topics_split_keeps_read_methods_on_facade() -> None:
+    assert issubclass(bridge_topics.PublicHiveBridgeTopicsMixin, PublicHiveBridgeTopicReadsMixin)
+    assert bridge_topics.PublicHiveBridgeTopicsMixin.list_public_topics is PublicHiveBridgeTopicReadsMixin.list_public_topics
+
+
+def test_public_hive_bridge_topics_split_keeps_review_and_write_methods_on_facade() -> None:
+    assert issubclass(bridge_topics.PublicHiveBridgeTopicsMixin, PublicHiveBridgeTopicReviewsMixin)
+    assert issubclass(bridge_topics.PublicHiveBridgeTopicsMixin, PublicHiveBridgeTopicWritesMixin)
+    assert issubclass(bridge_topics.PublicHiveBridgeTopicsMixin, PublicHiveBridgeTopicPublicationMixin)
