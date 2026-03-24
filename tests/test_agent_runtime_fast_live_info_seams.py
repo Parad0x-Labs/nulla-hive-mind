@@ -5,9 +5,11 @@ from unittest import mock
 
 from core.agent_runtime import (
     fast_live_info,
+    fast_live_info_mode_policy,
     fast_live_info_price,
     fast_live_info_rendering,
     fast_live_info_router,
+    fast_live_info_runtime,
     fast_live_info_search,
 )
 
@@ -22,7 +24,9 @@ def _build_agent() -> SimpleNamespace:
 
 def test_fast_live_info_facade_reexports_split_modules() -> None:
     assert fast_live_info.maybe_handle_live_info_fast_path is fast_live_info_router.maybe_handle_live_info_fast_path
+    assert fast_live_info_router.maybe_handle_live_info_fast_path is fast_live_info_runtime.maybe_handle_live_info_fast_path
     assert fast_live_info.live_info_mode is fast_live_info_router.live_info_mode
+    assert fast_live_info_router.live_info_mode is fast_live_info_mode_policy.live_info_mode
     assert fast_live_info.live_info_search_notes is fast_live_info_search.live_info_search_notes
     assert fast_live_info.try_live_quote_note is fast_live_info_search.try_live_quote_note
     assert fast_live_info.render_live_info_response is fast_live_info_rendering.render_live_info_response
