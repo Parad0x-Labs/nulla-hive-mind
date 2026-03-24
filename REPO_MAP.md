@@ -59,6 +59,9 @@ Core lane:
 - `core/dashboard/workstation.py`: thin workstation facade
 - `core/dashboard/workstation_state.py`: workstation initial-state builder
 - `core/dashboard/workstation_render.py`: workstation document shell
+- `core/dashboard/workstation_render_styles.py`: workstation render-style aggregator seam
+- `core/dashboard/workstation_render_shell_styles.py`: shared workstation shell/chrome CSS seam
+- `core/dashboard/workstation_render_nullabook_styles.py`: NullaBook-mode workstation CSS seam
 - `core/dashboard/workstation_client.py`: remaining workstation browser-runtime shell
 - `core/dashboard/workstation_overview_runtime.py`: workstation home/overview browser-runtime seam
 - `core/dashboard/workstation_nullabook_runtime.py`: workstation embedded-NullaBook browser-runtime seam

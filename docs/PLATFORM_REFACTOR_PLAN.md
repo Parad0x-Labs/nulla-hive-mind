@@ -39,7 +39,10 @@ The biggest files on the current trunk are:
 | `core/dashboard/workstation_inspector_runtime.py` | 239 | inspect payload encoding, inspector truth/debug rendering, workstation chrome shaping, and inspector/tab click binding are now isolated behind a dedicated browser-runtime seam |
 | `core/dashboard/workstation_trading_learning_runtime.py` | 594 | trading-presence helpers plus the trading and learning-lab browser runtime are now isolated behind a dedicated browser-runtime seam |
 | `core/dashboard/workstation_cards.py` | 295 | workstation card/fold render helpers are now isolated behind a dedicated browser-render helper lane |
-| `core/dashboard/workstation_render.py` | 1983 | the workstation document shell is much smaller, but still owns a broad HTML/panel composition slab |
+| `core/dashboard/workstation_render.py` | 476 | the workstation document shell is now much smaller after the render-style extraction, but it still owns the remaining markup/tab composition shell |
+| `core/dashboard/workstation_render_styles.py` | 12 | tiny style aggregator seam for workstation render styles |
+| `core/dashboard/workstation_render_shell_styles.py` | 877 | shared workstation shell/chrome CSS is now isolated behind a dedicated render-style seam |
+| `core/dashboard/workstation_render_nullabook_styles.py` | 641 | NullaBook-mode and embedded public-feed CSS is now isolated behind a dedicated render-style seam |
 | `core/nullabook_feed_page.py` | 705 | public worklog/feed route shell is smaller again after the surface-runtime extraction, but it still owns a broad document shell and public-surface presentation slab |
 | `core/nullabook_feed_surface_runtime.py` | 350 | route/view state, hero/sidebar shaping, and the public feed/dashboard loading loop are now isolated behind a dedicated client-runtime seam |
 | `core/nullabook_feed_cards.py` | 289 | feed/task/agent/proof card render helpers and feed ordering are now isolated, but still coupled to page globals |
@@ -77,7 +80,7 @@ These are the current blast-radius centers. Split these before inventing more la
 
 - completed enough to stop pretending they are still untouched: `core/local_operator_actions.py`, `core/control_plane_workspace.py`, `apps/brain_hive_watch_server.py`, `apps/nulla_daemon.py`, `apps/nulla_api_server.py`, `apps/meet_and_greet_server.py`, `core/brain_hive_dashboard.py`, `core/persistent_memory.py`
 - materially improved but still active: `core/public_hive/bridge.py`, `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/dashboard/workstation_client.py`, `core/dashboard/workstation_trading_learning_runtime.py`, `core/nullabook_feed_page.py`, `core/nullabook_feed_surface_runtime.py`, `core/brain_hive_service.py`, `core/agent_runtime/hive_topic_create.py`, `core/agent_runtime/hive_topic_drafting.py`, `core/agent_runtime/hive_research_followup.py`, `core/agent_runtime/fast_paths.py`, `core/agent_runtime/fast_live_info.py`
-- still the next serious targets: `apps/nulla_agent.py`, `core/dashboard/workstation_render.py`, `core/nullabook_feed_page.py`, `core/brain_hive_service.py`, `core/runtime_task_rail.py`, `core/public_hive/bridge.py`, `core/agent_runtime/hive_research_followup.py`, `core/agent_runtime/fast_paths.py`
+- still the next serious targets: `apps/nulla_agent.py`, `core/nullabook_feed_page.py`, `core/brain_hive_service.py`, `core/runtime_task_rail.py`, `core/public_hive/bridge.py`, `core/agent_runtime/hive_research_followup.py`, `core/agent_runtime/fast_paths.py`
 - startup/provider state is now also centralized behind `core/runtime_backbone.py` so operator/chat surfaces stop rediscovering hardware tier and provider audit state independently
 - provider-role routing now also lives behind `core/provider_routing.py`, and both the helper/teacher lane and the main model execution router now honor bounded drone/queen provider roles without broad caller rewiring
 - chat-surface wording, observation shaping, and Hive status narration now also live behind `core/agent_runtime/chat_surface.py`, and the agent-facing wrapper surface now also lives behind `core/agent_runtime/chat_surface_facade.py`, so `apps/nulla_agent.py` no longer owns that slab directly
@@ -100,6 +103,7 @@ These are the current blast-radius centers. Split these before inventing more la
 - the embedded NullaBook panel rendering and butterfly-canvas runtime now also live behind `core/dashboard/workstation_nullabook_runtime.py`, so `core/dashboard/workstation_client.py` no longer owns that panel-runtime slab directly
 - inspect payload encoding, inspector truth/debug rendering, workstation chrome shaping, and inspector/tab click binding now also live behind `core/dashboard/workstation_inspector_runtime.py`, so `core/dashboard/workstation_client.py` no longer owns that inspector/truth-selection lane directly
 - trading-presence helpers plus the trading and learning-lab browser runtime now also live behind `core/dashboard/workstation_trading_learning_runtime.py`, so `core/dashboard/workstation_client.py` no longer owns that trading/learning slab directly
+- shared workstation shell/chrome CSS now also lives behind `core/dashboard/workstation_render_shell_styles.py`, NullaBook-mode CSS now also lives behind `core/dashboard/workstation_render_nullabook_styles.py`, and `core/dashboard/workstation_render_styles.py` is now the small aggregator seam, so `core/dashboard/workstation_render.py` no longer owns that giant inline style slab directly
 - feed/task/agent/proof card render helpers and local feed ordering now also live behind `core/nullabook_feed_cards.py`, so `core/nullabook_feed_page.py` no longer owns that public-card slab directly
 - public route/view state, hero/sidebar shaping, and the `loadAll()` public feed/dashboard loading loop now also live behind `core/nullabook_feed_surface_runtime.py`, so `core/nullabook_feed_page.py` no longer owns that client-runtime slab directly
 - post permalink overlay logic, reply loading, share/copy actions, and public vote runtime now also live behind `core/nullabook_feed_post_interactions.py`, so `core/nullabook_feed_page.py` no longer owns that browser-runtime slab directly
@@ -133,6 +137,8 @@ Split next:
 - `core/dashboard/workstation_inspector_runtime.py`
 - `core/dashboard/workstation_trading_learning_runtime.py`
 - `core/dashboard/workstation_render.py`
+- `core/dashboard/workstation_render_shell_styles.py`
+- `core/dashboard/workstation_render_nullabook_styles.py`
 - `core/dashboard/workstation_cards.py`
 - `core/agent_runtime/hive_topic_drafting.py`
 - `core/agent_runtime/hive_topic_pending.py`
@@ -159,7 +165,10 @@ Rewrite selectively:
 - keep the embedded NullaBook panel rendering and butterfly-canvas runtime inside `core/dashboard/workstation_nullabook_runtime.py`
 - keep inspect payload encoding, inspector truth/debug rendering, workstation chrome shaping, and inspector/tab click binding inside `core/dashboard/workstation_inspector_runtime.py`
 - keep trading-presence helpers plus the trading and learning-lab browser runtime inside `core/dashboard/workstation_trading_learning_runtime.py`
-- `core/dashboard/workstation_render.py` into document-shell/render-section slices instead of one presentation slab
+- keep shared workstation shell/chrome CSS inside `core/dashboard/workstation_render_shell_styles.py`
+- keep NullaBook-mode CSS inside `core/dashboard/workstation_render_nullabook_styles.py`
+- keep `core/dashboard/workstation_render_styles.py` as the tiny style aggregator instead of letting another giant style slab grow back
+- `core/dashboard/workstation_render.py` into document-shell/tab-markup slices instead of one presentation slab
 - keep draft parsing and create-vs-drafting detection inside `core/agent_runtime/hive_topic_drafting.py`
 - keep `core/agent_runtime/hive_topic_create.py` focused on create/publish orchestration instead of draft parsing
 - keep confirmation-state flow inside `core/agent_runtime/hive_topic_pending.py`
@@ -432,13 +441,16 @@ Status on trunk:
 - `core/dashboard/render.py` is down to 346 lines and now routes public vs workstation rendering
 - `core/dashboard/workstation.py` is down to 30 lines and now only assembles workstation state + document helpers
 - `core/dashboard/workstation_state.py` is the extracted workstation initial-state builder at 48 lines
-- `core/dashboard/workstation_render.py` is down to 1983 lines and now owns the workstation document shell instead of the whole browser runtime
+- `core/dashboard/workstation_render.py` is down to 476 lines and now owns the smaller workstation markup/document shell after the render-style extraction
 - `core/dashboard/workstation_client.py` is down to 532 lines and now owns the slimmer workstation browser-runtime shell after the card/fold helper, overview/home-runtime, embedded-NullaBook, inspector/truth-selection, and trading/learning extractions
 - `core/dashboard/workstation_overview_runtime.py` now owns the extracted workstation home/overview runtime lane at 778 lines
 - `core/dashboard/workstation_nullabook_runtime.py` now owns the extracted embedded-NullaBook runtime lane at 277 lines
 - `core/dashboard/workstation_inspector_runtime.py` now owns the extracted inspector/truth-selection runtime lane at 239 lines
 - `core/dashboard/workstation_trading_learning_runtime.py` now owns the extracted trading/learning runtime lane at 594 lines
 - `core/dashboard/workstation_cards.py` now owns the extracted workstation card/fold renderer helpers at 295 lines
+- `core/dashboard/workstation_render_styles.py` is now the 12-line style aggregator seam
+- `core/dashboard/workstation_render_shell_styles.py` now owns the extracted shared workstation shell/chrome CSS at 877 lines
+- `core/dashboard/workstation_render_nullabook_styles.py` now owns the extracted NullaBook-mode CSS at 641 lines
 - `core/agent_runtime/hive_topic_create.py` is down to 477 lines and now owns the slimmer create/publish orchestration after the drafting extraction
 - `core/agent_runtime/hive_topic_drafting.py` now owns the extracted draft parsing and create-vs-drafting detection lane at 405 lines
 
@@ -450,7 +462,9 @@ Split next:
 - keep the embedded NullaBook panel runtime in `core/dashboard/workstation_nullabook_runtime.py`
 - keep the inspector/truth-selection runtime in `core/dashboard/workstation_inspector_runtime.py`
 - keep the trading/learning runtime in `core/dashboard/workstation_trading_learning_runtime.py`
-- `core/dashboard/workstation_render.py` -> `templates.py`, `render_sections.py`
+- keep the shared workstation shell/chrome CSS in `core/dashboard/workstation_render_shell_styles.py`
+- keep the NullaBook-mode CSS in `core/dashboard/workstation_render_nullabook_styles.py`
+- `core/dashboard/workstation_render.py` -> `tab_markup.py`, `shell_markup.py`
 - `apps/brain_hive_watch_server.py` -> `core/web/watch/routes_public.py`, `routes_topic.py`, `cache.py`, `tls.py`, `responses.py`
 - keep `apps/nulla_api_server.py` and `apps/meet_and_greet_server.py` thin; do not re-bloat the facades
 

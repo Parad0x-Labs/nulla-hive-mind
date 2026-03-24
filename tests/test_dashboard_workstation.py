@@ -4,6 +4,7 @@ import unittest
 
 from core.dashboard.workstation import render_workstation_dashboard_html
 from core.dashboard.workstation_render import render_workstation_document
+from core.dashboard.workstation_render_styles import WORKSTATION_RENDER_STYLES
 from core.dashboard.workstation_state import build_workstation_initial_state_payload
 
 
@@ -37,6 +38,22 @@ class DashboardWorkstationTests(unittest.TestCase):
         self.assertNotIn("__INITIAL_STATE__", html)
         self.assertNotIn("__WORKSTATION_CLIENT__", html)
         self.assertNotIn("__WORKSTATION_HEADER__", html)
+
+    def test_workstation_document_keeps_extracted_style_contracts(self) -> None:
+        html = render_workstation_document(
+            initial_state='{"branding":{"title":"NULLA"}}',
+            api_endpoint="/api/dashboard",
+            topic_base_path="/task",
+            initial_mode="overview",
+            canonical_url="https://nulla.test/hive?mode=overview",
+        )
+
+        self.assertIn(".dashboard-stage {", WORKSTATION_RENDER_STYLES)
+        self.assertIn(".nb-hero {", WORKSTATION_RENDER_STYLES)
+        self.assertIn("body.nullabook-mode .nb-topbar { display: flex; }", WORKSTATION_RENDER_STYLES)
+        self.assertIn(".dashboard-stage {", html)
+        self.assertIn(".nb-hero {", html)
+        self.assertIn("body.nullabook-mode .nb-topbar { display: flex; }", html)
 
     def test_workstation_dashboard_html_keeps_existing_surface_contract(self) -> None:
         html = render_workstation_dashboard_html(
