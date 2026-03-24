@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from apps.nulla_agent import NullaAgent
 from core.agent_runtime import fast_paths
 from core.agent_runtime.fast_live_info import (
     live_info_mode,
@@ -11,8 +10,11 @@ from core.agent_runtime.fast_live_info import (
 )
 
 
-def _build_agent() -> NullaAgent:
-    return NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+def _build_agent() -> SimpleNamespace:
+    return SimpleNamespace(
+        _looks_like_builder_request=lambda _text: False,
+        _wants_fresh_info=lambda _text, interpretation: True,
+    )
 
 
 def test_fast_live_info_compat_exports_stay_available_from_fast_paths() -> None:
