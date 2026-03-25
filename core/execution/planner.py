@@ -682,6 +682,19 @@ def _looks_like_failing_test_repair_request(
     return any(marker in lowered for marker in failure_markers)
 
 
+def _planned_command_payload(*, user_text: str, command: str) -> tuple[str, dict[str, Any]] | None:
+    validation_step = _validation_step_from_request(user_text=user_text, explicit_command=command)
+    if validation_step is not None:
+        return ("planned_validation_run", validation_step)
+    normalized_command = _normalize_inline_command(command)
+    if not normalized_command:
+        return None
+    return (
+        "planned_command_run",
+        {"intent": "sandbox.run_command", "arguments": {"command": normalized_command}},
+    )
+
+
 def _planned_orchestrated_operator_payload(
     *,
     user_text: str,
@@ -1020,11 +1033,14 @@ def plan_tool_workflow(
                 next_payload=orchestrated_payload,
             )
         if explicit_command and any(marker in lowered for marker in (" retry ", " then retry", " then rerun", " rerun ")):
-            return WorkflowPlannerDecision(
-                handled=True,
-                reason="planned_diagnose_run",
-                next_payload={"intent": "sandbox.run_command", "arguments": {"command": explicit_command}},
-            )
+            command_payload = _planned_command_payload(user_text=raw_text, command=explicit_command)
+            if command_payload is not None:
+                reason, next_payload = command_payload
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_diagnose_run" if reason == "planned_command_run" else reason,
+                    next_payload=next_payload,
+                )
         if replacement is not None:
             path = str(replacement.get("path") or "").strip()
             if path:
@@ -1053,11 +1069,10 @@ def plan_tool_workflow(
                 next_payload={"intent": "web.search", "arguments": {"query": research_text, "limit": 4}},
             )
         if explicit_command:
-            return WorkflowPlannerDecision(
-                handled=True,
-                reason="planned_command_run",
-                next_payload={"intent": "sandbox.run_command", "arguments": {"command": explicit_command}},
-            )
+            command_payload = _planned_command_payload(user_text=raw_text, command=explicit_command)
+            if command_payload is not None:
+                reason, next_payload = command_payload
+                return WorkflowPlannerDecision(handled=True, reason=reason, next_payload=next_payload)
         return WorkflowPlannerDecision(handled=False, reason="no_workflow_plan")
 
     last_observation = dict(last_step.get("observation") or {})
@@ -1165,12 +1180,20 @@ def plan_tool_workflow(
                         },
                     },
                 )
-        if explicit_command and not _workflow_step_exists(steps, "sandbox.run_command", key="command", value=explicit_command):
-            return WorkflowPlannerDecision(
-                handled=True,
-                reason="planned_command_after_read",
-                next_payload={"intent": "sandbox.run_command", "arguments": {"command": explicit_command}},
-            )
+        if explicit_command and not (
+            _workflow_step_exists(steps, "sandbox.run_command", key="command", value=explicit_command)
+            or _workflow_step_exists(steps, "workspace.run_tests", key="command", value=explicit_command)
+            or _workflow_step_exists(steps, "workspace.run_lint", key="command", value=explicit_command)
+            or _workflow_step_exists(steps, "workspace.run_formatter", key="command", value=explicit_command)
+        ):
+            command_payload = _planned_command_payload(user_text=user_text, command=explicit_command)
+            if command_payload is not None:
+                reason, next_payload = command_payload
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_command_after_read" if reason == "planned_command_run" else "planned_validation_after_read",
+                    next_payload=next_payload,
+                )
         return WorkflowPlannerDecision(handled=True, reason="workspace_stop_after_read", stop_after=True)
 
     if last_intent == "workspace.ensure_directory":
@@ -1212,12 +1235,20 @@ def plan_tool_workflow(
                 reason="planned_workspace_list_after_write",
                 next_payload={"intent": "workspace.list_files", "arguments": {"path": list_path, "limit": 200}},
             )
-        if explicit_command and not _workflow_step_exists(steps, "sandbox.run_command", key="command", value=explicit_command):
-            return WorkflowPlannerDecision(
-                handled=True,
-                reason="planned_command_after_write",
-                next_payload={"intent": "sandbox.run_command", "arguments": {"command": explicit_command}},
-            )
+        if explicit_command and not (
+            _workflow_step_exists(steps, "sandbox.run_command", key="command", value=explicit_command)
+            or _workflow_step_exists(steps, "workspace.run_tests", key="command", value=explicit_command)
+            or _workflow_step_exists(steps, "workspace.run_lint", key="command", value=explicit_command)
+            or _workflow_step_exists(steps, "workspace.run_formatter", key="command", value=explicit_command)
+        ):
+            command_payload = _planned_command_payload(user_text=user_text, command=explicit_command)
+            if command_payload is not None:
+                reason, next_payload = command_payload
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_command_after_write" if reason == "planned_command_run" else "planned_validation_after_write",
+                    next_payload=next_payload,
+                )
         return WorkflowPlannerDecision(handled=True, reason="workspace_stop_after_write", stop_after=True)
 
     if last_intent == "workspace.list_files":
@@ -1226,11 +1257,14 @@ def plan_tool_workflow(
     if last_intent == "workspace.replace_in_file":
         retry_command = _last_command_from_steps(steps) or explicit_command
         if retry_command and not _workflow_retry_already_happened(steps, retry_command):
-            return WorkflowPlannerDecision(
-                handled=True,
-                reason="planned_retry_after_edit",
-                next_payload={"intent": "sandbox.run_command", "arguments": {"command": retry_command}},
-            )
+            command_payload = _planned_command_payload(user_text=user_text, command=retry_command)
+            if command_payload is not None:
+                _, next_payload = command_payload
+                return WorkflowPlannerDecision(
+                    handled=True,
+                    reason="planned_retry_after_edit",
+                    next_payload=next_payload,
+                )
         return WorkflowPlannerDecision(handled=True, reason="workspace_stop_after_edit", stop_after=True)
 
     if last_intent == "orchestration.execute_envelope":
@@ -1271,5 +1305,33 @@ def plan_tool_workflow(
                 next_payload={"intent": "workspace.search_text", "arguments": {"query": diagnostic_query, "limit": 10}},
             )
         return WorkflowPlannerDecision(handled=True, reason="command_stop_after_failure", stop_after=True)
+
+    if last_intent in {"workspace.run_tests", "workspace.run_lint", "workspace.run_formatter"}:
+        returncode = int(hints.get("returncode") or 0)
+        if returncode == 0:
+            return WorkflowPlannerDecision(handled=True, reason="validation_stop_after_success", stop_after=True)
+        error_path = str(hints.get("error_path") or "").strip()
+        error_line = int(hints.get("error_line") or 0)
+        if error_path and not _workflow_step_exists(steps, "workspace.read_file", key="path", value=error_path):
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_inspect_after_validation_failure",
+                next_payload={
+                    "intent": "workspace.read_file",
+                    "arguments": {
+                        "path": error_path,
+                        "start_line": max(1, error_line - 8) if error_line else 1,
+                        "max_lines": 60,
+                    },
+                },
+            )
+        diagnostic_query = str(hints.get("diagnostic_query") or "").strip()
+        if diagnostic_query and not _workflow_step_exists(steps, "workspace.search_text", key="query", value=diagnostic_query):
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_search_after_validation_failure",
+                next_payload={"intent": "workspace.search_text", "arguments": {"query": diagnostic_query, "limit": 10}},
+            )
+        return WorkflowPlannerDecision(handled=True, reason="validation_stop_after_failure", stop_after=True)
 
     return WorkflowPlannerDecision(handled=False, reason="no_followup_plan")

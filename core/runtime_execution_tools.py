@@ -147,6 +147,24 @@ def _extract_failure_summary(*, command: str, stdout: str, stderr: str, returnco
     return f"`{command}` exited with code {int(returncode or 0)}"
 
 
+def _extract_command_failure_followup(*, stdout: str, stderr: str) -> dict[str, Any]:
+    combined = "\n".join(part for part in (str(stderr or "").strip(), str(stdout or "").strip()) if part).strip()
+    file_match = _FILE_LINE_RE.search(combined)
+    path = str(file_match.group("path") or "").strip() if file_match else ""
+    line_number = int(file_match.group("line") or 0) if file_match else 0
+    diagnostic_query = ""
+    for line in [item.strip() for item in combined.splitlines() if item.strip()]:
+        lowered = line.lower()
+        if any(token in lowered for token in ("error", "failed", "exception", "traceback", "assert")):
+            diagnostic_query = line[:160]
+            break
+    return {
+        "error_path": path,
+        "error_line": line_number,
+        "diagnostic_query": diagnostic_query,
+    }
+
+
 def runtime_execution_capability_ledger() -> list[dict[str, Any]]:
     ledger: dict[str, dict[str, Any]] = {}
     for contract in runtime_tool_contracts():
@@ -260,7 +278,22 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
             "restored_paths": [str(item).strip() for item in list(payload.get("restored_paths") or []) if str(item).strip()],
             "removed_paths": [str(item).strip() for item in list(payload.get("removed_paths") or []) if str(item).strip()],
         }
-    if intent in {"workspace.git_status", "workspace.git_diff", "workspace.run_tests", "workspace.run_lint", "workspace.run_formatter"}:
+    if intent in {"workspace.run_tests", "workspace.run_lint", "workspace.run_formatter"}:
+        followup = _extract_command_failure_followup(
+            stdout=str(payload.get("stdout") or ""),
+            stderr=str(payload.get("stderr") or ""),
+        )
+        return {
+            "intent": intent,
+            "command": str(payload.get("command") or "").strip(),
+            "cwd": str(payload.get("cwd") or "").strip(),
+            "returncode": int(payload.get("returncode") or 0),
+            "success": bool(payload.get("success", False)),
+            "error_path": str(payload.get("error_path") or followup.get("error_path") or "").strip(),
+            "error_line": int(payload.get("error_line") or followup.get("error_line") or 0),
+            "diagnostic_query": str(payload.get("diagnostic_query") or followup.get("diagnostic_query") or "").strip(),
+        }
+    if intent in {"workspace.git_status", "workspace.git_diff"}:
         return {
             "intent": intent,
             "command": str(payload.get("command") or "").strip(),
@@ -278,27 +311,19 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
             "merged_strategy": str(payload.get("merged_strategy") or "").strip(),
         }
     if intent == "sandbox.run_command":
-        stdout = str(payload.get("stdout") or "").strip()
-        stderr = str(payload.get("stderr") or "").strip()
-        combined = "\n".join(part for part in (stderr, stdout) if part).strip()
-        file_match = _FILE_LINE_RE.search(combined)
-        path = str(file_match.group("path") or "").strip() if file_match else ""
-        line_number = int(file_match.group("line") or 0) if file_match else 0
-        diagnostic_query = ""
-        for line in [item.strip() for item in combined.splitlines() if item.strip()]:
-            lowered = line.lower()
-            if any(token in lowered for token in ("error", "failed", "exception", "traceback", "assert")):
-                diagnostic_query = line[:160]
-                break
+        followup = _extract_command_failure_followup(
+            stdout=str(payload.get("stdout") or ""),
+            stderr=str(payload.get("stderr") or ""),
+        )
         return {
             "intent": intent,
             "command": str(payload.get("command") or "").strip(),
             "cwd": str(payload.get("cwd") or "").strip(),
             "returncode": int(payload.get("returncode") or 0),
             "success": bool(payload.get("success", False)),
-            "error_path": path,
-            "error_line": line_number,
-            "diagnostic_query": diagnostic_query,
+            "error_path": str(followup.get("error_path") or "").strip(),
+            "error_line": int(followup.get("error_line") or 0),
+            "diagnostic_query": str(followup.get("diagnostic_query") or "").strip(),
         }
     if intent == "web.search":
         results = [dict(item) for item in list(payload.get("results") or []) if isinstance(item, dict)]
@@ -1217,6 +1242,13 @@ def _run_validation(intent: str, arguments: dict[str, Any], *, workspace_root: P
         }[intent],
     )
     details = dict(payload.get("details") or {})
+    followup = _extract_command_failure_followup(
+        stdout=str(details.get("stdout") or ""),
+        stderr=str(details.get("stderr") or ""),
+    )
+    details["error_path"] = str(followup.get("error_path") or "").strip()
+    details["error_line"] = int(followup.get("error_line") or 0)
+    details["diagnostic_query"] = str(followup.get("diagnostic_query") or "").strip()
     details["observation"] = _tool_observation(
         intent=intent,
         tool_surface="workspace",
@@ -1227,6 +1259,9 @@ def _run_validation(intent: str, arguments: dict[str, Any], *, workspace_root: P
         returncode=int(details.get("returncode") or 0),
         success=bool(details.get("success", False)),
         failure_summary=str(details.get("failure_summary") or ""),
+        error_path=str(details.get("error_path") or ""),
+        error_line=int(details.get("error_line") or 0),
+        diagnostic_query=str(details.get("diagnostic_query") or ""),
     )
     return _result_from_payload(
         ok=bool(payload.get("ok")),

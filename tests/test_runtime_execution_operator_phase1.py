@@ -417,6 +417,52 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
             self.assertTrue(preflight["details"]["step_results"][0]["failure_allowed"])
             self.assertEqual((workspace / "app.py").read_text(encoding="utf-8"), "def answer():\n    return 42\n")
 
+    def test_planned_validation_run_can_feed_failed_test_inspection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            (workspace / "app.py").write_text("def answer():\n    return 41\n", encoding="utf-8")
+            (workspace / "test_app.py").write_text(
+                "from app import answer\n\n\ndef test_answer():\n    assert answer() == 42\n",
+                encoding="utf-8",
+            )
+
+            first = plan_tool_workflow(
+                user_text="run `python3 -m pytest -q test_app.py` and fix the failing tests",
+                task_class="debugging",
+                executed_steps=[],
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
+            )
+
+            self.assertTrue(first.handled)
+            self.assertEqual(first.next_payload["intent"], "workspace.run_tests")
+
+            validation_result = execute_runtime_tool(
+                first.next_payload["intent"],
+                dict(first.next_payload["arguments"]),
+                source_context={"workspace": tmpdir, "session_id": "session-validation-followup"},
+            )
+
+            assert validation_result is not None
+            self.assertFalse(validation_result.ok)
+            self.assertEqual(validation_result.details["observation"]["intent"], "workspace.run_tests")
+
+            second = plan_tool_workflow(
+                user_text="run `python3 -m pytest -q test_app.py` and fix the failing tests",
+                task_class="debugging",
+                executed_steps=[
+                    {
+                        "tool_name": "workspace.run_tests",
+                        "arguments": dict(first.next_payload["arguments"]),
+                        "observation": dict(validation_result.details["observation"]),
+                    }
+                ],
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
+            )
+
+            self.assertTrue(second.handled)
+            self.assertEqual(second.next_payload["intent"], "workspace.read_file")
+            self.assertEqual(second.next_payload["arguments"]["path"], "test_app.py")
+
     def test_planned_orchestrated_operator_envelope_can_apply_multi_file_diff_and_verify(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir)

@@ -877,6 +877,79 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertTrue(fourth.handled)
         self.assertEqual(fourth.next_payload["intent"], "sandbox.run_command")
 
+    def test_workflow_planner_prefers_validation_intent_for_explicit_pytest_command(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="run `python3 -m pytest -q test_app.py` and fix the failing tests",
+            task_class="debugging",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertEqual(decision.reason, "planned_validation_run")
+        self.assertEqual(decision.next_payload["intent"], "workspace.run_tests")
+        self.assertEqual(decision.next_payload["arguments"]["command"], "python3 -m pytest -q test_app.py")
+
+    def test_workflow_planner_can_inspect_after_failed_validation_run(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="run `python3 -m pytest -q test_app.py` and fix the failing tests",
+            task_class="debugging",
+            executed_steps=[
+                {
+                    "tool_name": "workspace.run_tests",
+                    "arguments": {"command": "python3 -m pytest -q test_app.py"},
+                    "observation": {
+                        "intent": "workspace.run_tests",
+                        "tool_surface": "workspace",
+                        "ok": False,
+                        "status": "executed",
+                        "command": "python3 -m pytest -q test_app.py",
+                        "cwd": ".",
+                        "returncode": 1,
+                        "success": False,
+                        "error_path": "app.py",
+                        "error_line": 2,
+                        "diagnostic_query": "AssertionError: assert 41 == 42",
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertEqual(decision.reason, "planned_inspect_after_validation_failure")
+        self.assertEqual(decision.next_payload["intent"], "workspace.read_file")
+        self.assertEqual(decision.next_payload["arguments"]["path"], "app.py")
+
+    def test_workflow_planner_can_search_after_failed_validation_without_path(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="run `python3 -m pytest -q test_app.py` and fix the failing tests",
+            task_class="debugging",
+            executed_steps=[
+                {
+                    "tool_name": "workspace.run_tests",
+                    "arguments": {"command": "python3 -m pytest -q test_app.py"},
+                    "observation": {
+                        "intent": "workspace.run_tests",
+                        "tool_surface": "workspace",
+                        "ok": False,
+                        "status": "executed",
+                        "command": "python3 -m pytest -q test_app.py",
+                        "cwd": ".",
+                        "returncode": 1,
+                        "success": False,
+                        "diagnostic_query": "AssertionError: answer() == 42",
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertEqual(decision.reason, "planned_search_after_validation_failure")
+        self.assertEqual(decision.next_payload["intent"], "workspace.search_text")
+        self.assertEqual(decision.next_payload["arguments"]["query"], "AssertionError: answer() == 42")
+
     def test_workflow_planner_can_emit_orchestrated_operator_envelope_for_patch_and_validate(self) -> None:
         decision = plan_tool_workflow(
             user_text="replace `return 41` with `return 42` in app.py, then run `python3 -m pytest -q test_app.py`",
