@@ -20,6 +20,8 @@ Current execution truth:
 - queen envelope execution now respects child dependency order instead of blindly following latency sort order
 - envelope-aware provider routing now fails closed for local-private or mutating coder work without a local lane, and it penalizes saturated candidates instead of blindly taking the first ranked provider
 - envelope scheduling now also understands attached provider-capability truth: queue pressure degrades lane priority, incompatible worker lanes can fail closed with `capacity_blocked`, and queen execution exposes scheduling details instead of only child order
+- `task_router.py` now emits explicit model constraints for locality, structured-output pressure, long-context preference, code-complex preference, and queue-pressure strategy instead of leaving those hints implicit
+- `model_teacher_pipeline.py` now records routing requirements/rejections in provenance and backs off saturated provider lanes during execution instead of blindly fanning out across every selected candidate
 
 ## Current Internal Zones
 
@@ -31,8 +33,10 @@ Current execution truth:
   - `runtime_paths.py`
   - `runtime_capabilities.py`
 - provider/model routing:
+  - `task_router.py`
   - `provider_routing.py`
   - `memory_first_router.py`
+  - `model_teacher_pipeline.py`
 - execution/tooling:
   - `runtime_execution_tools.py`
   - `runtime_tool_contracts.py`

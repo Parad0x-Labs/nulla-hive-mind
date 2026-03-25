@@ -215,6 +215,7 @@ Core lane:
 - `apps/nulla_agent.py`: thin runtime composition root
 - `core/runtime_backbone.py`: startup/runtime/provider snapshot facade for hardware tier, provider audit rows, and install-profile truth
 - `core/runtime_install_profiles.py`: authoritative install/runtime profile selection, disk-volume checks, and provider-key readiness truth
+- `core/task_router.py`: task classification, typed envelope emission, reusable-procedure citations, and route-level model constraints for latency/locality/capability pressure
 - `core/provider_routing.py`: envelope-aware provider routing for local drone lanes vs higher-tier synthesis lanes, including local fail-closed checks for private/mutating work plus queue-pressure and role-fit scoring
 - `core/memory_first_router.py`: main model execution router that now honors provider-role routing for slow-lane synthesis and tool-intent selection
 - `core/runtime_tool_contracts.py`: authoritative runtime intent contract map for workspace, git, validation, envelope orchestration, sandbox, Hive, web, and operator execution
@@ -314,7 +315,7 @@ Core lane:
 - `core/agent_runtime/hive_research_status.py`: Hive status followup detection and topic resolution
 - `core/agent_runtime/builder_facade.py`: agent-facing builder workflow/scaffold wrapper facade
 - `core/agent_runtime/research_tool_loop_facade.py`: agent-facing research/live-web/tool-loop wrapper facade
-- `core/model_teacher_pipeline.py`: bounded provider-swarm selection for helper/teacher candidate generation
+- `core/model_teacher_pipeline.py`: bounded provider-swarm selection for helper/teacher candidate generation, now with routing-note provenance and saturated-lane execution backoff
 - `core/agent_runtime/fast_paths.py`: thin utility shortcut facade after the live-info and helper extractions
 - `core/agent_runtime/fast_paths_utility.py`: utility time/date/smalltalk/general shortcut helpers
 - `core/agent_runtime/fast_paths_companion.py`: companion-memory and personalized-plan shortcut helpers

@@ -4,7 +4,7 @@ Current status matrix. Updated 2026-03-25.
 
 ## Latest Stabilization Checkpoint
 
-The current `main` checkpoint materially improved ninety-one areas:
+The current `main` checkpoint materially improved ninety-five areas:
 
 1. **Provider routing and model orchestration**
    NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
@@ -194,12 +194,14 @@ The current `main` checkpoint materially improved ninety-one areas:
    `core/provider_routing.py` now turns task-envelope locality and pressure into real routing behavior instead of passive metadata. Local-private or mutating coder lanes now fail closed without a local provider, saturated candidates get penalized by queue depth vs safe concurrency, and `core/model_teacher_pipeline.py` now carries the resulting routing requirements/rejections alongside capability truth instead of pretending every ranked manifest is equally valid for the task.
 94. **Capacity-aware envelope scheduling baseline**
    `core/orchestration/resource_scheduler.py` is no longer only a latency sorter. Attached provider-capability truth now feeds queue-pressure and locality-aware scheduling, `core/orchestration/executor.py` now records scheduled child details, and worker envelopes fail closed with `capacity_blocked` when the attached provider lane is incompatible with local-private or mutating work.
+95. **Task-router and helper-model capacity alignment**
+   `core/task_router.py` now emits explicit model-constraint hints for locality, structured-output preference, long-context pressure, code-complex preference, and queue-pressure strategy instead of leaving those concerns implicit. `core/model_teacher_pipeline.py` now honors those envelope constraints, records routing notes/rejections in provenance, and backs off saturated provider lanes during execution instead of blindly fanning out across every selected candidate.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1411 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1413 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -219,17 +221,17 @@ Current test gate on this checkpoint:
 | **Trace Rail (local viewer)** | **Works** | Browser UI showing your own agent's execution in real time. `core/runtime_task_rail.py` is now the thin document facade; document assembly and shell composition live behind `core/runtime_task_rail_document.py`; the asset seam now fans out to `core/runtime_task_rail_shell.py` and `core/runtime_task_rail_styles.py` behind the tiny `core/runtime_task_rail_assets.py` compatibility module; `core/runtime_task_rail_client.py` is now the thin browser facade; polling and event/session rendering now live behind `core/runtime_task_rail_polling.py` and `core/runtime_task_rail_event_render.py`; and the session-summary derivation still lives behind `core/runtime_task_rail_summary_client.py`. |
 | **Coding operator baseline** | **Works** | Repo/workspace inspection, unified-diff patching, git status/diff, bounded tests/lint/format, tracked rollback, procedure promotion, and local proof artifacts are now explicit runtime tools instead of generic shell-only behavior. |
 | **Typed subtask execution baseline** | **Works (local baseline)** | `TaskEnvelopeV1` is no longer only routing metadata. Local coder/verifier envelopes can execute bounded runtime-tool steps under permissions, queen envelopes can schedule child envelopes with dependency-aware ordering and deterministic merge, and the same bounded flow is now reachable through `orchestration.execute_envelope`. Public/mesh delegation is still not the same thing and is not being claimed here. |
-| **Envelope-aware provider routing** | **Works (local baseline)** | Task envelopes now influence provider selection materially: local-private/mutating coder work fails closed without a local lane, saturated providers are penalized by queue depth vs safe concurrency, and capability truth now carries the routing requirements/rejections instead of only exposing raw ranked candidates. |
-| **Capacity-aware envelope scheduling** | **Works (local baseline)** | When task envelopes carry provider-capability truth, scheduling now accounts for queue pressure and locality instead of only latency labels, and incompatible worker lanes fail closed before mutating the workspace. This is still local orchestration, not distributed swarm scheduling. |
+| **Envelope-aware provider routing** | **Works (local baseline)** | Task envelopes now influence provider selection materially: local-private/mutating coder work fails closed without a local lane, task-router model constraints now carry locality/structured-output/context/code-pressure hints, saturated providers are penalized by queue depth vs safe concurrency, and capability truth now carries routing requirements/rejections instead of only exposing raw ranked candidates. |
+| **Capacity-aware envelope scheduling** | **Works (local baseline)** | When task envelopes carry provider-capability truth, scheduling now accounts for queue pressure and locality instead of only latency labels, incompatible worker lanes fail closed before mutating the workspace, and the helper-model execution lane now also backs off saturated providers instead of blindly fanning out into them. This is still local orchestration, not distributed swarm scheduling. |
 | **Remote shard fetch/reuse baseline** | **Works (bounded)** | `SHARD_PAYLOAD` now carries manifest-bound transport metadata plus signed origin fields; accepted remote payloads emit explicit fetch receipts, cache locally as `peer_received` shards, and surface reuse citations through tiered context assembly. This is still not the same thing as hardened public-internet trust or automatic global synthesis. |
 | **Sandboxed code execution** | **Works** | Restricted environment with guardrails and fail-closed posture when no safe isolation backend exists. |
-| **Multi-model support** | **Works** | Ollama local, HTTP-compatible provider adapters, cloud fallback, and role-aware provider routing for local drone lanes vs higher-tier synthesis. Provider capability truth now also surfaces role fit, queue depth, max safe concurrency, and tool/structured-output support instead of only listing adapters. |
+| **Multi-model support** | **Works** | Ollama local, HTTP-compatible provider adapters, cloud fallback, and role-aware provider routing for local drone lanes vs higher-tier synthesis. Provider capability truth now also surfaces role fit, queue depth, max safe concurrency, and tool/structured-output support instead of only listing adapters, and the helper/teacher lane now records routing notes while backing off saturated candidates during execution. |
 | **Discord relay bridge** | **Works** | Full bot integration with channel routing. |
 | **Telegram relay bridge** | **Works** | Bot API with group chat support. |
 | **Contribution scoring** | **Works** | Glory scores, local credits, receipts, evidence-based grading, and partial-result paths are present. Credits here are local work/participation accounting, not blockchain tokens. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. Remote fetches now also record explicit receipts and cached remote-shard reuse can surface citation metadata instead of stopping at metadata-only hints. |
 | **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection, explicit install profiles, single-volume free-space checks, built-wheel smoke coverage, and aligned `/healthz` startup checks. The doctor/receipt now report whether the selected install profile is actually ready. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1411 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1413 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist. Not yet proven at scale over internet. |
 | **DHT routing** | **Partial** | Code exists. Not hardened as public routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
@@ -265,8 +267,8 @@ Credits in this repo are local proof-of-work / proof-of-participation accounting
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1411 passed, 13 skipped, 12 xfailed, 16 xpassed` |
-| Passing | 1411 |
+| Full suite result | `1413 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Passing | 1413 |
 | Skipped | 13 |
 | Expected failures (xfail) | 12 |
 | Unexpected passes (xpass) | 16 |
