@@ -228,20 +228,20 @@ Core lane:
 - `core/provider_routing.py`: envelope-aware provider routing for local drone lanes vs higher-tier synthesis lanes, including local fail-closed checks for private/mutating work plus queue-pressure and role-fit scoring
 - `core/memory_first_router.py`: main model execution router that now honors provider-role routing for slow-lane synthesis and tool-intent selection
 - `core/runtime_tool_contracts.py`: authoritative runtime intent contract map for workspace, git, validation, envelope orchestration, sandbox, Hive, web, and operator execution
-- `core/runtime_execution_tools.py`: coding/operator execution surface for workspace inspection, diff patching, git status/diff, bounded validation, rollback, emitted artifacts, bounded `orchestration.execute_envelope` execution, and validation-failure followup hints
-- `core/execution/workspace_tools.py`: workspace tree, symbol search, and strict unified-diff patch helpers that prefer full Python application before shell `patch`
+- `core/runtime_execution_tools.py`: coding/operator execution surface for workspace inspection, diff patching, git status/diff, bounded validation, rollback, emitted artifacts, bounded `orchestration.execute_envelope` execution, validation-failure followup hints, and fresh-timestamp writes that stay honest across repeated same-size rewrites
+- `core/execution/workspace_tools.py`: workspace tree, symbol search, and strict unified-diff patch helpers that prefer full Python application before shell `patch` and now preserve fresh source mtimes across repeated write cycles
 - `core/execution/git_tools.py`: bounded git status/diff helpers
 - `core/execution/validation_tools.py`: bounded test/lint/format command helpers and result shaping
-- `core/execution/artifacts.py`: diff, command, failure, mutation-history, and rollback/procedure-link artifacts
+- `core/execution/artifacts.py`: diff, command, failure, mutation-history, and rollback/procedure-link artifacts, including rollback-time source timestamp hardening for repeated recovery attempts
 - `core/execution/planner.py`: workflow planner for research/operator/hive flows, including the bounded search/read/patch/validate envelope path, raw fenced unified-diff repair planning, preflight failing-test repair planning for clear repo edit requests, validation-result followup planning into inspect/search steps that can continue past the first file read and into the first unread repo match, narrow candidate-repair promotion from explicit diagnosis evidence, and rollback-on-failure verifier planning for bounded repairs
-- `core/orchestration/executor.py`: local queen/coder/verifier executor, including fail-closed verifier rollback for bounded repair envelopes that opt into tracked cleanup
+- `core/orchestration/executor.py`: local queen/coder/verifier executor, including fail-closed verifier rollback for bounded repair envelopes that opt into tracked cleanup and dependency-session restore before explicitly-marked fallback retries
 - `core/orchestration/task_envelope.py`: `TaskEnvelopeV1` schema and role-default builder
-- `core/orchestration/executor.py`: bounded local queen/coder/verifier envelope executor with permission enforcement, validation-only preflight failure capture, capacity-blocked worker fail-closed behavior, dependency-aware child ordering, explicit fallback-child recovery after failed dependencies, step-to-step runtime reference resolution, and persisted procedure-reuse metrics
+- `core/orchestration/executor.py`: bounded local queen/coder/verifier envelope executor with permission enforcement, validation-only preflight failure capture, capacity-blocked worker fail-closed behavior, dependency-aware child ordering, explicit fallback-child recovery after failed dependencies, tracked workspace restore before recovery retries, step-to-step runtime reference resolution, and persisted procedure-reuse metrics
 - `core/orchestration/role_contracts.py`: queen/coder/verifier/researcher/memory-clerk/narrator contracts
 - `core/orchestration/resource_scheduler.py`: capacity-state evaluation plus queue-pressure/locality-aware envelope scheduling helpers
 - `core/orchestration/task_graph.py`: task-graph node/status model
 - `core/orchestration/cancel_resume.py`: cancel/resume propagation helpers
-- `core/orchestration/result_merge.py`: deterministic subtask result merge helpers, including fail-closed `highest_score` and ordered `last_success` recovery merges
+- `core/orchestration/result_merge.py`: deterministic subtask result merge helpers, including fail-closed `highest_score` plus `last_success` recovery merges that still fail closed when the final verifier loses
 - `core/learning/procedure_shards.py`: `ProcedureShardV1` local persistence plus reuse/verified-reuse metric tracking
 - `core/learning/procedure_promotion.py`: verified procedure promotion gate
 - `core/learning/reuse_ranker.py`: later-task procedure reuse ranking with verified-reuse weighting

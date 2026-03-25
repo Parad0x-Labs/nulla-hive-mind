@@ -88,7 +88,7 @@ Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 - Shared runtime bootstrap for local Ollama plus real configured Kimi, vLLM-local, and llama.cpp-local lanes
 - Persistent memory and context carryover
 - Tool use, bounded research, and Hive task flow
-- Bounded coding/operator repair flow for concrete repo edits, including search/read/patch/validate and preflight failing-test capture before local repair
+- Bounded coding/operator repair flow for concrete repo edits, including search/read/patch/validate, preflight failing-test capture, narrow diagnosis-to-repair promotion, and fail-closed rollback/recovery isolation
 - Role-aware provider routing for local drone lanes vs higher-tier synthesis lanes
 - OpenClaw registration and local API lane
 - Public proof, tasks, operator pages, worklog, and coordination surfaces
