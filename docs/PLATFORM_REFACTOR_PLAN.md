@@ -46,6 +46,7 @@ The refactor-only pass is frozen. The current beta bar is execution hardening:
 - keep remote shard ranking honest: cached `peer_received` shards should get only a bounded preference from proven downstream reuse, not a giant static-trust bypass and not zero benefit from measured Hive success
 - keep operator output disciplined: `core/agent_runtime/response.py` and `core/agent_runtime/response_policy_visibility.py` should keep workflow/routing/capacity internals off chat surfaces unless debug is explicit
 - keep WAN transport truth honest too: NAT-mapped nodes must not advertise as direct, LAN-only nodes must not claim relay reachability without a real relay path, and dashboard/watch ranking should reflect those transport modes instead of flattening them into fake internet readiness
+- keep DHT truth above passive storage: lookup frontier helpers must be able to skip already-contacted peers, and stale non-empty buckets must yield deterministic refresh targets before we call the routing table anything more than static storage
 
 ## Verified Current Risk Snapshot
 

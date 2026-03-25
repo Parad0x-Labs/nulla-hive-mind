@@ -58,6 +58,7 @@ Core lane:
 - `network/nat_probe.py`: local vs public NAT classification seam
 - `network/relay_fallback.py`: honest advertised transport-mode selection seam
 - `network/hole_punch.py`: hole-punch connectivity classification and attempt helpers
+- `network/dht.py`: bucketed routing table with iterative lookup-frontier helpers and stale-bucket refresh targets
 
 ## Current Dashboard Spine
 
