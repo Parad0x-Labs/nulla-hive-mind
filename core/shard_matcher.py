@@ -7,6 +7,7 @@ from typing import Any
 from core.shard_synthesizer import build_generalized_query
 from storage.db import get_connection
 from storage.shard_fetch_receipts import latest_receipts_for_shards
+from storage.shard_reuse_outcomes import summarize_reuse_outcomes_for_shards
 
 
 def _get(obj: Any, key: str, default: Any = None) -> Any:
@@ -90,7 +91,9 @@ def find_local_candidates(task: Any, classification: dict[str, Any]) -> list[dic
     finally:
         conn.close()
 
-    receipt_map = latest_receipts_for_shards([str(row["shard_id"]) for row in rows])
+    shard_ids = [str(row["shard_id"]) for row in rows]
+    receipt_map = latest_receipts_for_shards(shard_ids)
+    reuse_outcome_map = summarize_reuse_outcomes_for_shards(shard_ids)
     candidates: list[dict] = []
 
     for row in rows:
@@ -126,6 +129,7 @@ def find_local_candidates(task: Any, classification: dict[str, Any]) -> list[dic
                 "expires_ts": row["expires_ts"],
                 "signature": row["signature"],
                 "retrieval_receipt": dict(receipt or {}),
+                "reuse_outcomes": dict(reuse_outcome_map.get(str(row["shard_id"])) or {}),
                 "semantic_match": semantic,
                 "environment_match": env_match,
             }

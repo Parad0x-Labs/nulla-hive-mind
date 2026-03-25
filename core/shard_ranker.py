@@ -33,6 +33,24 @@ def _clamp(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
+def _reuse_outcome_adjustment(candidate: dict[str, Any]) -> float:
+    if str(candidate.get("source_type") or "").strip() != "peer_received":
+        return 0.0
+    summary = dict(candidate.get("reuse_outcomes") or {})
+    total = max(0, int(summary.get("total_count") or 0))
+    if total <= 0:
+        return 0.0
+    success = max(0, int(summary.get("success_count") or 0))
+    durable = max(0, int(summary.get("durable_count") or 0))
+    success_rate = success / total
+    durable_rate = durable / total
+    evidence_weight = min(total, 5) / 5.0
+    score = ((success_rate - 0.5) * 0.10) + (durable_rate * 0.05)
+    if success > 0:
+        score += evidence_weight * 0.03
+    return score
+
+
 def rank(candidates: list[dict], task: Any) -> list[dict]:
     if not isinstance(candidates, list):
         return []
@@ -53,6 +71,7 @@ def rank(candidates: list[dict], task: Any) -> list[dict]:
         quality = float(candidate.get("quality_score", 0.0))
         freshness = _freshness_score(candidate.get("freshness_ts"))
         validation = _validation_rate(candidate)
+        reuse_outcome_adjustment = _reuse_outcome_adjustment(candidate)
 
         risk_flags = set(candidate.get("risk_flags") or [])
         risk_penalty = 0.20 if risk_flags else 0.0
@@ -64,12 +83,14 @@ def rank(candidates: list[dict], task: Any) -> list[dict]:
             + (0.10 * quality)
             + (0.10 * freshness)
             + (0.05 * validation)
+            + reuse_outcome_adjustment
             - risk_penalty
         )
 
         enriched = dict(candidate)
         enriched["freshness_score"] = freshness
         enriched["validation_rate"] = validation
+        enriched["reuse_outcome_adjustment"] = reuse_outcome_adjustment
         enriched["score"] = score
         ranked.append(enriched)
 

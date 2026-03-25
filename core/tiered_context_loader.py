@@ -122,8 +122,9 @@ def _remote_shard_citation(
         "validation_state": str(receipt.get("validation_state") or "").strip(),
         "fetched_at": str(receipt.get("created_at") or "").strip(),
     }
-    if isinstance(reuse_summary, dict) and reuse_summary:
-        citation["reuse_outcomes"] = dict(reuse_summary)
+    effective_summary = dict(reuse_summary or candidate.get("reuse_outcomes") or {})
+    if effective_summary:
+        citation["reuse_outcomes"] = effective_summary
     return citation
 
 
@@ -154,13 +155,15 @@ def _local_candidate_items(task: Any, classification: dict[str, Any]) -> tuple[l
             str(candidate.get("shard_id") or "").strip()
             for candidate in ranked
             if str(candidate.get("source_type") or "") == "peer_received"
+            and not dict(candidate.get("reuse_outcomes") or {})
         ]
     )
     items: list[ContextItem] = []
     for candidate in ranked[:8]:
         pattern = list(candidate.get("resolution_pattern") or [])[:4]
         shard_id = str(candidate.get("shard_id") or "").strip()
-        citation = _remote_shard_citation(candidate, reuse_summary=outcome_summaries.get(shard_id))
+        reuse_summary = dict(candidate.get("reuse_outcomes") or outcome_summaries.get(shard_id) or {})
+        citation = _remote_shard_citation(candidate, reuse_summary=reuse_summary)
         if citation:
             reuse_outcomes = dict(citation.get("reuse_outcomes") or {})
             reuse_note = ""

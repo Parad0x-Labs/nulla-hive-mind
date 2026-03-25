@@ -570,6 +570,104 @@ class TieredContextLoaderTests(unittest.TestCase):
         self.assertEqual(reuse_outcomes["durable_count"], 1)
         self.assertEqual(reuse_outcomes["last_receipt_id"], receipt_id)
 
+    def test_cached_remote_shard_with_better_reuse_history_ranks_first(self) -> None:
+        now = _now()
+
+        def _insert_remote_shard(shard_id: str, summary: str, peer_id: str) -> str:
+            conn = get_connection()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO learning_shards (
+                        shard_id, schema_version, problem_class, problem_signature,
+                        summary, resolution_pattern_json, environment_tags_json,
+                        source_type, source_node_id, quality_score, trust_score,
+                        local_validation_count, local_failure_count,
+                        quarantine_status, risk_flags_json, freshness_ts, expires_ts,
+                        signature, created_at, updated_at
+                    ) VALUES (?, 1, 'system_design', ?, ?, ?, ?, 'peer_received', ?, 0.86, 0.58, 0, 0, 'active', '[]', ?, NULL, ?, ?, ?)
+                    """,
+                    (
+                        shard_id,
+                        f"sig-{uuid.uuid4().hex}",
+                        summary,
+                        json.dumps(["compare topology", "validate holder state"]),
+                        json.dumps({"os": "unknown", "runtime": "python", "shell": "unknown", "version_family": "unknown"}),
+                        peer_id,
+                        now,
+                        "signed",
+                        now,
+                        now,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            return record_fetch_receipt(
+                shard_id=shard_id,
+                source_peer_id=peer_id,
+                source_node_id=peer_id,
+                query_id=f"query-{uuid.uuid4().hex}",
+                manifest_id=f"manifest-{uuid.uuid4().hex}",
+                content_hash=f"content-{uuid.uuid4().hex}",
+                version=1,
+                summary_digest=f"digest-{shard_id}",
+                validation_state="signature_and_manifest_verified",
+                accepted=True,
+                details={"reason": "test"},
+            )
+
+        favored_shard_id = f"remote-favored-{uuid.uuid4().hex}"
+        plain_shard_id = f"remote-plain-{uuid.uuid4().hex}"
+        favored_receipt = _insert_remote_shard(
+            favored_shard_id,
+            "Remote shard with proven downstream success for swarm replication notes",
+            f"peer-favored-{uuid.uuid4().hex}",
+        )
+        _insert_remote_shard(
+            plain_shard_id,
+            "Remote shard with similar swarm replication notes but no proven reuse yet",
+            f"peer-plain-{uuid.uuid4().hex}",
+        )
+
+        record_shard_reuse_outcomes(
+            citations=[
+                {
+                    "kind": "remote_shard",
+                    "shard_id": favored_shard_id,
+                    "receipt_id": favored_receipt,
+                    "source_peer_id": "peer-favored",
+                    "source_node_id": "peer-favored",
+                    "manifest_id": "manifest-favored",
+                    "content_hash": "content-favored",
+                    "validation_state": "signature_and_manifest_verified",
+                }
+            ],
+            task_id="task-rank-favored",
+            session_id=self.session_id,
+            task_class="system_design",
+            response_class="generic_conversation",
+            success=True,
+            durable=True,
+        )
+
+        task = create_task_record("design swarm knowledge replication")
+        interpretation = _interpretation("design swarm knowledge replication", topics=["swarm", "knowledge"])
+        result = self.loader.load(
+            task=task,
+            classification=classify(task.task_summary, context=interpretation.as_context()),
+            interpretation=interpretation,
+            persona=self.persona,
+            session_id=self.session_id,
+        )
+
+        remote_items = [item for item in result.relevant_items if item.source_type == "remote_shard_cache"]
+        self.assertGreaterEqual(len(remote_items), 2)
+        top_citation = dict(remote_items[0].metadata.get("reuse_citation") or {})
+        self.assertEqual(top_citation["shard_id"], favored_shard_id)
+        self.assertEqual(dict(top_citation.get("reuse_outcomes") or {}).get("success_count"), 1)
+
     def test_shared_swarm_context_is_reused_in_live_retrieval(self) -> None:
         save_sniffed_context(
             parent_peer_id=f"peer-{uuid.uuid4().hex}",
