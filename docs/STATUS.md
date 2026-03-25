@@ -4,7 +4,7 @@ Current status matrix. Updated 2026-03-25.
 
 ## Latest Stabilization Checkpoint
 
-The current `main` checkpoint materially improved one hundred and twenty-one areas:
+The current `main` checkpoint materially improved one hundred and twenty-two areas:
 
 1. **Provider routing and model orchestration**
    NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
@@ -248,6 +248,8 @@ The current `main` checkpoint materially improved one hundred and twenty-one are
    Full DHT buckets no longer evict the oldest live incumbent just because a fresh challenger appears. `network/dht.py` now keeps a bounded per-bucket replacement cache, only replaces the oldest incumbent immediately when that incumbent is already stale, and promotes queued replacements when `remove_node()` or `prune_stale_nodes()` opens a slot. This still is not public-internet DHT hardening, but it stops the easiest churn-poisoning path where a full bucket could shed good peers too eagerly.
 121. **Unread diagnosis followthrough baseline**
    The bounded local debug loop no longer reruns validation too early just because it already inspected one plausible implementation file. `core/execution/planner.py` can now walk the next unread `workspace.symbol_search` or `workspace.search_text` match after a diagnostic read when the first implementation read does not yet justify a repair, which keeps the bounded loop moving across the remaining high-signal candidates before it burns the next step on a premature rerun.
+122. **Provider lane ordering baseline**
+   Local install-profile truth no longer depends on registry ordering to decide who becomes the primary coder lane. `core/runtime_install_profiles.py` now explicitly prefers `ollama-local` as the primary local coder lane when it exists, and then picks a distinct verifier-fit local like `vllm-local` or `llamacpp-local` for the secondary lane instead of accidentally inverting those roles when provider snapshots arrive alphabetically. That fixes the core runtime truth before installer/doctor/receipt surfaces spread the wrong lane mapping any further.
 
 Current test gate on this checkpoint:
 
