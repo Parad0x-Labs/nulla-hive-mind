@@ -50,13 +50,15 @@ def is_probably_text(path: Path) -> bool:
     return b"\x00" not in sample
 
 
-def force_fresh_source_timestamp(path: Path) -> None:
+def force_fresh_source_timestamp(path: Path, *, minimum_mtime_ns: int = 0) -> None:
     if not path.exists() or not path.is_file():
         return
     stat_result = path.stat()
-    current_second = int(stat_result.st_mtime)
-    target_second = max(current_second + 1, int(time.time()))
-    target_ns = target_second * 1_000_000_000
+    target_ns = max(
+        int(stat_result.st_mtime_ns) + 1,
+        int(minimum_mtime_ns or 0) + 1_000_000_000,
+        time.time_ns() + 1_000_000_000,
+    )
     os.utime(path, ns=(target_ns, target_ns))
 
 
@@ -207,7 +209,14 @@ def apply_unified_diff_workspace(
         target = resolve_workspace_path(relative, workspace_root=workspace_root)
         existed_before = target.exists()
         before_text = target.read_text(encoding="utf-8", errors="replace") if existed_before and target.is_file() else ""
-        snapshots.append({"path": relative_path(target, workspace_root=workspace_root), "existed_before": existed_before, "before_text": before_text})
+        snapshots.append(
+            {
+                "path": relative_path(target, workspace_root=workspace_root),
+                "existed_before": existed_before,
+                "before_text": before_text,
+                "before_mtime_ns": int(target.stat().st_mtime_ns) if existed_before and target.is_file() else 0,
+            }
+        )
 
     applied_with = ""
     errors: list[str] = []
@@ -254,7 +263,7 @@ def apply_unified_diff_workspace(
             after_text = after_text + "\n"
             target.write_text(after_text, encoding="utf-8")
         if exists_after and target.is_file():
-            force_fresh_source_timestamp(target)
+            force_fresh_source_timestamp(target, minimum_mtime_ns=int(snapshot.get("before_mtime_ns") or 0))
         action = "updated"
         if not snapshot["existed_before"] and exists_after:
             action = "created"

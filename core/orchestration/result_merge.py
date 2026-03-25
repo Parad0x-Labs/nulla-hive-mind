@@ -40,6 +40,18 @@ def merge_task_results(parent: TaskEnvelopeV1, results: list[dict[str, Any]]) ->
         return {"strategy": strategy, "ok": all(bool(item.get("ok", True)) for item in ordered), "text": combined, "results": ordered}
     ordered = list(clean_results)
     if strategy == "last_success":
+        verifier_failures = [
+            item for item in ordered if str(item.get("role") or "").strip() == "verifier" and not bool(item.get("ok", False))
+        ]
+        if verifier_failures:
+            winner = min(verifier_failures, key=_failure_merge_priority)
+            return {
+                "strategy": strategy,
+                "ok": False,
+                "winner": winner,
+                "results": ordered,
+                "failed_results": verifier_failures,
+            }
         successful = [item for item in ordered if bool(item.get("ok", False))]
         winner = successful[-1] if successful else ordered[-1]
         return {"strategy": strategy, "ok": bool(winner.get("ok", False)), "winner": winner, "results": ordered}

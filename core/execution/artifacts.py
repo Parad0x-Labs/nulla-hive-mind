@@ -3,6 +3,8 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
+import os
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -104,6 +106,18 @@ def session_key_for_workspace(session_id: str | None, workspace_root: Path) -> s
     return f"workspace-{digest[:16]}"
 
 
+def _force_fresh_source_timestamp(path: Path, *, minimum_mtime_ns: int = 0) -> None:
+    if not path.exists() or not path.is_file():
+        return
+    stat_result = path.stat()
+    target_ns = max(
+        int(stat_result.st_mtime_ns) + 1,
+        int(minimum_mtime_ns or 0) + 1_000_000_000,
+        time.time_ns() + 1_000_000_000,
+    )
+    os.utime(path, ns=(target_ns, target_ns))
+
+
 def record_workspace_mutation(
     *,
     session_id: str | None,
@@ -161,8 +175,10 @@ def rollback_last_workspace_mutation(
         existed_before = bool(change.get("existed_before", False))
         before_text = str(change.get("before_text") or "")
         if existed_before:
+            previous_mtime_ns = int(target.stat().st_mtime_ns) if target.exists() and target.is_file() else 0
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(before_text, encoding="utf-8")
+            _force_fresh_source_timestamp(target, minimum_mtime_ns=previous_mtime_ns)
             restored_paths.append(relative_path)
         else:
             if target.exists():

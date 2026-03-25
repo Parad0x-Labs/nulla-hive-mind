@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+from core.execution.artifacts import latest_workspace_mutation
 from core.learning import record_procedure_reuse
 from core.runtime_execution_tools import RuntimeExecutionResult, execute_runtime_tool
 from core.runtime_tool_contracts import runtime_tool_contract_map
@@ -381,7 +383,20 @@ def _execute_queen_envelope(
                 details={"blocked_by": blocked_dependencies},
             )
         else:
-            child_result = execute_child(child)
+            restore_step, restore_error = _maybe_restore_workspace_before_child(
+                child,
+                blocked_dependencies=blocked_dependencies,
+                workspace_root=workspace_root,
+                session_id=session_id,
+                source_context=source_context,
+                execute_tool=runtime_tool_executor or _runtime_tool_executor,
+            )
+            if restore_error is not None:
+                child_result = restore_error
+            else:
+                child_result = execute_child(child)
+                if restore_step is not None:
+                    child_result = _attach_workspace_restore(child_result, restore_step=restore_step)
         graph.mark_status(child.task_id, "completed" if child_result.ok else "failed", result=child_result.merge_payload())
         child_results.append(child_result)
         child_result_map[child.task_id] = child_result
@@ -434,6 +449,135 @@ def _child_dependencies(envelope: TaskEnvelopeV1) -> list[str]:
 
 def _continue_on_dependency_failure(envelope: TaskEnvelopeV1) -> bool:
     return bool(envelope.inputs.get("continue_on_dependency_failure", False))
+
+
+def _restore_workspace_before_run(envelope: TaskEnvelopeV1) -> bool:
+    return bool(envelope.inputs.get("restore_workspace_before_run", False))
+
+
+def _maybe_restore_workspace_before_child(
+    envelope: TaskEnvelopeV1,
+    *,
+    blocked_dependencies: list[str],
+    workspace_root: str | None,
+    session_id: str | None,
+    source_context: dict[str, Any] | None,
+    execute_tool: Callable[[str, dict[str, Any], dict[str, Any] | None], RuntimeExecutionResult],
+) -> tuple[dict[str, Any] | None, EnvelopeExecutionResult | None]:
+    if not blocked_dependencies or not _restore_workspace_before_run(envelope):
+        return None, None
+    if not workspace_root:
+        return None, EnvelopeExecutionResult(
+            envelope=envelope,
+            ok=False,
+            status="restore_failed",
+            output_text=(
+                f"{envelope.role} envelope `{envelope.task_id}` requested workspace restore before recovery, "
+                "but no workspace root was available."
+            ),
+            details={"blocked_by": blocked_dependencies},
+        )
+
+    resolved_root = Path(workspace_root).resolve()
+    restore_session_id = ""
+    for dependency in reversed(blocked_dependencies):
+        candidate_session_id = str(session_id or dependency).strip()
+        mutation = latest_workspace_mutation(session_id=candidate_session_id, workspace_root=resolved_root)
+        if mutation is None:
+            continue
+        restore_session_id = candidate_session_id
+        break
+    if not restore_session_id:
+        return (
+            {
+                "intent": "workspace.rollback_last_change",
+                "status": "skipped",
+                "ok": True,
+                "response_text": "No tracked workspace mutation needed rollback before the recovery attempt.",
+                "triggered_by": list(blocked_dependencies),
+                "details": {
+                    "blocked_by": list(blocked_dependencies),
+                    "restored_paths": [],
+                    "removed_paths": [],
+                    "restore_session_id": "",
+                },
+            },
+            None,
+        )
+
+    restore_context = {
+        **dict(source_context or {}),
+        "workspace": str(resolved_root),
+        "session_id": restore_session_id,
+        "task_id": envelope.task_id,
+        "task_role": envelope.role,
+        "task_class": str(envelope.inputs.get("task_class") or ""),
+        "task_envelope": envelope.to_dict(),
+    }
+    rollback_result = execute_tool("workspace.rollback_last_change", {}, restore_context)
+    restore_step = {
+        "intent": "workspace.rollback_last_change",
+        "status": rollback_result.status,
+        "ok": rollback_result.ok,
+        "response_text": rollback_result.response_text,
+        "triggered_by": list(blocked_dependencies),
+        "details": {
+            **dict(rollback_result.details or {}),
+            "blocked_by": list(blocked_dependencies),
+            "restore_session_id": restore_session_id,
+        },
+    }
+    if rollback_result.ok:
+        return restore_step, None
+    return None, EnvelopeExecutionResult(
+        envelope=envelope,
+        ok=False,
+        status="restore_failed",
+        output_text=(
+            f"{envelope.role} envelope `{envelope.task_id}` could not restore the workspace before recovery: "
+            f"{rollback_result.response_text}"
+        ).strip(),
+        receipts=(
+            {
+                "receipt_type": "tool_receipt",
+                "step_id": "restore-workspace-before-run",
+                "intent": "workspace.rollback_last_change",
+                "status": rollback_result.status,
+                "observation": dict(rollback_result.details.get("observation") or {}),
+            },
+        )
+        if "observation" in rollback_result.details
+        else (),
+        details={
+            "blocked_by": blocked_dependencies,
+            "workspace_restore": restore_step,
+        },
+    )
+
+
+def _attach_workspace_restore(result: EnvelopeExecutionResult, *, restore_step: dict[str, Any]) -> EnvelopeExecutionResult:
+    updated_details = dict(result.details or {})
+    updated_details["workspace_restore"] = dict(restore_step)
+    updated_receipts = [dict(item) for item in result.receipts]
+    observation = dict(restore_step.get("details", {}).get("observation") or {})
+    if observation:
+        updated_receipts.append(
+            {
+                "receipt_type": "tool_receipt",
+                "step_id": "restore-workspace-before-run",
+                "intent": "workspace.rollback_last_change",
+                "status": str(restore_step.get("status") or "").strip(),
+                "observation": observation,
+            }
+        )
+    return EnvelopeExecutionResult(
+        envelope=result.envelope,
+        ok=result.ok,
+        status=result.status,
+        output_text=result.output_text,
+        receipts=tuple(updated_receipts),
+        details=updated_details,
+    )
 
 
 def _maybe_rollback_after_failure(

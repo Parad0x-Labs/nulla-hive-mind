@@ -911,9 +911,10 @@ def _write_file(arguments: dict[str, Any], *, workspace_root: Path, session_id: 
     content = str(arguments.get("content") or "")
     target.parent.mkdir(parents=True, exist_ok=True)
     existed = target.exists()
+    previous_mtime_ns = int(target.stat().st_mtime_ns) if existed and target.is_file() else 0
     previous = target.read_text(encoding="utf-8", errors="replace") if existed else ""
     target.write_text(content, encoding="utf-8")
-    force_fresh_source_timestamp(target)
+    force_fresh_source_timestamp(target, minimum_mtime_ns=previous_mtime_ns)
     line_count = len(content.splitlines()) or (1 if content else 0)
     relative_path = _relative_path(target, workspace_root=workspace_root)
     diff_artifact = build_file_diff_artifact(
@@ -1024,6 +1025,7 @@ def _replace_in_file(arguments: dict[str, Any], *, workspace_root: Path, session
             },
         )
     content = target.read_text(encoding="utf-8", errors="replace")
+    previous_mtime_ns = int(target.stat().st_mtime_ns)
     occurrences = content.count(old_text)
     if occurrences <= 0:
         return RuntimeExecutionResult(
@@ -1051,7 +1053,7 @@ def _replace_in_file(arguments: dict[str, Any], *, workspace_root: Path, session
         updated = content.replace(old_text, new_text, 1)
         replaced = 1
     target.write_text(updated, encoding="utf-8")
-    force_fresh_source_timestamp(target)
+    force_fresh_source_timestamp(target, minimum_mtime_ns=previous_mtime_ns)
     relative_path = _relative_path(target, workspace_root=workspace_root)
     diff_artifact = build_file_diff_artifact(
         path=relative_path,

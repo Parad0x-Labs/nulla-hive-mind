@@ -7,6 +7,7 @@ from unittest import mock
 
 from core.learning import load_procedure_shards, promote_verified_procedure
 from core.orchestration import EnvelopeExecutionResult, build_task_envelope, execute_task_envelope
+from core.runtime_execution_tools import RuntimeExecutionResult, execute_runtime_tool
 
 
 class OrchestrationExecutionPhase1Tests(unittest.TestCase):
@@ -596,14 +597,19 @@ class OrchestrationExecutionPhase1Tests(unittest.TestCase):
                             "intent": "workspace.replace_in_file",
                             "arguments": {
                                 "path": "app.py",
-                                "old_text": "return 999",
+                                "old_text": "return 41",
                                 "new_text": "return 40",
                                 "replace_all": True,
                             },
                         },
+                        {
+                            "step_id": "verify-bad",
+                            "intent": "workspace.run_tests",
+                            "arguments": {"command": "python3 -m pytest -q test_app.py"},
+                        },
                     ],
                 },
-                required_receipts=("tool_receipt",),
+                required_receipts=("tool_receipt", "validation_result"),
             )
             fallback_coder = build_task_envelope(
                 role="coder",
@@ -614,6 +620,7 @@ class OrchestrationExecutionPhase1Tests(unittest.TestCase):
                     "task_class": "debugging",
                     "depends_on": ["coder-primary"],
                     "continue_on_dependency_failure": True,
+                    "restore_workspace_before_run": True,
                     "runtime_tools": [
                         {
                             "step_id": "patch-fallback",
@@ -659,7 +666,111 @@ class OrchestrationExecutionPhase1Tests(unittest.TestCase):
             self.assertTrue(result.ok)
             self.assertEqual(result.status, "completed")
             self.assertEqual(result.details["merged_result"]["winner"]["task_id"], "verify-final")
+            fallback_result = next(
+                item for item in result.details["child_results"] if item["task_id"] == "coder-fallback"
+            )
+            self.assertEqual(fallback_result["details"]["workspace_restore"]["status"], "executed")
+            self.assertEqual(
+                fallback_result["details"]["workspace_restore"]["details"]["restore_session_id"],
+                "coder-primary",
+            )
             self.assertEqual((workspace / "app.py").read_text(encoding="utf-8"), "def answer():\n    return 42\n")
+
+    def test_queen_envelope_fails_closed_when_fallback_restore_cannot_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            (workspace / "app.py").write_text("def answer():\n    return 41\n", encoding="utf-8")
+            (workspace / "test_app.py").write_text(
+                "from app import answer\n\n\ndef test_answer():\n    assert answer() == 42\n",
+                encoding="utf-8",
+            )
+            bad_coder = build_task_envelope(
+                role="coder",
+                task_id="coder-primary",
+                parent_task_id="queen-recovery-fail",
+                goal="Mutate the file and fail validation",
+                inputs={
+                    "task_class": "debugging",
+                    "runtime_tools": [
+                        {
+                            "step_id": "patch-bad",
+                            "intent": "workspace.replace_in_file",
+                            "arguments": {
+                                "path": "app.py",
+                                "old_text": "return 41",
+                                "new_text": "return 40",
+                                "replace_all": True,
+                            },
+                        },
+                        {
+                            "step_id": "verify-bad",
+                            "intent": "workspace.run_tests",
+                            "arguments": {"command": "python3 -m pytest -q test_app.py"},
+                        },
+                    ],
+                },
+                required_receipts=("tool_receipt", "validation_result"),
+            )
+            fallback_coder = build_task_envelope(
+                role="coder",
+                task_id="coder-fallback",
+                parent_task_id="queen-recovery-fail",
+                goal="Recover from the failed first repair",
+                inputs={
+                    "task_class": "debugging",
+                    "depends_on": ["coder-primary"],
+                    "continue_on_dependency_failure": True,
+                    "restore_workspace_before_run": True,
+                    "runtime_tools": [
+                        {
+                            "step_id": "patch-fallback",
+                            "intent": "workspace.replace_in_file",
+                            "arguments": {
+                                "path": "app.py",
+                                "old_text": "return 41",
+                                "new_text": "return 42",
+                                "replace_all": True,
+                            },
+                        }
+                    ],
+                },
+                required_receipts=("tool_receipt",),
+            )
+            queen = build_task_envelope(
+                role="queen",
+                task_id="queen-recovery-fail",
+                goal="Try a fallback repair only if restore succeeds",
+                merge_strategy="last_success",
+                inputs={"subtasks": [bad_coder.to_dict(), fallback_coder.to_dict()]},
+            )
+
+            def _runtime_tool_executor(
+                intent: str, arguments: dict[str, object], source_context: dict[str, object] | None
+            ) -> RuntimeExecutionResult:
+                if intent == "workspace.rollback_last_change":
+                    return RuntimeExecutionResult(
+                        handled=True,
+                        ok=False,
+                        status="disabled",
+                        response_text="Rollback is disabled for this recovery test.",
+                        details={},
+                    )
+                result = execute_runtime_tool(intent, arguments, source_context=source_context)
+                assert result is not None
+                return result
+
+            result = execute_task_envelope(
+                queen,
+                workspace_root=tmpdir,
+                runtime_tool_executor=_runtime_tool_executor,
+            )
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.status, "merge_failed")
+            self.assertEqual(result.details["merged_result"]["winner"]["task_id"], "coder-fallback")
+            self.assertEqual(result.details["merged_result"]["winner"]["status"], "restore_failed")
+            self.assertIn("could not restore the workspace before recovery", result.output_text)
+            self.assertEqual((workspace / "app.py").read_text(encoding="utf-8"), "def answer():\n    return 40\n")
 
     def test_successful_envelope_records_verified_reuse_metrics_for_attached_procedures(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
