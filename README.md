@@ -78,14 +78,14 @@ What the installer does:
 4. registers NULLA as an OpenClaw agent
 5. starts the local API server on `http://127.0.0.1:11435`
 
-If `KIMI_API_KEY` is configured, the same shared runtime bootstrap truth now also surfaces a real remote Kimi queen lane instead of leaving Kimi as routing-only theory.
+If `KIMI_API_KEY` is configured, the same shared runtime bootstrap truth now also surfaces a real remote Kimi queen lane instead of leaving Kimi as routing-only theory. If `VLLM_BASE_URL` is configured, NULLA now also surfaces a real local `vllm-local` OpenAI-compatible lane instead of treating local non-Ollama backends as doc debt.
 
 Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 
 ## What Works Now
 
 - Local-first runtime with Ollama-backed execution
-- Shared runtime bootstrap for local Ollama plus a real configured remote Kimi queen lane
+- Shared runtime bootstrap for local Ollama plus real configured vLLM-local and Kimi lanes
 - Persistent memory and context carryover
 - Tool use, bounded research, and Hive task flow
 - Bounded coding/operator repair flow for concrete repo edits, including search/read/patch/validate and preflight failing-test capture before local repair

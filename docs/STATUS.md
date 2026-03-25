@@ -4,7 +4,7 @@ Current status matrix. Updated 2026-03-25.
 
 ## Latest Stabilization Checkpoint
 
-The current `main` checkpoint materially improved one hundred and five areas:
+The current `main` checkpoint materially improved one hundred and six areas:
 
 1. **Provider routing and model orchestration**
    NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
@@ -216,12 +216,14 @@ The current `main` checkpoint materially improved one hundred and five areas:
    The local queen/coder/verifier lane no longer reports success just because an earlier child looked good. `core/orchestration/result_merge.py` now treats any real child failure as merge-dominating under `highest_score`, with verifier failures taking precedence over earlier successful child payloads, so `core/orchestration/executor.py` fails closed when the final verifier still sees a broken workspace instead of masking that failure behind a coder success or preflight capture.
 105. **Configured Kimi bootstrap baseline**
    The Kimi queen lane is no longer only routing/install-profile fiction. `core/runtime_provider_defaults.py` now auto-registers a remote `kimi-remote` OpenAI-compatible manifest whenever `KIMI_API_KEY` is configured, `core/runtime_backbone.py` now feeds that same bootstrap truth into provider snapshots for doctor/backbone/CLI surfaces, and `core/web/api/runtime.py` now uses the shared bootstrap seam instead of hand-rolling only the local Ollama manifest.
+106. **Configured local vLLM bootstrap baseline**
+   The first local OpenAI-compatible backend is no longer a doc-only aspiration. `core/runtime_provider_defaults.py` now auto-registers a local `vllm-local` manifest whenever `VLLM_BASE_URL` is configured, `core/runtime_backbone.py` surfaces that same local queen-capable lane through provider snapshots, and `core/web/api/runtime.py` now keeps API bootstrap aligned with that shared local-vs-remote provider truth instead of pretending Ollama is the only real local runtime lane.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1443 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1446 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -248,13 +250,13 @@ Current test gate on this checkpoint:
 | **Capacity-aware envelope scheduling** | **Works (local baseline)** | When task envelopes carry provider-capability truth, scheduling now accounts for queue pressure and locality instead of only latency labels, incompatible worker lanes fail closed before mutating the workspace, and the helper-model execution lane now also backs off saturated providers instead of blindly fanning out into them. This is still local orchestration, not distributed swarm scheduling. |
 | **Remote shard fetch/reuse baseline** | **Works (bounded)** | `SHARD_PAYLOAD` now carries manifest-bound transport metadata plus signed origin fields; accepted remote payloads emit explicit fetch receipts, cache locally as `peer_received` shards, surface reuse citations through tiered context assembly, persist downstream success/durable reuse outcomes, and now rank cached remote shards with bounded preference for proven successful reuse instead of treating every remote cache entry as a static trust score. This is still not the same thing as hardened public-internet trust or automatic global synthesis. |
 | **Sandboxed code execution** | **Works** | Restricted environment with guardrails and fail-closed posture when no safe isolation backend exists. |
-| **Multi-model support** | **Works** | Ollama local, HTTP-compatible provider adapters, cloud fallback, and role-aware provider routing for local drone lanes vs higher-tier synthesis. Provider capability truth now also surfaces role fit, queue depth, max safe concurrency, and tool/structured-output support instead of only listing adapters, the helper/teacher lane now records routing notes while backing off saturated candidates during execution, and a configured `KIMI_API_KEY` now auto-registers a real remote Kimi queen manifest through the shared runtime bootstrap path. |
+| **Multi-model support** | **Works** | Ollama local, HTTP-compatible provider adapters, cloud fallback, and role-aware provider routing for local drone lanes vs higher-tier synthesis. Provider capability truth now also surfaces role fit, queue depth, max safe concurrency, and tool/structured-output support instead of only listing adapters, the helper/teacher lane now records routing notes while backing off saturated candidates during execution, a configured `KIMI_API_KEY` now auto-registers a real remote Kimi queen manifest through the shared runtime bootstrap path, and a configured `VLLM_BASE_URL` now auto-registers a real local `vllm-local` queen lane instead of leaving local OpenAI-compatible backends as TDL. |
 | **Discord relay bridge** | **Works** | Full bot integration with channel routing. |
 | **Telegram relay bridge** | **Works** | Bot API with group chat support. |
 | **Contribution scoring** | **Works** | Glory scores, local credits, receipts, evidence-based grading, and partial-result paths are present. Credits here are local work/participation accounting, not blockchain tokens. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. Remote fetches now also record explicit receipts, cached remote-shard reuse surfaces citation metadata, grounded turns persist downstream reuse outcomes, and future cached-remote retrieval can prefer shards that have actually helped before instead of replaying static trust/quality only. |
 | **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection, explicit install profiles, single-volume free-space checks, built-wheel smoke coverage, and aligned `/healthz` startup checks. The doctor/receipt now report whether the selected install profile is actually ready. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1443 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1446 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist. Not yet proven at scale over internet. |
 | **DHT routing** | **Partial** | Code exists. Not hardened as public routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
@@ -290,8 +292,8 @@ Credits in this repo are local proof-of-work / proof-of-participation accounting
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1443 passed, 13 skipped, 12 xfailed, 16 xpassed` |
-| Passing | 1443 |
+| Full suite result | `1446 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Passing | 1446 |
 | Skipped | 13 |
 | Expected failures (xfail) | 12 |
 | Unexpected passes (xpass) | 16 |

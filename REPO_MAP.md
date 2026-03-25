@@ -214,7 +214,7 @@ Core lane:
 
 - `apps/nulla_agent.py`: thin runtime composition root
 - `core/runtime_backbone.py`: startup/runtime/provider snapshot facade for hardware tier, provider audit rows, install-profile truth, and shared default-provider bootstrap
-- `core/runtime_provider_defaults.py`: shared default-provider bootstrap for local Ollama plus configured remote Kimi manifests
+- `core/runtime_provider_defaults.py`: shared default-provider bootstrap for local Ollama plus configured local vLLM and remote Kimi manifests
 - `core/runtime_install_profiles.py`: authoritative install/runtime profile selection, disk-volume checks, and provider-key readiness truth
 - `core/task_router.py`: task classification, typed envelope emission, reusable-procedure citations, route-level model constraints, and promoted queen-lane routing for explicit patch-and-validate repo work
 - `core/provider_routing.py`: envelope-aware provider routing for local drone lanes vs higher-tier synthesis lanes, including local fail-closed checks for private/mutating work plus queue-pressure and role-fit scoring
