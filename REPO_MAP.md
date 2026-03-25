@@ -233,7 +233,7 @@ Core lane:
 - `core/execution/git_tools.py`: bounded git status/diff helpers
 - `core/execution/validation_tools.py`: bounded test/lint/format command helpers and result shaping
 - `core/execution/artifacts.py`: diff, command, failure, mutation-history, and rollback/procedure-link artifacts
-- `core/execution/planner.py`: workflow planner for research/operator/hive flows, including the bounded search/read/patch/validate envelope path, raw fenced unified-diff repair planning, preflight failing-test repair planning for clear repo edit requests, validation-result followup planning into inspect/search steps, and rollback-on-failure verifier planning for bounded repairs
+- `core/execution/planner.py`: workflow planner for research/operator/hive flows, including the bounded search/read/patch/validate envelope path, raw fenced unified-diff repair planning, preflight failing-test repair planning for clear repo edit requests, validation-result followup planning into inspect/search steps that can continue past the first file read, and rollback-on-failure verifier planning for bounded repairs
 - `core/orchestration/executor.py`: local queen/coder/verifier executor, including fail-closed verifier rollback for bounded repair envelopes that opt into tracked cleanup
 - `core/orchestration/task_envelope.py`: `TaskEnvelopeV1` schema and role-default builder
 - `core/orchestration/executor.py`: bounded local queen/coder/verifier envelope executor with permission enforcement, validation-only preflight failure capture, capacity-blocked worker fail-closed behavior, dependency-aware child ordering, explicit fallback-child recovery after failed dependencies, step-to-step runtime reference resolution, and persisted procedure-reuse metrics
