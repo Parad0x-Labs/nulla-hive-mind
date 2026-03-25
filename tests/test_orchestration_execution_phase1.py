@@ -206,6 +206,61 @@ class OrchestrationExecutionPhase1Tests(unittest.TestCase):
         self.assertEqual(graph_rows["verify-child"]["status"], "completed")
         self.assertEqual(graph_rows["coder-child"]["status"], "completed")
 
+    def test_queen_envelope_fails_closed_when_final_verifier_child_fails(self) -> None:
+        coder = build_task_envelope(
+            role="coder",
+            task_id="coder-child",
+            parent_task_id="queen-parent",
+            goal="Patch the code",
+            latency_budget="deep",
+        )
+        verifier = build_task_envelope(
+            role="verifier",
+            task_id="verify-child",
+            parent_task_id="queen-parent",
+            goal="Validate the patch",
+            latency_budget="low_latency",
+            inputs={"depends_on": ["coder-child"]},
+        )
+        queen = build_task_envelope(
+            role="queen",
+            task_id="queen-parent",
+            goal="Coordinate patch and verification",
+            merge_strategy="highest_score",
+            inputs={"subtasks": [coder.to_dict(), verifier.to_dict()]},
+        )
+
+        def _child_executor(child: object) -> EnvelopeExecutionResult:
+            envelope = child if hasattr(child, "role") else verifier
+            if envelope.role == "verifier":
+                return EnvelopeExecutionResult(
+                    envelope=envelope,
+                    ok=False,
+                    status="executed",
+                    output_text="Tests still fail after the patch.",
+                    receipts=({"receipt_type": "validation_result", "ok": False},),
+                    details={"score": 0.0},
+                )
+            return EnvelopeExecutionResult(
+                envelope=envelope,
+                ok=True,
+                status="completed",
+                output_text="Applied patch.",
+                receipts=({"receipt_type": "tool_receipt", "ok": True},),
+                details={"score": 0.95},
+            )
+
+        result = execute_task_envelope(queen, child_executor=_child_executor)
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.status, "merge_failed")
+        self.assertEqual(result.output_text, "Tests still fail after the patch.")
+        self.assertEqual(result.details["merged_result"]["winner"]["task_id"], "verify-child")
+        graph_rows = {item["task_id"]: item for item in result.details["graph"]}
+        self.assertEqual(graph_rows["queen-parent"]["status"], "failed")
+        self.assertEqual(graph_rows["coder-child"]["status"], "completed")
+        self.assertEqual(graph_rows["verify-child"]["status"], "failed")
+
     def test_queen_envelope_respects_child_dependencies_for_real_runtime_steps(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir)

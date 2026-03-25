@@ -61,6 +61,27 @@ class OrchestrationPhase1Tests(unittest.TestCase):
         self.assertEqual(merged["winner"]["task_id"], "c")
         self.assertEqual(merged["strategy"], "highest_score")
 
+    def test_merge_task_results_fails_closed_when_verifier_child_fails(self) -> None:
+        envelope = build_task_envelope(role="queen", goal="Merge worker results", merge_strategy="highest_score")
+        merged = merge_task_results(
+            envelope,
+            [
+                {"task_id": "coder-child", "role": "coder", "ok": True, "score": 0.95, "text": "Patch applied."},
+                {
+                    "task_id": "verify-child",
+                    "role": "verifier",
+                    "ok": False,
+                    "status": "executed",
+                    "score": 0.0,
+                    "text": "Tests still fail after the patch.",
+                },
+            ],
+        )
+
+        self.assertFalse(merged["ok"])
+        self.assertEqual(merged["winner"]["task_id"], "verify-child")
+        self.assertEqual(merged["winner"]["text"], "Tests still fail after the patch.")
+
     def test_cancel_and_resume_flow_updates_children(self) -> None:
         graph = TaskGraph()
         parent = build_task_envelope(role="queen", goal="Coordinate", task_id="parent")
