@@ -177,6 +177,23 @@ class OrchestrationPhase1Tests(unittest.TestCase):
         self.assertEqual(envelope.inputs["task_class"], "debugging")
         self.assertIn(shard.procedure_id, envelope.inputs["reused_procedure_ids"])
 
+    def test_build_task_envelope_for_request_attaches_routing_constraints(self) -> None:
+        with mock.patch("core.task_router.classify", return_value={"task_class": "research"}):
+            envelope = build_task_envelope_for_request(
+                "research the latest regional cluster approach for hive routing",
+                context={"share_scope": "local_only"},
+                task_id="task-routing-1",
+            )
+
+        self.assertEqual(envelope.role, "researcher")
+        self.assertEqual(envelope.latency_budget, "deep")
+        self.assertEqual(envelope.model_constraints["routing_task_kind"], "summarization")
+        self.assertEqual(envelope.model_constraints["routing_output_mode"], "summary_block")
+        self.assertTrue(envelope.model_constraints["allow_paid_fallback"])
+        self.assertEqual(envelope.model_constraints["queue_pressure_strategy"], "degrade")
+        self.assertIn("web_search", envelope.model_constraints["preferred_tool_support"])
+        self.assertTrue(envelope.model_constraints["prefer_long_context"])
+
     def test_provider_routing_plan_for_envelope_exposes_capability_truth(self) -> None:
         _clear_manifests()
         registry = ModelRegistry()
@@ -386,6 +403,88 @@ class OrchestrationPhase1Tests(unittest.TestCase):
         )
 
         self.assertIsNone(candidate)
+
+    def test_teacher_pipeline_skips_saturated_secondary_lane_during_execution(self) -> None:
+        _clear_manifests()
+        registry = ModelRegistry()
+        registry.register_manifest(
+            {
+                "provider_name": "local-busy",
+                "model_name": "qwen2.5:14b-busy",
+                "source_type": "http",
+                "adapter_type": "local_qwen_provider",
+                "license_name": "Apache-2.0",
+                "license_reference": "https://www.apache.org/licenses/LICENSE-2.0",
+                "weight_location": "user-supplied",
+                "weights_bundled": False,
+                "redistribution_allowed": True,
+                "runtime_dependency": "ollama",
+                "capabilities": ["summarize", "structured_json", "code_complex"],
+                "runtime_config": {"base_url": "http://127.0.0.1:11434"},
+                "metadata": {
+                    "deployment_class": "local",
+                    "orchestration_role": "drone",
+                    "queue_depth": 4,
+                    "max_safe_concurrency": 1,
+                },
+                "enabled": True,
+            }
+        )
+        registry.register_manifest(
+            {
+                "provider_name": "local-ready",
+                "model_name": "qwen2.5:14b-ready",
+                "source_type": "http",
+                "adapter_type": "local_qwen_provider",
+                "license_name": "Apache-2.0",
+                "license_reference": "https://www.apache.org/licenses/LICENSE-2.0",
+                "weight_location": "user-supplied",
+                "weights_bundled": False,
+                "redistribution_allowed": True,
+                "runtime_dependency": "ollama",
+                "capabilities": ["summarize", "structured_json", "code_complex"],
+                "runtime_config": {"base_url": "http://127.0.0.1:11435"},
+                "metadata": {
+                    "deployment_class": "local",
+                    "orchestration_role": "drone",
+                    "queue_depth": 0,
+                    "max_safe_concurrency": 2,
+                },
+                "enabled": True,
+            }
+        )
+        pipeline = ModelTeacherPipeline(registry)
+        envelope = build_task_envelope(role="coder", goal="Patch local code", task_id="coder-backoff")
+        invoked: list[str] = []
+
+        def build_adapter(manifest):
+            adapter = mock.Mock()
+            invoked.append(manifest.provider_name)
+            adapter.invoke.return_value = mock.Mock(
+                output_text=f"{manifest.provider_name} says patch the code",
+                confidence=0.75 if manifest.provider_name == "local-ready" else 0.52,
+            )
+            adapter.get_license_metadata.return_value = {
+                "provider_name": manifest.provider_name,
+                "model_name": manifest.model_name,
+                "license_name": manifest.license_name,
+                "license_reference": manifest.resolved_license_reference,
+            }
+            return adapter
+
+        with mock.patch.object(registry, "build_adapter", side_effect=build_adapter):
+            candidate = pipeline.run(
+                task_kind="action_plan",
+                prompt="patch the local repo",
+                output_mode="action_plan",
+                task_envelope=envelope,
+            )
+
+        assert candidate is not None
+        self.assertEqual(candidate.provider_name, "local-ready")
+        self.assertEqual(invoked, ["local-ready"])
+        self.assertTrue(candidate.provenance["capacity_backoff_applied"])
+        self.assertIn("skipped_saturated_candidates", candidate.provenance["capacity_backoff_notes"])
 
 
 if __name__ == "__main__":

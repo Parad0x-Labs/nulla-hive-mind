@@ -199,7 +199,12 @@ def resolve_provider_routing_plan_for_envelope(
     from core.orchestration import provider_role_for_task_role
 
     resolved_role = provider_role_for_task_role(envelope.role)
-    resolved_swarm_size = max(1, int(swarm_size or envelope.model_constraints.get("swarm_size") or 1))
+    explicit_swarm_size = int(swarm_size or envelope.model_constraints.get("swarm_size") or 0)
+    resolved_swarm_size = _resolve_swarm_size(_normalize_role(resolved_role), explicit_swarm_size)
+    resolved_allow_paid = _resolve_allow_paid_fallback(
+        _normalize_role(resolved_role),
+        allow_paid_fallback if allow_paid_fallback is not None else envelope.model_constraints.get("allow_paid_fallback"),
+    )
     ranked = _rank_provider_candidates_internal(
         registry,
         task_kind=task_kind,
@@ -207,7 +212,7 @@ def resolve_provider_routing_plan_for_envelope(
         role=resolved_role,
         preferred_provider=preferred_provider,
         preferred_model=preferred_model,
-        allow_paid_fallback=allow_paid_fallback,
+        allow_paid_fallback=resolved_allow_paid,
         swarm_size=resolved_swarm_size,
         min_trust=min_trust,
         limit_to_swarm_size=False,
@@ -248,7 +253,7 @@ def resolve_provider_routing_plan_for_envelope(
         role=resolved_role,
         task_kind=task_kind,
         output_mode=output_mode,
-        allow_paid_fallback=_resolve_allow_paid_fallback(_normalize_role(resolved_role), allow_paid_fallback),
+        allow_paid_fallback=resolved_allow_paid,
         swarm_size=resolved_swarm_size,
         preferred_provider=preferred_provider,
         preferred_model=preferred_model,
@@ -268,26 +273,32 @@ def _build_envelope_routing_requirements(
     output_mode: str,
     provider_role: str,
 ) -> dict[str, Any]:
+    constraints = dict(envelope.model_constraints or {})
     tool_permissions = {str(item).strip() for item in envelope.tool_permissions if str(item).strip()}
     allowed_side_effects = {str(item).strip() for item in envelope.allowed_side_effects if str(item).strip()}
     privacy_class = str(envelope.privacy_class or "").strip().lower()
-    requires_local = privacy_class in {"local_private"} or bool(
+    inferred_requires_local = privacy_class in {"local_private"} or bool(
         allowed_side_effects & {"workspace_write", "memory_write"}
     )
+    required_locality = str(constraints.get("required_locality") or "").strip()
+    requires_local = inferred_requires_local or required_locality == "local"
     preferred_tool_support: list[str] = []
-    if any(permission.startswith("web.") for permission in tool_permissions):
+    preferred_tool_support.extend(str(item).strip() for item in list(constraints.get("preferred_tool_support") or []) if str(item).strip())
+    if any(permission.startswith("web.") for permission in tool_permissions) and "web_search" not in preferred_tool_support:
         preferred_tool_support.append("web_search")
     notes: list[str] = []
     if requires_local:
         notes.append("Envelope requires a local provider because the task is private or has mutating side effects.")
+    if constraints.get("queue_pressure_strategy") == "fail_closed":
+        notes.append("Queue-pressure strategy is fail-closed for this envelope.")
     return {
-        "required_locality": "local" if requires_local else None,
-        "preferred_locality": "local" if envelope.role in {"coder", "verifier", "memory_clerk"} else None,
-        "preferred_role_fit": provider_role if provider_role != "auto" else "",
-        "preferred_tool_support": tuple(preferred_tool_support),
-        "prefer_structured_output": output_mode != "plain_text" or envelope.role in {"coder", "verifier", "queen", "narrator"},
-        "prefer_long_context": envelope.role in {"queen", "researcher"},
-        "prefer_code_complex": envelope.role == "coder",
+        "required_locality": required_locality or ("local" if requires_local else None),
+        "preferred_locality": str(constraints.get("preferred_locality") or "").strip() or ("local" if envelope.role in {"coder", "verifier", "memory_clerk"} else None),
+        "preferred_role_fit": str(constraints.get("preferred_provider_role") or "").strip() or (provider_role if provider_role != "auto" else ""),
+        "preferred_tool_support": tuple(dict.fromkeys(preferred_tool_support)),
+        "prefer_structured_output": bool(constraints.get("prefer_structured_output", output_mode != "plain_text" or envelope.role in {"coder", "verifier", "queen", "narrator"})),
+        "prefer_long_context": bool(constraints.get("prefer_long_context", envelope.role in {"queen", "researcher"})),
+        "prefer_code_complex": bool(constraints.get("prefer_code_complex", envelope.role == "coder")),
         "fail_closed": requires_local,
         "notes": tuple(notes),
     }

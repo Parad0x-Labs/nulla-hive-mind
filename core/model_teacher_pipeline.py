@@ -69,6 +69,12 @@ class ModelTeacherPipeline:
         task_envelope: TaskEnvelopeV1 | None = None,
     ) -> TeacherCandidate | None:
         resolved_role = provider_role_for_task_role(task_envelope.role) if task_envelope else provider_role
+        requested_swarm_size = self._requested_swarm_size(task_envelope=task_envelope, swarm_size=swarm_size)
+        requested_allow_paid = (
+            allow_paid_fallback
+            if allow_paid_fallback is not None
+            else self._envelope_bool_constraint(task_envelope, "allow_paid_fallback")
+        )
         plan = (
             resolve_provider_routing_plan_for_envelope(
                 self.registry,
@@ -77,8 +83,8 @@ class ModelTeacherPipeline:
                 output_mode=output_mode,
                 preferred_provider=preferred_provider,
                 preferred_model=preferred_model,
-                allow_paid_fallback=allow_paid_fallback,
-                swarm_size=int(swarm_size or 1),
+                allow_paid_fallback=requested_allow_paid,
+                swarm_size=requested_swarm_size,
                 min_trust=0.0,
             )
             if task_envelope is not None
@@ -89,8 +95,8 @@ class ModelTeacherPipeline:
                 role=resolved_role,
                 preferred_provider=preferred_provider,
                 preferred_model=preferred_model,
-                allow_paid_fallback=allow_paid_fallback,
-                swarm_size=int(swarm_size or 1),
+                allow_paid_fallback=requested_allow_paid,
+                swarm_size=int(requested_swarm_size or 1),
                 min_trust=0.0,
             )
         )
@@ -115,6 +121,7 @@ class ModelTeacherPipeline:
         )
         if not results:
             return None
+        execution_metadata = self._execution_metadata(plan, results)
         winner = max(results, key=lambda item: (item.trust_score, item.confidence, -item.rank_index))
         swarm_provider_ids = [item.manifest.provider_id for item in results]
         candidate_id = record_candidate_output(
@@ -136,9 +143,15 @@ class ModelTeacherPipeline:
                 "teacher_pipeline": True,
                 "provider_role": plan.role,
                 "swarm_size": plan.swarm_size,
+                "effective_swarm_size": execution_metadata["effective_swarm_size"],
                 "swarm_provider_ids": swarm_provider_ids,
                 "task_envelope": dict(plan.task_envelope or {}),
                 "capability_truth": [item.to_dict() for item in plan.capability_truth],
+                "routing_requirements": dict(plan.routing_requirements or {}),
+                "rejected_candidates": list(plan.rejected_candidates),
+                "selection_notes": list(plan.selection_notes),
+                "capacity_backoff_applied": execution_metadata["capacity_backoff_applied"],
+                "capacity_backoff_notes": list(execution_metadata["capacity_backoff_notes"]),
             },
             provenance={
                 **winner.license_metadata,
@@ -149,6 +162,12 @@ class ModelTeacherPipeline:
                 "provider_role": plan.role,
                 "swarm_provider_ids": swarm_provider_ids,
                 "task_envelope": dict(plan.task_envelope or {}),
+                "routing_requirements": dict(plan.routing_requirements or {}),
+                "rejected_candidates": list(plan.rejected_candidates),
+                "selection_notes": list(plan.selection_notes),
+                "capacity_backoff_applied": execution_metadata["capacity_backoff_applied"],
+                "capacity_backoff_notes": list(execution_metadata["capacity_backoff_notes"]),
+                "effective_swarm_size": execution_metadata["effective_swarm_size"],
             },
         )
         candidate = TeacherCandidate(
@@ -173,6 +192,12 @@ class ModelTeacherPipeline:
                 "swarm_provider_ids": swarm_provider_ids,
                 "task_envelope": dict(plan.task_envelope or {}),
                 "capability_truth": [item.to_dict() for item in plan.capability_truth],
+                "routing_requirements": dict(plan.routing_requirements or {}),
+                "rejected_candidates": list(plan.rejected_candidates),
+                "selection_notes": list(plan.selection_notes),
+                "capacity_backoff_applied": execution_metadata["capacity_backoff_applied"],
+                "capacity_backoff_notes": list(execution_metadata["capacity_backoff_notes"]),
+                "effective_swarm_size": execution_metadata["effective_swarm_size"],
             },
             candidate_id=candidate_id,
             provider_role=plan.role,
@@ -192,6 +217,8 @@ class ModelTeacherPipeline:
                 "candidate_id": candidate_id,
                 "provider_role": plan.role,
                 "swarm_provider_ids": swarm_provider_ids,
+                "effective_swarm_size": execution_metadata["effective_swarm_size"],
+                "capacity_backoff_applied": execution_metadata["capacity_backoff_applied"],
             },
         )
         return candidate
@@ -204,7 +231,7 @@ class ModelTeacherPipeline:
         output_mode: str,
         trace_id: str | None,
     ) -> list[_PipelineCandidateResult]:
-        manifests = list(plan.candidates)
+        manifests, max_workers, _ = self._execution_manifests(plan)
         if not manifests:
             return []
         if len(manifests) == 1:
@@ -218,7 +245,7 @@ class ModelTeacherPipeline:
             return [result] if result else []
 
         results: list[_PipelineCandidateResult] = []
-        with ThreadPoolExecutor(max_workers=min(plan.swarm_size, len(manifests))) as executor:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {
                 executor.submit(
                     self._run_candidate,
@@ -236,6 +263,65 @@ class ModelTeacherPipeline:
                     results.append(candidate)
         results.sort(key=lambda item: item.rank_index)
         return results
+
+    @staticmethod
+    def _envelope_bool_constraint(task_envelope: TaskEnvelopeV1 | None, key: str) -> bool | None:
+        if task_envelope is None:
+            return None
+        if key not in task_envelope.model_constraints:
+            return None
+        return bool(task_envelope.model_constraints.get(key))
+
+    @staticmethod
+    def _requested_swarm_size(*, task_envelope: TaskEnvelopeV1 | None, swarm_size: int | None) -> int | None:
+        if swarm_size is not None:
+            return int(swarm_size)
+        if task_envelope is None:
+            return None
+        raw = task_envelope.model_constraints.get("swarm_size")
+        if raw in {None, ""}:
+            return None
+        return max(1, int(raw))
+
+    def _execution_manifests(
+        self,
+        plan: ProviderRoutingPlan,
+    ) -> tuple[list[ModelProviderManifest], int, list[str]]:
+        manifests = list(plan.candidates)
+        if not manifests or not plan.capability_truth:
+            return manifests, max(1, min(plan.swarm_size, len(manifests) or 1)), []
+        capability_by_id = {item.provider_id: item for item in plan.capability_truth}
+        ready: list[ModelProviderManifest] = []
+        degraded: list[ModelProviderManifest] = []
+        for manifest in manifests:
+            capability = capability_by_id.get(manifest.provider_id)
+            if capability is None:
+                ready.append(manifest)
+                continue
+            queue_pressure = float(capability.queue_depth) / float(max(1, capability.max_safe_concurrency))
+            if queue_pressure >= 1.0:
+                degraded.append(manifest)
+            else:
+                ready.append(manifest)
+        if ready and degraded:
+            selected = ready[: max(1, min(plan.swarm_size, len(ready)))]
+            return selected, max(1, min(plan.swarm_size, len(selected))), ["skipped_saturated_candidates"]
+        if degraded:
+            selected = degraded[:1]
+            return selected, 1, ["reduced_to_single_degraded_lane"]
+        return manifests, max(1, min(plan.swarm_size, len(manifests))), []
+
+    def _execution_metadata(
+        self,
+        plan: ProviderRoutingPlan,
+        results: list[_PipelineCandidateResult],
+    ) -> dict[str, Any]:
+        executed_manifests, _, backoff_notes = self._execution_manifests(plan)
+        return {
+            "effective_swarm_size": len(results),
+            "capacity_backoff_applied": bool(backoff_notes) or len(executed_manifests) < len(plan.candidates),
+            "capacity_backoff_notes": backoff_notes,
+        }
 
     def _run_candidate(
         self,

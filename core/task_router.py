@@ -929,6 +929,12 @@ def build_task_envelope_for_request(
     if str(profile.get("task_kind") or "") == "action_plan" and role == "narrator":
         role = "queen"
     reused = _reused_procedure_inputs(task_class=routed_task_class, user_input=user_input)
+    model_constraints = _routing_model_constraints(
+        task_class=routed_task_class,
+        role=role,
+        profile=profile,
+        context=context,
+    )
     return build_task_envelope(
         task_id=task_id,
         parent_task_id=parent_task_id,
@@ -943,7 +949,11 @@ def build_task_envelope_for_request(
             "reused_procedure_ids": list(reused.get("reused_procedure_ids") or []),
             "reused_procedures": list(reused.get("reused_procedures") or []),
         },
-        latency_budget="low_latency" if role == "narrator" else "balanced",
+        model_constraints=model_constraints,
+        latency_budget=_latency_budget_for_request(
+            task_class=routed_task_class,
+            role=role,
+        ),
         quality_target="high" if role in {"queen", "verifier", "researcher"} else "standard",
         required_receipts=("tool_receipt", "validation_result") if role in {"coder", "verifier"} else (),
         privacy_class=str(context.get("share_scope") or "local_only"),
@@ -975,6 +985,42 @@ def _reused_procedure_inputs(*, task_class: str, user_input: str) -> dict[str, A
             for shard in ranked
         ],
     }
+
+
+def _routing_model_constraints(
+    *,
+    task_class: str,
+    role: str,
+    profile: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    privacy_class = str(context.get("share_scope") or "local_only").strip().lower() or "local_only"
+    required_locality = "local" if privacy_class == "local_private" or role in {"coder", "verifier", "memory_clerk"} else ""
+    preferred_locality = "local" if role in {"coder", "verifier", "memory_clerk"} else ""
+    preferred_tool_support: list[str] = []
+    if role == "researcher":
+        preferred_tool_support.append("web_search")
+    return {
+        "routing_task_kind": str(profile.get("task_kind") or "").strip(),
+        "routing_output_mode": str(profile.get("output_mode") or "").strip(),
+        "allow_paid_fallback": bool(profile.get("allow_paid_fallback", False)),
+        "preferred_provider_role": str(profile.get("provider_role") or "auto").strip() or "auto",
+        "required_locality": required_locality,
+        "preferred_locality": preferred_locality,
+        "prefer_structured_output": str(profile.get("output_mode") or "plain_text") != "plain_text" or role in {"coder", "verifier", "queen"},
+        "prefer_long_context": role in {"queen", "researcher"} or task_class in {"research", "chat_research", "system_design"},
+        "prefer_code_complex": task_class in {"debugging", "dependency_resolution", "security_hardening", "integration_orchestration"},
+        "preferred_tool_support": preferred_tool_support,
+        "queue_pressure_strategy": "fail_closed" if required_locality else "degrade",
+    }
+
+
+def _latency_budget_for_request(*, task_class: str, role: str) -> str:
+    if role in {"narrator", "verifier"}:
+        return "low_latency"
+    if role in {"queen", "researcher"} or task_class in {"research", "chat_research", "system_design", "integration_orchestration"}:
+        return "deep"
+    return "balanced"
 
 
 def chat_surface_execution_task_class(
