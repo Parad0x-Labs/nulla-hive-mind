@@ -43,7 +43,9 @@ def agent_profile_rank(agent: dict[str, object]) -> tuple[int, int, int, str]:
         "channel_openclaw": 4,
         "nulla_agent": 3,
         "direct": 2,
-        "lan_only": 1,
+        "hole_punch": 1,
+        "relay": 1,
+        "lan_only": 0,
         "background_openclaw": 0,
     }.get(transport, 0)
     capability_count = len([item for item in list(agent.get("capabilities") or []) if str(item).strip()])

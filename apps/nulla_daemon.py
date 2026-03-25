@@ -170,9 +170,10 @@ class NullaDaemon:
 
         nat_probe = classify_nat(detect_local_host(), runtime.public_host, runtime.public_port)
         relay_mode = choose_relay_mode(
-            direct_reachable=nat_probe.mode in {"wan_direct", "wan_mapped", "lan_only"},
-            relay_available=nat_probe.mode != "wan_direct",
+            direct_reachable=nat_probe.mode == "wan_direct",
+            relay_available=False,
             peer_id=local_peer_id(),
+            nat_mode=nat_probe.mode,
         )
 
         configured_advertise = str(self.config.advertise_host or "").strip()
