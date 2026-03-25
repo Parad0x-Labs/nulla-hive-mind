@@ -224,7 +224,7 @@ Core lane:
 - `core/runtime_backbone.py`: startup/runtime/provider snapshot facade for hardware tier, provider audit rows, install-profile truth, and shared default-provider bootstrap
 - `core/runtime_provider_defaults.py`: shared default-provider bootstrap for local Ollama plus configured local vLLM, local llama.cpp, and remote Kimi manifests
 - `core/runtime_install_profiles.py`: authoritative install/runtime profile selection, disk-volume checks, provider-key readiness truth, and distinct configured local verifier-lane selection for heavier local profiles
-- `core/task_router.py`: task classification, typed envelope emission, reusable-procedure citations, route-level model constraints, and promoted queen-lane routing for explicit patch-and-validate repo work
+- `core/task_router.py`: task classification, typed envelope emission, reusable-procedure citations, route-level model constraints, promoted queen-lane routing for explicit patch-and-validate repo work, and bounded-repair normalization that keeps readonly `ruff format --check` validation off the risky-action lane
 - `core/provider_routing.py`: envelope-aware provider routing for local drone lanes vs higher-tier synthesis lanes, including local fail-closed checks for private/mutating work plus queue-pressure and role-fit scoring
 - `core/memory_first_router.py`: main model execution router that now honors provider-role routing for slow-lane synthesis and tool-intent selection
 - `core/runtime_tool_contracts.py`: authoritative runtime intent contract map for workspace, git, validation, envelope orchestration, sandbox, Hive, web, and operator execution
