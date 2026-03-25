@@ -220,11 +220,11 @@ Core lane:
 - `core/memory_first_router.py`: main model execution router that now honors provider-role routing for slow-lane synthesis and tool-intent selection
 - `core/runtime_tool_contracts.py`: authoritative runtime intent contract map for workspace, git, validation, envelope orchestration, sandbox, Hive, web, and operator execution
 - `core/runtime_execution_tools.py`: coding/operator execution surface for workspace inspection, diff patching, git status/diff, bounded validation, rollback, emitted artifacts, and bounded `orchestration.execute_envelope` execution
-- `core/execution/workspace_tools.py`: workspace tree, symbol search, and unified-diff patch helpers
+- `core/execution/workspace_tools.py`: workspace tree, symbol search, and strict unified-diff patch helpers that prefer full Python application before shell `patch`
 - `core/execution/git_tools.py`: bounded git status/diff helpers
 - `core/execution/validation_tools.py`: bounded test/lint/format command helpers and result shaping
 - `core/execution/artifacts.py`: diff, command, failure, mutation-history, and rollback/procedure-link artifacts
-- `core/execution/planner.py`: workflow planner for research/operator/hive flows, including the bounded search/read/patch/validate envelope path and preflight failing-test repair planning for clear repo edit requests
+- `core/execution/planner.py`: workflow planner for research/operator/hive flows, including the bounded search/read/patch/validate envelope path, raw fenced unified-diff repair planning, and preflight failing-test repair planning for clear repo edit requests
 - `core/orchestration/task_envelope.py`: `TaskEnvelopeV1` schema and role-default builder
 - `core/orchestration/executor.py`: bounded local queen/coder/verifier envelope executor with permission enforcement, validation-only preflight failure capture, capacity-blocked worker fail-closed behavior, dependency-aware child ordering, deterministic merge, step-to-step runtime reference resolution, and persisted procedure-reuse metrics
 - `core/orchestration/role_contracts.py`: queen/coder/verifier/researcher/memory-clerk/narrator contracts
