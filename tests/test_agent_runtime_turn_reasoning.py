@@ -27,6 +27,7 @@ from apps.nulla_agent import (
 )
 from core.identity_manager import load_active_persona
 from core.memory_first_router import ModelExecutionDecision
+from storage.shard_reuse_outcomes import summarize_reuse_outcomes_for_shards
 
 
 def _build_agent() -> NullaAgent:
@@ -262,3 +263,81 @@ def test_execute_grounded_turn_uses_app_level_swarm_query_overrides(make_agent, 
     build_generalized_query_mock.assert_called_once_with(task, classification)
     request_relevant_holders_mock.assert_called_once_with("research", task.task_summary, query_id="query-123", limit=3)
     dispatch_query_shard_mock.assert_called_once_with({"query_id": "query-123"}, limit=5)
+
+
+def test_execute_grounded_turn_records_remote_shard_reuse_outcome(make_agent) -> None:
+    agent = make_agent()
+    citation = {
+        "kind": "remote_shard",
+        "shard_id": "remote-shard-123",
+        "receipt_id": "receipt-123",
+        "source_peer_id": "peer-123",
+        "source_node_id": "node-123",
+        "manifest_id": "manifest-123",
+        "content_hash": "content-123",
+        "validation_state": "signature_and_manifest_verified",
+        "fetched_at": "2026-03-25T00:00:00+00:00",
+    }
+    context_result = SimpleNamespace(
+        local_candidates=[],
+        swarm_metadata=[],
+        retrieval_confidence_score=0.74,
+        assembled_context=lambda: "",
+        context_snippets=lambda: [
+            {
+                "title": "Cached remote shard",
+                "source_type": "remote_shard_cache",
+                "summary": "Remote proof notes",
+                "citation": dict(citation),
+            }
+        ],
+        report=SimpleNamespace(
+            retrieval_confidence=0.74,
+            total_tokens_used=lambda: 0,
+            to_dict=lambda: {"external_evidence_attachments": []},
+        ),
+    )
+    task, classification, interpreted, persona = _configure_grounded_turn_agent(agent, context_result=context_result)
+
+    with mock.patch("apps.nulla_agent.orchestrate_parent_task", return_value=None), mock.patch(
+        "apps.nulla_agent.ingest_media_evidence",
+        return_value=[],
+    ), mock.patch(
+        "apps.nulla_agent.build_media_context_snippets",
+        return_value=[],
+    ), mock.patch(
+        "apps.nulla_agent.build_plan",
+        return_value=SimpleNamespace(confidence=0.72),
+    ), mock.patch(
+        "apps.nulla_agent.render_response",
+        return_value="rendered answer",
+    ), mock.patch(
+        "apps.nulla_agent.explicit_planner_style_requested",
+        return_value=False,
+    ), mock.patch(
+        "apps.nulla_agent.should_use_planner_renderer",
+        return_value=True,
+    ), mock.patch(
+        "apps.nulla_agent.feedback_engine.evaluate_outcome",
+        return_value=SimpleNamespace(is_success=True, is_durable=True),
+    ), mock.patch(
+        "apps.nulla_agent.feedback_engine.apply",
+        return_value=None,
+    ):
+        result = agent._execute_grounded_turn(
+            task=task,
+            effective_input="research proof receipts",
+            classification=classification,
+            interpreted=interpreted,
+            persona=persona,
+            session_id="turn-reasoning-session",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+    assert result["swarm_reuse_outcome_count"] == 1
+    summary = summarize_reuse_outcomes_for_shards([citation["shard_id"]])
+    assert summary[citation["shard_id"]]["total_count"] == 1
+    assert summary[citation["shard_id"]]["success_count"] == 1
+    assert summary[citation["shard_id"]]["durable_count"] == 1
+    assert summary[citation["shard_id"]]["last_outcome_label"] == "durable_success"
+    assert summary[citation["shard_id"]]["last_response_class"] == ResponseClass.GENERIC_CONVERSATION.value

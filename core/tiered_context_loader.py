@@ -19,6 +19,7 @@ from storage.context_access_log import record_context_access
 from storage.db import get_connection
 from storage.dialogue_memory import recent_dialogue_turns, session_lexicon
 from storage.payment_status import list_payment_status
+from storage.shard_reuse_outcomes import summarize_reuse_outcomes_for_shards
 from storage.swarm_memory import search_recent_contexts
 
 
@@ -102,11 +103,15 @@ def _observation_payload_from_item(item: ContextItem) -> dict[str, Any] | None:
     return dict(loaded) if isinstance(loaded, dict) else None
 
 
-def _remote_shard_citation(candidate: dict[str, Any]) -> dict[str, Any] | None:
+def _remote_shard_citation(
+    candidate: dict[str, Any],
+    *,
+    reuse_summary: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     receipt = dict(candidate.get("retrieval_receipt") or {})
     if str(candidate.get("source_type") or "") != "peer_received" or not receipt:
         return None
-    return {
+    citation = {
         "kind": "remote_shard",
         "shard_id": str(candidate.get("shard_id") or "").strip(),
         "source_peer_id": str(receipt.get("source_peer_id") or "").strip(),
@@ -117,6 +122,9 @@ def _remote_shard_citation(candidate: dict[str, Any]) -> dict[str, Any] | None:
         "validation_state": str(receipt.get("validation_state") or "").strip(),
         "fetched_at": str(receipt.get("created_at") or "").strip(),
     }
+    if isinstance(reuse_summary, dict) and reuse_summary:
+        citation["reuse_outcomes"] = dict(reuse_summary)
+    return citation
 
 
 def _render_context_sections(label: str, items: list[ContextItem]) -> list[str]:
@@ -141,16 +149,32 @@ def _render_context_sections(label: str, items: list[ContextItem]) -> list[str]:
 
 def _local_candidate_items(task: Any, classification: dict[str, Any]) -> tuple[list[ContextItem], list[dict[str, Any]]]:
     ranked = rank(find_local_candidates(task, classification), task)
+    outcome_summaries = summarize_reuse_outcomes_for_shards(
+        [
+            str(candidate.get("shard_id") or "").strip()
+            for candidate in ranked
+            if str(candidate.get("source_type") or "") == "peer_received"
+        ]
+    )
     items: list[ContextItem] = []
     for candidate in ranked[:8]:
         pattern = list(candidate.get("resolution_pattern") or [])[:4]
-        citation = _remote_shard_citation(candidate)
+        shard_id = str(candidate.get("shard_id") or "").strip()
+        citation = _remote_shard_citation(candidate, reuse_summary=outcome_summaries.get(shard_id))
         if citation:
+            reuse_outcomes = dict(citation.get("reuse_outcomes") or {})
+            reuse_note = ""
+            if int(reuse_outcomes.get("success_count") or 0) > 0:
+                reuse_note = (
+                    f" Previously helped in {int(reuse_outcomes.get('success_count') or 0)} successful "
+                    f"turns ({int(reuse_outcomes.get('durable_count') or 0)} durable)."
+                )
             content = (
                 f"Cached remote shard from {citation.get('source_peer_id', 'unknown peer')[:12]}... "
                 f"with validation {citation.get('validation_state', 'unknown')}. "
                 f"{candidate.get('summary', '')} "
                 f"Pattern: {', '.join(str(step) for step in pattern) or 'n/a'}."
+                f"{reuse_note}"
             ).strip()
             source_type = "remote_shard_cache"
             include_reason = "remote_shard_reuse"

@@ -42,6 +42,7 @@ RUNTIME_TABLES = (
     "runtime_tool_receipts",
     "session_hive_watch_state",
     "session_memory_policies",
+    "shard_reuse_outcomes",
     "swarm_dispatch_budget_events",
     "web_notes",
 )

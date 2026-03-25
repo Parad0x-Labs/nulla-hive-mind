@@ -27,6 +27,7 @@ from storage.context_access_log import recent_context_access
 from storage.db import get_connection
 from storage.migrations import run_migrations
 from storage.shard_fetch_receipts import record_fetch_receipt
+from storage.shard_reuse_outcomes import record_shard_reuse_outcomes
 from storage.swarm_memory import save_sniffed_context
 
 
@@ -72,6 +73,7 @@ class TieredContextLoaderTests(unittest.TestCase):
                 "payment_status_markers",
                 "context_access_log",
                 "shard_fetch_receipts",
+                "shard_reuse_outcomes",
                 "sniffed_context",
                 "runtime_tool_receipts",
                 "runtime_checkpoints",
@@ -481,6 +483,92 @@ class TieredContextLoaderTests(unittest.TestCase):
         self.assertEqual(citation["validation_state"], "signature_and_manifest_verified")
         snippets = result.context_snippets()
         self.assertTrue(any(dict(item.get("citation") or {}).get("receipt_id") == receipt_id for item in snippets))
+
+    def test_cached_remote_shard_surfaces_reuse_outcome_summary(self) -> None:
+        shard_id = f"remote-cache-summary-{uuid.uuid4().hex}{uuid.uuid4().hex}"
+        now = _now()
+        conn = get_connection()
+        try:
+            conn.execute(
+                """
+                INSERT INTO learning_shards (
+                    shard_id, schema_version, problem_class, problem_signature,
+                    summary, resolution_pattern_json, environment_tags_json,
+                    source_type, source_node_id, quality_score, trust_score,
+                    local_validation_count, local_failure_count,
+                    quarantine_status, risk_flags_json, freshness_ts, expires_ts,
+                    signature, created_at, updated_at
+                ) VALUES (?, 1, 'system_design', ?, ?, ?, ?, 'peer_received', ?, 0.91, 0.61, 0, 0, 'active', '[]', ?, NULL, ?, ?, ?)
+                """,
+                (
+                    shard_id,
+                    f"sig-{uuid.uuid4().hex}",
+                    "Remote shard with proven downstream reuse",
+                    json.dumps(["inspect topology", "reuse holder evidence"]),
+                    json.dumps({"os": "unknown", "runtime": "python", "shell": "unknown", "version_family": "unknown"}),
+                    f"peer-origin-{uuid.uuid4().hex}{uuid.uuid4().hex}",
+                    now,
+                    "signed",
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        receipt_id = record_fetch_receipt(
+            shard_id=shard_id,
+            source_peer_id=f"peer-holder-{uuid.uuid4().hex}{uuid.uuid4().hex}",
+            source_node_id=f"peer-origin-{uuid.uuid4().hex}{uuid.uuid4().hex}",
+            query_id=f"query-{uuid.uuid4().hex}",
+            manifest_id=f"manifest-{uuid.uuid4().hex}",
+            content_hash=f"content-{uuid.uuid4().hex}",
+            version=1,
+            summary_digest="digest-remote-cache-summary",
+            validation_state="signature_and_manifest_verified",
+            accepted=True,
+            details={"reason": "test"},
+        )
+        record_shard_reuse_outcomes(
+            citations=[
+                {
+                    "kind": "remote_shard",
+                    "shard_id": shard_id,
+                    "receipt_id": receipt_id,
+                    "source_peer_id": "peer-holder",
+                    "source_node_id": "peer-origin",
+                    "manifest_id": "manifest-1",
+                    "content_hash": "content-1",
+                    "validation_state": "signature_and_manifest_verified",
+                }
+            ],
+            task_id="task-reuse-summary",
+            session_id=self.session_id,
+            task_class="system_design",
+            response_class="generic_conversation",
+            success=True,
+            durable=True,
+        )
+
+        task = create_task_record("design swarm knowledge replication")
+        interpretation = _interpretation("design swarm knowledge replication", topics=["swarm", "knowledge"])
+        result = self.loader.load(
+            task=task,
+            classification=classify(task.task_summary, context=interpretation.as_context()),
+            interpretation=interpretation,
+            persona=self.persona,
+            session_id=self.session_id,
+        )
+
+        remote_items = [item for item in result.relevant_items if item.source_type == "remote_shard_cache"]
+        self.assertTrue(remote_items)
+        citation = dict(remote_items[0].metadata.get("reuse_citation") or {})
+        reuse_outcomes = dict(citation.get("reuse_outcomes") or {})
+        self.assertEqual(reuse_outcomes["total_count"], 1)
+        self.assertEqual(reuse_outcomes["success_count"], 1)
+        self.assertEqual(reuse_outcomes["durable_count"], 1)
+        self.assertEqual(reuse_outcomes["last_receipt_id"], receipt_id)
 
     def test_shared_swarm_context_is_reused_in_live_retrieval(self) -> None:
         save_sniffed_context(

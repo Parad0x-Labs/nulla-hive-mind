@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from storage.shard_reuse_outcomes import record_shard_reuse_outcomes
+
 
 def _dispatch_background_swarm_query(
     *,
@@ -382,6 +384,21 @@ def execute_grounded_turn(
         session_id=session_id,
         source_context=source_context,
     )
+    reuse_outcome_records = record_shard_reuse_outcomes(
+        citations=swarm_reuse_citations,
+        task_id=str(task.task_id or ""),
+        session_id=session_id,
+        task_class=str(classification.get("task_class") or ""),
+        response_class=turn_result.response_class.value,
+        success=bool(outcome.is_success),
+        durable=bool(outcome.is_durable),
+        details={
+            "source_surface": str((source_context or {}).get("surface") or ""),
+            "source_platform": str((source_context or {}).get("platform") or ""),
+            "model_execution_source": str(model_execution.source or ""),
+            "gate_mode": str(gate.mode or ""),
+        },
+    )
     agent._emit_chat_truth_metrics(
         task_id=task.task_id,
         reason=response_reason,
@@ -416,6 +433,7 @@ def execute_grounded_turn(
             "context_retrieval_confidence": context_result.report.retrieval_confidence,
             "context_budget_used": context_result.report.total_tokens_used(),
             "swarm_reuse_citation_count": len(swarm_reuse_citations),
+            "swarm_reuse_outcome_count": len(reuse_outcome_records),
             "model_execution_source": model_execution.source,
             "model_provider_id": model_execution.provider_id,
             "media_analysis_reason": media_analysis.reason,
@@ -472,4 +490,5 @@ def execute_grounded_turn(
         "workflow_summary": workflow_summary,
         "response_class": turn_result.response_class.value,
         "swarm_reuse_citations": swarm_reuse_citations,
+        "swarm_reuse_outcome_count": len(reuse_outcome_records),
     }
