@@ -9,6 +9,7 @@ from core.learning import (
     load_procedure_shards,
     promote_verified_procedure,
     rank_reusable_procedures,
+    record_procedure_reuse,
     summarize_procedure_metrics,
 )
 from core.learning.procedure_shards import ProcedureShardV1
@@ -79,6 +80,41 @@ class LearningPhase1Tests(unittest.TestCase):
         )
         self.assertEqual(ranked[0].procedure_id, matching.procedure_id)
 
+    def test_rank_reusable_procedures_prefers_verified_reuse_when_text_overlap_is_similar(self) -> None:
+        fresh = ProcedureShardV1.create(
+            task_class="coding_operator",
+            title="Patch Python code and run tests",
+            preconditions=[],
+            steps=["apply diff", "run tests"],
+            tool_receipts=[],
+            validation={"ok": True},
+            rollback={},
+            privacy_class="local_private",
+            shareability="local_only",
+            success_signal="verified_success",
+        )
+        proven = ProcedureShardV1.create(
+            task_class="coding_operator",
+            title="Patch Python code and run tests",
+            preconditions=[],
+            steps=["apply diff", "run tests"],
+            tool_receipts=[],
+            validation={"ok": True},
+            rollback={},
+            privacy_class="local_private",
+            shareability="local_only",
+            success_signal="verified_success",
+            reuse_count=3,
+            verified_reuse_count=2,
+        )
+
+        ranked = rank_reusable_procedures(
+            task_class="coding_operator",
+            query_text="patch and run tests",
+            procedures=[fresh, proven],
+        )
+        self.assertEqual(ranked[0].procedure_id, proven.procedure_id)
+
     def test_summarize_procedure_metrics_counts_shareability(self) -> None:
         procedures = [
             ProcedureShardV1.create(
@@ -111,6 +147,39 @@ class LearningPhase1Tests(unittest.TestCase):
         self.assertEqual(summary["total"], 2)
         self.assertEqual(summary["local_only"], 1)
         self.assertEqual(summary["trusted_hive"], 1)
+        self.assertEqual(summary["reused"], 0)
+        self.assertEqual(summary["total_reuse_count"], 0)
+        self.assertEqual(summary["verified_reuse_count"], 0)
+
+    def test_record_procedure_reuse_updates_persisted_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.learning.procedure_shards.data_path", return_value=Path(tmpdir)):
+            shard = promote_verified_procedure(
+                task_class="coding_operator",
+                title="Patch and verify a repo file",
+                preconditions=["workspace is writable"],
+                steps=["read file", "apply diff", "run tests"],
+                tool_receipts=[{"intent": "workspace.apply_unified_diff"}],
+                validation={"ok": True, "tool": "workspace.run_tests"},
+                rollback={"intent": "workspace.rollback_last_change"},
+            )
+
+            assert shard is not None
+            updated = record_procedure_reuse(
+                procedure_ids=[shard.procedure_id],
+                task_class="debugging",
+                verified=True,
+                outcome="completed",
+            )
+
+            self.assertEqual(len(updated), 1)
+            self.assertEqual(updated[0].reuse_count, 1)
+            self.assertEqual(updated[0].verified_reuse_count, 1)
+            self.assertEqual(updated[0].last_reuse_task_class, "debugging")
+            self.assertEqual(updated[0].last_reuse_outcome, "completed")
+
+            loaded = load_procedure_shards()
+            self.assertEqual(loaded[0].reuse_count, 1)
+            self.assertEqual(loaded[0].verified_reuse_count, 1)
 
     def test_validation_success_promotes_procedure_from_tracked_mutation_once(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

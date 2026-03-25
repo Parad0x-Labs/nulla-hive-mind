@@ -19,6 +19,8 @@ def rank_reusable_procedures(
         haystack = " ".join([shard.title, *shard.preconditions, *shard.steps]).lower()
         overlap = len(query_tokens & {token for token in "".join(ch if ch.isalnum() else " " for ch in haystack).split() if token})
         score += float(overlap)
+        score += min(float(shard.reuse_count or 0), 10.0) * 0.1
+        score += min(float(shard.verified_reuse_count or 0), 5.0) * 0.5
         if shard.shareability in {"local_only", "trusted_hive"}:
             score += 0.25
         if score > 0:

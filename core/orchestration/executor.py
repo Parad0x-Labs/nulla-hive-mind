@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.learning import record_procedure_reuse
 from core.runtime_execution_tools import RuntimeExecutionResult, execute_runtime_tool
 from core.runtime_tool_contracts import runtime_tool_contract_map
 
@@ -71,7 +72,7 @@ def execute_task_envelope(
     active_graph.mark_status(envelope.task_id, "completed" if result.ok else "failed", result=result.merge_payload())
     if "graph" in result.details:
         result.details["graph"] = _graph_snapshot(active_graph)
-    return result
+    return _attach_reused_procedure_metrics(result)
 
 
 def _execute_worker_envelope(
@@ -487,6 +488,64 @@ def _runtime_tool_executor(intent: str, arguments: dict[str, Any], source_contex
             details={},
         )
     return result
+
+
+def _attach_reused_procedure_metrics(result: EnvelopeExecutionResult) -> EnvelopeExecutionResult:
+    procedure_ids = [
+        str(item).strip()
+        for item in list(result.envelope.inputs.get("reused_procedure_ids") or [])
+        if str(item).strip()
+    ]
+    if not procedure_ids or not result.ok:
+        return result
+    verified = _envelope_result_has_validation_signal(result)
+    updates = record_procedure_reuse(
+        procedure_ids=procedure_ids,
+        task_class=str(result.envelope.inputs.get("task_class") or result.envelope.role or "unknown"),
+        verified=verified,
+        outcome=str(result.status or "completed"),
+    )
+    if not updates:
+        return result
+    updated_details = dict(result.details or {})
+    updated_details["reused_procedure_updates"] = [
+        {
+            "procedure_id": shard.procedure_id,
+            "reuse_count": int(shard.reuse_count or 0),
+            "verified_reuse_count": int(shard.verified_reuse_count or 0),
+            "last_reuse_task_class": shard.last_reuse_task_class,
+            "last_reuse_outcome": shard.last_reuse_outcome,
+        }
+        for shard in updates
+    ]
+    updated_details["reused_procedure_ids"] = [shard.procedure_id for shard in updates]
+    updated_details["verified_reuse"] = verified
+    return EnvelopeExecutionResult(
+        envelope=result.envelope,
+        ok=result.ok,
+        status=result.status,
+        output_text=result.output_text,
+        receipts=result.receipts,
+        details=updated_details,
+    )
+
+
+def _envelope_result_has_validation_signal(result: EnvelopeExecutionResult) -> bool:
+    if _receipts_include_validation(result.receipts):
+        return True
+    child_results = [dict(item) for item in list(result.details.get("child_results") or []) if isinstance(item, dict)]
+    return any(_receipts_include_validation(child.get("receipts") or []) for child in child_results)
+
+
+def _receipts_include_validation(receipts: Any) -> bool:
+    for item in list(receipts or []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("receipt_type") or "").strip() != "validation_result":
+            continue
+        if bool(item.get("ok", True)):
+            return True
+    return False
 
 
 def _resolve_step_arguments(

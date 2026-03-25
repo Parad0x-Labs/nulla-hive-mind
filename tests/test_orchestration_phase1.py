@@ -176,6 +176,8 @@ class OrchestrationPhase1Tests(unittest.TestCase):
         self.assertEqual(envelope.role, "coder")
         self.assertEqual(envelope.inputs["task_class"], "debugging")
         self.assertIn(shard.procedure_id, envelope.inputs["reused_procedure_ids"])
+        self.assertEqual(envelope.inputs["reused_procedures"][0]["reuse_count"], 0)
+        self.assertEqual(envelope.inputs["reused_procedures"][0]["verified_reuse_count"], 0)
 
     def test_build_task_envelope_for_request_attaches_routing_constraints(self) -> None:
         with mock.patch("core.task_router.classify", return_value={"task_class": "research"}):

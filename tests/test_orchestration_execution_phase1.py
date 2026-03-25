@@ -3,7 +3,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from core.learning import load_procedure_shards, promote_verified_procedure
 from core.orchestration import EnvelopeExecutionResult, build_task_envelope, execute_task_envelope
 
 
@@ -371,6 +373,71 @@ class OrchestrationExecutionPhase1Tests(unittest.TestCase):
             self.assertIn("returned 2 matches", result.output_text)
             self.assertEqual((workspace / "app.py").read_text(encoding="utf-8"), "def answer():\n    return 41\n")
             self.assertEqual((workspace / "backup.py").read_text(encoding="utf-8"), "def answer_backup():\n    return 41\n")
+
+    def test_successful_envelope_records_verified_reuse_metrics_for_attached_procedures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "workspace"
+            workspace.mkdir(parents=True, exist_ok=True)
+            (workspace / "app.py").write_text("def answer():\n    return 41\n", encoding="utf-8")
+            (workspace / "test_app.py").write_text(
+                "from app import answer\n\n\ndef test_answer():\n    assert answer() == 42\n",
+                encoding="utf-8",
+            )
+            patch_text = "\n".join(
+                [
+                    "--- a/app.py",
+                    "+++ b/app.py",
+                    "@@ -1,2 +1,2 @@",
+                    " def answer():",
+                    "-    return 41",
+                    "+    return 42",
+                    "",
+                ]
+            )
+
+            def _data_path(*parts: str) -> Path:
+                path = Path(tmpdir) / "data"
+                for part in parts:
+                    path /= str(part)
+                return path
+
+            with mock.patch("core.learning.procedure_shards.data_path", side_effect=_data_path):
+                shard = promote_verified_procedure(
+                    task_class="debugging",
+                    title="Patch and verify a repo file",
+                    preconditions=["workspace is writable"],
+                    steps=["apply diff", "run tests"],
+                    tool_receipts=[{"intent": "workspace.apply_unified_diff"}],
+                    validation={"ok": True},
+                    rollback={"intent": "workspace.rollback_last_change"},
+                )
+
+                assert shard is not None
+                envelope = build_task_envelope(
+                    role="coder",
+                    task_id="coder-reuse",
+                    goal="Reuse a verified procedure and validate it",
+                    inputs={
+                        "task_class": "debugging",
+                        "reused_procedure_ids": [shard.procedure_id],
+                        "runtime_tools": [
+                            {"intent": "workspace.apply_unified_diff", "arguments": {"patch": patch_text}},
+                            {"intent": "workspace.run_tests", "arguments": {"command": "python3 -m pytest -q test_app.py"}},
+                        ],
+                    },
+                    required_receipts=("tool_receipt", "validation_result"),
+                )
+
+                result = execute_task_envelope(envelope, workspace_root=str(workspace), session_id="reuse-session")
+
+                self.assertTrue(result.ok)
+                self.assertTrue(result.details["verified_reuse"])
+                self.assertEqual(result.details["reused_procedure_updates"][0]["procedure_id"], shard.procedure_id)
+
+                loaded = {item.procedure_id: item for item in load_procedure_shards()}
+                self.assertEqual(loaded[shard.procedure_id].reuse_count, 1)
+                self.assertEqual(loaded[shard.procedure_id].verified_reuse_count, 1)
+                self.assertEqual(loaded[shard.procedure_id].last_reuse_task_class, "debugging")
 
 
 if __name__ == "__main__":

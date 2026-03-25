@@ -1008,6 +1008,8 @@ def _reused_procedure_inputs(*, task_class: str, user_input: str) -> dict[str, A
                 "task_class": shard.task_class,
                 "shareability": shard.shareability,
                 "success_signal": shard.success_signal,
+                "reuse_count": int(shard.reuse_count or 0),
+                "verified_reuse_count": int(shard.verified_reuse_count or 0),
             }
             for shard in ranked
         ],
