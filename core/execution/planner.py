@@ -655,7 +655,8 @@ def _planned_orchestrated_operator_payload(
     old_text = str(replace_payload.get("old_text") or "").strip()
     new_text = str(replace_payload.get("new_text") or "").strip()
     if not (path and old_text and new_text):
-        return None
+        if not (old_text and new_text):
+            return None
     validation_step = _validation_step_from_request(user_text=user_text, explicit_command=explicit_command)
     if validation_step is None:
         return None
@@ -676,25 +677,60 @@ def _planned_orchestrated_operator_payload(
     task_suffix = hashlib.sha1(f"{task_class}|{path}|{old_text}|{new_text}|{explicit_command}".encode()).hexdigest()[:12]
     queen_id = f"queen-{task_suffix}"
     privacy_class = str(source_context.get("share_scope") or "local_only")
+    if path:
+        coder_tools = [
+            {"step_id": "inspect-target", "intent": "workspace.read_file", "arguments": {"path": path, "start_line": 1, "max_lines": 240}},
+            {
+                "step_id": "apply-replacement",
+                "intent": "workspace.replace_in_file",
+                "arguments": {
+                    "path": path,
+                    "old_text": old_text,
+                    "new_text": new_text,
+                    "replace_all": True,
+                },
+            },
+        ]
+    else:
+        path_ref = {
+            "$from_step": "locate-replacement-target",
+            "$path": "observation.primary_path",
+            "$require_single_match": True,
+        }
+        coder_tools = [
+            {
+                "step_id": "locate-replacement-target",
+                "intent": "workspace.search_text",
+                "arguments": {"query": old_text, "limit": 2},
+            },
+            {
+                "step_id": "inspect-target",
+                "intent": "workspace.read_file",
+                "arguments": {"path": dict(path_ref), "start_line": 1, "max_lines": 240},
+            },
+            {
+                "step_id": "apply-replacement",
+                "intent": "workspace.replace_in_file",
+                "arguments": {
+                    "path": dict(path_ref),
+                    "old_text": old_text,
+                    "new_text": new_text,
+                    "replace_all": True,
+                },
+            },
+        ]
     coder = build_task_envelope(
         role="coder",
         task_id=f"coder-{task_suffix}",
         parent_task_id=queen_id,
-        goal=f"Apply the requested workspace change in `{path}`.",
+        goal=(
+            f"Apply the requested workspace change in `{path}`."
+            if path
+            else "Locate the requested workspace change target, inspect it, and apply the requested replacement."
+        ),
         inputs={
             "task_class": str(task_class or "debugging").strip() or "debugging",
-            "runtime_tools": [
-                {"intent": "workspace.read_file", "arguments": {"path": path, "start_line": 1, "max_lines": 240}},
-                {
-                    "intent": "workspace.replace_in_file",
-                    "arguments": {
-                        "path": path,
-                        "old_text": old_text,
-                        "new_text": new_text,
-                        "replace_all": True,
-                    },
-                },
-            ],
+            "runtime_tools": coder_tools,
         },
         required_receipts=("tool_receipt",),
         privacy_class=privacy_class,

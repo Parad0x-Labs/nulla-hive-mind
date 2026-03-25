@@ -112,6 +112,7 @@ def _execute_worker_envelope(
     execute_tool = runtime_tool_executor or _runtime_tool_executor
     receipts: list[dict[str, Any]] = []
     step_results: list[dict[str, Any]] = []
+    step_results_by_id: dict[str, dict[str, Any]] = {}
     active_context = {
         **dict(source_context or {}),
         "workspace": workspace_root or str((source_context or {}).get("workspace") or ""),
@@ -122,8 +123,56 @@ def _execute_worker_envelope(
         "task_envelope": envelope.to_dict(),
     }
     for index, step in enumerate(steps):
+        step_id = str(step.get("step_id") or f"step-{index + 1}").strip()
+        if not step_id:
+            return EnvelopeExecutionResult(
+                envelope=envelope,
+                ok=False,
+                status="invalid_step_id",
+                output_text=f"{envelope.role} envelope `{envelope.task_id}` produced an empty runtime step id.",
+                receipts=tuple(receipts),
+                details={
+                    "failed_step": index,
+                    "role_contract": contract.role,
+                    "step_results": step_results,
+                },
+            )
+        if step_id in step_results_by_id:
+            return EnvelopeExecutionResult(
+                envelope=envelope,
+                ok=False,
+                status="duplicate_step_id",
+                output_text=(
+                    f"{envelope.role} envelope `{envelope.task_id}` reused runtime step id `{step_id}`, "
+                    "which makes step references ambiguous."
+                ),
+                receipts=tuple(receipts),
+                details={
+                    "failed_step": index,
+                    "failed_step_id": step_id,
+                    "role_contract": contract.role,
+                    "step_results": step_results,
+                },
+            )
         intent = str(step.get("intent") or "").strip()
-        arguments = dict(step.get("arguments") or {})
+        raw_arguments = dict(step.get("arguments") or {})
+        arguments, reference_error = _resolve_step_arguments(raw_arguments, step_results_by_id=step_results_by_id)
+        if reference_error is not None:
+            return EnvelopeExecutionResult(
+                envelope=envelope,
+                ok=False,
+                status="unresolved_step_reference",
+                output_text=reference_error["message"],
+                receipts=tuple(receipts),
+                details={
+                    "failed_step": index,
+                    "failed_step_id": step_id,
+                    "failed_intent": intent,
+                    "reference_error": reference_error,
+                    "role_contract": contract.role,
+                    "step_results": step_results,
+                },
+            )
         permission_error = _check_step_permission(envelope, intent=intent)
         if permission_error is not None:
             return EnvelopeExecutionResult(
@@ -141,17 +190,21 @@ def _execute_worker_envelope(
             )
         runtime_result = execute_tool(intent, arguments, active_context)
         step_payload = {
+            "step_id": step_id,
             "intent": intent,
             "ok": runtime_result.ok,
             "status": runtime_result.status,
             "response_text": runtime_result.response_text,
+            "arguments": dict(arguments or {}),
             "details": dict(runtime_result.details or {}),
         }
         step_results.append(step_payload)
+        step_results_by_id[step_id] = step_payload
         if "observation" in runtime_result.details:
             receipts.append(
                 {
                     "receipt_type": "tool_receipt",
+                    "step_id": step_id,
                     "intent": intent,
                     "status": runtime_result.status,
                     "observation": dict(runtime_result.details.get("observation") or {}),
@@ -163,6 +216,7 @@ def _execute_worker_envelope(
             receipts.append(
                 {
                     "receipt_type": "validation_result",
+                    "step_id": step_id,
                     "intent": intent,
                     "status": runtime_result.status,
                     "ok": runtime_result.ok,
@@ -433,3 +487,115 @@ def _runtime_tool_executor(intent: str, arguments: dict[str, Any], source_contex
             details={},
         )
     return result
+
+
+def _resolve_step_arguments(
+    value: Any,
+    *,
+    step_results_by_id: dict[str, dict[str, Any]],
+    location: str = "arguments",
+) -> tuple[Any, dict[str, Any] | None]:
+    if isinstance(value, dict):
+        reference_step = str(value.get("$from_step") or "").strip()
+        if reference_step:
+            return _resolve_step_reference(value, step_results_by_id=step_results_by_id, location=location)
+        resolved: dict[str, Any] = {}
+        for key, item in value.items():
+            child_value, child_error = _resolve_step_arguments(
+                item,
+                step_results_by_id=step_results_by_id,
+                location=f"{location}.{key}",
+            )
+            if child_error is not None:
+                return None, child_error
+            resolved[str(key)] = child_value
+        return resolved, None
+    if isinstance(value, list):
+        resolved_items: list[Any] = []
+        for index, item in enumerate(value):
+            child_value, child_error = _resolve_step_arguments(
+                item,
+                step_results_by_id=step_results_by_id,
+                location=f"{location}[{index}]",
+            )
+            if child_error is not None:
+                return None, child_error
+            resolved_items.append(child_value)
+        return resolved_items, None
+    return value, None
+
+
+def _resolve_step_reference(
+    reference: dict[str, Any],
+    *,
+    step_results_by_id: dict[str, dict[str, Any]],
+    location: str,
+) -> tuple[Any, dict[str, Any] | None]:
+    step_id = str(reference.get("$from_step") or "").strip()
+    source = step_results_by_id.get(step_id)
+    if source is None:
+        return None, {
+            "location": location,
+            "step_id": step_id,
+            "path": str(reference.get("$path") or "observation").strip(),
+            "message": f"Runtime step reference at `{location}` points to unknown step `{step_id}`.",
+        }
+    require_single_match = bool(reference.get("$require_single_match"))
+    observation = dict(source.get("details") or {}).get("observation")
+    if require_single_match and isinstance(observation, dict):
+        match_count = int(observation.get("match_count") or 0)
+        if match_count != 1:
+            return None, {
+                "location": location,
+                "step_id": step_id,
+                "path": str(reference.get("$path") or "observation").strip(),
+                "message": (
+                    f"Runtime step reference at `{location}` is ambiguous because step `{step_id}` "
+                    f"returned {match_count} matches instead of exactly one."
+                ),
+            }
+    path = str(reference.get("$path") or "observation").strip() or "observation"
+    resolved = _lookup_reference_value(source, path)
+    if resolved is None or (isinstance(resolved, (str, list, dict)) and not resolved):
+        if "$default" in reference:
+            return reference.get("$default"), None
+        return None, {
+            "location": location,
+            "step_id": step_id,
+            "path": path,
+            "message": (
+                f"Runtime step reference at `{location}` could not resolve `{path}` from step `{step_id}`."
+            ),
+        }
+    return resolved, None
+
+
+def _lookup_reference_value(source: dict[str, Any], path: str) -> Any:
+    observation = dict((source.get("details") or {}).get("observation") or {})
+    if str(observation.get("intent") or "").strip() in {"workspace.search_text", "workspace.symbol_search"}:
+        matches = [dict(item) for item in list(observation.get("matches") or []) if isinstance(item, dict)]
+        primary = dict((matches[:1] or [{}])[0] or {})
+        if "primary_path" not in observation and str(primary.get("path") or "").strip():
+            observation["primary_path"] = str(primary.get("path") or "").strip()
+        if "primary_line" not in observation and str(primary.get("line") or "").strip():
+            observation["primary_line"] = int(primary.get("line") or 0)
+    current: Any = {
+        "step_id": source.get("step_id"),
+        "intent": source.get("intent"),
+        "status": source.get("status"),
+        "response_text": source.get("response_text"),
+        "arguments": dict(source.get("arguments") or {}),
+        "details": dict(source.get("details") or {}),
+        "observation": observation,
+    }
+    for raw_part in [part for part in str(path or "").split(".") if part]:
+        if isinstance(current, dict):
+            current = current.get(raw_part)
+            continue
+        if isinstance(current, list) and raw_part.isdigit():
+            index = int(raw_part)
+            if 0 <= index < len(current):
+                current = current[index]
+                continue
+        return None
+    return current

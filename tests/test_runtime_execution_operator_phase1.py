@@ -336,6 +336,40 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
             self.assertEqual(result.details["scheduled_children"][0][:6], "coder-")
             self.assertEqual((workspace / "app.py").read_text(encoding="utf-8"), "def answer():\n    return 42\n")
 
+    def test_planned_orchestrated_operator_envelope_can_locate_target_before_patch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            (workspace / "app.py").write_text("def answer():\n    return 41\n", encoding="utf-8")
+            (workspace / "test_app.py").write_text(
+                "from app import answer\n\n\ndef test_answer():\n    assert answer() == 42\n",
+                encoding="utf-8",
+            )
+
+            decision = plan_tool_workflow(
+                user_text="replace `return 41` with `return 42`, then run `python3 -m pytest -q test_app.py`",
+                task_class="debugging",
+                executed_steps=[],
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
+            )
+
+            self.assertTrue(decision.handled)
+            self.assertEqual(decision.next_payload["intent"], "orchestration.execute_envelope")
+            subtasks = list(decision.next_payload["arguments"]["task_envelope"]["inputs"]["subtasks"])
+            coder_steps = list(subtasks[0]["inputs"]["runtime_tools"])
+            self.assertEqual(coder_steps[0]["intent"], "workspace.search_text")
+            self.assertEqual(coder_steps[1]["arguments"]["path"]["$from_step"], "locate-replacement-target")
+
+            result = execute_runtime_tool(
+                decision.next_payload["intent"],
+                dict(decision.next_payload["arguments"]),
+                source_context={"workspace": tmpdir, "session_id": "session-planned-envelope-search"},
+            )
+
+            assert result is not None
+            self.assertTrue(result.ok)
+            self.assertEqual(result.status, "completed")
+            self.assertEqual((workspace / "app.py").read_text(encoding="utf-8"), "def answer():\n    return 42\n")
+
 
 if __name__ == "__main__":
     unittest.main()

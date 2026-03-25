@@ -269,6 +269,109 @@ class OrchestrationExecutionPhase1Tests(unittest.TestCase):
             self.assertEqual(graph_rows["verify-child"]["status"], "completed")
             self.assertEqual((workspace / "app.py").read_text(encoding="utf-8"), "def answer():\n    return 42\n")
 
+    def test_coder_envelope_can_resolve_search_reference_into_read_replace_and_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            (workspace / "app.py").write_text("def answer():\n    return 41\n", encoding="utf-8")
+            (workspace / "test_app.py").write_text(
+                "from app import answer\n\n\ndef test_answer():\n    assert answer() == 42\n",
+                encoding="utf-8",
+            )
+            path_ref = {
+                "$from_step": "locate-target",
+                "$path": "observation.primary_path",
+                "$require_single_match": True,
+            }
+            envelope = build_task_envelope(
+                role="coder",
+                task_id="coder-search-replace",
+                goal="Find the target file, patch it, and validate the change",
+                inputs={
+                    "task_class": "debugging",
+                    "runtime_tools": [
+                        {
+                            "step_id": "locate-target",
+                            "intent": "workspace.search_text",
+                            "arguments": {"query": "return 41", "limit": 2},
+                        },
+                        {
+                            "step_id": "inspect-target",
+                            "intent": "workspace.read_file",
+                            "arguments": {"path": dict(path_ref), "start_line": 1, "max_lines": 40},
+                        },
+                        {
+                            "step_id": "apply-target",
+                            "intent": "workspace.replace_in_file",
+                            "arguments": {
+                                "path": dict(path_ref),
+                                "old_text": "return 41",
+                                "new_text": "return 42",
+                                "replace_all": True,
+                            },
+                        },
+                        {
+                            "step_id": "validate-target",
+                            "intent": "workspace.run_tests",
+                            "arguments": {"command": "python3 -m pytest -q test_app.py"},
+                        },
+                    ],
+                },
+                required_receipts=("tool_receipt", "validation_result"),
+            )
+
+            result = execute_task_envelope(envelope, workspace_root=tmpdir)
+
+            self.assertTrue(result.ok)
+            self.assertEqual(result.status, "completed")
+            self.assertEqual((workspace / "app.py").read_text(encoding="utf-8"), "def answer():\n    return 42\n")
+            self.assertEqual(result.details["step_results"][0]["step_id"], "locate-target")
+            self.assertEqual(result.details["step_results"][2]["arguments"]["path"], "app.py")
+
+    def test_coder_envelope_fails_closed_when_search_reference_is_ambiguous(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            (workspace / "app.py").write_text("def answer():\n    return 41\n", encoding="utf-8")
+            (workspace / "backup.py").write_text("def answer_backup():\n    return 41\n", encoding="utf-8")
+            path_ref = {
+                "$from_step": "locate-target",
+                "$path": "observation.primary_path",
+                "$require_single_match": True,
+            }
+            envelope = build_task_envelope(
+                role="coder",
+                task_id="coder-ambiguous-search",
+                goal="Find the target file and patch it",
+                inputs={
+                    "task_class": "debugging",
+                    "runtime_tools": [
+                        {
+                            "step_id": "locate-target",
+                            "intent": "workspace.search_text",
+                            "arguments": {"query": "return 41", "limit": 2},
+                        },
+                        {
+                            "step_id": "apply-target",
+                            "intent": "workspace.replace_in_file",
+                            "arguments": {
+                                "path": dict(path_ref),
+                                "old_text": "return 41",
+                                "new_text": "return 42",
+                                "replace_all": True,
+                            },
+                        },
+                    ],
+                },
+                required_receipts=("tool_receipt",),
+            )
+
+            result = execute_task_envelope(envelope, workspace_root=tmpdir)
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.status, "unresolved_step_reference")
+            self.assertIn("returned 2 matches", result.output_text)
+            self.assertEqual((workspace / "app.py").read_text(encoding="utf-8"), "def answer():\n    return 41\n")
+            self.assertEqual((workspace / "backup.py").read_text(encoding="utf-8"), "def answer_backup():\n    return 41\n")
+
 
 if __name__ == "__main__":
     unittest.main()
