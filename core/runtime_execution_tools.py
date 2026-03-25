@@ -153,11 +153,27 @@ def _extract_command_failure_followup(*, stdout: str, stderr: str) -> dict[str, 
     path = str(file_match.group("path") or "").strip() if file_match else ""
     line_number = int(file_match.group("line") or 0) if file_match else 0
     diagnostic_query = ""
-    for line in [item.strip() for item in combined.splitlines() if item.strip()]:
+    lines = [item.strip() for item in combined.splitlines() if item.strip()]
+    for line in lines:
         lowered = line.lower()
-        if any(token in lowered for token in ("error", "failed", "exception", "traceback", "assert")):
-            diagnostic_query = line[:160]
+        if "assert" not in lowered:
+            continue
+        normalized = line.lstrip("> ").strip()
+        expression = normalized.partition("assert")[2].strip() or normalized
+        call_match = re.search(r"([A-Za-z_][A-Za-z0-9_\.]*)\s*\(", expression)
+        if call_match:
+            diagnostic_query = f"{call_match.group(1)}("
             break
+        left_side = re.split(r"\s*(==|!=|<=|>=| is | in )\s*", expression, maxsplit=1)[0].strip()
+        if left_side:
+            diagnostic_query = left_side[:160]
+            break
+    if not diagnostic_query:
+        for line in lines:
+            lowered = line.lower()
+            if any(token in lowered for token in ("error", "failed", "exception", "traceback")):
+                diagnostic_query = line[:160]
+                break
     return {
         "error_path": path,
         "error_line": line_number,

@@ -548,6 +548,18 @@ def _workflow_retry_already_happened(steps: list[dict[str, Any]], command: str) 
     return count >= 2
 
 
+def _latest_failed_validation_hints(steps: list[dict[str, Any]]) -> dict[str, Any]:
+    for step in reversed(list(steps or [])):
+        observation = dict(step.get("observation") or {})
+        intent = str(observation.get("intent") or "").strip()
+        if intent not in {"workspace.run_tests", "workspace.run_lint", "workspace.run_formatter"}:
+            continue
+        hints = extract_observation_followup_hints(observation)
+        if int(hints.get("returncode") or 0) != 0:
+            return hints
+    return {}
+
+
 def _explicit_replace_request(user_text: str) -> dict[str, str] | None:
     text = str(user_text or "").strip()
     if not text:
@@ -1149,6 +1161,7 @@ def plan_tool_workflow(
 
     if last_intent == "workspace.read_file":
         read_path = str(hints.get("path") or "").strip()
+        latest_validation_hints = _latest_failed_validation_hints(steps)
         pending_writes = _pending_workspace_writes(workspace_file_plan or {}, steps)
         if workspace_file_plan is not None and pending_writes:
             next_write = dict(pending_writes[0] or {})
@@ -1195,6 +1208,13 @@ def plan_tool_workflow(
                     reason="planned_command_after_read" if reason == "planned_command_run" else "planned_validation_after_read",
                     next_payload=next_payload,
                 )
+        diagnostic_query = str(latest_validation_hints.get("diagnostic_query") or "").strip()
+        if diagnostic_query and not _workflow_step_exists(steps, "workspace.search_text", key="query", value=diagnostic_query):
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_search_after_validation_inspection",
+                next_payload={"intent": "workspace.search_text", "arguments": {"query": diagnostic_query, "limit": 10}},
+            )
         return WorkflowPlannerDecision(handled=True, reason="workspace_stop_after_read", stop_after=True)
 
     if last_intent == "workspace.ensure_directory":

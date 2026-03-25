@@ -463,6 +463,40 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
             self.assertEqual(second.next_payload["intent"], "workspace.read_file")
             self.assertEqual(second.next_payload["arguments"]["path"], "test_app.py")
 
+            third = plan_tool_workflow(
+                user_text="run `python3 -m pytest -q test_app.py` and fix the failing tests",
+                task_class="debugging",
+                executed_steps=[
+                    {
+                        "tool_name": "workspace.run_tests",
+                        "arguments": dict(first.next_payload["arguments"]),
+                        "observation": dict(validation_result.details["observation"]),
+                    },
+                    {
+                        "tool_name": "workspace.read_file",
+                        "arguments": dict(second.next_payload["arguments"]),
+                        "observation": {
+                            "intent": "workspace.read_file",
+                            "tool_surface": "workspace",
+                            "ok": True,
+                            "status": "executed",
+                            "path": "test_app.py",
+                            "start_line": 1,
+                            "line_count": 5,
+                            "lines": [
+                                {"line_number": 1, "text": "from app import answer"},
+                                {"line_number": 4, "text": "    assert answer() == 42"},
+                            ],
+                        },
+                    },
+                ],
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
+            )
+
+            self.assertTrue(third.handled)
+            self.assertEqual(third.next_payload["intent"], "workspace.search_text")
+            self.assertIn("answer", third.next_payload["arguments"]["query"])
+
     def test_planned_orchestrated_operator_envelope_can_apply_multi_file_diff_and_verify(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir)
