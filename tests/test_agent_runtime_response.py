@@ -113,3 +113,43 @@ def test_orchestration_success_text_is_humanized_for_user_reply() -> None:
     )
 
     assert decorated == "I finished the bounded multi-step run."
+
+
+def test_capacity_blocked_text_is_humanized_for_user_reply() -> None:
+    agent = _build_agent()
+
+    decorated = agent._decorate_chat_response(
+        ChatTurnResult(
+            text=(
+                "coder envelope `coder-remote-lane` is blocked by provider-capacity policy: "
+                "requires_local_provider.\n\n"
+                '{"capacity_state":{"availability_state":"blocked","notes":["requires_local_provider"]}}'
+            ),
+            response_class=ResponseClass.TASK_FAILED_USER_SAFE,
+        ),
+        session_id="openclaw:capacity-blocked",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert "local execution requirements" in decorated.lower()
+    assert "capacity_state" not in decorated.lower()
+    assert "requires_local_provider" not in decorated.lower()
+
+
+def test_routing_payload_is_stripped_from_generic_user_reply() -> None:
+    agent = _build_agent()
+
+    decorated = agent._decorate_chat_response(
+        ChatTurnResult(
+            text=(
+                '{"selection_notes":["Queue-depth pressure was applied while scoring provider candidates."],'
+                '"rejected_candidates":[{"provider_id":"kimi:k2","reason":"requires_local_provider"}],'
+                '"routing_requirements":{"required_locality":"local"}}'
+            ),
+            response_class=ResponseClass.GENERIC_CONVERSATION,
+        ),
+        session_id="openclaw:routing-payload",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert decorated == "I finished the work and stripped the internal routing details from the reply."

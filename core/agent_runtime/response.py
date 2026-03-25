@@ -16,6 +16,23 @@ _ORCHESTRATION_LEAK_MARKERS = (
     "merge_strategy",
     "cancellation_policy",
     "privacy_class",
+    "routing_requirements",
+    "rejected_candidates",
+    "selection_notes",
+    "provider_capability_truth",
+    "queue_pressure_strategy",
+    "required_locality",
+    "preferred_locality",
+    "preferred_provider_role",
+    "effective_swarm_size",
+    "capacity_backoff_applied",
+    "capacity_backoff_notes",
+    "capacity_blocked",
+    "capacity_state",
+    "scheduled_children",
+    "merged_result",
+    "step_results",
+    "graph",
 )
 _ENVELOPE_ROLE_MARKERS = (
     "queen envelope",
@@ -243,10 +260,27 @@ def humanize_orchestration_leak(
         return "I finished part of that run, but I couldn't close it out because the required proof receipts were missing."
     if "not allowed to run" in lowered or "not allowed to trigger" in lowered:
         return "I couldn't complete that bounded worker step because its permissions did not allow the requested action."
+    if (
+        "capacity_blocked" in lowered
+        or "provider-capacity policy" in lowered
+        or ("requires_local_provider" in lowered and "capacity_state" in lowered)
+    ):
+        return "I couldn't run that bounded worker step because the available provider lane did not meet the task's local execution requirements."
     if "has no child envelopes" in lowered or "has no runtime tool steps" in lowered:
         return "I couldn't continue that bounded run because it did not contain executable steps."
     if "failed to merge child results" in lowered:
         return "I couldn't merge the worker results into a clean final answer."
+    if (
+        "routing_requirements" in lowered
+        or "rejected_candidates" in lowered
+        or "selection_notes" in lowered
+        or "provider_capability_truth" in lowered
+    ):
+        if response_class in {agent.ResponseClass.TASK_FAILED_USER_SAFE, agent.ResponseClass.SYSTEM_ERROR_USER_SAFE}:
+            return "I couldn't find a provider lane that satisfied the task's routing and execution requirements cleanly."
+        return "I finished the work and stripped the internal routing details from the reply."
+    if "capacity_backoff_applied" in lowered or "skipped_saturated_candidates" in lowered or "reduced_to_single_degraded_lane" in lowered:
+        return "I finished the work using the least-busy available provider lane."
     if "completed merge" in lowered or (" envelope" in lowered and "completed" in lowered):
         return "I finished the bounded multi-step run."
     if response_class == agent.ResponseClass.UTILITY_ANSWER:
