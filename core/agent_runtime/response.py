@@ -4,6 +4,29 @@ import json
 import re
 from typing import Any
 
+_ORCHESTRATION_LEAK_MARKERS = (
+    '"schema": "nulla.task_envelope.v1"',
+    "task_envelope",
+    "tool_permissions",
+    "model_constraints",
+    "latency_budget",
+    "quality_target",
+    "allowed_side_effects",
+    "required_receipts",
+    "merge_strategy",
+    "cancellation_policy",
+    "privacy_class",
+)
+_ENVELOPE_ROLE_MARKERS = (
+    "queen envelope",
+    "coder envelope",
+    "verifier envelope",
+    "researcher envelope",
+    "memory clerk envelope",
+    "memory_clerk envelope",
+    "narrator envelope",
+)
+
 
 def turn_result(
     chat_turn_result_cls: type[Any],
@@ -160,6 +183,13 @@ def sanitize_user_chat_text(
         if response_class in {agent.ResponseClass.TASK_FAILED_USER_SAFE, agent.ResponseClass.SYSTEM_ERROR_USER_SAFE}:
             return "I got part of the work done, but I couldn't close it out cleanly."
         return "I couldn't answer that cleanly. Ask it another way."
+    orchestration_safe_text = humanize_orchestration_leak(
+        agent,
+        sanitized,
+        response_class=response_class,
+    )
+    if orchestration_safe_text is not None:
+        return orchestration_safe_text
     return sanitized
 
 
@@ -193,6 +223,37 @@ def strip_planner_leakage(agent: Any, text: str) -> str:
     clean = re.sub(r"^here(?:'|’)s what i(?:'|’)d suggest:\s*", "", clean, flags=re.IGNORECASE).strip()
     clean = re.sub(r"^(summary_block|action_plan)\s*:\s*", "", clean, flags=re.IGNORECASE).strip()
     return clean
+
+
+def humanize_orchestration_leak(
+    agent: Any,
+    text: str,
+    *,
+    response_class: Any,
+) -> str | None:
+    clean = str(text or "").strip()
+    if not clean:
+        return None
+    lowered = clean.lower()
+    if not any(marker in lowered for marker in _ORCHESTRATION_LEAK_MARKERS) and not any(
+        marker in lowered for marker in _ENVELOPE_ROLE_MARKERS
+    ):
+        return None
+    if "missing required receipts" in lowered:
+        return "I finished part of that run, but I couldn't close it out because the required proof receipts were missing."
+    if "not allowed to run" in lowered or "not allowed to trigger" in lowered:
+        return "I couldn't complete that bounded worker step because its permissions did not allow the requested action."
+    if "has no child envelopes" in lowered or "has no runtime tool steps" in lowered:
+        return "I couldn't continue that bounded run because it did not contain executable steps."
+    if "failed to merge child results" in lowered:
+        return "I couldn't merge the worker results into a clean final answer."
+    if "completed merge" in lowered or (" envelope" in lowered and "completed" in lowered):
+        return "I finished the bounded multi-step run."
+    if response_class == agent.ResponseClass.UTILITY_ANSWER:
+        return "I couldn't surface that utility result cleanly."
+    if response_class in {agent.ResponseClass.TASK_FAILED_USER_SAFE, agent.ResponseClass.SYSTEM_ERROR_USER_SAFE}:
+        return "I couldn't complete that bounded multi-step run cleanly."
+    return "I finished the work, but I'm stripping internal orchestration details from the reply."
 
 
 def contains_generic_planner_scaffold(agent: Any, text: str) -> bool:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest import mock
 
 from apps.nulla_agent import ChatTurnResult, NullaAgent, ResponseClass
 from core.agent_runtime import (
@@ -90,3 +91,34 @@ def test_tool_intent_direct_message_reads_explicit_direct_response() -> None:
     assert response_policy.tool_intent_direct_message(
         {"intent": "respond.direct", "arguments": {"message": "Use the local proof receipt."}},
     ) == "Use the local proof receipt."
+
+
+def test_maybe_attach_workflow_keeps_openclaw_clean_without_debug_flag() -> None:
+    with mock.patch(
+        "core.agent_runtime.response_policy_visibility.load_preferences",
+        return_value=SimpleNamespace(show_workflow=True),
+    ):
+        attached = response_policy.maybe_attach_workflow(
+            None,
+            "Patched the failing test and reran the pack.",
+            "- recognized operator action `workspace.apply_unified_diff`\n- execution posture: `tool_executed`",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+    assert attached == "Patched the failing test and reran the pack."
+
+
+def test_maybe_attach_workflow_allows_explicit_debug_on_openclaw() -> None:
+    with mock.patch(
+        "core.agent_runtime.response_policy_visibility.load_preferences",
+        return_value=SimpleNamespace(show_workflow=True),
+    ):
+        attached = response_policy.maybe_attach_workflow(
+            None,
+            "Patched the failing test and reran the pack.",
+            "- recognized operator action `workspace.apply_unified_diff`\n- execution posture: `tool_executed`",
+            source_context={"surface": "openclaw", "platform": "openclaw", "workflow_debug": True},
+        )
+
+    assert attached.startswith("Workflow:\n")
+    assert "Patched the failing test and reran the pack." in attached

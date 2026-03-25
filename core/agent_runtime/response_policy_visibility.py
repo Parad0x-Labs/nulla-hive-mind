@@ -4,6 +4,24 @@ from typing import Any
 
 from core.user_preferences import load_preferences
 
+_CHAT_WORKFLOW_SURFACES = {"channel", "openclaw", "api"}
+
+
+def workflow_debug_requested(source_context: dict[str, object] | None) -> bool:
+    payload = dict(source_context or {})
+    surface = str(payload.get("surface") or "").strip().lower()
+    if surface in {"trace", "trace_rail"}:
+        return True
+    return any(
+        bool(payload.get(key))
+        for key in (
+            "workflow_debug",
+            "show_workflow_debug",
+            "show_internal_workflow",
+            "debug_workflow",
+        )
+    )
+
 
 def maybe_attach_workflow(
     agent: Any,
@@ -14,6 +32,9 @@ def maybe_attach_workflow(
 ) -> str:
     prefs = load_preferences()
     if not getattr(prefs, "show_workflow", False):
+        return str(response or "")
+    surface = str((source_context or {}).get("surface", "") or "").strip().lower()
+    if surface in _CHAT_WORKFLOW_SURFACES and not workflow_debug_requested(source_context):
         return str(response or "")
     summary = str(workflow_summary or "").strip()
     if not summary:
@@ -34,7 +55,7 @@ def should_attach_hive_footer(
     source_context: dict[str, object] | None,
 ) -> bool:
     surface = str((source_context or {}).get("surface", "") or "").strip().lower()
-    if surface not in {"channel", "openclaw", "api"}:
+    if surface not in _CHAT_WORKFLOW_SURFACES:
         return False
     if result.response_class == agent.ResponseClass.TASK_SELECTION_CLARIFICATION:
         return True
@@ -54,7 +75,9 @@ def should_show_workflow_summary(
 ) -> bool:
     surface = str((source_context or {}).get("surface", "") or "").strip().lower()
     response_text = str(response or "").strip()
-    if surface not in {"channel", "openclaw", "api"}:
+    if surface not in _CHAT_WORKFLOW_SURFACES:
+        return True
+    if workflow_debug_requested(source_context):
         return True
     if "recognized operator action" in workflow_summary:
         return True

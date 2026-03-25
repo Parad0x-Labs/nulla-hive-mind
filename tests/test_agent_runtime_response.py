@@ -77,3 +77,39 @@ def test_strip_planner_leakage_facade_matches_extracted_module() -> None:
     payload = '{"summary":"Here\'s what I’d suggest: claim the task","bullets":["post progress","deliver result"]}'
 
     assert agent._strip_planner_leakage(payload) == response.strip_planner_leakage(agent, payload)
+
+
+def test_orchestration_failure_text_is_humanized_for_user_reply() -> None:
+    agent = _build_agent()
+
+    decorated = agent._decorate_chat_response(
+        ChatTurnResult(
+            text=(
+                "coder envelope `coder-1` is not allowed to run `workspace.write_file` because it lacks "
+                'capability `workspace.write`.\n\n{"task_envelope":{"task_id":"coder-1","tool_permissions":["workspace.read"]}}'
+            ),
+            response_class=ResponseClass.TASK_FAILED_USER_SAFE,
+        ),
+        session_id="openclaw:orchestration-failure",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert "permissions did not allow the requested action" in decorated.lower()
+    assert "coder envelope" not in decorated.lower()
+    assert "task_envelope" not in decorated.lower()
+    assert "workspace.write_file" not in decorated.lower()
+
+
+def test_orchestration_success_text_is_humanized_for_user_reply() -> None:
+    agent = _build_agent()
+
+    decorated = agent._decorate_chat_response(
+        ChatTurnResult(
+            text="queen envelope `queen-1` completed merge.",
+            response_class=ResponseClass.GENERIC_CONVERSATION,
+        ),
+        session_id="openclaw:orchestration-success",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert decorated == "I finished the bounded multi-step run."
