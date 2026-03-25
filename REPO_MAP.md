@@ -226,7 +226,7 @@ Core lane:
 - `core/execution/artifacts.py`: diff, command, failure, mutation-history, and rollback/procedure-link artifacts
 - `core/execution/planner.py`: workflow planner for research/operator/hive flows, including the bounded search/read/patch/validate envelope path, raw fenced unified-diff repair planning, and preflight failing-test repair planning for clear repo edit requests
 - `core/orchestration/task_envelope.py`: `TaskEnvelopeV1` schema and role-default builder
-- `core/orchestration/executor.py`: bounded local queen/coder/verifier envelope executor with permission enforcement, validation-only preflight failure capture, capacity-blocked worker fail-closed behavior, dependency-aware child ordering, deterministic merge, step-to-step runtime reference resolution, and persisted procedure-reuse metrics
+- `core/orchestration/executor.py`: bounded local queen/coder/verifier envelope executor with permission enforcement, validation-only preflight failure capture, capacity-blocked worker fail-closed behavior, dependency-aware child ordering, deterministic fail-closed merge, step-to-step runtime reference resolution, and persisted procedure-reuse metrics
 - `core/orchestration/role_contracts.py`: queen/coder/verifier/researcher/memory-clerk/narrator contracts
 - `core/orchestration/resource_scheduler.py`: capacity-state evaluation plus queue-pressure/locality-aware envelope scheduling helpers
 - `core/orchestration/task_graph.py`: task-graph node/status model
