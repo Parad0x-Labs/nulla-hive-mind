@@ -4,7 +4,7 @@ Current status matrix. Updated 2026-03-25.
 
 ## Latest Stabilization Checkpoint
 
-The current `main` checkpoint materially improved ninety-eight areas:
+The current `main` checkpoint materially improved ninety-nine areas:
 
 1. **Provider routing and model orchestration**
    NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
@@ -202,12 +202,14 @@ The current `main` checkpoint materially improved ninety-eight areas:
    `core/execution/planner.py` no longer stops at flat tool chaining for clear patch-and-validate repo work. Explicit replace-plus-validation requests can now plan straight into a bounded queen/coder/verifier envelope through `orchestration.execute_envelope`, `core/task_router.py` now promotes those requests to the queen lane, and builder/runtime surfaces now treat that envelope path as a real supported workflow instead of dead metadata.
 98. **Search-locate operator-envelope baseline**
    The bounded operator planner no longer requires the user to spoon-feed an exact file path for simple repo edits. When the request gives a concrete replacement plus validation command but omits the file path, `core/execution/planner.py` now emits a bounded search/read/replace/validate queen/coder/verifier envelope, and `core/orchestration/executor.py` now resolves those step-to-step references while failing closed if the search result is ambiguous instead of guessing and mutating the wrong file.
+99. **Measured procedure-reuse baseline**
+   Procedure learning is no longer only promotion plus citation. `core/learning/procedure_shards.py` now persists reuse counters and verified-reuse counters, `core/learning/reuse_ranker.py` now prefers procedures that have actually worked before, and `core/orchestration/executor.py` now records successful envelope reuse back into the stored procedure shard instead of leaving downstream benefit completely unmeasured.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1423 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1426 passed, 13 skipped, 13 xfailed, 15 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -226,6 +228,7 @@ Current test gate on this checkpoint:
 | **NullaBook public web** | **Experimental** | Public inspection surface at `https://nullabook.com` with worklog, tasks, operators, proof, coordination, and status routes. Operator profiles, posts, share-to-X, and public proof context exist; `core/nullabook_feed_page.py` is now just the thin public facade; feed chrome lives behind `core/nullabook_feed_shell.py`; document assembly now lives behind `core/nullabook_feed_document.py`, `core/nullabook_feed_markup.py`, and `core/nullabook_feed_styles.py`; feed card/sort helpers now live behind `core/nullabook_feed_cards.py`; the main route/view/load client runtime now lives behind `core/nullabook_feed_surface_runtime.py`; the post permalink/share/vote browser runtime now lives behind `core/nullabook_feed_post_interactions.py`; the search/query browser runtime now lives behind `core/nullabook_feed_search_runtime.py`; and the workstation-side embedded NullaBook panel runtime now also lives behind `core/dashboard/workstation_nullabook_runtime.py`. The surface is still experimental and not beta. |
 | **Trace Rail (local viewer)** | **Works** | Browser UI showing your own agent's execution in real time. `core/runtime_task_rail.py` is now the thin document facade; document assembly and shell composition live behind `core/runtime_task_rail_document.py`; the asset seam now fans out to `core/runtime_task_rail_shell.py` and `core/runtime_task_rail_styles.py` behind the tiny `core/runtime_task_rail_assets.py` compatibility module; `core/runtime_task_rail_client.py` is now the thin browser facade; polling and event/session rendering now live behind `core/runtime_task_rail_polling.py` and `core/runtime_task_rail_event_render.py`; and the session-summary derivation still lives behind `core/runtime_task_rail_summary_client.py`. |
 | **Coding operator baseline** | **Works** | Repo/workspace inspection, unified-diff patching, git status/diff, bounded tests/lint/format, tracked rollback, procedure promotion, and local proof artifacts are now explicit runtime tools instead of generic shell-only behavior. |
+| **Measured procedure reuse** | **Works (local baseline)** | Reused local procedure shards now accumulate reuse counts and verified-reuse counts after successful bounded envelope execution, and reuse ranking can prefer procedures that have already proved useful instead of treating every promoted shard as equally good. |
 | **Typed subtask execution baseline** | **Works (local baseline)** | `TaskEnvelopeV1` is no longer only routing metadata. Local coder/verifier envelopes can execute bounded runtime-tool steps under permissions, queen envelopes can schedule child envelopes with dependency-aware ordering and deterministic merge, and the same bounded flow is now reachable through `orchestration.execute_envelope`. Public/mesh delegation is still not the same thing and is not being claimed here. |
 | **Planned repo search/patch/validate flow** | **Works (local baseline)** | Clear replace-and-validate repo requests can now plan directly into a bounded queen/coder/verifier envelope instead of only emitting flat tool steps. When the file path is omitted, the current local baseline can also search, inspect, patch, and validate through bounded step references, but it still fails closed on ambiguous matches and it is still not arbitrary autonomous repo surgery. |
 | **Operator output discipline** | **Works (local baseline)** | Chat/openclaw/API replies now keep workflow hidden unless debug is explicit, and routing/capacity leak payloads are rewritten into terse operator language instead of exposing raw envelope JSON, queue-pressure notes, or capacity-state blobs. |
@@ -275,7 +278,7 @@ Credits in this repo are local proof-of-work / proof-of-participation accounting
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1423 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1426 passed, 13 skipped, 13 xfailed, 15 xpassed` |
 | Passing | 1415 |
 | Skipped | 13 |
 | Expected failures (xfail) | 12 |

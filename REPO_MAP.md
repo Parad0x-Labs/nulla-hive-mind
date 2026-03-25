@@ -226,16 +226,16 @@ Core lane:
 - `core/execution/artifacts.py`: diff, command, failure, mutation-history, and rollback/procedure-link artifacts
 - `core/execution/planner.py`: workflow planner for research/operator/hive flows, including the bounded search/read/patch/validate envelope path for clear repo edit requests
 - `core/orchestration/task_envelope.py`: `TaskEnvelopeV1` schema and role-default builder
-- `core/orchestration/executor.py`: bounded local queen/coder/verifier envelope executor with permission enforcement, capacity-blocked worker fail-closed behavior, dependency-aware child ordering, deterministic merge, and step-to-step runtime reference resolution
+- `core/orchestration/executor.py`: bounded local queen/coder/verifier envelope executor with permission enforcement, capacity-blocked worker fail-closed behavior, dependency-aware child ordering, deterministic merge, step-to-step runtime reference resolution, and persisted procedure-reuse metrics
 - `core/orchestration/role_contracts.py`: queen/coder/verifier/researcher/memory-clerk/narrator contracts
 - `core/orchestration/resource_scheduler.py`: capacity-state evaluation plus queue-pressure/locality-aware envelope scheduling helpers
 - `core/orchestration/task_graph.py`: task-graph node/status model
 - `core/orchestration/cancel_resume.py`: cancel/resume propagation helpers
 - `core/orchestration/result_merge.py`: deterministic subtask result merge helpers
-- `core/learning/procedure_shards.py`: `ProcedureShardV1` local persistence and load/save helpers
+- `core/learning/procedure_shards.py`: `ProcedureShardV1` local persistence plus reuse/verified-reuse metric tracking
 - `core/learning/procedure_promotion.py`: verified procedure promotion gate
-- `core/learning/reuse_ranker.py`: later-task procedure reuse ranking
-- `core/learning/procedure_metrics.py`: procedure shareability/success metrics
+- `core/learning/reuse_ranker.py`: later-task procedure reuse ranking with verified-reuse weighting
+- `core/learning/procedure_metrics.py`: procedure shareability/success/reuse metrics
 - `core/knowledge_registry.py`: shareable shard promotion, manifest registration, dense payload rehydration, and remote-holder search
 - `core/knowledge_fetcher.py`: metadata-first remote shard consult/fetch request helpers
 - `core/knowledge_transport.py`: manifest-bound shard transport response and inbound validation seam
