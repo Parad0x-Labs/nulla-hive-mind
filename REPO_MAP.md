@@ -215,7 +215,7 @@ Core lane:
 - `apps/nulla_agent.py`: thin runtime composition root
 - `core/runtime_backbone.py`: startup/runtime/provider snapshot facade for hardware tier, provider audit rows, and install-profile truth
 - `core/runtime_install_profiles.py`: authoritative install/runtime profile selection, disk-volume checks, and provider-key readiness truth
-- `core/provider_routing.py`: role-aware provider routing for local drone lanes vs higher-tier synthesis lanes
+- `core/provider_routing.py`: envelope-aware provider routing for local drone lanes vs higher-tier synthesis lanes, including local fail-closed checks for private/mutating work plus queue-pressure and role-fit scoring
 - `core/memory_first_router.py`: main model execution router that now honors provider-role routing for slow-lane synthesis and tool-intent selection
 - `core/runtime_tool_contracts.py`: authoritative runtime intent contract map for workspace, git, validation, envelope orchestration, sandbox, Hive, web, and operator execution
 - `core/runtime_execution_tools.py`: coding/operator execution surface for workspace inspection, diff patching, git status/diff, bounded validation, rollback, emitted artifacts, and bounded `orchestration.execute_envelope` execution

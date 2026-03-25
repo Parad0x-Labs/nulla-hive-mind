@@ -18,6 +18,7 @@ Current execution truth:
 - workspace/git/validation actions are explicit runtime intents, not shell-only folklore
 - `orchestration.execute_envelope` is now a real bounded runtime intent for local queen/coder/verifier execution
 - queen envelope execution now respects child dependency order instead of blindly following latency sort order
+- envelope-aware provider routing now fails closed for local-private or mutating coder work without a local lane, and it penalizes saturated candidates instead of blindly taking the first ranked provider
 
 ## Current Internal Zones
 
