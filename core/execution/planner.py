@@ -1144,15 +1144,28 @@ def plan_tool_workflow(
     if last_intent == "workspace.search_text":
         path = str(hints.get("primary_path") or "").strip()
         line = int(hints.get("primary_line") or 0)
-        if path and not _workflow_step_exists(steps, "workspace.read_file", key="path", value=path):
+        candidate_paths = []
+        for candidate in [path, *list(hints.get("paths") or [])]:
+            normalized = str(candidate or "").strip()
+            if normalized and normalized not in candidate_paths:
+                candidate_paths.append(normalized)
+        next_path = ""
+        next_line = 0
+        for candidate in candidate_paths:
+            if _workflow_step_exists(steps, "workspace.read_file", key="path", value=candidate):
+                continue
+            next_path = candidate
+            next_line = line if candidate == path else 0
+            break
+        if next_path:
             return WorkflowPlannerDecision(
                 handled=True,
                 reason="planned_read_after_search",
                 next_payload={
                     "intent": "workspace.read_file",
                     "arguments": {
-                        "path": path,
-                        "start_line": max(1, line - 8) if line else 1,
+                        "path": next_path,
+                        "start_line": max(1, next_line - 8) if next_line else 1,
                         "max_lines": 60,
                     },
                 },
