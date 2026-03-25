@@ -19,6 +19,7 @@ Current execution truth:
 - `orchestration.execute_envelope` is now a real bounded runtime intent for local queen/coder/verifier execution
 - queen envelope execution now respects child dependency order instead of blindly following latency sort order
 - envelope-aware provider routing now fails closed for local-private or mutating coder work without a local lane, and it penalizes saturated candidates instead of blindly taking the first ranked provider
+- envelope scheduling now also understands attached provider-capability truth: queue pressure degrades lane priority, incompatible worker lanes can fail closed with `capacity_blocked`, and queen execution exposes scheduling details instead of only child order
 
 ## Current Internal Zones
 
