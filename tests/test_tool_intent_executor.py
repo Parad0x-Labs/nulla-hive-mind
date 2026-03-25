@@ -16,6 +16,7 @@ from core.execution import (
 )
 from core.hive_activity_tracker import HiveActivityTracker, HiveActivityTrackerConfig
 from core.public_hive_bridge import PublicHiveBridgeConfig
+from core.task_router import classify
 from core.tool_intent_executor import (
     ToolIntentExecution,
     execute_tool_intent,
@@ -1213,9 +1214,10 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(coder_steps[1]["arguments"]["new_text"], "return 42")
 
     def test_workflow_planner_can_emit_orchestrated_operator_envelope_for_patch_and_validate(self) -> None:
+        prompt = "replace `return 41` with `return 42` in app.py, then run `python3 -m pytest -q test_app.py`"
         decision = plan_tool_workflow(
-            user_text="replace `return 41` with `return 42` in app.py, then run `python3 -m pytest -q test_app.py`",
-            task_class="debugging",
+            user_text=prompt,
+            task_class=classify(prompt)["task_class"],
             executed_steps=[],
             source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
         )
@@ -1232,9 +1234,10 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(subtasks[1]["inputs"]["depends_on"], [subtasks[0]["task_id"]])
 
     def test_workflow_planner_can_emit_search_then_patch_envelope_when_path_is_missing(self) -> None:
+        prompt = "replace `return 41` with `return 42`, then run `python3 -m pytest -q test_app.py`"
         decision = plan_tool_workflow(
-            user_text="replace `return 41` with `return 42`, then run `python3 -m pytest -q test_app.py`",
-            task_class="debugging",
+            user_text=prompt,
+            task_class=classify(prompt)["task_class"],
             executed_steps=[],
             source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
         )
@@ -1251,12 +1254,13 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(coder_steps[2]["intent"], "workspace.replace_in_file")
 
     def test_workflow_planner_can_emit_preflight_failing_test_repair_envelope(self) -> None:
+        prompt = (
+            "tests are failing. replace `return 41` with `return 42` in app.py, "
+            "then run `python3 -m pytest -q test_app.py`"
+        )
         decision = plan_tool_workflow(
-            user_text=(
-                "tests are failing. replace `return 41` with `return 42` in app.py, "
-                "then run `python3 -m pytest -q test_app.py`"
-            ),
-            task_class="debugging",
+            user_text=prompt,
+            task_class=classify(prompt)["task_class"],
             executed_steps=[],
             source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
         )
@@ -1276,19 +1280,20 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertTrue(postverify["inputs"]["rollback_on_failure"])
 
     def test_workflow_planner_can_emit_unified_diff_envelope(self) -> None:
+        prompt = (
+            "apply this patch, then run `python3 -m pytest -q test_app.py`\n"
+            "```diff\n"
+            "--- a/app.py\n"
+            "+++ b/app.py\n"
+            "@@ -1,2 +1,2 @@\n"
+            " def answer():\n"
+            "-    return 41\n"
+            "+    return 42\n"
+            "```\n"
+        )
         decision = plan_tool_workflow(
-            user_text=(
-                "apply this patch, then run `python3 -m pytest -q test_app.py`\n"
-                "```diff\n"
-                "--- a/app.py\n"
-                "+++ b/app.py\n"
-                "@@ -1,2 +1,2 @@\n"
-                " def answer():\n"
-                "-    return 41\n"
-                "+    return 42\n"
-                "```\n"
-            ),
-            task_class="debugging",
+            user_text=prompt,
+            task_class=classify(prompt)["task_class"],
             executed_steps=[],
             source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
         )
@@ -1302,20 +1307,36 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(coder_steps[0]["intent"], "workspace.apply_unified_diff")
         self.assertIn("--- a/app.py", coder_steps[0]["arguments"]["patch"])
 
-    def test_workflow_planner_can_emit_preflight_unified_diff_repair_envelope(self) -> None:
+    def test_workflow_planner_backstops_patch_and_validate_when_task_class_is_stale(self) -> None:
+        prompt = "replace `return 41` with `return 42` in app.py, then run `python3 -m pytest -q test_app.py`"
+
         decision = plan_tool_workflow(
-            user_text=(
-                "tests are failing. apply this patch, then run `python3 -m pytest -q test_app.py`\n"
-                "```diff\n"
-                "--- a/app.py\n"
-                "+++ b/app.py\n"
-                "@@ -1,2 +1,2 @@\n"
-                " def answer():\n"
-                "-    return 41\n"
-                "+    return 42\n"
-                "```\n"
-            ),
-            task_class="debugging",
+            user_text=prompt,
+            task_class="shell_guidance",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertEqual(decision.reason, "planned_orchestrated_operator_envelope")
+        envelope = dict(decision.next_payload["arguments"]["task_envelope"])
+        self.assertEqual(envelope["inputs"]["task_class"], "debugging")
+
+    def test_workflow_planner_can_emit_preflight_unified_diff_repair_envelope(self) -> None:
+        prompt = (
+            "tests are failing. apply this patch, then run `python3 -m pytest -q test_app.py`\n"
+            "```diff\n"
+            "--- a/app.py\n"
+            "+++ b/app.py\n"
+            "@@ -1,2 +1,2 @@\n"
+            " def answer():\n"
+            "-    return 41\n"
+            "+    return 42\n"
+            "```\n"
+        )
+        decision = plan_tool_workflow(
+            user_text=prompt,
+            task_class=classify(prompt)["task_class"],
             executed_steps=[],
             source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
         )

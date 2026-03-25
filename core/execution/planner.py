@@ -9,6 +9,7 @@ from typing import Any
 from core.runtime_execution_tools import extract_observation_followup_hints, looks_like_execution_request
 from core.task_router import (
     build_task_envelope_for_request,
+    looks_like_bounded_repo_repair_request,
     looks_like_explicit_lookup_request,
     looks_like_live_recency_lookup,
     looks_like_public_entity_lookup_request,
@@ -866,6 +867,7 @@ def _planned_orchestrated_operator_payload(
     validation_step = _validation_step_from_request(user_text=user_text, explicit_command=explicit_command)
     if validation_step is None:
         return None
+    bounded_repo_repair = looks_like_bounded_repo_repair_request(user_text)
     normalized_request = re.sub(r"[^a-z0-9]+", " ", str(user_text or "").lower())
     normalized_request = f" {' '.join(normalized_request.split())} "
     if not normalized_patch and not any(
@@ -873,19 +875,21 @@ def _planned_orchestrated_operator_payload(
         for marker in (" apply ", " replace ", " patch ", " edit ", " change ", " fix ")
     ):
         return None
-    if str(task_class or "").strip().lower() not in {
+    normalized_task_class = str(task_class or "").strip().lower()
+    if normalized_task_class not in {
         "unknown",
         "debugging",
         "dependency_resolution",
         "config",
         "security_hardening",
         "integration_orchestration",
-    }:
+    } and not bounded_repo_repair:
         return None
+    planned_task_class = "debugging" if bounded_repo_repair else (normalized_task_class or "debugging")
     from core.orchestration import build_task_envelope
 
     task_suffix = hashlib.sha1(
-        f"{task_class}|{path}|{old_text}|{new_text}|{normalized_patch}|{explicit_command}".encode()
+        f"{planned_task_class}|{path}|{old_text}|{new_text}|{normalized_patch}|{explicit_command}".encode()
     ).hexdigest()[:12]
     queen_id = f"queen-{task_suffix}"
     privacy_class = str(source_context.get("share_scope") or "local_only")
@@ -904,7 +908,7 @@ def _planned_orchestrated_operator_payload(
             parent_task_id=queen_id,
             goal="Capture the current failing test state before any workspace mutation.",
             inputs={
-                "task_class": "debugging",
+                "task_class": planned_task_class,
                 "runtime_tools": [preflight_step],
             },
             required_receipts=("tool_receipt", "validation_result"),
@@ -972,7 +976,7 @@ def _planned_orchestrated_operator_payload(
             else "Locate the requested workspace change target, inspect it, and apply the requested replacement."
         ),
         inputs={
-            "task_class": str(task_class or "debugging").strip() or "debugging",
+            "task_class": planned_task_class,
             "depends_on": [preflight_task_id] if preflight_verifier is not None else [],
             "runtime_tools": coder_tools,
         },
@@ -985,7 +989,7 @@ def _planned_orchestrated_operator_payload(
         parent_task_id=queen_id,
         goal="Validate the requested workspace change.",
         inputs={
-            "task_class": "file_inspection",
+            "task_class": planned_task_class,
             "depends_on": final_verifier_dependencies,
             "rollback_on_failure": True,
             "runtime_tools": [validation_step],
@@ -1005,7 +1009,7 @@ def _planned_orchestrated_operator_payload(
         "role": "queen",
         "inputs": {
             **dict(queen.inputs or {}),
-            "task_class": str(task_class or queen.inputs.get("task_class") or "unknown"),
+            "task_class": planned_task_class,
             "planner_source": "execution_planner",
             "subtasks": [
                 *( [preflight_verifier.to_dict()] if preflight_verifier is not None else [] ),

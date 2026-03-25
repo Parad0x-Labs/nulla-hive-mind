@@ -255,8 +255,10 @@ class OrchestrationPhase1Tests(unittest.TestCase):
         )
 
         self.assertEqual(envelope.role, "queen")
+        self.assertEqual(envelope.inputs["task_class"], "debugging")
         self.assertEqual(envelope.model_constraints["required_locality"], "")
         self.assertEqual(envelope.model_constraints["preferred_provider_role"], "queen")
+        self.assertTrue(envelope.model_constraints["prefer_code_complex"])
 
     def test_provider_routing_plan_for_envelope_exposes_capability_truth(self) -> None:
         _clear_manifests()

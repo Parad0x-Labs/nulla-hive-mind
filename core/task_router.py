@@ -550,6 +550,8 @@ def classify(user_input: str, context: dict[str, Any] | None = None) -> dict[str
     risk_flags: list[str] = []
     task_class = "unknown"
     confidence_hint = 0.35
+    bounded_repo_repair = looks_like_bounded_repo_repair_request(text)
+    readonly_format_check = _looks_like_readonly_format_check_request(text)
 
     risky_markers = {
         "rm -rf": "destructive_command",
@@ -566,12 +568,17 @@ def classify(user_input: str, context: dict[str, Any] | None = None) -> dict[str
     }
 
     for marker, flag in risky_markers.items():
+        if marker == "format " and readonly_format_check:
+            continue
         if marker in text:
             risk_flags.append(flag)
 
     if risk_flags:
         task_class = "risky_system_action"
         confidence_hint = 0.90
+    elif bounded_repo_repair:
+        task_class = "debugging"
+        confidence_hint = 0.84
     elif looks_like_direct_math_request(text):
         task_class = "chat_conversation"
         confidence_hint = 0.94
@@ -902,12 +909,32 @@ def orchestration_role_for_task_class(task_class: str) -> str:
     return "narrator"
 
 
-def _looks_like_orchestrated_operator_request(user_input: str) -> bool:
-    lowered = f" {' '.join(str(user_input or '').lower().split())} "
-    has_mutation = any(marker in lowered for marker in (" replace ", " patch ", " edit ", " change ", " fix "))
+def _looks_like_readonly_format_check_request(user_input: str) -> bool:
+    lowered = re.sub(r"[^a-z0-9\-]+", " ", str(user_input or "").lower())
+    lowered = f" {' '.join(lowered.split())} "
+    return " ruff format --check " in lowered or " format --check " in lowered
+
+
+def looks_like_bounded_repo_repair_request(user_input: str) -> bool:
+    lowered = re.sub(r"[^a-z0-9\-]+", " ", str(user_input or "").lower())
+    lowered = f" {' '.join(lowered.split())} "
+    has_mutation = any(
+        marker in lowered
+        for marker in (
+            " replace ",
+            " patch ",
+            " apply patch ",
+            " apply this patch ",
+            " edit ",
+            " change ",
+            " fix ",
+            " ```diff ",
+            " ```patch ",
+        )
+    )
     if not has_mutation:
         return False
-    has_validation = any(
+    return any(
         marker in lowered
         for marker in (
             " run tests ",
@@ -920,7 +947,10 @@ def _looks_like_orchestrated_operator_request(user_input: str) -> bool:
             " ruff format ",
         )
     )
-    return has_validation
+
+
+def _looks_like_orchestrated_operator_request(user_input: str) -> bool:
+    return looks_like_bounded_repo_repair_request(user_input)
 
 
 def build_task_envelope_for_request(
@@ -934,6 +964,12 @@ def build_task_envelope_for_request(
 ) -> TaskEnvelopeV1:
     context = dict(context or {})
     classification = classify(user_input, context)
+    bounded_repo_repair = looks_like_bounded_repo_repair_request(user_input)
+    if bounded_repo_repair and not classification.get("risk_flags"):
+        classification = {
+            **classification,
+            "task_class": "debugging",
+        }
     routed_task_class = str(classification.get("task_class") or "unknown")
     if chat_surface:
         routed_task_class = chat_surface_execution_task_class(
@@ -947,7 +983,7 @@ def build_task_envelope_for_request(
         planner_style_requested=planner_style_requested,
     )
     role = orchestration_role_for_task_class(routed_task_class)
-    if _looks_like_orchestrated_operator_request(user_input):
+    if bounded_repo_repair and not classification.get("risk_flags"):
         role = "queen"
         profile = {
             **dict(profile),

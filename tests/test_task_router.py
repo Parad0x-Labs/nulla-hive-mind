@@ -27,3 +27,28 @@ def test_live_recency_lookup_classifies_as_research() -> None:
     assert looks_like_live_recency_lookup(prompt) is True
     result = classify(prompt)
     assert result["task_class"] == "research"
+
+
+def test_patch_and_pytest_prompt_classifies_as_debugging() -> None:
+    result = classify(
+        "apply this patch, then run `python3 -m pytest -q test_app.py`\n"
+        "```diff\n"
+        "--- a/app.py\n"
+        "+++ b/app.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        " def answer():\n"
+        "-    return 41\n"
+        "+    return 42\n"
+        "```\n"
+    )
+
+    assert result["task_class"] == "debugging"
+
+
+def test_replace_and_ruff_format_check_prompt_is_not_risky_and_classifies_as_debugging() -> None:
+    result = classify(
+        "replace `foo( )` with `foo()` in app.py, then run `ruff format --check app.py`"
+    )
+
+    assert result["task_class"] == "debugging"
+    assert result["risk_flags"] == []

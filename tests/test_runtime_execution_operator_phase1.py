@@ -10,6 +10,7 @@ from unittest import mock
 from core.execution.validation_tools import runtime_validation_command, validation_command
 from core.orchestration import build_task_envelope
 from core.runtime_execution_tools import execute_runtime_tool
+from core.task_router import classify
 from core.tool_intent_executor import plan_tool_workflow
 
 
@@ -640,30 +641,32 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            prompt = (
+                "tests are failing. apply this patch, then run `python3 -m pytest -q test_app.py`\n"
+                "```diff\n"
+                "--- a/app.py\n"
+                "+++ b/app.py\n"
+                "@@ -1,4 +1,4 @@\n"
+                "-from maths import adjust\n"
+                "+from maths import increment\n"
+                " \n"
+                " \n"
+                " def answer():\n"
+                "-    return adjust(41)\n"
+                "+    return increment(41)\n"
+                "--- a/maths.py\n"
+                "+++ b/maths.py\n"
+                "@@ -1,2 +1,2 @@\n"
+                "-def adjust(value):\n"
+                "-    return value\n"
+                "+def increment(value):\n"
+                "+    return value + 1\n"
+                "```\n"
+            )
+
             decision = plan_tool_workflow(
-                user_text=(
-                    "tests are failing. apply this patch, then run `python3 -m pytest -q test_app.py`\n"
-                    "```diff\n"
-                    "--- a/app.py\n"
-                    "+++ b/app.py\n"
-                    "@@ -1,4 +1,4 @@\n"
-                    "-from maths import adjust\n"
-                    "+from maths import increment\n"
-                    " \n"
-                    " \n"
-                    " def answer():\n"
-                    "-    return adjust(41)\n"
-                    "+    return increment(41)\n"
-                    "--- a/maths.py\n"
-                    "+++ b/maths.py\n"
-                    "@@ -1,2 +1,2 @@\n"
-                    "-def adjust(value):\n"
-                    "-    return value\n"
-                    "+def increment(value):\n"
-                    "+    return value + 1\n"
-                    "```\n"
-                ),
-                task_class="debugging",
+                user_text=prompt,
+                task_class=classify(prompt)["task_class"],
                 executed_steps=[],
                 source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
             )
@@ -702,12 +705,14 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            prompt = (
+                "tests are failing. replace `return 41` with `return 40` in app.py, "
+                "then run `python3 -m pytest -q test_app.py`"
+            )
+
             decision = plan_tool_workflow(
-                user_text=(
-                    "tests are failing. replace `return 41` with `return 40` in app.py, "
-                    "then run `python3 -m pytest -q test_app.py`"
-                ),
-                task_class="debugging",
+                user_text=prompt,
+                task_class=classify(prompt)["task_class"],
                 executed_steps=[],
                 source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
             )
