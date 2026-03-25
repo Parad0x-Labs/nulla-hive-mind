@@ -560,6 +560,99 @@ def _latest_failed_validation_hints(steps: list[dict[str, Any]]) -> dict[str, An
     return {}
 
 
+def _latest_failed_validation_observation(steps: list[dict[str, Any]]) -> dict[str, Any]:
+    for step in reversed(list(steps or [])):
+        observation = dict(step.get("observation") or {})
+        intent = str(observation.get("intent") or "").strip()
+        if intent not in {"workspace.run_tests", "workspace.run_lint", "workspace.run_formatter"}:
+            continue
+        hints = extract_observation_followup_hints(observation)
+        if int(hints.get("returncode") or 0) != 0:
+            return observation
+    return {}
+
+
+def _latest_read_file_hints(steps: list[dict[str, Any]], *, path: str) -> dict[str, Any]:
+    normalized_path = str(path or "").strip()
+    if not normalized_path:
+        return {}
+    for step in reversed(list(steps or [])):
+        observation = dict(step.get("observation") or {})
+        if str(observation.get("intent") or "").strip() != "workspace.read_file":
+            continue
+        hints = extract_observation_followup_hints(observation)
+        if str(hints.get("path") or "").strip() == normalized_path:
+            return hints
+    return {}
+
+
+def _infer_literal_candidate_repair(
+    *,
+    user_text: str,
+    steps: list[dict[str, Any]],
+    current_read_hints: dict[str, Any],
+) -> dict[str, str] | None:
+    latest_validation = _latest_failed_validation_observation(steps)
+    if str(latest_validation.get("intent") or "").strip() != "workspace.run_tests":
+        return None
+    if not _looks_like_failing_test_repair_request(user_text, validation_step=latest_validation):
+        return None
+    error_path = str(latest_validation.get("error_path") or "").strip()
+    current_path = str(current_read_hints.get("path") or "").strip()
+    if not error_path or not current_path or current_path == error_path:
+        return None
+    test_read_hints = _latest_read_file_hints(steps, path=error_path)
+    test_content = str(test_read_hints.get("content") or "").strip()
+    implementation_content = str(current_read_hints.get("content") or "").strip()
+    if not test_content or not implementation_content:
+        return None
+
+    expected_match = re.search(
+        r"assert\s+(?P<call>[A-Za-z_][A-Za-z0-9_\.]*)\s*\(\s*\)\s*==\s*(?P<expected>-?\d+|True|False|None|'[^']*'|\"[^\"]*\")",
+        test_content,
+    )
+    if not expected_match:
+        return None
+    function_name = str(expected_match.group("call") or "").strip().split(".")[-1]
+    expected_literal = str(expected_match.group("expected") or "").strip()
+    if not function_name or not expected_literal:
+        return None
+
+    lines = [str(item.get("text") or "") for item in list(current_read_hints.get("lines") or []) if isinstance(item, dict)]
+    if not lines:
+        return None
+
+    function_start = None
+    for index, raw_line in enumerate(lines):
+        if re.match(rf"^\s*def\s+{re.escape(function_name)}\s*\(", raw_line):
+            function_start = index
+            break
+    if function_start is None:
+        return None
+
+    candidate_old = ""
+    candidate_new = ""
+    for raw_line in lines[function_start + 1 :]:
+        if re.match(r"^\s*(def|class)\s+", raw_line):
+            break
+        return_match = re.match(r"^(?P<indent>\s*)return\s+(?P<value>-?\d+|True|False|None|'[^']*'|\"[^\"]*\")\s*$", raw_line)
+        if not return_match:
+            continue
+        actual_literal = str(return_match.group("value") or "").strip()
+        if actual_literal == expected_literal:
+            return None
+        candidate_old = raw_line.strip()
+        candidate_new = f"return {expected_literal}"
+        break
+    if not candidate_old or not candidate_new:
+        return None
+    return {
+        "path": current_path,
+        "old_text": candidate_old,
+        "new_text": candidate_new,
+    }
+
+
 def _explicit_replace_request(user_text: str) -> dict[str, str] | None:
     text = str(user_text or "").strip()
     if not text:
@@ -1207,6 +1300,32 @@ def plan_tool_workflow(
                         },
                     },
                 )
+        if replacement is None and not patch_text and not _workflow_step_exists(steps, "orchestration.execute_envelope"):
+            candidate_repair = _infer_literal_candidate_repair(
+                user_text=user_text,
+                steps=steps,
+                current_read_hints=hints,
+            )
+            if candidate_repair is not None:
+                validation_command = str(
+                    explicit_command
+                    or _latest_failed_validation_observation(steps).get("command")
+                    or ""
+                ).strip()
+                orchestrated_payload = _planned_orchestrated_operator_payload(
+                    user_text=user_text,
+                    task_class=task_class,
+                    source_context=source_context,
+                    replacement=candidate_repair,
+                    patch_text="",
+                    explicit_command=validation_command,
+                )
+                if orchestrated_payload is not None:
+                    return WorkflowPlannerDecision(
+                        handled=True,
+                        reason="planned_candidate_repair_after_validation_diagnosis",
+                        next_payload=orchestrated_payload,
+                    )
         if explicit_command and not (
             _workflow_step_exists(steps, "sandbox.run_command", key="command", value=explicit_command)
             or _workflow_step_exists(steps, "workspace.run_tests", key="command", value=explicit_command)

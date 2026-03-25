@@ -1063,6 +1063,94 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(decision.next_payload["arguments"]["path"], "app.py")
         self.assertEqual(decision.next_payload["arguments"]["start_line"], 1)
 
+    def test_workflow_planner_can_emit_candidate_repair_after_validation_diagnosis(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="run `python3 -m pytest -q test_app.py` and fix the failing tests",
+            task_class="debugging",
+            executed_steps=[
+                {
+                    "tool_name": "workspace.run_tests",
+                    "arguments": {"command": "python3 -m pytest -q test_app.py"},
+                    "observation": {
+                        "intent": "workspace.run_tests",
+                        "tool_surface": "workspace",
+                        "ok": False,
+                        "status": "executed",
+                        "command": "python3 -m pytest -q test_app.py",
+                        "cwd": ".",
+                        "returncode": 1,
+                        "success": False,
+                        "error_path": "test_app.py",
+                        "error_line": 4,
+                        "diagnostic_query": "answer(",
+                    },
+                },
+                {
+                    "tool_name": "workspace.read_file",
+                    "arguments": {"path": "test_app.py", "start_line": 1, "max_lines": 60},
+                    "observation": {
+                        "intent": "workspace.read_file",
+                        "tool_surface": "workspace",
+                        "ok": True,
+                        "status": "executed",
+                        "path": "test_app.py",
+                        "start_line": 1,
+                        "line_count": 4,
+                        "lines": [
+                            {"line_number": 1, "text": "from app import answer"},
+                            {"line_number": 4, "text": "    assert answer() == 42"},
+                        ],
+                    },
+                },
+                {
+                    "tool_name": "workspace.search_text",
+                    "arguments": {"query": "answer(", "limit": 10},
+                    "observation": {
+                        "intent": "workspace.search_text",
+                        "tool_surface": "workspace",
+                        "ok": True,
+                        "status": "executed",
+                        "query": "answer(",
+                        "match_count": 2,
+                        "matches": [
+                            {"path": "test_app.py", "line": 4, "snippet": "assert answer() == 42"},
+                            {"path": "app.py", "line": 1, "snippet": "def answer():"},
+                        ],
+                    },
+                },
+                {
+                    "tool_name": "workspace.read_file",
+                    "arguments": {"path": "app.py", "start_line": 1, "max_lines": 60},
+                    "observation": {
+                        "intent": "workspace.read_file",
+                        "tool_surface": "workspace",
+                        "ok": True,
+                        "status": "executed",
+                        "path": "app.py",
+                        "start_line": 1,
+                        "line_count": 2,
+                        "lines": [
+                            {"line_number": 1, "text": "def answer():"},
+                            {"line_number": 2, "text": "    return 41"},
+                        ],
+                    },
+                },
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertEqual(decision.reason, "planned_candidate_repair_after_validation_diagnosis")
+        self.assertEqual(decision.next_payload["intent"], "orchestration.execute_envelope")
+        subtasks = list(decision.next_payload["arguments"]["task_envelope"]["inputs"]["subtasks"])
+        self.assertEqual([item["role"] for item in subtasks], ["verifier", "coder", "verifier"])
+        coder_steps = list(subtasks[1]["inputs"]["runtime_tools"])
+        self.assertEqual(coder_steps[0]["intent"], "workspace.read_file")
+        self.assertEqual(coder_steps[1]["intent"], "workspace.replace_in_file")
+        self.assertEqual(coder_steps[1]["arguments"]["path"], "app.py")
+        self.assertEqual(coder_steps[1]["arguments"]["old_text"], "return 41")
+        self.assertEqual(coder_steps[1]["arguments"]["new_text"], "return 42")
+
     def test_workflow_planner_can_emit_orchestrated_operator_envelope_for_patch_and_validate(self) -> None:
         decision = plan_tool_workflow(
             user_text="replace `return 41` with `return 42` in app.py, then run `python3 -m pytest -q test_app.py`",

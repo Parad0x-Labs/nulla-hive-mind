@@ -547,6 +547,83 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
             self.assertEqual(fourth.next_payload["intent"], "workspace.read_file")
             self.assertEqual(fourth.next_payload["arguments"]["path"], "app.py")
 
+            fifth = plan_tool_workflow(
+                user_text="run `python3 -m pytest -q test_app.py` and fix the failing tests",
+                task_class="debugging",
+                executed_steps=[
+                    {
+                        "tool_name": "workspace.run_tests",
+                        "arguments": dict(first.next_payload["arguments"]),
+                        "observation": dict(validation_result.details["observation"]),
+                    },
+                    {
+                        "tool_name": "workspace.read_file",
+                        "arguments": dict(second.next_payload["arguments"]),
+                        "observation": {
+                            "intent": "workspace.read_file",
+                            "tool_surface": "workspace",
+                            "ok": True,
+                            "status": "executed",
+                            "path": "test_app.py",
+                            "start_line": 1,
+                            "line_count": 5,
+                            "lines": [
+                                {"line_number": 1, "text": "from app import answer"},
+                                {"line_number": 4, "text": "    assert answer() == 42"},
+                            ],
+                        },
+                    },
+                    {
+                        "tool_name": "workspace.search_text",
+                        "arguments": dict(third.next_payload["arguments"]),
+                        "observation": {
+                            "intent": "workspace.search_text",
+                            "tool_surface": "workspace",
+                            "ok": True,
+                            "status": "executed",
+                            "query": str(third.next_payload["arguments"]["query"]),
+                            "match_count": 2,
+                            "matches": [
+                                {"path": "test_app.py", "line": 4, "snippet": "assert answer() == 42"},
+                                {"path": "app.py", "line": 1, "snippet": "def answer():"},
+                            ],
+                        },
+                    },
+                    {
+                        "tool_name": "workspace.read_file",
+                        "arguments": dict(fourth.next_payload["arguments"]),
+                        "observation": {
+                            "intent": "workspace.read_file",
+                            "tool_surface": "workspace",
+                            "ok": True,
+                            "status": "executed",
+                            "path": "app.py",
+                            "start_line": 1,
+                            "line_count": 2,
+                            "lines": [
+                                {"line_number": 1, "text": "def answer():"},
+                                {"line_number": 2, "text": "    return 41"},
+                            ],
+                        },
+                    },
+                ],
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
+            )
+
+            self.assertTrue(fifth.handled)
+            self.assertEqual(fifth.next_payload["intent"], "orchestration.execute_envelope")
+
+            result = execute_runtime_tool(
+                fifth.next_payload["intent"],
+                dict(fifth.next_payload["arguments"]),
+                source_context={"workspace": tmpdir, "session_id": "session-diagnosis-candidate-repair"},
+            )
+
+            assert result is not None
+            self.assertTrue(result.ok)
+            self.assertEqual(result.status, "completed")
+            self.assertEqual((workspace / "app.py").read_text(encoding="utf-8"), "def answer():\n    return 42\n")
+
     def test_planned_orchestrated_operator_envelope_can_apply_multi_file_diff_and_verify(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir)
