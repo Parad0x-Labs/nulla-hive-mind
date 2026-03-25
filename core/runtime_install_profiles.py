@@ -356,10 +356,17 @@ def _find_local_provider_id(
     *,
     model_tag: str,
 ) -> str:
+    preferred_provider_id = ""
+    fallback_provider_id = ""
     for item in provider_capability_truth:
-        if item.locality == "local":
-            return item.provider_id
-    return f"ollama-local:{model_tag}"
+        if item.locality != "local":
+            continue
+        if not fallback_provider_id:
+            fallback_provider_id = item.provider_id
+        if item.provider_id.lower().startswith("ollama-local:"):
+            preferred_provider_id = item.provider_id
+            break
+    return preferred_provider_id or fallback_provider_id or f"ollama-local:{model_tag}"
 
 
 def _find_secondary_local_provider_id(

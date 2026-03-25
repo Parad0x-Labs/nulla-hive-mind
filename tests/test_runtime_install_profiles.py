@@ -93,7 +93,7 @@ def test_explicit_full_orchestrated_profile_fails_closed_when_keys_and_space_are
     assert profile.volume_checks[0].required_gb > profile.volume_checks[0].free_gb
 
 
-def test_local_max_profile_prefers_distinct_local_verifier_lane_when_llamacpp_is_available() -> None:
+def test_local_max_profile_prefers_ollama_coder_even_when_llamacpp_is_listed_first() -> None:
     probe = MachineProbe(
         cpu_cores=16,
         ram_gb=32.0,
@@ -110,22 +110,6 @@ def test_local_max_profile_prefers_distinct_local_verifier_lane_when_llamacpp_is
         env={},
         provider_capability_truth=(
             ProviderCapabilityTruth(
-                provider_id="ollama-local:qwen2.5:14b",
-                model_id="qwen2.5:14b",
-                role_fit="coder",
-                context_window=32768,
-                tool_support=("structured_json",),
-                structured_output_support=True,
-                tokens_per_second=16.0,
-                ram_budget_gb=24.0,
-                vram_budget_gb=0.0,
-                quantization="Q4_K_M",
-                locality="local",
-                privacy_class="local_private",
-                queue_depth=0,
-                max_safe_concurrency=1,
-            ),
-            ProviderCapabilityTruth(
                 provider_id="llamacpp-local:qwen2.5:14b-gguf",
                 model_id="qwen2.5:14b-gguf",
                 role_fit="verifier",
@@ -136,6 +120,22 @@ def test_local_max_profile_prefers_distinct_local_verifier_lane_when_llamacpp_is
                 ram_budget_gb=20.0,
                 vram_budget_gb=0.0,
                 quantization="Q6_K",
+                locality="local",
+                privacy_class="local_private",
+                queue_depth=0,
+                max_safe_concurrency=1,
+            ),
+            ProviderCapabilityTruth(
+                provider_id="ollama-local:qwen2.5:14b",
+                model_id="qwen2.5:14b",
+                role_fit="coder",
+                context_window=32768,
+                tool_support=("structured_json",),
+                structured_output_support=True,
+                tokens_per_second=16.0,
+                ram_budget_gb=24.0,
+                vram_budget_gb=0.0,
+                quantization="Q4_K_M",
                 locality="local",
                 privacy_class="local_private",
                 queue_depth=0,
