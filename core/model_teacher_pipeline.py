@@ -9,8 +9,14 @@ from core import audit_logger
 from core.candidate_knowledge_lane import build_task_hash, record_candidate_output
 from core.model_registry import ModelRegistry
 from core.model_trust import output_trust_score
+from core.orchestration import TaskEnvelopeV1, provider_role_for_task_role
 from core.output_validator import validate_provider_output
-from core.provider_routing import ProviderRole, ProviderRoutingPlan, resolve_provider_routing_plan
+from core.provider_routing import (
+    ProviderRole,
+    ProviderRoutingPlan,
+    resolve_provider_routing_plan,
+    resolve_provider_routing_plan_for_envelope,
+)
 from network.signer import get_local_peer_id
 from storage.model_provider_manifest import ModelProviderManifest
 
@@ -60,17 +66,33 @@ class ModelTeacherPipeline:
         provider_role: ProviderRole = "auto",
         swarm_size: int | None = None,
         allow_paid_fallback: bool | None = None,
+        task_envelope: TaskEnvelopeV1 | None = None,
     ) -> TeacherCandidate | None:
-        plan = resolve_provider_routing_plan(
-            self.registry,
-            task_kind=task_kind,
-            output_mode=output_mode,
-            role=provider_role,
-            preferred_provider=preferred_provider,
-            preferred_model=preferred_model,
-            allow_paid_fallback=allow_paid_fallback,
-            swarm_size=int(swarm_size or 1),
-            min_trust=0.0,
+        resolved_role = provider_role_for_task_role(task_envelope.role) if task_envelope else provider_role
+        plan = (
+            resolve_provider_routing_plan_for_envelope(
+                self.registry,
+                envelope=task_envelope,
+                task_kind=task_kind,
+                output_mode=output_mode,
+                preferred_provider=preferred_provider,
+                preferred_model=preferred_model,
+                allow_paid_fallback=allow_paid_fallback,
+                swarm_size=int(swarm_size or 1),
+                min_trust=0.0,
+            )
+            if task_envelope is not None
+            else resolve_provider_routing_plan(
+                self.registry,
+                task_kind=task_kind,
+                output_mode=output_mode,
+                role=resolved_role,
+                preferred_provider=preferred_provider,
+                preferred_model=preferred_model,
+                allow_paid_fallback=allow_paid_fallback,
+                swarm_size=int(swarm_size or 1),
+                min_trust=0.0,
+            )
         )
         if not plan.selected:
             return None
@@ -78,7 +100,10 @@ class ModelTeacherPipeline:
             task_kind=task_kind,
             prompt=prompt,
             system_prompt=system_prompt,
-            context=dict(context or {}),
+            context={
+                **dict(context or {}),
+                **({"task_envelope": task_envelope.to_dict()} if task_envelope is not None else {}),
+            },
             output_mode=output_mode,
             trace_id=trace_id,
         )
@@ -112,6 +137,8 @@ class ModelTeacherPipeline:
                 "provider_role": plan.role,
                 "swarm_size": plan.swarm_size,
                 "swarm_provider_ids": swarm_provider_ids,
+                "task_envelope": dict(plan.task_envelope or {}),
+                "capability_truth": [item.to_dict() for item in plan.capability_truth],
             },
             provenance={
                 **winner.license_metadata,
@@ -121,6 +148,7 @@ class ModelTeacherPipeline:
                 "task_kind": task_kind,
                 "provider_role": plan.role,
                 "swarm_provider_ids": swarm_provider_ids,
+                "task_envelope": dict(plan.task_envelope or {}),
             },
         )
         candidate = TeacherCandidate(
@@ -143,6 +171,8 @@ class ModelTeacherPipeline:
                 "runtime_dependency": winner.manifest.runtime_dependency,
                 "provider_role": plan.role,
                 "swarm_provider_ids": swarm_provider_ids,
+                "task_envelope": dict(plan.task_envelope or {}),
+                "capability_truth": [item.to_dict() for item in plan.capability_truth],
             },
             candidate_id=candidate_id,
             provider_role=plan.role,

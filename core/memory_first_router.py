@@ -253,7 +253,11 @@ class MemoryFirstRouter:
                 output_mode=output_mode,
                 trace_id=internal_request.trace_id,
                 contract={"mode": output_mode},
-                metadata=internal_request.metadata,
+                metadata={
+                    **dict(internal_request.metadata or {}),
+                    **({"task_envelope": dict((source_context or {}).get("task_envelope") or {})} if (source_context or {}).get("task_envelope") else {}),
+                    **({"task_role": str((source_context or {}).get("task_role") or "")} if (source_context or {}).get("task_role") else {}),
+                },
                 attachments=internal_request.attachments,
             )
             try:

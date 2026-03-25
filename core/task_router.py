@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core import policy_engine
+from core.learning import load_procedure_shards, rank_reusable_procedures
+from core.orchestration import TaskEnvelopeV1, build_task_envelope
 from core.persistent_memory import session_memory_policy
 from core.task_state_machine import transition
 from core.trace_id import ensure_trace
@@ -885,6 +887,94 @@ def model_execution_profile(
         }
 
     return base_profile
+
+
+def orchestration_role_for_task_class(task_class: str) -> str:
+    normalized = str(task_class or "unknown").strip().lower() or "unknown"
+    if normalized in {"system_design", "integration_orchestration"}:
+        return "queen"
+    if normalized in {"research", "chat_research"}:
+        return "researcher"
+    if normalized in {"debugging", "dependency_resolution", "config", "security_hardening"}:
+        return "coder"
+    if normalized in {"file_inspection", "shell_guidance"}:
+        return "verifier"
+    return "narrator"
+
+
+def build_task_envelope_for_request(
+    user_input: str,
+    *,
+    context: dict[str, Any] | None = None,
+    task_id: str | None = None,
+    parent_task_id: str = "",
+    chat_surface: bool = False,
+    planner_style_requested: bool = False,
+) -> TaskEnvelopeV1:
+    context = dict(context or {})
+    classification = classify(user_input, context)
+    routed_task_class = str(classification.get("task_class") or "unknown")
+    if chat_surface:
+        routed_task_class = chat_surface_execution_task_class(
+            routed_task_class,
+            user_input=user_input,
+            context=context,
+        )
+    profile = model_execution_profile(
+        routed_task_class,
+        chat_surface=chat_surface,
+        planner_style_requested=planner_style_requested,
+    )
+    role = orchestration_role_for_task_class(routed_task_class)
+    if str(profile.get("task_kind") or "") == "action_plan" and role == "narrator":
+        role = "queen"
+    reused = _reused_procedure_inputs(task_class=routed_task_class, user_input=user_input)
+    return build_task_envelope(
+        task_id=task_id,
+        parent_task_id=parent_task_id,
+        role=role,
+        goal=str(user_input or "").strip()[:600],
+        inputs={
+            "task_class": routed_task_class,
+            "classification": classification,
+            "task_kind": str(profile.get("task_kind") or ""),
+            "output_mode": str(profile.get("output_mode") or ""),
+            "routing_profile": dict(profile),
+            "reused_procedure_ids": list(reused.get("reused_procedure_ids") or []),
+            "reused_procedures": list(reused.get("reused_procedures") or []),
+        },
+        latency_budget="low_latency" if role == "narrator" else "balanced",
+        quality_target="high" if role in {"queen", "verifier", "researcher"} else "standard",
+        required_receipts=("tool_receipt", "validation_result") if role in {"coder", "verifier"} else (),
+        privacy_class=str(context.get("share_scope") or "local_only"),
+    )
+
+
+def _reused_procedure_inputs(*, task_class: str, user_input: str) -> dict[str, Any]:
+    procedures = load_procedure_shards()
+    if not procedures:
+        return {}
+    ranked = rank_reusable_procedures(
+        task_class=str(task_class or "unknown").strip().lower() or "unknown",
+        query_text=user_input,
+        procedures=procedures,
+        limit=3,
+    )
+    if not ranked:
+        return {}
+    return {
+        "reused_procedure_ids": [shard.procedure_id for shard in ranked],
+        "reused_procedures": [
+            {
+                "procedure_id": shard.procedure_id,
+                "title": shard.title,
+                "task_class": shard.task_class,
+                "shareability": shard.shareability,
+                "success_signal": shard.success_signal,
+            }
+            for shard in ranked
+        ],
+    }
 
 
 def chat_surface_execution_task_class(

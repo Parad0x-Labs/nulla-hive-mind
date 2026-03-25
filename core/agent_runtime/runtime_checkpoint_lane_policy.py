@@ -5,6 +5,7 @@ from typing import Any
 from core.reasoning_engine import explicit_planner_style_requested
 from core.runtime_execution_tools import looks_like_execution_request
 from core.task_router import (
+    build_task_envelope_for_request,
     chat_surface_execution_task_class,
     looks_like_explicit_lookup_request,
     looks_like_public_entity_lookup_request,
@@ -31,11 +32,27 @@ def model_routing_profile(
         )
         routed["routing_origin_task_class"] = str(classification.get("task_class") or "unknown")
         routed["planner_style_requested"] = planner_style_requested
-    return routed, model_execution_profile(
+    profile = model_execution_profile(
         str(routed.get("task_class") or "unknown"),
         chat_surface=is_chat_surface,
         planner_style_requested=planner_style_requested,
     )
+    envelope = build_task_envelope_for_request(
+        user_input,
+        context={
+            **getattr(interpretation, "as_context", lambda: {})(),
+            **routed,
+            "share_scope": str((source_context or {}).get("share_scope") or "local_only"),
+        },
+        task_id=str((source_context or {}).get("task_id") or ""),
+        parent_task_id=str((source_context or {}).get("parent_task_id") or ""),
+        chat_surface=is_chat_surface,
+        planner_style_requested=planner_style_requested,
+    )
+    routed["task_role"] = envelope.role
+    profile["task_envelope"] = envelope.to_dict()
+    profile["task_role"] = envelope.role
+    return routed, profile
 
 
 def explicit_runtime_workflow_request(*, user_input: str, task_class: str) -> bool:

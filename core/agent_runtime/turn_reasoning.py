@@ -172,6 +172,13 @@ def execute_grounded_turn(
             ),
             session_id=session_id,
         )
+    model_source_context = dict(source_context or {})
+    if routing_profile.get("task_envelope"):
+        model_source_context["task_envelope"] = dict(routing_profile.get("task_envelope") or {})
+    if routing_profile.get("task_role"):
+        model_source_context["task_role"] = str(routing_profile.get("task_role") or "")
+    if routing_classification.get("task_class"):
+        model_source_context["task_class"] = str(routing_classification.get("task_class") or "")
     model_execution = agent.memory_router.resolve(
         task=task,
         classification=routing_classification,
@@ -180,7 +187,7 @@ def execute_grounded_turn(
         persona=persona,
         force_model=is_chat_surface,
         surface=surface,
-        source_context=source_context,
+        source_context=model_source_context,
     )
     model_candidate = model_execution.as_plan_candidate()
     media_source_context = dict(source_context or {})
