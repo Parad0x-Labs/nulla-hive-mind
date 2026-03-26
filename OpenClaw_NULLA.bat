@@ -41,7 +41,7 @@ if !errorlevel! neq 0 (
   if "!OLLAMA_EXE!"=="" if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" set "OLLAMA_EXE=%LOCALAPPDATA%\Programs\Ollama\ollama.exe"
   if "!OLLAMA_EXE!"=="" if exist "%SystemDrive%\Ollama\ollama.exe" set "OLLAMA_EXE=%SystemDrive%\Ollama\ollama.exe"
   if not "!OLLAMA_EXE!"=="" (
-    start "" /B "!OLLAMA_EXE!" launch openclaw --model "!MODEL_TAG!"
+    start "" /B "!OLLAMA_EXE!" launch openclaw --yes --model "!MODEL_TAG!"
     for /L %%j in (1,1,30) do (
       timeout /t 1 /nobreak >nul
       powershell -NoProfile -Command "try { $null = Invoke-WebRequest -Uri 'http://127.0.0.1:18789' -UseBasicParsing -TimeoutSec 2; exit 0 } catch { exit 1 }" >nul 2>&1

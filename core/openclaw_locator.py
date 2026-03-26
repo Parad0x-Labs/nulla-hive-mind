@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import plistlib
 from dataclasses import dataclass
 from pathlib import Path
 
 NULLA_AGENT_ID = "nulla"
+OPENCLAW_GATEWAY_LAUNCH_AGENT = "ai.openclaw.gateway.plist"
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,14 @@ def discover_openclaw_paths(
             home=direct_home,
             source="explicit_home" if explicit_home else "env_home",
             discovered_existing=direct_home.exists() or (direct_home / "openclaw.json").is_file(),
+        )
+
+    state_home = _clean_path(os.environ.get("OPENCLAW_STATE_DIR"))
+    if state_home is not None:
+        return _build_paths(
+            home=state_home,
+            source="env_state_dir",
+            discovered_existing=state_home.exists() or (state_home / "openclaw.json").is_file(),
         )
 
     ranked: list[tuple[int, int, Path, str]] = []
@@ -98,14 +108,21 @@ def _default_openclaw_home() -> Path:
 
 def _candidate_homes() -> list[tuple[Path, str]]:
     home = Path.home()
-    candidates: list[tuple[Path, str]] = [
-        (_default_openclaw_home(), "dot_home"),
-        (home / ".config" / "openclaw", "xdg_config_lower"),
-        (home / ".config" / "OpenClaw", "xdg_config_title"),
-        (home / ".local" / "share" / "openclaw", "xdg_share_lower"),
-        (home / ".local" / "share" / "OpenClaw", "xdg_share_title"),
-        (home / "Library" / "Application Support" / "OpenClaw", "macos_app_support"),
-    ]
+    candidates: list[tuple[Path, str]] = []
+    launchd_home = _launch_agent_state_home(home)
+    if launchd_home is not None:
+        candidates.append((launchd_home, "launchd_state_dir"))
+    candidates.extend(
+        [
+            (_default_openclaw_home(), "dot_home"),
+            (home / ".openclaw-default", "dot_home_default"),
+            (home / ".config" / "openclaw", "xdg_config_lower"),
+            (home / ".config" / "OpenClaw", "xdg_config_title"),
+            (home / ".local" / "share" / "openclaw", "xdg_share_lower"),
+            (home / ".local" / "share" / "OpenClaw", "xdg_share_title"),
+            (home / "Library" / "Application Support" / "OpenClaw", "macos_app_support"),
+        ]
+    )
     for env_name, source in (
         ("APPDATA", "windows_appdata"),
         ("LOCALAPPDATA", "windows_localappdata"),
@@ -143,6 +160,40 @@ def _score_home(home: Path) -> int:
     if home.exists():
         score += 5
     return score
+
+
+def _launch_agent_state_home(home: Path) -> Path | None:
+    plist_path = home / "Library" / "LaunchAgents" / OPENCLAW_GATEWAY_LAUNCH_AGENT
+    if not plist_path.is_file():
+        return None
+    try:
+        with plist_path.open("rb") as handle:
+            payload = plistlib.load(handle)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    env = payload.get("EnvironmentVariables") or {}
+    if isinstance(env, dict):
+        for key in ("OPENCLAW_STATE_DIR", "OPENCLAW_HOME"):
+            resolved = _clean_path(env.get(key))
+            if resolved is not None:
+                return resolved
+
+    args = payload.get("ProgramArguments") or []
+    if isinstance(args, list):
+        values = [str(item) for item in args]
+        for idx, item in enumerate(values[:-1]):
+            if item == "--state-dir":
+                resolved = _clean_path(values[idx + 1])
+                if resolved is not None:
+                    return resolved
+            if item == "--config":
+                resolved = _clean_path(values[idx + 1])
+                if resolved is not None:
+                    return resolved.parent
+    return None
 
 
 def _clean_path(value: str | Path | None) -> Path | None:

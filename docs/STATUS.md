@@ -45,7 +45,7 @@ Current test gate on this checkpoint:
 | **Telegram relay bridge** | **Works** | Bot API lane works in the supported lane. |
 | **Local proof and contribution scoring** | **Works** | Receipts, glory/finality style scoring, and evidence-based grading exist. This is local proof/accounting, not blockchain token settlement. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, and reuse knowledge locally and across supported helper lanes. |
-| **One-click installer** | **Works** | macOS, Linux, and Windows bootstrap paths exist. |
+| **One-click installer** | **Works** | macOS, Linux, and Windows bootstrap paths exist. The local Ollama + isolated OpenClaw default-home path is now proven on a clean macOS reinstall; broader provider setup and public Hive auth are still separate follow-up work. |
 | **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, and build checks on push. Local full gate currently `1065 passed, 11 skipped, 21 xfailed, 9 xpassed, 1 warning`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Connectivity exists, but hostile/public-internet hardening is not proven. |
 | **DHT routing** | **Partial** | Code exists. It is not yet a hardened public-routing layer. |
