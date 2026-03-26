@@ -62,7 +62,7 @@ Core lane:
 ## Current WAN Transport Spine
 
 - `apps/nulla_daemon.py`: transport-mode discovery, capability advertising, and local presence broadcast entrypoint
-- `core/discovery_index.py`: endpoint-source priority, capability freshness scoring, authoritative multi-endpoint storage, best-endpoint compatibility selection, signed observed/API/bootstrap/self endpoint promotion, candidate probe cooldown/failure memory, and delivery-target ordering that distinguishes live mesh proof from registry proof while still serving deterministic compatibility views for older callers
+- `core/discovery_index.py`: endpoint-source priority, capability freshness scoring, authoritative multi-endpoint storage, best-endpoint compatibility selection, signed observed/API/bootstrap/self endpoint promotion, proof-timestamp-backed liveness ordering, candidate probe cooldown/failure memory, and delivery-target ordering that distinguishes fresh live mesh proof from stale registry proof while still serving deterministic compatibility views for older callers
 - `core/daemon/peer_delivery.py`: critical peer-send retry/fallback seam that walks ordered verified/candidate endpoint targets, writes delivery outcomes back into discovery truth, and fails closed with explicit attempted-endpoint evidence
 - `core/knowledge_advertiser.py`: hello/capability broadcasts now route through peer-centric ordered fallback instead of flattening peers to one compatibility endpoint
 - `retrieval/swarm_query.py`: shard/query/capability/credit broadcasts now use peer-centric ordered fallback while targeted shard delivery still goes through direct ordered endpoint selection
