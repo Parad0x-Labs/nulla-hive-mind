@@ -80,3 +80,31 @@ def test_record_shard_reuse_outcomes_only_marks_selected_remote_shard_as_answer_
     assert summary["remote-shard-incidental"]["success_count"] == 1
     assert summary["remote-shard-incidental"]["selected_count"] == 0
     assert summary["remote-shard-incidental"]["answer_backed_count"] == 0
+
+
+def test_record_shard_reuse_outcomes_keeps_single_selected_remote_shard_non_answer_backed_when_explicitly_false() -> None:
+    rows = record_shard_reuse_outcomes(
+        citations=[
+            {
+                "kind": "remote_shard",
+                "shard_id": "remote-shard-selected-only",
+                "receipt_id": "receipt-selected-only",
+                "selected_for_plan": True,
+                "answer_backed": False,
+                "rendered_via": "reasoning_engine",
+                "response_reason": "grounded_plan_response",
+            }
+        ],
+        task_id="task-3",
+        session_id="session-3",
+        task_class="research",
+        response_class="generic_conversation",
+        success=True,
+        durable=True,
+    )
+
+    assert len(rows) == 1
+    summary = summarize_reuse_outcomes_for_shards(["remote-shard-selected-only"])
+    assert summary["remote-shard-selected-only"]["selected_count"] == 1
+    assert summary["remote-shard-selected-only"]["answer_backed_count"] == 0
+    assert summary["remote-shard-selected-only"]["answer_backed_success_count"] == 0

@@ -4,6 +4,8 @@ from typing import Any
 
 from storage.shard_reuse_outcomes import record_shard_reuse_outcomes
 
+_GROUNDED_RESPONSE_REASONS = {"grounded_plan_response", "grounded_model_response"}
+
 
 def _dispatch_background_swarm_query(
     *,
@@ -64,17 +66,10 @@ def _annotate_swarm_reuse_citations(
     *,
     rendered_via: str,
     response_reason: str,
+    selected_shard_id: str = "",
+    answer_backed: bool = False,
+    counterfactual_details: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    selected_shard_id = next(
-        (
-            str(citation.get("shard_id") or "").strip()
-            for citation in list(citations or [])
-            if str(citation.get("kind") or "").strip() == "remote_shard"
-            and str(citation.get("shard_id") or "").strip()
-        ),
-        "",
-    )
-    answer_backed = response_reason in {"grounded_plan_response", "grounded_model_response"}
     annotated: list[dict[str, Any]] = []
     for citation in list(citations or []):
         enriched = dict(citation)
@@ -84,8 +79,118 @@ def _annotate_swarm_reuse_citations(
         enriched["answer_backed"] = bool(is_selected and answer_backed)
         enriched["rendered_via"] = rendered_via if is_selected else ""
         enriched["response_reason"] = response_reason if is_selected else ""
+        if is_selected and counterfactual_details:
+            enriched.update(dict(counterfactual_details))
         annotated.append(enriched)
     return annotated
+
+
+def _selected_remote_shard_id(citations: list[dict[str, Any]]) -> str:
+    return next(
+        (
+            str(citation.get("shard_id") or "").strip()
+            for citation in list(citations or [])
+            if str(citation.get("kind") or "").strip() == "remote_shard"
+            and str(citation.get("shard_id") or "").strip()
+        ),
+        "",
+    )
+
+
+def _counterfactual_evidence_without_selected_remote_shard(
+    evidence: dict[str, Any],
+    *,
+    selected_shard_id: str,
+) -> tuple[dict[str, Any], bool]:
+    removed = False
+    filtered_context_snippets: list[dict[str, Any]] = []
+    for snippet in list(evidence.get("context_snippets") or []):
+        if not isinstance(snippet, dict):
+            filtered_context_snippets.append(snippet)
+            continue
+        citation = snippet.get("citation")
+        shard_id = ""
+        if isinstance(citation, dict):
+            shard_id = str(citation.get("shard_id") or "").strip()
+        if (
+            not removed
+            and shard_id
+            and shard_id == selected_shard_id
+            and str(citation.get("kind") or "").strip() == "remote_shard"
+        ):
+            removed = True
+            continue
+        filtered_context_snippets.append(snippet)
+    counterfactual_evidence = dict(evidence)
+    counterfactual_evidence["context_snippets"] = filtered_context_snippets
+    return counterfactual_evidence, removed
+
+
+def _answer_backed_counterfactual(
+    *,
+    task: Any,
+    classification: dict[str, Any],
+    evidence: dict[str, Any],
+    persona: Any,
+    plan: Any,
+    citations: list[dict[str, Any]],
+    response_reason: str,
+    build_plan_fn: Any,
+) -> tuple[str, bool, dict[str, Any]]:
+    selected_shard_id = _selected_remote_shard_id(citations)
+    grounded = response_reason in _GROUNDED_RESPONSE_REASONS
+    details: dict[str, Any] = {
+        "counterfactual_tested": False,
+        "counterfactual_grounded_response": grounded,
+        "counterfactual_confidence_drop": 0.0,
+        "counterfactual_winning_source_changed": False,
+        "counterfactual_confidence_without_shard": 0.0,
+        "counterfactual_primary_source_without_shard": "",
+    }
+    if not selected_shard_id or not grounded:
+        return selected_shard_id, False, details
+    counterfactual_evidence, removed = _counterfactual_evidence_without_selected_remote_shard(
+        evidence,
+        selected_shard_id=selected_shard_id,
+    )
+    if not removed:
+        return selected_shard_id, False, details
+    try:
+        counterfactual_plan = build_plan_fn(
+            task=task,
+            classification=classification,
+            evidence=counterfactual_evidence,
+            persona=persona,
+        )
+    except Exception as exc:  # pragma: no cover - fail closed on counterfactual errors
+        details["counterfactual_error"] = str(exc)
+        return selected_shard_id, False, details
+
+    actual_confidence = float(getattr(plan, "confidence", 0.0) or 0.0)
+    counterfactual_confidence = float(getattr(counterfactual_plan, "confidence", 0.0) or 0.0)
+    actual_sources = [
+        str(source).strip()
+        for source in list(getattr(plan, "evidence_sources", []) or [])
+        if str(source).strip()
+    ]
+    counterfactual_sources = [
+        str(source).strip()
+        for source in list(getattr(counterfactual_plan, "evidence_sources", []) or [])
+        if str(source).strip()
+    ]
+    confidence_drop = max(0.0, actual_confidence - counterfactual_confidence)
+    winning_source_changed = bool(actual_sources or counterfactual_sources) and actual_sources[:1] != counterfactual_sources[:1]
+    details.update(
+        {
+            "counterfactual_tested": True,
+            "counterfactual_confidence_drop": confidence_drop,
+            "counterfactual_winning_source_changed": winning_source_changed,
+            "counterfactual_confidence_without_shard": counterfactual_confidence,
+            "counterfactual_primary_source_without_shard": counterfactual_sources[0] if counterfactual_sources else "",
+        }
+    )
+    answer_backed = confidence_drop >= 0.05 or winning_source_changed
+    return selected_shard_id, answer_backed, details
 
 
 def execute_grounded_turn(
@@ -417,10 +522,23 @@ def execute_grounded_turn(
         session_id=session_id,
         source_context=source_context,
     )
+    selected_shard_id, answer_backed, counterfactual_details = _answer_backed_counterfactual(
+        task=task,
+        classification=classification,
+        evidence=evidence,
+        persona=persona,
+        plan=plan,
+        citations=swarm_reuse_citations,
+        response_reason=response_reason,
+        build_plan_fn=build_plan_fn,
+    )
     swarm_reuse_citations = _annotate_swarm_reuse_citations(
         swarm_reuse_citations,
         rendered_via=rendered_via,
         response_reason=response_reason,
+        selected_shard_id=selected_shard_id,
+        answer_backed=answer_backed,
+        counterfactual_details=counterfactual_details,
     )
     reuse_outcome_records = record_shard_reuse_outcomes(
         citations=swarm_reuse_citations,
