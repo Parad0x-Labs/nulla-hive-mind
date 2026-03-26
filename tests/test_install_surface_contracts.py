@@ -85,6 +85,16 @@ def test_installers_use_module_entrypoints_and_runtime_extra_without_pythonpath_
     assert (REPO_ROOT / "ops" / "ensure_public_hive_auth.py").exists()
 
 
+def test_installers_derive_profile_truth_from_runtime_provider_snapshot() -> None:
+    sh_installer = (REPO_ROOT / "installer" / "install_nulla.sh").read_text(encoding="utf-8")
+    bat_installer = (REPO_ROOT / "installer" / "install_nulla.bat").read_text(encoding="utf-8")
+
+    assert "from core.runtime_backbone import build_provider_registry_snapshot" in sh_installer
+    assert "provider_capability_truth=snapshot.capability_truth" in sh_installer
+    assert "from core.runtime_backbone import build_provider_registry_snapshot" in bat_installer
+    assert "provider_capability_truth=snapshot.capability_truth" in bat_installer
+
+
 def test_bootstrap_scripts_support_checksum_verification_and_docs_do_not_pipe_remote_scripts() -> None:
     sh_bootstrap = (REPO_ROOT / "installer" / "bootstrap_nulla.sh").read_text(encoding="utf-8")
     ps_bootstrap = (REPO_ROOT / "installer" / "bootstrap_nulla.ps1").read_text(encoding="utf-8")

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from unittest import mock
+
+from core.provider_routing import ProviderCapabilityTruth
 from installer.write_install_receipt import build_receipt
 
 
@@ -19,3 +22,64 @@ def test_install_receipt_includes_enabled_web_stack_defaults() -> None:
     assert web_stack["searxng_url"] == "http://127.0.0.1:8080"
     assert web_stack["playwright_enabled"] is True
     assert web_stack["browser_engine"] == "chromium"
+
+
+def test_install_receipt_uses_provider_snapshot_truth_for_profile_and_output() -> None:
+    snapshot = mock.Mock(
+        capability_truth=(
+            ProviderCapabilityTruth(
+                provider_id="ollama-local:qwen2.5:7b",
+                model_id="qwen2.5:7b",
+                role_fit="coder",
+                context_window=32768,
+                tool_support=("workspace.read_file",),
+                structured_output_support=True,
+                tokens_per_second=22.0,
+                ram_budget_gb=8.0,
+                vram_budget_gb=0.0,
+                quantization="q4",
+                locality="local",
+                privacy_class="private",
+                queue_depth=0,
+                max_safe_concurrency=1,
+            ),
+            ProviderCapabilityTruth(
+                provider_id="kimi-remote:kimi-k2",
+                model_id="kimi-k2",
+                role_fit="queen",
+                context_window=131072,
+                tool_support=("workspace.read_file", "workspace.run_tests"),
+                structured_output_support=True,
+                tokens_per_second=48.0,
+                ram_budget_gb=0.0,
+                vram_budget_gb=0.0,
+                quantization="remote",
+                locality="remote",
+                privacy_class="delegated",
+                queue_depth=0,
+                max_safe_concurrency=2,
+            ),
+        )
+    )
+
+    with mock.patch("installer.write_install_receipt.build_provider_registry_snapshot", return_value=snapshot), mock.patch.dict(
+        "os.environ",
+        {"NULLA_INSTALL_PROFILE": "hybrid-kimi", "KIMI_API_KEY": "test-key"},
+        clear=False,
+    ):
+        receipt = build_receipt(
+            project_root="/tmp/nulla",
+            runtime_home="/tmp/nulla-home",
+            model_tag="qwen2.5:7b",
+            openclaw_enabled=True,
+            openclaw_config_path="/tmp/openclaw.json",
+            openclaw_agent_dir="/tmp/agent",
+            ollama_binary="ollama",
+        )
+
+    truth = receipt["provider_capability_truth"]
+    provider_ids = {item["provider_id"] for item in truth}
+    mix_ids = {item["provider_id"] for item in receipt["install_profile"]["provider_mix"]}
+    assert provider_ids == {"ollama-local:qwen2.5:7b", "kimi-remote:kimi-k2"}
+    assert mix_ids <= provider_ids
+    assert "kimi-remote:kimi-k2" in mix_ids

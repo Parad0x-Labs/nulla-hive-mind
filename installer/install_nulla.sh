@@ -301,8 +301,14 @@ detect_install_profile() {
   local runtime_home="$1"
   local model_tag="$2"
   NULLA_HOME="${runtime_home}" "${VENV_DIR}/bin/python" -c "
+from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_install_profiles import build_install_profile_truth
-profile = build_install_profile_truth(selected_model='${model_tag}', runtime_home='${runtime_home}')
+snapshot = build_provider_registry_snapshot()
+profile = build_install_profile_truth(
+    selected_model='${model_tag}',
+    runtime_home='${runtime_home}',
+    provider_capability_truth=snapshot.capability_truth,
+)
 print(profile.profile_id)
 " 2>/dev/null || echo "local-only"
 }
@@ -312,8 +318,14 @@ detect_install_profile_summary() {
   local runtime_home="$1"
   local model_tag="$2"
   NULLA_HOME="${runtime_home}" "${VENV_DIR}/bin/python" -c "
+from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_install_profiles import build_install_profile_truth
-profile = build_install_profile_truth(selected_model='${model_tag}', runtime_home='${runtime_home}')
+snapshot = build_provider_registry_snapshot()
+profile = build_install_profile_truth(
+    selected_model='${model_tag}',
+    runtime_home='${runtime_home}',
+    provider_capability_truth=snapshot.capability_truth,
+)
 print(profile.display_summary())
 " 2>/dev/null || echo "local-only -> ${model_tag}"
 }

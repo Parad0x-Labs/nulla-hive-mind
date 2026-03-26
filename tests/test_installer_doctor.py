@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
+from core.provider_routing import ProviderCapabilityTruth
 from installer.doctor import build_report
 from installer.write_install_receipt import build_receipt
 
@@ -124,3 +125,71 @@ def test_build_report_accepts_bundled_public_hive_auth() -> None:
     assert report["components"]["public_hive"]["ok"] is True
     assert report["components"]["public_hive"]["write_enabled"] is True
     assert report["components"]["public_hive"]["bundled_auth_loaded"] is True
+
+
+def test_build_report_exposes_provider_snapshot_truth_and_profile_mix() -> None:
+    snapshot = mock.Mock(
+        capability_truth=(
+            ProviderCapabilityTruth(
+                provider_id="ollama-local:qwen2.5:7b",
+                model_id="qwen2.5:7b",
+                role_fit="coder",
+                context_window=32768,
+                tool_support=("workspace.read_file",),
+                structured_output_support=True,
+                tokens_per_second=22.0,
+                ram_budget_gb=8.0,
+                vram_budget_gb=0.0,
+                quantization="q4",
+                locality="local",
+                privacy_class="private",
+                queue_depth=0,
+                max_safe_concurrency=1,
+            ),
+            ProviderCapabilityTruth(
+                provider_id="llamacpp-local:qwen2.5:14b-gguf",
+                model_id="qwen2.5:14b-gguf",
+                role_fit="verifier",
+                context_window=32768,
+                tool_support=("workspace.read_file", "workspace.run_tests"),
+                structured_output_support=True,
+                tokens_per_second=14.0,
+                ram_budget_gb=12.0,
+                vram_budget_gb=0.0,
+                quantization="q4_k_m",
+                locality="local",
+                privacy_class="private",
+                queue_depth=0,
+                max_safe_concurrency=1,
+            ),
+        )
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / ".venv").mkdir()
+        (root / "Start_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "Talk_To_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "OpenClaw_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "Stage_Trainable_Base.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "install_receipt.json").write_text("{}\n", encoding="utf-8")
+        runtime_home = root / ".nulla_runtime"
+        runtime_home.mkdir()
+        with mock.patch("core.trainable_base_manager.list_staged_trainable_bases", return_value=[]), mock.patch(
+            "installer.doctor.build_provider_registry_snapshot",
+            return_value=snapshot,
+        ):
+            report = build_report(
+                project_root=str(root),
+                runtime_home=str(runtime_home),
+                model_tag="qwen2.5:7b",
+                openclaw_enabled=False,
+                openclaw_config_path="",
+                openclaw_agent_dir="",
+                ollama_binary="",
+            )
+
+    truth = report["provider_capability_truth"]
+    provider_ids = {item["provider_id"] for item in truth}
+    mix_ids = {item["provider_id"] for item in report["install_profile"]["provider_mix"]}
+    assert provider_ids == {"ollama-local:qwen2.5:7b", "llamacpp-local:qwen2.5:14b-gguf"}
+    assert mix_ids <= provider_ids
