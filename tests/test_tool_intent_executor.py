@@ -1633,7 +1633,7 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertTrue(subtasks[0]["inputs"]["runtime_tools"][0]["allow_failure"])
         self.assertEqual(subtasks[1]["inputs"]["runtime_tools"][0]["intent"], "workspace.apply_unified_diff")
 
-    def test_workflow_planner_stops_after_orchestrated_operator_envelope(self) -> None:
+    def test_workflow_planner_stops_after_successful_orchestrated_operator_envelope(self) -> None:
         decision = plan_tool_workflow(
             user_text="replace `return 41` with `return 42` in app.py, then run `python3 -m pytest -q test_app.py`",
             task_class="debugging",
@@ -1648,6 +1648,129 @@ class ToolIntentExecutorTests(unittest.TestCase):
                         "status": "completed",
                         "task_id": "queen-1",
                         "task_role": "queen",
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertTrue(decision.stop_after)
+        self.assertEqual(decision.reason, "orchestration_stop_after_envelope")
+
+    def test_workflow_planner_continues_after_failed_orchestrated_operator_envelope_with_rollback(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="replace `return 41` with `return 40` in app.py, then run `python3 -m pytest -q test_app.py`",
+            task_class="debugging",
+            executed_steps=[
+                {
+                    "tool_name": "orchestration.execute_envelope",
+                    "arguments": {"task_envelope": {"task_id": "queen-rollback"}},
+                    "observation": {
+                        "intent": "orchestration.execute_envelope",
+                        "tool_surface": "orchestration",
+                        "ok": False,
+                        "status": "merge_failed",
+                        "task_id": "queen-rollback",
+                        "task_role": "queen",
+                    },
+                    "details": {
+                        "merged_result": {
+                            "winner": {
+                                "task_id": "verify-final",
+                                "role": "verifier",
+                                "ok": False,
+                                "status": "executed",
+                                "details": {
+                                    "failure_rollback": {
+                                        "intent": "workspace.rollback_last_change",
+                                        "ok": True,
+                                        "status": "executed",
+                                    },
+                                    "step_results": [
+                                        {
+                                            "step_id": "verify-final",
+                                            "intent": "workspace.run_tests",
+                                            "ok": False,
+                                            "status": "executed",
+                                            "details": {
+                                                "observation": {
+                                                    "intent": "workspace.run_tests",
+                                                    "tool_surface": "workspace",
+                                                    "ok": False,
+                                                    "status": "executed",
+                                                    "command": "python3 -m pytest -q test_app.py",
+                                                    "returncode": 1,
+                                                    "error_path": "test_app.py",
+                                                    "error_line": 4,
+                                                    "diagnostic_query": "answer",
+                                                }
+                                            },
+                                        }
+                                    ],
+                                },
+                            }
+                        }
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertFalse(decision.stop_after)
+        self.assertEqual(decision.reason, "planned_inspect_after_envelope_failure")
+        self.assertEqual(decision.next_payload["intent"], "workspace.read_file")
+        self.assertEqual(decision.next_payload["arguments"]["path"], "test_app.py")
+
+    def test_workflow_planner_stops_after_failed_orchestrated_operator_envelope_without_rollback(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="replace `return 41` with `return 40` in app.py, then run `python3 -m pytest -q test_app.py`",
+            task_class="debugging",
+            executed_steps=[
+                {
+                    "tool_name": "orchestration.execute_envelope",
+                    "arguments": {"task_envelope": {"task_id": "queen-no-rollback"}},
+                    "observation": {
+                        "intent": "orchestration.execute_envelope",
+                        "tool_surface": "orchestration",
+                        "ok": False,
+                        "status": "merge_failed",
+                        "task_id": "queen-no-rollback",
+                        "task_role": "queen",
+                    },
+                    "details": {
+                        "merged_result": {
+                            "winner": {
+                                "task_id": "verify-final",
+                                "role": "verifier",
+                                "ok": False,
+                                "status": "executed",
+                                "details": {
+                                    "step_results": [
+                                        {
+                                            "step_id": "verify-final",
+                                            "intent": "workspace.run_tests",
+                                            "ok": False,
+                                            "status": "executed",
+                                            "details": {
+                                                "observation": {
+                                                    "intent": "workspace.run_tests",
+                                                    "tool_surface": "workspace",
+                                                    "ok": False,
+                                                    "status": "executed",
+                                                    "command": "python3 -m pytest -q test_app.py",
+                                                    "returncode": 1,
+                                                    "error_path": "test_app.py",
+                                                    "error_line": 4,
+                                                    "diagnostic_query": "answer",
+                                                }
+                                            },
+                                        }
+                                    ],
+                                },
+                            }
+                        }
                     },
                 }
             ],

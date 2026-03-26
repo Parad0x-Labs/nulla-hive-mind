@@ -987,6 +987,59 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
             self.assertEqual(rollback["intent"], "workspace.rollback_last_change")
             self.assertTrue(rollback["ok"])
 
+    def test_failed_planned_repair_can_continue_diagnosis_after_clean_rollback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            (workspace / "app.py").write_text("def answer():\n    return 41\n", encoding="utf-8")
+            (workspace / "test_app.py").write_text(
+                "from app import answer\n\n\ndef test_answer():\n    assert answer() == 42\n",
+                encoding="utf-8",
+            )
+
+            prompt = (
+                "tests are failing. replace `return 41` with `return 40` in app.py, "
+                "then run `python3 -m pytest -q test_app.py`"
+            )
+
+            first = plan_tool_workflow(
+                user_text=prompt,
+                task_class=classify(prompt)["task_class"],
+                executed_steps=[],
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
+            )
+
+            self.assertTrue(first.handled)
+            self.assertEqual(first.next_payload["intent"], "orchestration.execute_envelope")
+            result = execute_runtime_tool(
+                first.next_payload["intent"],
+                dict(first.next_payload["arguments"]),
+                source_context={"workspace": tmpdir, "session_id": "session-failed-repair-followup"},
+            )
+
+            assert result is not None
+            self.assertFalse(result.ok)
+            self.assertEqual(result.status, "merge_failed")
+            self.assertEqual((workspace / "app.py").read_text(encoding="utf-8"), "def answer():\n    return 41\n")
+
+            second = plan_tool_workflow(
+                user_text=prompt,
+                task_class=classify(prompt)["task_class"],
+                executed_steps=[
+                    {
+                        "tool_name": first.next_payload["intent"],
+                        "arguments": dict(first.next_payload["arguments"]),
+                        "observation": dict(result.details["observation"] or {}),
+                        "details": dict(result.details or {}),
+                    }
+                ],
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
+            )
+
+            self.assertTrue(second.handled)
+            self.assertEqual(second.reason, "planned_inspect_after_envelope_failure")
+            self.assertEqual(second.next_payload["intent"], "workspace.read_file")
+            self.assertEqual(second.next_payload["arguments"]["path"], "test_app.py")
+
 
 if __name__ == "__main__":
     unittest.main()

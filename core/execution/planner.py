@@ -573,6 +573,30 @@ def _latest_failed_validation_observation(steps: list[dict[str, Any]]) -> dict[s
     return {}
 
 
+def _failed_validation_from_orchestration_step(step: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    details = dict(step.get("details") or {})
+    merged_result = dict(details.get("merged_result") or {})
+    winner = dict(merged_result.get("winner") or {})
+    winner_details = dict(winner.get("details") or {})
+    rollback = dict(winner_details.get("failure_rollback") or {})
+    if rollback and not bool(rollback.get("ok", False)):
+        return {}, {}, {}
+    if not rollback:
+        return {}, {}, {}
+    for step_payload in reversed(list(winner_details.get("step_results") or [])):
+        if not isinstance(step_payload, dict):
+            continue
+        step_details = dict(step_payload.get("details") or {})
+        observation = dict(step_details.get("observation") or {})
+        intent = str(observation.get("intent") or "").strip()
+        if intent not in {"workspace.run_tests", "workspace.run_lint", "workspace.run_formatter"}:
+            continue
+        hints = extract_observation_followup_hints(observation)
+        if int(hints.get("returncode") or 0) != 0:
+            return observation, hints, rollback
+    return {}, {}, {}
+
+
 def _latest_read_file_hints(steps: list[dict[str, Any]], *, path: str) -> dict[str, Any]:
     normalized_path = str(path or "").strip()
     if not normalized_path:
@@ -671,6 +695,43 @@ def _planned_diagnostic_lookup_followup(
             next_payload={"intent": "workspace.search_text", "arguments": {"query": diagnostic_query, "limit": 10}},
         )
     return None
+
+
+def _planned_validation_failure_followup(
+    *,
+    steps: list[dict[str, Any]],
+    hints: dict[str, Any],
+    inspect_reason: str,
+    symbol_reason: str,
+    search_reason: str,
+    stop_reason: str,
+) -> WorkflowPlannerDecision:
+    error_path = str(hints.get("error_path") or "").strip()
+    error_line = int(hints.get("error_line") or 0)
+    if error_path and not _workflow_step_exists(steps, "workspace.read_file", key="path", value=error_path):
+        return WorkflowPlannerDecision(
+            handled=True,
+            reason=inspect_reason,
+            next_payload={
+                "intent": "workspace.read_file",
+                "arguments": {
+                    "path": error_path,
+                    "start_line": max(1, error_line - 8) if error_line else 1,
+                    "max_lines": 60,
+                },
+            },
+        )
+    diagnostic_query = str(hints.get("diagnostic_query") or "").strip()
+    if diagnostic_query:
+        lookup_followup = _planned_diagnostic_lookup_followup(
+            steps=steps,
+            diagnostic_query=diagnostic_query,
+            symbol_reason=symbol_reason,
+            search_reason=search_reason,
+        )
+        if lookup_followup is not None:
+            return lookup_followup
+    return WorkflowPlannerDecision(handled=True, reason=stop_reason, stop_after=True)
 
 
 def _infer_literal_candidate_repair(
@@ -1636,6 +1697,16 @@ def plan_tool_workflow(
         return WorkflowPlannerDecision(handled=True, reason="workspace_stop_after_edit", stop_after=True)
 
     if last_intent == "orchestration.execute_envelope":
+        _, envelope_validation_hints, rollback = _failed_validation_from_orchestration_step(last_step)
+        if envelope_validation_hints and bool(rollback.get("ok", False)):
+            return _planned_validation_failure_followup(
+                steps=steps,
+                hints=envelope_validation_hints,
+                inspect_reason="planned_inspect_after_envelope_failure",
+                symbol_reason="planned_symbol_search_after_envelope_failure",
+                search_reason="planned_search_after_envelope_failure",
+                stop_reason="orchestration_stop_after_failed_envelope",
+            )
         return WorkflowPlannerDecision(handled=True, reason="orchestration_stop_after_envelope", stop_after=True)
 
     if last_intent == "sandbox.run_command":
@@ -1681,31 +1752,13 @@ def plan_tool_workflow(
         returncode = int(hints.get("returncode") or 0)
         if returncode == 0:
             return WorkflowPlannerDecision(handled=True, reason="validation_stop_after_success", stop_after=True)
-        error_path = str(hints.get("error_path") or "").strip()
-        error_line = int(hints.get("error_line") or 0)
-        if error_path and not _workflow_step_exists(steps, "workspace.read_file", key="path", value=error_path):
-            return WorkflowPlannerDecision(
-                handled=True,
-                reason="planned_inspect_after_validation_failure",
-                next_payload={
-                    "intent": "workspace.read_file",
-                    "arguments": {
-                        "path": error_path,
-                        "start_line": max(1, error_line - 8) if error_line else 1,
-                        "max_lines": 60,
-                    },
-                },
-            )
-        diagnostic_query = str(hints.get("diagnostic_query") or "").strip()
-        if diagnostic_query:
-            lookup_followup = _planned_diagnostic_lookup_followup(
-                steps=steps,
-                diagnostic_query=diagnostic_query,
-                symbol_reason="planned_symbol_search_after_validation_failure",
-                search_reason="planned_search_after_validation_failure",
-            )
-            if lookup_followup is not None:
-                return lookup_followup
-        return WorkflowPlannerDecision(handled=True, reason="validation_stop_after_failure", stop_after=True)
+        return _planned_validation_failure_followup(
+            steps=steps,
+            hints=hints,
+            inspect_reason="planned_inspect_after_validation_failure",
+            symbol_reason="planned_symbol_search_after_validation_failure",
+            search_reason="planned_search_after_validation_failure",
+            stop_reason="validation_stop_after_failure",
+        )
 
     return WorkflowPlannerDecision(handled=False, reason="no_followup_plan")
