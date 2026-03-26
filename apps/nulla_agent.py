@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from core import audit_logger, feedback_engine, policy_engine
@@ -554,7 +555,7 @@ class NullaAgent:
         if smalltalk:
             smalltalk_phrase = normalized_input.lower().strip(" \t\r\n?!.,")
             if self._is_chat_truth_surface(source_context):
-                is_help_prompt = smalltalk_phrase in {"what can you do", "help"}
+                is_help_prompt = smalltalk_phrase == "help" or smalltalk_phrase.startswith("what can you do")
                 return self._chat_surface_model_wording_result(
                     session_id=session_id,
                     user_input=effective_input,
@@ -580,7 +581,7 @@ class NullaAgent:
                 response=smalltalk,
                 confidence=0.90,
                 source_context=source_context,
-                reason="help_fast_path" if smalltalk_phrase in {"what can you do", "help"} else "smalltalk_fast_path",
+                reason="help_fast_path" if (smalltalk_phrase == "help" or smalltalk_phrase.startswith("what can you do")) else "smalltalk_fast_path",
             )
 
         self._sync_public_presence(status="busy", source_context=source_context)
@@ -615,45 +616,46 @@ class NullaAgent:
                 task_class=str(classification.get("task_class") or "unknown"),
             )
 
-            post_intent, post_error = parse_channel_post_intent(effective_input)
-            if post_intent is not None:
-                dispatch = dispatch_outbound_post_intent(
-                    post_intent,
-                    task_id=task.task_id,
-                    session_id=session_id,
-                    source_context=source_context,
-                )
-                return self._action_fast_path_result(
-                    task_id=task.task_id,
-                    session_id=session_id,
-                    user_input=effective_input,
-                    response=dispatch.response_text,
-                    confidence=0.95 if dispatch.ok else 0.42,
-                    source_context=source_context,
-                    reason=f"channel_post_{dispatch.status}",
-                    success=dispatch.ok,
-                    details={
-                        "platform": dispatch.platform,
-                        "target": dispatch.target,
-                        "record_id": dispatch.record_id,
-                        "error": dispatch.error,
-                    },
-                )
-            if post_error:
-                return self._action_fast_path_result(
-                    task_id=task.task_id,
-                    session_id=session_id,
-                    user_input=effective_input,
-                    response=(
-                        "I can do that, but I need the exact message text. "
-                        "Use a format like: post to Discord: \"We are live tonight.\""
-                    ),
-                    confidence=0.40,
-                    source_context=source_context,
-                    reason="channel_post_missing_message",
-                    success=False,
-                    details={"error": post_error},
-                )
+            if effective_hive_create_draft is None:
+                post_intent, post_error = parse_channel_post_intent(effective_input)
+                if post_intent is not None:
+                    dispatch = dispatch_outbound_post_intent(
+                        post_intent,
+                        task_id=task.task_id,
+                        session_id=session_id,
+                        source_context=source_context,
+                    )
+                    return self._action_fast_path_result(
+                        task_id=task.task_id,
+                        session_id=session_id,
+                        user_input=effective_input,
+                        response=dispatch.response_text,
+                        confidence=0.95 if dispatch.ok else 0.42,
+                        source_context=source_context,
+                        reason=f"channel_post_{dispatch.status}",
+                        success=dispatch.ok,
+                        details={
+                            "platform": dispatch.platform,
+                            "target": dispatch.target,
+                            "record_id": dispatch.record_id,
+                            "error": dispatch.error,
+                        },
+                    )
+                if post_error:
+                    return self._action_fast_path_result(
+                        task_id=task.task_id,
+                        session_id=session_id,
+                        user_input=effective_input,
+                        response=(
+                            "I can do that, but I need the exact message text. "
+                            "Use a format like: post to Discord: \"We are live tonight.\""
+                        ),
+                        confidence=0.40,
+                        source_context=source_context,
+                        reason="channel_post_missing_message",
+                        success=False,
+                        details={"error": post_error},
+                    )
 
             operator_intent = parse_operator_action_intent(user_input) or parse_operator_action_intent(effective_input)
             if operator_intent is not None:
@@ -718,6 +720,25 @@ class NullaAgent:
             )
             if hive_topic_create is not None:
                 return hive_topic_create
+
+            machine_write_guard = self._maybe_handle_safe_machine_write_request(
+                user_input=user_input,
+                task=task,
+                session_id=session_id,
+                source_context=source_context,
+            )
+            if machine_write_guard is not None:
+                return machine_write_guard
+
+            machine_read_fast_path = self._maybe_handle_direct_machine_read_request(
+                user_input=effective_input,
+                task=task,
+                task_class=str(classification.get("task_class") or "unknown"),
+                session_id=session_id,
+                source_context=source_context,
+            )
+            if machine_read_fast_path is not None:
+                return machine_read_fast_path
 
             builder_fast_path = self._maybe_run_builder_controller(
                 task=task,
@@ -2460,12 +2481,14 @@ class NullaAgent:
             task_class=task_class,
         ):
             return False
+        if self._looks_like_supported_machine_read_request(user_input) or self._looks_like_safe_machine_write_request(user_input):
+            return False
         lowered_input = " ".join(str(user_input or "").split()).strip().lower()
         if self._looks_like_hive_topic_drafting_request(lowered_input):
             return True
         if looks_like_public_entity_lookup_request(lowered_input) or looks_like_explicit_lookup_request(lowered_input):
             return False
-        if any(marker in lowered_input for marker in ("create task", "create new task", "new task for", "add task", "add to hive", "add to the hive")):
+        if any(marker in lowered_input for marker in ("create task", "create new task", "new task for", "add task", "add to hive", "add to the hive", "active tasks", "others should help", "others can help", "put this on the hive")):
             return False
         if "create" in lowered_input and "task" in lowered_input and ("hive" in lowered_input or "topic" in lowered_input):
             return False
@@ -3806,6 +3829,16 @@ class NullaAgent:
         session_id: str,
         source_context: dict[str, object] | None,
     ) -> dict[str, Any] | None:
+        lowered = " ".join(str(user_input or "").split()).strip().lower()
+        if lowered == "help" or lowered.startswith("what can you do"):
+            return self._fast_path_result(
+                session_id=session_id,
+                user_input=user_input,
+                response=self._help_capabilities_text(),
+                confidence=0.98,
+                source_context=source_context,
+                reason="capability_truth_query",
+            )
         report = capability_truth_for_request(
             user_input,
             extra_entries=self._capability_ledger_entries(),
@@ -4407,6 +4440,8 @@ class NullaAgent:
             "workspace.ensure_directory",
             "sandbox.run_command",
             "hive.create_topic",
+            "machine.list_directory",
+            "machine.inspect_specs",
         } and (explicit_file_request or not generic_bootstrap_request):
             return {
                 "should_handle": True,
@@ -4429,6 +4464,8 @@ class NullaAgent:
             "workspace.ensure_directory",
             "sandbox.run_command",
             "hive.create_topic",
+            "machine.list_directory",
+            "machine.inspect_specs",
         }:
             return {
                 "should_handle": True,
@@ -4476,6 +4513,8 @@ class NullaAgent:
             "workspace.ensure_directory",
             "sandbox.run_command",
             "hive.create_topic",
+            "machine.list_directory",
+            "machine.inspect_specs",
         }:
             return True
         if not self._explicit_runtime_workflow_request(
@@ -4813,7 +4852,201 @@ class NullaAgent:
             response_text = str(last_step.get("response_text") or "").strip()
             if response_text:
                 return response_text
+        if str(last_step.get("tool_name") or "").strip() in {"machine.list_directory", "machine.inspect_specs"}:
+            response_text = str(last_step.get("response_text") or "").strip()
+            if response_text:
+                return response_text
         return None
+
+    def _looks_like_supported_machine_read_request(self, user_input: str) -> bool:
+        lowered = " " + " ".join(str(user_input or "").split()).strip().lower() + " "
+        if not lowered.strip():
+            return False
+        if any(
+            marker in lowered
+            for marker in (
+                " what can you do ",
+                " what are your capabilities ",
+                " what can you help with ",
+                " help me ",
+            )
+        ):
+            return False
+        asks_for_directory = any(marker in lowered for marker in (" desktop ", " downloads ", " documents ", " docs "))
+        asks_for_listing = any(
+            marker in lowered
+            for marker in (" list ", " show ", " what are ", " what's on ", " what is on ", " contents of ", " what do we have on ", " tell me what ")
+        )
+        if asks_for_directory and asks_for_listing:
+            return True
+        return any(
+            marker in lowered
+            for marker in (
+                " machine specs ",
+                " machine spec ",
+                " our machine ",
+                " this machine ",
+                " what machine ",
+                " system specs ",
+                " hardware specs ",
+                " ram ",
+                " memory ",
+                " gpu ",
+                " vram ",
+                " chip ",
+                " cpu ",
+                " cores ",
+                " running on ",
+            )
+        )
+
+    def _looks_like_safe_machine_write_request(self, user_input: str) -> bool:
+        lowered = " " + " ".join(str(user_input or "").split()).strip().lower() + " "
+        if not lowered.strip():
+            return False
+        has_write_verb = any(
+            marker in lowered
+            for marker in (
+                " create ",
+                " make ",
+                " mkdir",
+                " write ",
+                " save ",
+                " append ",
+                " put ",
+                " edit ",
+                " change ",
+                " delete ",
+                " remove ",
+                " rename ",
+                " move ",
+            )
+        )
+        has_safe_machine_target = any(
+            marker in lowered
+            for marker in (
+                " desktop ",
+                " on my desktop ",
+                " my desktop ",
+                " downloads ",
+                " documents ",
+                " docs ",
+                "~/desktop",
+                "~/downloads",
+                "~/documents",
+                " this machine ",
+                " my machine ",
+                " home ",
+            )
+        )
+        has_workspace_target = any(marker in lowered for marker in (" workspace ", " repo ", " repository ", " project ", " current workspace "))
+        if has_safe_machine_target and has_write_verb:
+            return not has_workspace_target
+        return has_write_verb and " in there " in lowered and not has_workspace_target
+
+    def _safe_machine_write_targets_workspace(
+        self,
+        *,
+        user_input: str,
+        source_context: dict[str, object] | None,
+    ) -> bool:
+        workspace_root = str((source_context or {}).get("workspace") or (source_context or {}).get("workspace_root") or "").strip()
+        if not workspace_root:
+            return False
+        try:
+            workspace_path = Path(workspace_root).expanduser().resolve()
+        except Exception:
+            return False
+        for raw_path in re.findall(r"(?:(?:~|/)[^\s'\"`]+)", str(user_input or "")):
+            try:
+                candidate = Path(raw_path).expanduser().resolve()
+            except Exception:
+                continue
+            if candidate == workspace_path or workspace_path in candidate.parents:
+                return True
+        return False
+
+    def _maybe_handle_safe_machine_write_request(
+        self,
+        *,
+        user_input: str,
+        task: Any,
+        session_id: str,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, Any] | None:
+        if not self._looks_like_safe_machine_write_request(user_input):
+            return None
+        if self._safe_machine_write_targets_workspace(
+            user_input=user_input,
+            source_context=source_context,
+        ):
+            return None
+        return self._action_fast_path_result(
+            task_id=task.task_id,
+            session_id=session_id,
+            user_input=user_input,
+            response=(
+                "I can read safe local folders like Desktop, Downloads, and Documents on this machine, "
+                "but I do not have a real non-workspace write lane there yet. I won't pretend I created or changed files outside the active workspace."
+            ),
+            confidence=0.95,
+            source_context=source_context,
+            reason="machine_write_unsupported",
+            success=False,
+            details={"status": "unsupported", "scope": "safe_machine_write"},
+            mode_override="tool_failed",
+            task_outcome="failed",
+            workflow_summary=self._action_workflow_summary(
+                operator_kind="machine.write",
+                dispatch_status="unsupported",
+                details={"action_id": ""},
+            ),
+        )
+
+    def _maybe_handle_direct_machine_read_request(
+        self,
+        *,
+        user_input: str,
+        task: Any,
+        task_class: str,
+        session_id: str,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, Any] | None:
+        decision = plan_tool_workflow(
+            user_text=user_input,
+            task_class=task_class,
+            executed_steps=[],
+            source_context=dict(source_context or {}),
+        )
+        payload = dict(decision.next_payload or {})
+        intent = str(payload.get("intent") or "").strip()
+        if intent not in {"machine.list_directory", "machine.inspect_specs"}:
+            return None
+        execution = execute_runtime_tool(
+            intent,
+            dict(payload.get("arguments") or {}),
+            source_context=dict(source_context or {}),
+        )
+        if execution is None:
+            return None
+        return self._action_fast_path_result(
+            task_id=task.task_id,
+            session_id=session_id,
+            user_input=user_input,
+            response=str(execution.response_text or "").strip(),
+            confidence=0.96 if execution.ok else 0.72,
+            source_context=source_context,
+            reason=f"{intent}_{execution.status}",
+            success=bool(execution.ok),
+            details=dict(execution.details or {}),
+            mode_override="tool_executed" if execution.ok else "tool_failed",
+            task_outcome="success" if execution.ok else "failed",
+            workflow_summary=self._action_workflow_summary(
+                operator_kind=intent,
+                dispatch_status=str(execution.status or "executed"),
+                details={"action_id": ""},
+            ),
+        )
 
     def _builder_controller_workflow_summary(
         self,
@@ -5177,6 +5410,8 @@ class NullaAgent:
                 "workspace.ensure_directory",
                 "sandbox.run_command",
                 "hive.create_topic",
+                "machine.list_directory",
+                "machine.inspect_specs",
             }
         )
         if task_class not in {
@@ -6689,7 +6924,13 @@ class NullaAgent:
 
     def _hive_tracker_needs_bridge_fallback(self, response: str) -> bool:
         lowered = str(response or "").strip().lower()
-        return lowered.startswith("hive watcher is not configured") or lowered.startswith("i couldn't reach the hive watcher")
+        return (
+            lowered.startswith("hive watcher is not configured")
+            or lowered.startswith("i couldn't reach the hive watcher")
+            or "there are no active tasks in the hive mind right now" in lowered
+            or "open hive tasks: none are visible right now" in lowered
+            or "no open hive tasks are visible right now" in lowered
+        )
 
     def _looks_like_hive_prompt_control_command(self, user_input: str) -> bool:
         lowered = " ".join(str(user_input or "").strip().lower().split())
@@ -6718,6 +6959,12 @@ class NullaAgent:
         lowered = " ".join(str(user_input or "").strip().lower().split())
         if "online" in lowered and "task" not in lowered and "tasks" not in lowered and "work" not in lowered:
             lead = "I couldn't read live agent presence from the watcher, but I can still pull public Hive tasks (public-bridge-derived; live presence unavailable):"
+        elif (
+            "there are no active tasks in the hive mind right now" in str(tracker_response or "").lower()
+            or "open hive tasks: none are visible right now" in str(tracker_response or "").lower()
+            or "no open hive tasks are visible right now" in str(tracker_response or "").lower()
+        ):
+            lead = "Watcher task truth looks stale right now. Direct public Hive reads still show open tasks:"
         elif "not configured" in str(tracker_response or "").lower():
             lead = "Live Hive watcher is not configured here, but I can still pull public Hive tasks (public-bridge-derived; live presence unavailable):"
         else:
@@ -8278,6 +8525,34 @@ class NullaAgent:
             allow_history_recovery=is_positive or is_negative or bool(variant_choice),
         )
         if pending is None:
+            recent_assistant_hive_prompt = any(
+                "hive" in str(message.get("content") or "").lower()
+                and (
+                    "would you like me to proceed" in str(message.get("content") or "").lower()
+                    or "ready to post this to the public hive" in str(message.get("content") or "").lower()
+                )
+                for message in list((source_context or {}).get("conversation_history") or [])[-6:]
+                if isinstance(message, dict) and str(message.get("role") or "").strip().lower() == "assistant"
+            )
+            if (is_positive or is_negative or bool(variant_choice)) and recent_assistant_hive_prompt:
+                return self._action_fast_path_result(
+                    task_id=task.task_id,
+                    session_id=session_id,
+                    user_input=user_input,
+                    response="There is no pending Hive task draft to confirm right now. Ask me to create the Hive task again with a concrete title or `Task:` brief.",
+                    confidence=0.94,
+                    source_context=source_context,
+                    reason="hive_topic_create_missing_pending_draft",
+                    success=False,
+                    details={"status": "missing_pending_draft"},
+                    mode_override="tool_failed",
+                    task_outcome="failed",
+                    workflow_summary=self._action_workflow_summary(
+                        operator_kind="hive.create_topic",
+                        dispatch_status="missing_pending_draft",
+                        details={"action_id": ""},
+                    ),
+                )
             return None
 
         if is_positive or bool(variant_choice):
@@ -9331,17 +9606,30 @@ class NullaAgent:
             return False
         if self._looks_like_hive_topic_drafting_request(text):
             return False
+        mutation_markers = ("update", "edit", "change", "delete", "remove", "cancel", "close")
+        mutation_target_markers = (
+            "the one you created",
+            "the one you just created",
+            "task #",
+            "topic #",
+            "thread #",
+        )
+        if any(marker in text for marker in mutation_markers):
+            if any(marker in text for marker in mutation_target_markers):
+                return False
+            if re.search(r"\b(?:task|topic|thread)\s*#?[0-9a-f-]{6,}\b", text):
+                return False
         has_create = bool(
-            re.search(r"\b(?:create|make|start)\b", text)
+            re.search(r"\b(?:create|make|start|add|post|send|push|put|share)\b", text)
             or "new task" in text
             or "new topic" in text
             or "open a" in text
             or "open new" in text
         )
-        has_target = any(marker in text for marker in ("task", "topic", "thread"))
+        has_target = any(marker in text for marker in ("task", "topic", "thread", "active tasks", "hive mind"))
         if not (has_create and has_target):
             return False
-        if "hive" not in text and "topic" not in text and "create" not in text:
+        if "hive" not in text and "topic" not in text and "active tasks" not in text and "create" not in text:
             return False
         return not any(marker in text for marker in ("claim task", "pull hive tasks", "open hive tasks", "open tasks", "show me", "what do we have", "any tasks", "list tasks", "ignore hive", "research complete", "status"))
 

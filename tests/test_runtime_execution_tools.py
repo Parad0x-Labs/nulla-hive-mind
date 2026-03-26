@@ -137,6 +137,39 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             self.assertEqual(result.status, "not_allowed")
             self.assertIn("safe local directories", result.response_text.lower())
 
+    def test_machine_inspect_specs_returns_grounded_machine_summary(self) -> None:
+        with mock.patch(
+            "core.runtime_execution_tools.probe_machine",
+            return_value=SimpleNamespace(
+                cpu_cores=10,
+                ram_gb=24.0,
+                gpu_name="Apple Silicon",
+                vram_gb=24.0,
+                accelerator="mps",
+            ),
+        ), mock.patch(
+            "core.runtime_execution_tools.select_qwen_tier",
+            return_value=SimpleNamespace(tier_name="mid", ollama_tag="qwen2.5:14b"),
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_os_details",
+            return_value=("macOS", "15.4"),
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_chip_name",
+            return_value="Apple M4",
+        ):
+            result = execute_runtime_tool(
+                "machine.inspect_specs",
+                {},
+                source_context={},
+            )
+            assert result is not None
+            self.assertTrue(result.ok)
+            self.assertIn("Apple M4", result.response_text)
+            self.assertIn("24.0 GiB", result.response_text)
+            hints = extract_observation_followup_hints(result.details["observation"])
+            self.assertEqual(hints["chip_name"], "Apple M4")
+            self.assertEqual(hints["recommended_model"], "qwen2.5:14b")
+
     def test_workspace_ensure_directory_creates_requested_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             created = execute_runtime_tool(

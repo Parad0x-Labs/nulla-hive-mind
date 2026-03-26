@@ -18,8 +18,12 @@ What `full` does:
 2. runs the online acceptance suite
 3. captures a manual BTC spot-check against the locked source
 4. restarts with web lookup disabled and runs the offline honesty gate
-5. restores normal online mode
+5. restores the pre-existing live runtime if one was already serving `11435`; otherwise leaves the acceptance runtime stopped
 6. renders the final report under `artifacts/acceptance_runs/<stamp>/evidence/`
+
+Latest restore-proof rerun:
+- [`artifacts/acceptance_runs/2026-03-26-qwen25-7b-restore-proof-2/evidence/NULLA_LOCAL_ACCEPTANCE_REPORT.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/artifacts/acceptance_runs/2026-03-26-qwen25-7b-restore-proof-2/evidence/NULLA_LOCAL_ACCEPTANCE_REPORT.md)
+- result: `GREEN`
 
 Locked gate:
 - cold start must stay under `120s`
@@ -33,3 +37,10 @@ Locked gate:
 - manual BTC verification must pass
 
 This is a real gate, not a vanity report. If a future run wants to call itself green, it should pass this profile or a stricter one.
+
+What this locked gate still does **not** prove by itself:
+- live OpenClaw machine-spec prompts
+- safe-machine Desktop listing through the chat surface
+- watcher-vs-public-bridge Hive consistency when the watcher task queue goes stale
+
+Those are covered separately in the operator/runtime regression pack and live prompt replays documented in [`docs/STATUS.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/STATUS.md).

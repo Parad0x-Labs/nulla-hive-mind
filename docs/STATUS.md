@@ -41,6 +41,50 @@ What is still weak:
 - Tether/QVAC are not yet real first-class stacks
 - WAN/mesh/public-internet hardening is still not beta-hard
 
+### OpenClaw Operator Truth Checkpoint (2026-03-26)
+
+The live OpenClaw/operator lane materially improved eight things:
+
+1. **Grounded machine specs**
+   `what machine are you running on?` now resolves to a real local machine inspection lane instead of generic model filler.
+2. **Direct safe-machine reads**
+   Desktop / Downloads / Documents reads now short-circuit into real local tool execution instead of relying on slow or flaky model/tool routing.
+3. **Fail-closed non-workspace writes**
+   Requests like `create a txt file in MarchTest on my Desktop` now fail honestly instead of pretending a workspace bootstrap was the same thing.
+4. **Natural Hive create phrasing**
+   Prompts like `add this to the Hive mind active tasks` now hit the real Hive-create preview lane instead of drifting into unrelated Telegram-post or generic-chat behavior.
+5. **Grounded capability truth**
+   `what can you do right now on this machine?` now returns the real runtime capability ledger instead of drifting into fake machine disclaimers or misrouting into machine-spec replies.
+6. **Absolute workspace path writes**
+   Prompts that target a real path inside the active workspace, even when that workspace lives under `/Users/.../Desktop/...`, now write into the workspace instead of being falsely blocked as non-workspace machine writes.
+7. **Imprecise machine-spec phrasing**
+   Ugly real-user prompts like `what is machine you are running on?` now still resolve into the grounded machine inspection lane instead of dropping back to cloud-style filler.
+8. **Watcher-stale Hive fallback**
+   When the watcher says there are no open tasks but the direct public Hive bridge still sees real topics, chat now falls back to the bridge instead of repeating a fake empty queue.
+
+Current measured proof on this checkpoint:
+
+| Metric | Value |
+|--------|-------|
+| Runtime / planner / OpenClaw / acceptance cumulative pack | `165 passed, 2 skipped, 1 warning` |
+| Live machine-spec replay | `Apple M4 / 24.0 GiB / qwen2.5:14b` |
+| Live capability replay | `grounded capability ledger returned` |
+| Live Desktop read replay | `real Desktop entries returned` |
+| Live Desktop write replay | `fails closed with explicit non-workspace-write message` |
+| Live absolute-workspace file replay | `create -> append -> exact readback passed` |
+| Live Hive create replay | `real preview -> confirm -> topic created on public bridge` |
+| Live Hive read replay | `public-bridge-derived fallback now surfaces real open topics when watcher task truth is stale` |
+| Locked local acceptance rerun | `GREEN` (`artifacts/acceptance_runs/2026-03-26-qwen25-7b-restore-proof-2/...`) |
+| Acceptance restore proof | `post-run runtime restored to qwen2.5:14b on ~/.nulla_runtime` |
+
+What is still weak, bluntly:
+
+- the detached launcher/API startup path is still flaky enough that startup banners can overclaim service health in non-interactive runs
+- safe non-workspace writes are still intentionally unsupported
+- public Hive task truth is currently stronger through the direct bridge than through the watcher dashboard when those two drift
+- Kimi is still not a first-class installed/runtime profile
+- Tether/QVAC are still not real first-class stacks
+
 The current `main` checkpoint materially improved five areas:
 
 1. **Public feed shell reduction**
@@ -77,7 +121,8 @@ Current test gate on this checkpoint:
 | **NullaBook public web** | **Experimental** | Worklog, tasks, operators, proof, coordination, and status routes exist. The feed page is thinner now, but the browser/runtime slab still needs more extraction before beta. |
 | **Trace Rail (local viewer)** | **Works** | Browser view of local execution and trace state. |
 | **Sandboxed code execution** | **Works** | Guarded execution lane exists and is covered. |
-| **Safe machine directory reads** | **Works** | Read-only inspection of Desktop / Downloads / Documents now exists in the supported lane. This is not arbitrary filesystem access. |
+| **Safe machine directory reads** | **Works** | Read-only inspection of Desktop / Downloads / Documents now exists in the supported lane and now short-circuits directly in OpenClaw instead of relying on generic chat/model fallback. This is not arbitrary filesystem access. |
+| **Safe non-workspace machine writes** | **Not yet** | NULLA now fails closed here on purpose. It will not pretend a Desktop write succeeded when only workspace writes are real. |
 | **Multi-model support** | **Works** | Local Ollama, OpenAI-compatible lanes, and cloud fallback exist. |
 | **Discord relay bridge** | **Works** | Bot integration and routing work in the supported lane. |
 | **Telegram relay bridge** | **Works** | Bot API lane works in the supported lane. |

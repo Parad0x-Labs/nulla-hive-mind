@@ -92,7 +92,7 @@ def smalltalk_fast_path(agent: Any, normalized_input: str, *, source_surface: st
         return "You're right. That reply was slow and useless. Give me the task again and I will go straight for the action lane."
     if phrase in {"thanks", "thank you", "thx"}:
         return "Anytime. Send the next task."
-    if phrase in {"what can you do", "help"}:
+    if phrase == "help" or phrase.startswith("what can you do"):
         return agent._help_capabilities_text()
     if phrase in {"kill me lol", "omfg just kill me", "omfg just kill me lol", "kms lol"}:
         return "You're frustrated. Let's fix the thing instead. If you want me to go by a different name, I'll use it."

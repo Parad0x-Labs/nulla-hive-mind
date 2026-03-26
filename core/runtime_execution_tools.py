@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import difflib
 import fnmatch
+import platform
 import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from core import policy_engine
 from core.execution_gate import ExecutionGate
+from core.hardware_tier import probe_machine, select_qwen_tier
 from core.runtime_paths import resolve_workspace_root
 from core.runtime_tool_contracts import runtime_tool_contract_map, runtime_tool_contracts
 from sandbox.sandbox_runner import SandboxRunner
@@ -192,6 +195,19 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
             "entries": entries,
             "paths": [str(item.get("path") or "").strip() for item in entries if str(item.get("path") or "").strip()],
         }
+    if intent == "machine.inspect_specs":
+        return {
+            "intent": intent,
+            "chip_name": str(payload.get("chip_name") or "").strip(),
+            "os_name": str(payload.get("os_name") or "").strip(),
+            "os_version": str(payload.get("os_version") or "").strip(),
+            "cpu_cores": int(payload.get("cpu_cores") or 0),
+            "ram_gb": float(payload.get("ram_gb") or 0.0),
+            "gpu_name": str(payload.get("gpu_name") or "").strip(),
+            "vram_gb": float(payload.get("vram_gb") or 0.0) if payload.get("vram_gb") is not None else None,
+            "accelerator": str(payload.get("accelerator") or "").strip(),
+            "recommended_model": str(payload.get("recommended_model") or "").strip(),
+        }
     if intent == "workspace.read_file":
         lines = [dict(item) for item in list(payload.get("lines") or []) if isinstance(item, dict)]
         return {
@@ -312,6 +328,8 @@ def execute_runtime_tool(
             return _list_files(arguments, workspace_root=workspace_root)
         if intent == "machine.list_directory":
             return _list_machine_directory(arguments)
+        if intent == "machine.inspect_specs":
+            return _inspect_machine_specs()
         if intent == "workspace.search_text":
             return _search_text(arguments, workspace_root=workspace_root)
         if intent == "workspace.read_file":
@@ -619,6 +637,98 @@ def _list_machine_directory(arguments: dict[str, Any]) -> RuntimeExecutionResult
                 directories_only=directories_only,
                 entries=entries,
             ),
+        },
+    )
+
+
+def _machine_os_details() -> tuple[str, str]:
+    system = str(platform.system() or "").strip()
+    if system == "Darwin":
+        version = str(platform.mac_ver()[0] or "").strip() or str(platform.release() or "").strip()
+        return "macOS", version
+    if system == "Windows":
+        return "Windows", str(platform.version() or platform.release() or "").strip()
+    if system:
+        return system, str(platform.release() or "").strip()
+    return "Unknown", ""
+
+
+def _machine_chip_name() -> str:
+    system = str(platform.system() or "").strip().lower()
+    try:
+        if system == "darwin":
+            completed = subprocess.run(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            brand = str(completed.stdout or "").strip()
+            if brand:
+                return brand
+    except Exception:
+        pass
+    processor = str(platform.processor() or "").strip()
+    if processor:
+        return processor
+    machine = str(platform.machine() or "").strip()
+    if machine:
+        return machine
+    return "unknown"
+
+
+def _inspect_machine_specs() -> RuntimeExecutionResult:
+    probe = probe_machine()
+    selected_tier = select_qwen_tier(probe)
+    os_name, os_version = _machine_os_details()
+    chip_name = _machine_chip_name()
+    response_lines = [
+        "Machine specs for this host:",
+        f"- OS: {os_name}{f' {os_version}' if os_version else ''}",
+        f"- Chip: {chip_name}",
+        f"- CPU cores: {probe.cpu_cores}",
+        f"- RAM: {round(probe.ram_gb, 1)} GiB",
+        f"- Accelerator: {probe.accelerator or 'cpu'}",
+        f"- GPU: {probe.gpu_name or 'none'}",
+    ]
+    if probe.vram_gb is not None:
+        label = "Unified memory" if str(probe.accelerator or "").strip().lower() == "mps" else "VRAM"
+        response_lines.append(f"- {label}: {round(probe.vram_gb, 1)} GiB")
+    response_lines.append(f"- Recommended local model: {selected_tier.ollama_tag}")
+    observation = _tool_observation(
+        intent="machine.inspect_specs",
+        tool_surface="machine",
+        ok=True,
+        status="executed",
+        chip_name=chip_name,
+        os_name=os_name,
+        os_version=os_version,
+        cpu_cores=probe.cpu_cores,
+        ram_gb=round(probe.ram_gb, 1),
+        gpu_name=probe.gpu_name or "",
+        vram_gb=round(probe.vram_gb, 1) if probe.vram_gb is not None else None,
+        accelerator=probe.accelerator,
+        recommended_model=selected_tier.ollama_tag,
+        selected_tier=selected_tier.tier_name,
+    )
+    return RuntimeExecutionResult(
+        handled=True,
+        ok=True,
+        status="executed",
+        response_text="\n".join(response_lines),
+        details={
+            "chip_name": chip_name,
+            "os_name": os_name,
+            "os_version": os_version,
+            "cpu_cores": probe.cpu_cores,
+            "ram_gb": round(probe.ram_gb, 1),
+            "gpu_name": probe.gpu_name or "",
+            "vram_gb": round(probe.vram_gb, 1) if probe.vram_gb is not None else None,
+            "accelerator": probe.accelerator,
+            "recommended_model": selected_tier.ollama_tag,
+            "selected_tier": selected_tier.tier_name,
+            "observation": observation,
         },
     )
 

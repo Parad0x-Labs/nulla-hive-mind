@@ -39,6 +39,14 @@ class AcceptanceProfile:
     manual_btc_source_url: str
 
 
+@dataclass(frozen=True)
+class RuntimeSnapshot:
+    runtime_home: Path
+    workspace_root: Path
+    model: str
+    expected_commit: str
+
+
 def _sanitize_text(value: str, *, repo_root: Path) -> str:
     sanitized = value.replace(str(repo_root), "<repo>")
     sanitized = re.sub(r"/Users/[^/\s]+", "/Users/<redacted>", sanitized)
@@ -565,6 +573,26 @@ def _current_health(base_url: str) -> dict[str, Any] | None:
         return None
 
 
+def _capture_runtime_snapshot(base_url: str) -> RuntimeSnapshot | None:
+    health = _current_health(base_url)
+    if not health or not bool(health.get("ok")):
+        return None
+    runtime = dict(health.get("runtime") or {})
+    capabilities = dict(health.get("capabilities") or {})
+    runtime_home = str(capabilities.get("runtime_home") or "").strip()
+    workspace_root = str(capabilities.get("workspace_root") or "").strip()
+    model = str(runtime.get("model_tag") or "").strip()
+    expected_commit = str(runtime.get("commit") or "").strip()
+    if not runtime_home or not workspace_root or not model or not expected_commit:
+        return None
+    return RuntimeSnapshot(
+        runtime_home=Path(runtime_home).expanduser().resolve(),
+        workspace_root=Path(workspace_root).expanduser().resolve(),
+        model=model,
+        expected_commit=expected_commit,
+    )
+
+
 def _stop_runtime(base_url: str) -> None:
     health = _current_health(base_url)
     pid = int(dict(health.get("runtime") or {}).get("pid") or 0) if isinstance(health, dict) else 0
@@ -628,6 +656,28 @@ def _start_runtime(
     return process
 
 
+def _restore_runtime(
+    *,
+    repo_root: Path,
+    base_url: str,
+    run_root: Path,
+    start_script: Path,
+    snapshot: RuntimeSnapshot | None,
+) -> subprocess.Popen[Any] | None:
+    if snapshot is None:
+        return None
+    return _start_runtime(
+        repo_root=repo_root,
+        base_url=base_url,
+        run_root=run_root,
+        runtime_home=snapshot.runtime_home,
+        workspace_root=snapshot.workspace_root,
+        model=snapshot.model,
+        start_script=start_script,
+        expected_commit=snapshot.expected_commit,
+    )
+
+
 def run_full_acceptance(
     *,
     base_url: str,
@@ -639,6 +689,7 @@ def run_full_acceptance(
     start_script: Path,
 ) -> int:
     expected_commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=str(repo_root), text=True).strip()
+    previous_runtime = _capture_runtime_snapshot(base_url)
     _stop_runtime(base_url)
     _start_runtime(
         repo_root=repo_root,
@@ -679,15 +730,12 @@ def run_full_acceptance(
     finally:
         _clear_offline_policy_override(runtime_home)
         _stop_runtime(base_url)
-        _start_runtime(
+        _restore_runtime(
             repo_root=repo_root,
             base_url=base_url,
             run_root=run_root,
-            runtime_home=runtime_home,
-            workspace_root=workspace_root,
-            model=profile.model,
             start_script=start_script,
-            expected_commit=expected_commit,
+            snapshot=previous_runtime,
         )
     render_report(
         repo_root=repo_root,

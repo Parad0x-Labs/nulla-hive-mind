@@ -125,13 +125,75 @@ def test_run_full_acceptance_restores_online_runtime(monkeypatch, tmp_path: Path
     workspace_root = tmp_path / "workspace"
     start_script = tmp_path / "Start_NULLA.sh"
     start_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    previous_runtime = acceptance.RuntimeSnapshot(
+        runtime_home=tmp_path / "live_runtime_home",
+        workspace_root=tmp_path / "live_workspace",
+        model="qwen2.5:14b",
+        expected_commit="3b0dba4e9786",
+    )
 
     monkeypatch.setattr(acceptance.subprocess, "check_output", lambda *args, **kwargs: "9141b55\n")
+    monkeypatch.setattr(acceptance, "_capture_runtime_snapshot", lambda base_url: previous_runtime)
+    monkeypatch.setattr(acceptance, "_stop_runtime", lambda base_url: calls.append(f"stop:{base_url}"))
+    start_calls: list[dict[str, object]] = []
+
+    def _fake_start(**kwargs):
+        start_calls.append(kwargs)
+        calls.append(f"start:{kwargs['expected_commit']}:{kwargs['model']}")
+        return object()
+
+    monkeypatch.setattr(acceptance, "_start_runtime", _fake_start)
+    monkeypatch.setattr(
+        acceptance.AcceptanceRunner,
+        "run_online",
+        lambda self: _fake_online_payload(commit="9141b55"),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "fetch_manual_btc_verification",
+        lambda **kwargs: {"pass": True, "source": "CoinGecko", "observed": "$70,573.00 at 2026-03-20 23:09 UTC", "assessment": "tight", "acceptance_response": "Bitcoin is $70,576.00 USD."},
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "run_offline_honesty",
+        lambda *args, **kwargs: {"result": {"latency_seconds": 0.05, "pass": True}},
+    )
+    monkeypatch.setattr(acceptance, "render_report", lambda **kwargs: calls.append("report"))
+
+    exit_code = acceptance.run_full_acceptance(
+        base_url="http://127.0.0.1:11435",
+        repo_root=tmp_path,
+        run_root=tmp_path,
+        profile=profile,
+        runtime_home=runtime_home,
+        workspace_root=workspace_root,
+        start_script=start_script,
+    )
+
+    assert exit_code == 0
+    assert not (runtime_home / "config" / "default_policy.yaml").exists()
+    assert calls.count("report") == 1
+    assert calls.count("start:9141b55:qwen2.5:7b") == 2
+    assert calls.count("start:3b0dba4e9786:qwen2.5:14b") == 1
+    assert start_calls[-1]["runtime_home"] == previous_runtime.runtime_home
+    assert start_calls[-1]["workspace_root"] == previous_runtime.workspace_root
+
+
+def test_run_full_acceptance_without_existing_runtime_leaves_runtime_stopped(monkeypatch, tmp_path: Path) -> None:
+    profile = acceptance.load_profile()
+    calls: list[str] = []
+    runtime_home = tmp_path / "runtime_home"
+    workspace_root = tmp_path / "workspace"
+    start_script = tmp_path / "Start_NULLA.sh"
+    start_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    monkeypatch.setattr(acceptance.subprocess, "check_output", lambda *args, **kwargs: "9141b55\n")
+    monkeypatch.setattr(acceptance, "_capture_runtime_snapshot", lambda base_url: None)
     monkeypatch.setattr(acceptance, "_stop_runtime", lambda base_url: calls.append(f"stop:{base_url}"))
     monkeypatch.setattr(
         acceptance,
         "_start_runtime",
-        lambda **kwargs: calls.append(f"start:{kwargs['expected_commit']}") or object(),
+        lambda **kwargs: calls.append(f"start:{kwargs['expected_commit']}:{kwargs['model']}") or object(),
     )
     monkeypatch.setattr(
         acceptance.AcceptanceRunner,
@@ -163,4 +225,4 @@ def test_run_full_acceptance_restores_online_runtime(monkeypatch, tmp_path: Path
     assert exit_code == 0
     assert not (runtime_home / "config" / "default_policy.yaml").exists()
     assert calls.count("report") == 1
-    assert calls.count("start:9141b55") == 3
+    assert calls.count("start:9141b55:qwen2.5:7b") == 2

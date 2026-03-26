@@ -279,8 +279,62 @@ def _extract_safe_machine_directory_listing(text: str) -> dict[str, Any] | None:
         path = "~/Documents"
     if not path:
         return None
-    directories_only = any(token in lowered for token in (" folder", " folders", " directory", " directories"))
+    mentions_directory_words = any(token in lowered for token in (" folder", " folders", " directory", " directories"))
+    mentions_files = any(token in lowered for token in (" file", " files", " entry", " entries", " contents"))
+    directories_only = mentions_directory_words and not mentions_files
     return {"path": path, "directories_only": directories_only, "limit": 200}
+
+
+def _extract_machine_specs_request(text: str) -> dict[str, Any] | None:
+    lowered = " ".join(str(text or "").strip().lower().split())
+    if not lowered:
+        return None
+    if any(
+        marker in lowered
+        for marker in (
+            "what can you do",
+            "what are your capabilities",
+            "what can you help with",
+        )
+    ):
+        return None
+    if any(marker in lowered for marker in ("write ", "create ", "edit ", "change ", "delete ", "remove ", "rename ", "move ")):
+        return None
+    spec_markers = (
+        "machine specs",
+        "machine spec",
+        "our machine",
+        "this machine",
+        "what machine",
+        "what is machine",
+        "system specs",
+        "hardware specs",
+        "cpu",
+        "ram",
+        "memory",
+        "gpu",
+        "vram",
+        "chip",
+        "cores",
+    )
+    mentions_machine_shape = any(marker in lowered for marker in spec_markers)
+    mentions_running_host = "running on" in lowered and "machine" in lowered
+    if not mentions_machine_shape and not mentions_running_host:
+        return None
+    wants_inspection = any(
+        marker in lowered
+        for marker in (
+            "what",
+            "tell me",
+            "show me",
+            "check",
+            "inspect",
+            "which",
+            "how much",
+            "running on",
+        )
+    )
+    return {} if wants_inspection else None
 
 
 def _looks_like_workspace_bootstrap_request(text: str) -> bool:
@@ -300,8 +354,19 @@ def _looks_like_workspace_bootstrap_request(text: str) -> bool:
     )
 
 
-def _clean_workspace_file_path(candidate: str, *, base_dir: str = "") -> str:
-    clean = _clean_workspace_path(candidate)
+def _clean_workspace_file_path(candidate: str, *, base_dir: str = "", workspace_root: str = "") -> str:
+    raw = str(candidate or "").strip().strip("`\"'")
+    clean = ""
+    if raw and workspace_root:
+        try:
+            resolved_workspace_root = Path(workspace_root).expanduser().resolve()
+            resolved_candidate = Path(raw).expanduser().resolve()
+            if resolved_candidate == resolved_workspace_root or resolved_workspace_root in resolved_candidate.parents:
+                clean = str(resolved_candidate.relative_to(resolved_workspace_root))
+        except Exception:
+            clean = ""
+    if not clean:
+        clean = _clean_workspace_path(candidate)
     if not clean or "." not in Path(clean).name:
         return ""
     if base_dir and "/" not in clean:
@@ -363,6 +428,7 @@ def _extract_workspace_file_plan(
         r"\g<stem>.\g<ext>",
         raw,
     )
+    workspace_root = str((source_context or {}).get("workspace") or (source_context or {}).get("workspace_root") or "").strip()
     base_dir = ""
     if any(marker in raw.lower() for marker in _DIRECTORY_CREATE_MARKERS):
         base_dir = _extract_workspace_bootstrap_path(raw)
@@ -434,7 +500,11 @@ def _extract_workspace_file_plan(
     writes: list[dict[str, Any]] = []
     for pattern in (_CREATE_NAMED_FILE_WITH_CONTENT_RE, _INLINE_CREATE_FILE_RE):
         for match in pattern.finditer(raw):
-            path = _clean_workspace_file_path(str(match.group("path") or "").strip(), base_dir=base_dir)
+            path = _clean_workspace_file_path(
+                str(match.group("path") or "").strip(),
+                base_dir=base_dir,
+                workspace_root=workspace_root,
+            )
             content = str(match.group("content") or "").strip()
             if path and content:
                 writes.append({"path": path, "content": content, "mode": "write"})
@@ -660,6 +730,7 @@ def plan_tool_workflow(
     explicit_lookup = looks_like_explicit_lookup_request(research_text) or public_entity_lookup
     tool_inventory_request = _looks_like_tool_inventory_request(text)
     machine_directory_list = _extract_safe_machine_directory_listing(text)
+    machine_specs_request = _extract_machine_specs_request(text)
     workspace_bootstrap_path = _extract_workspace_bootstrap_path(text)
     workspace_bootstrap_request = _looks_like_workspace_bootstrap_request(text)
     workspace_file_plan = _extract_workspace_file_plan(text, source_context=source_context)
@@ -734,6 +805,12 @@ def plan_tool_workflow(
                 reason="planned_operator_tool_inventory",
                 next_payload={"intent": "operator.list_tools", "arguments": {}},
             )
+        if machine_specs_request is not None:
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_machine_specs_inspection",
+                next_payload={"intent": "machine.inspect_specs", "arguments": machine_specs_request},
+            )
         if machine_directory_list:
             return WorkflowPlannerDecision(
                 handled=True,
@@ -772,19 +849,14 @@ def plan_tool_workflow(
         if workspace_bootstrap_request and workspace_bootstrap_path:
             wants_desktop = any(m in lowered for m in (" desktop ", " on my desktop", " my desktop", " on desktop", "~/desktop"))
             wants_home = any(m in lowered for m in (" home ", " home/", " my machine", " this machine", "~/", "folder in my machine"))
-            home_dir = str(Path.home())
-            if wants_desktop:
-                return WorkflowPlannerDecision(
-                    handled=True,
-                    reason="planned_desktop_directory_create",
-                    next_payload={"intent": "sandbox.run_command", "arguments": {"command": f"mkdir -p {home_dir}/Desktop/{workspace_bootstrap_path}"}},
-                )
-            if wants_home:
-                return WorkflowPlannerDecision(
-                    handled=True,
-                    reason="planned_home_directory_create",
-                    next_payload={"intent": "sandbox.run_command", "arguments": {"command": f"mkdir -p {home_dir}/{workspace_bootstrap_path}"}},
-                )
+            try:
+                repo_root = Path.cwd().resolve()
+                resolved_bootstrap_path = Path(workspace_bootstrap_path).expanduser().resolve()
+                workspace_like_bootstrap = resolved_bootstrap_path == repo_root or repo_root in resolved_bootstrap_path.parents
+            except Exception:
+                workspace_like_bootstrap = False
+            if (wants_desktop or wants_home) and not workspace_like_bootstrap:
+                return WorkflowPlannerDecision(handled=False, reason="unsupported_safe_machine_write_request")
             return WorkflowPlannerDecision(
                 handled=True,
                 reason="planned_workspace_directory_bootstrap",
@@ -996,6 +1068,9 @@ def plan_tool_workflow(
 
     if last_intent == "machine.list_directory":
         return WorkflowPlannerDecision(handled=True, reason="machine_stop_after_list", stop_after=True)
+
+    if last_intent == "machine.inspect_specs":
+        return WorkflowPlannerDecision(handled=True, reason="machine_stop_after_specs", stop_after=True)
 
     if last_intent == "workspace.replace_in_file":
         retry_command = _last_command_from_steps(steps) or explicit_command
