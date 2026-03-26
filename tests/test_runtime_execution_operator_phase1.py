@@ -1053,8 +1053,6 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
                 "tests are failing. replace `return 41` with `return 40` in app.py, "
                 "then run `python3 -m pytest -q test_app.py`"
             )
-            diagnose_prompt = "run `python3 -m pytest -q test_app.py` and fix the failing tests"
-
             first = plan_tool_workflow(
                 user_text=first_prompt,
                 task_class=classify(first_prompt)["task_class"],
@@ -1085,8 +1083,8 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
             ]
 
             second = plan_tool_workflow(
-                user_text=diagnose_prompt,
-                task_class=classify(diagnose_prompt)["task_class"],
+                user_text=first_prompt,
+                task_class=classify(first_prompt)["task_class"],
                 executed_steps=executed_steps,
                 source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
             )
@@ -1112,8 +1110,8 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
             )
 
             third = plan_tool_workflow(
-                user_text=diagnose_prompt,
-                task_class=classify(diagnose_prompt)["task_class"],
+                user_text=first_prompt,
+                task_class=classify(first_prompt)["task_class"],
                 executed_steps=executed_steps,
                 source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
             )
@@ -1138,8 +1136,8 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
             )
 
             fourth = plan_tool_workflow(
-                user_text=diagnose_prompt,
-                task_class=classify(diagnose_prompt)["task_class"],
+                user_text=first_prompt,
+                task_class=classify(first_prompt)["task_class"],
                 executed_steps=executed_steps,
                 source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
             )
@@ -1166,8 +1164,8 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
             )
 
             fifth = plan_tool_workflow(
-                user_text=diagnose_prompt,
-                task_class=classify(diagnose_prompt)["task_class"],
+                user_text=first_prompt,
+                task_class=classify(first_prompt)["task_class"],
                 executed_steps=executed_steps,
                 source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
             )

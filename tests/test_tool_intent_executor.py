@@ -1783,7 +1783,7 @@ class ToolIntentExecutorTests(unittest.TestCase):
 
     def test_workflow_planner_can_retry_candidate_repair_after_failed_envelope_rollback(self) -> None:
         decision = plan_tool_workflow(
-            user_text="run `python3 -m pytest -q test_app.py` and fix the failing tests",
+            user_text="tests are failing. replace `return 41` with `return 40` in app.py, then run `python3 -m pytest -q test_app.py`",
             task_class="debugging",
             executed_steps=[
                 {
@@ -1893,6 +1893,13 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertTrue(decision.handled)
         self.assertEqual(decision.reason, "planned_candidate_repair_after_validation_diagnosis")
         self.assertEqual(decision.next_payload["intent"], "orchestration.execute_envelope")
+        envelope = dict(decision.next_payload["arguments"]["task_envelope"])
+        coder = next(item for item in envelope["inputs"]["subtasks"] if item["role"] == "coder")
+        replace_step = next(
+            item for item in coder["inputs"]["runtime_tools"] if item["intent"] == "workspace.replace_in_file"
+        )
+        self.assertEqual(replace_step["arguments"]["old_text"], "return 41")
+        self.assertEqual(replace_step["arguments"]["new_text"], "return 42")
 
     def test_workflow_planner_can_stop_early_when_enough_state_is_gathered(self) -> None:
         decision = plan_tool_workflow(

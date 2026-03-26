@@ -801,6 +801,22 @@ def _can_plan_candidate_repair_envelope(steps: list[dict[str, Any]]) -> bool:
     return not bool(observation.get("ok", False))
 
 
+def _has_retryable_failed_envelope(steps: list[dict[str, Any]]) -> bool:
+    envelope_steps = [
+        step
+        for step in list(steps or [])
+        if str(dict(step.get("observation") or {}).get("intent") or "").strip() == "orchestration.execute_envelope"
+    ]
+    if not envelope_steps:
+        return False
+    last_envelope = dict(envelope_steps[-1] or {})
+    _, hints, rollback = _failed_validation_from_orchestration_step(last_envelope)
+    if not hints or not bool(rollback.get("ok", False)):
+        return False
+    observation = dict(last_envelope.get("observation") or {})
+    return not bool(observation.get("ok", False))
+
+
 def _infer_literal_candidate_repair(
     *,
     user_text: str,
@@ -1584,6 +1600,7 @@ def plan_tool_workflow(
     if last_intent == "workspace.read_file":
         read_path = str(hints.get("path") or "").strip()
         latest_validation_hints = _latest_failed_validation_hints(steps)
+        effective_replacement = None if _has_retryable_failed_envelope(steps) else replacement
         pending_writes = _pending_workspace_writes(workspace_file_plan or {}, steps)
         if workspace_file_plan is not None and pending_writes:
             next_write = dict(pending_writes[0] or {})
@@ -1598,10 +1615,10 @@ def plan_tool_workflow(
                     reason="planned_append_after_read",
                     next_payload={"intent": "workspace.write_file", "arguments": {"path": read_path, "content": content}},
                 )
-        if replacement is not None:
-            target_path = str(replacement.get("path") or read_path).strip()
-            old_text = str(replacement.get("old_text") or "").strip()
-            new_text = str(replacement.get("new_text") or "").strip()
+        if effective_replacement is not None:
+            target_path = str(effective_replacement.get("path") or read_path).strip()
+            old_text = str(effective_replacement.get("old_text") or "").strip()
+            new_text = str(effective_replacement.get("new_text") or "").strip()
             if target_path and old_text and new_text and not _workflow_step_exists(steps, "workspace.replace_in_file", key="path", value=target_path):
                 return WorkflowPlannerDecision(
                     handled=True,
@@ -1616,7 +1633,7 @@ def plan_tool_workflow(
                         },
                     },
                 )
-        if replacement is None and not patch_text and _can_plan_candidate_repair_envelope(steps):
+        if effective_replacement is None and not patch_text and _can_plan_candidate_repair_envelope(steps):
             candidate_repair = _infer_literal_candidate_repair(
                 user_text=user_text,
                 steps=steps,
