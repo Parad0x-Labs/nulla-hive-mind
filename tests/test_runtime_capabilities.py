@@ -84,6 +84,9 @@ def test_runtime_capability_snapshot_exposes_feature_flags_and_capability_rows()
                 privacy_class="local_private",
                 queue_depth=0,
                 max_safe_concurrency=1,
+                availability_state="ready",
+                circuit_open=False,
+                last_error=None,
             ),
         ),
     )
@@ -108,6 +111,8 @@ def test_runtime_capability_snapshot_exposes_feature_flags_and_capability_rows()
     assert snapshot["feature_flags"]["allow_remote_only_without_backend"] is False
     assert snapshot["install_profile"]["profile_id"] == "local-only"
     assert snapshot["provider_capability_truth"][0]["provider_id"] == "local-qwen-http:qwen2.5:7b"
+    assert snapshot["provider_capability_truth"][0]["availability_state"] == "ready"
+    assert snapshot["provider_capability_truth"][0]["circuit_open"] is False
     capabilities = {item["name"]: item for item in snapshot["capabilities"]}
     assert capabilities["workspace_write_tools"]["state"] == "implemented"
     assert capabilities["sandbox_execution"]["state"] == "implemented"

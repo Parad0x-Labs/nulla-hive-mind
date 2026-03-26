@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from core import policy_engine
+from core.model_health import get_provider_health
 from core.model_registry import ModelRegistry
 from core.model_selection_policy import ModelSelectionRequest
 from storage.model_provider_manifest import ModelProviderManifest
@@ -30,6 +31,9 @@ class ProviderCapabilityTruth:
     privacy_class: str
     queue_depth: int
     max_safe_concurrency: int
+    availability_state: str = "ready"
+    circuit_open: bool = False
+    last_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -48,6 +52,9 @@ class ProviderCapabilityTruth:
             "privacy_class": self.privacy_class,
             "queue_depth": self.queue_depth,
             "max_safe_concurrency": self.max_safe_concurrency,
+            "availability_state": self.availability_state,
+            "circuit_open": self.circuit_open,
+            "last_error": self.last_error,
         }
 
 
@@ -156,7 +163,7 @@ def resolve_provider_routing_plan(
     normalized_role = _normalize_role(role)
     resolved_allow_paid = _resolve_allow_paid_fallback(normalized_role, allow_paid_fallback)
     resolved_swarm_size = _resolve_swarm_size(normalized_role, swarm_size)
-    candidates = tuple(
+    ranked_candidates = tuple(
         rank_provider_candidates(
             registry,
             task_kind=task_kind,
@@ -169,6 +176,26 @@ def resolve_provider_routing_plan(
             min_trust=min_trust,
         )
     )
+    total = max(len(ranked_candidates), 1)
+    accepted: list[tuple[float, ModelProviderManifest, ProviderCapabilityTruth]] = []
+    rejected: list[dict[str, str]] = []
+    selection_notes: list[str] = []
+    for index, manifest in enumerate(ranked_candidates):
+        capability = provider_capability_truth_for_manifest(manifest)
+        if capability.availability_state == "blocked":
+            rejected.append({"provider_id": manifest.provider_id, "reason": "provider_circuit_open"})
+            continue
+        score = float(max(1, total - index))
+        if capability.availability_state == "degraded":
+            score -= 0.8
+        accepted.append((score, manifest, capability))
+    accepted.sort(key=lambda item: (item[0], item[1].provider_name, item[1].model_name), reverse=True)
+    candidates = tuple(item[1] for item in accepted)
+    capability_truth = tuple(item[2] for item in accepted)
+    if rejected:
+        selection_notes.append("Provider routing skipped one or more circuit-open lanes.")
+    if any(item.availability_state == "degraded" for item in capability_truth):
+        selection_notes.append("Provider routing penalized degraded lanes with recent failures.")
     return ProviderRoutingPlan(
         role=normalized_role,
         task_kind=task_kind,
@@ -179,8 +206,10 @@ def resolve_provider_routing_plan(
         preferred_model=preferred_model,
         selected=candidates[0] if candidates else None,
         candidates=candidates,
-        capability_truth=tuple(provider_capability_truth_for_manifest(manifest) for manifest in candidates),
+        capability_truth=capability_truth,
         task_envelope=dict(task_envelope or {}),
+        rejected_candidates=tuple(rejected),
+        selection_notes=tuple(selection_notes),
     )
 
 
@@ -305,6 +334,8 @@ def _build_envelope_routing_requirements(
 
 
 def _routing_rejection_reason(capability: ProviderCapabilityTruth, requirements: dict[str, Any]) -> str:
+    if capability.availability_state == "blocked":
+        return "provider_circuit_open"
     required_locality = str(requirements.get("required_locality") or "").strip()
     if required_locality and capability.locality != required_locality:
         return "requires_local_provider"
@@ -345,6 +376,8 @@ def _envelope_manifest_score(
             score += 0.4
         else:
             score -= 0.15
+    if capability.availability_state == "degraded":
+        score -= 0.75
     queue_pressure = float(capability.queue_depth) / float(max(1, capability.max_safe_concurrency))
     score -= min(2.5, queue_pressure)
     if provider_role == "queen" and capability.locality == "remote":
@@ -445,6 +478,8 @@ def provider_capability_truth_for_manifest(manifest: ModelProviderManifest) -> P
     metadata = dict(manifest.metadata or {})
     runtime_config = dict(manifest.runtime_config or {})
     capabilities = {str(item).strip().lower() for item in list(manifest.capabilities or []) if str(item).strip()}
+    health = get_provider_health(manifest.provider_id)
+    availability_state = "blocked" if health.circuit_open else ("degraded" if health.consecutive_failures > 0 else "ready")
     orchestration_role = str(metadata.get("orchestration_role") or "").strip().lower()
     deployment_class = str(metadata.get("deployment_class") or "").strip().lower()
     locality = "local" if manifest.source_type in {"local_path", "subprocess"} or _is_local_http(manifest) or deployment_class == "local" else "remote"
@@ -470,6 +505,9 @@ def provider_capability_truth_for_manifest(manifest: ModelProviderManifest) -> P
         privacy_class=privacy_class,
         queue_depth=max(0, int(metadata.get("queue_depth") or 0)),
         max_safe_concurrency=max(1, int(metadata.get("max_safe_concurrency") or 1)),
+        availability_state=availability_state,
+        circuit_open=health.circuit_open,
+        last_error=health.last_error,
     )
 
 
