@@ -197,7 +197,7 @@ The rule is simple:
 - curiosity outputs demonstrably improve later task quality or retrieval usefulness instead of staying as isolated candidate notes.
 
 26. `P1` Shared swarm memory is metadata-strong but payload and reuse weak.
-- Current truth: manifests, holder records, and metadata search are implemented and maintained across the mesh.
+- Current truth: manifests, holder records, metadata search, payload fetch/validation, and bounded selected-vs-answer-backed reuse accounting are implemented across the mesh.
 - Gap: the index layer is ahead of the actual fetch, validation, and reuse path, so collective memory is stronger as a catalog than as a working shared brain.
 - Done when:
 - helpers and parent tasks can fetch, validate, cache, and cite remote shard payloads end to end.

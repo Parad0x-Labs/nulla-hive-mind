@@ -4,7 +4,7 @@ Current status matrix. Updated 2026-03-26.
 
 ## Latest Stabilization Checkpoint
 
-The current `main` checkpoint materially improved one hundred and thirty-one areas:
+The current `main` checkpoint materially improved one hundred and thirty-two areas:
 
 1. **Provider routing and model orchestration**
    NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
@@ -268,12 +268,14 @@ The current `main` checkpoint materially improved one hundred and thirty-one are
    The bounded local repair lane no longer dead-ends on the trivial pattern where a tested function returns a same-file literal binding instead of the literal directly. `core/execution/planner.py` now promotes a bounded repair when the failing test expectation is explicit, the function body is exactly `return NAME`, and the same file contains exactly one top-level literal binding `NAME = <literal>` that conflicts with the expected value. It still fails closed on repeated bindings, expressions, imports, and cross-file constant chasing.
 131. **Installer provider-snapshot baseline**
    Installer-facing profile truth no longer depends on shell-local guesses or stale doctor/receipt wiring. `installer/write_install_receipt.py` and `installer/doctor.py` now derive `install_profile` from the same `core.runtime_backbone.build_provider_registry_snapshot()` seam as runtime, both payloads now expose top-level machine-readable `provider_capability_truth`, and `installer/install_nulla.sh` plus `installer/install_nulla.bat` now pass that same provider snapshot into `build_install_profile_truth(...)` instead of re-evaluating profile truth without the actual runtime lane ledger.
+132. **Counterfactual answer-backed shard baseline**
+   A selected remote shard no longer gets strong Hive credit just because it appeared in a grounded answer. `core/agent_runtime/turn_reasoning.py` now rebuilds the grounded plan without the selected remote shard and only marks that shard as `answer_backed` when the counterfactual plan gets weaker by confidence or switches its winning evidence source, while `storage/shard_reuse_outcomes.py` keeps respecting explicit non-answer-backed selections instead of auto-promoting every successful single citation.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1505 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1507 passed, 13 skipped, 13 xfailed, 15 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -298,15 +300,15 @@ Current test gate on this checkpoint:
 | **Operator output discipline** | **Works (local baseline)** | Chat/openclaw/API replies now keep workflow hidden unless debug is explicit, and routing/capacity leak payloads are rewritten into terse operator language instead of exposing raw envelope JSON, queue-pressure notes, or capacity-state blobs. |
 | **Envelope-aware provider routing** | **Works (local baseline)** | Task envelopes now influence provider selection materially: local-private/mutating coder work fails closed without a local lane, task-router model constraints now carry locality/structured-output/context/code-pressure hints, saturated providers are penalized by queue depth vs safe concurrency, and capability truth now carries routing requirements/rejections instead of only exposing raw ranked candidates. |
 | **Capacity-aware envelope scheduling** | **Works (local baseline)** | When task envelopes carry provider-capability truth, scheduling now accounts for queue pressure and locality instead of only latency labels, incompatible worker lanes fail closed before mutating the workspace, and the helper-model execution lane now also backs off saturated providers instead of blindly fanning out into them. This is still local orchestration, not distributed swarm scheduling. |
-| **Remote shard fetch/reuse baseline** | **Works (bounded)** | `SHARD_PAYLOAD` now carries manifest-bound transport metadata plus signed origin fields; accepted remote payloads emit explicit fetch receipts, cache locally as `peer_received` shards, surface reuse citations through tiered context assembly, persist downstream success/durable reuse outcomes, distinguish selected answer-backed reuse from incidental citation history, and now rank cached remote shards with bounded preference for proven answer-backed reuse instead of treating every remote cache entry as a static trust score. This is still not the same thing as hardened public-internet trust or automatic global synthesis. |
+| **Remote shard fetch/reuse baseline** | **Works (bounded)** | `SHARD_PAYLOAD` now carries manifest-bound transport metadata plus signed origin fields; accepted remote payloads emit explicit fetch receipts, cache locally as `peer_received` shards, surface reuse citations through tiered context assembly, persist downstream success/durable reuse outcomes, distinguish selected answer-backed reuse from incidental citation history, require a no-shard counterfactual loss test before a selected shard counts as answer-backed, and now rank cached remote shards with bounded preference for proven answer-backed reuse instead of treating every remote cache entry as a static trust score. This is still not the same thing as hardened public-internet trust or automatic global synthesis. |
 | **Sandboxed code execution** | **Works** | Restricted environment with guardrails and fail-closed posture when no safe isolation backend exists. |
 | **Multi-model support** | **Works** | Ollama local, HTTP-compatible provider adapters, cloud fallback, and role-aware provider routing for local drone lanes vs higher-tier synthesis. Provider capability truth now also surfaces role fit, queue depth, max safe concurrency, and tool/structured-output support instead of only listing adapters, the helper/teacher lane now records routing notes while backing off saturated candidates during execution, a configured `KIMI_API_KEY` now auto-registers a real remote Kimi queen manifest through the shared runtime bootstrap path, a configured `VLLM_BASE_URL` now auto-registers a real local `vllm-local` queen lane, and a configured `LLAMACPP_BASE_URL` now auto-registers a real local `llamacpp-local` drone lane instead of leaving local OpenAI-compatible backends as TDL. |
 | **Discord relay bridge** | **Works** | Full bot integration with channel routing. |
 | **Telegram relay bridge** | **Works** | Bot API with group chat support. |
 | **Contribution scoring** | **Works** | Glory scores, local credits, receipts, evidence-based grading, and partial-result paths are present. Credits here are local work/participation accounting, not blockchain tokens. |
-| **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. Remote fetches now also record explicit receipts, cached remote-shard reuse surfaces citation metadata, grounded turns persist downstream reuse outcomes with selected-vs-answer-backed attribution, and future cached-remote retrieval can prefer shards that have actually backed successful answers before instead of replaying static trust/quality only. |
+| **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. Remote fetches now also record explicit receipts, cached remote-shard reuse surfaces citation metadata, grounded turns persist downstream reuse outcomes with selected-vs-answer-backed attribution, selected shards now need counterfactual loss proof before they count as strongly answer-backed, and future cached-remote retrieval can prefer shards that have actually backed successful answers before instead of replaying static trust/quality only. |
 | **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection, explicit install profiles, single-volume free-space checks, built-wheel smoke coverage, and aligned `/healthz` startup checks. Doctor, receipt, and both installer launchers now derive profile truth from the same runtime provider snapshot seam and expose machine-readable `provider_capability_truth`, so install surfaces stop drifting from the live runtime lane ledger. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1505 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1507 passed, 13 skipped, 13 xfailed, 15 xpassed`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist, NAT-mapped nodes now advertise `hole_punch` instead of pretending they are direct, and private-LAN nodes now stay `lan_only` unless a real relay is configured. This is more honest, but it is still not proven at scale over internet. |
 | **DHT routing** | **Partial** | Bucketed routing now has iterative lookup-frontier helpers that can exclude already-contacted peers, deterministic refresh targets for stale non-empty buckets, a bounded replacement-cache path so fresh full buckets queue challengers instead of evicting live incumbents immediately, and endpoint-provenance guardrails so referral-only `NODE_FOUND` / `BLOCK_FOUND` peers do not overwrite observed endpoint truth or get re-exported in verified-only DHT replies. It is still not hardened as a public multi-hop routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
@@ -342,11 +344,11 @@ Credits in this repo are local proof-of-work / proof-of-participation accounting
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1470 passed, 13 skipped, 12 xfailed, 16 xpassed` |
-| Passing | 1470 |
+| Full suite result | `1507 passed, 13 skipped, 13 xfailed, 15 xpassed` |
+| Passing | 1507 |
 | Skipped | 13 |
-| Expected failures (xfail) | 12 |
-| Unexpected passes (xpass) | 16 |
+| Expected failures (xfail) | 13 |
+| Unexpected passes (xpass) | 15 |
 | Test files | 235 |
 
 Run `python3 ops/pytest_shards.py --workers 6 --label <label> --pytest-arg=--tb=short` to reproduce the current full local gate.
