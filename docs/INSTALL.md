@@ -18,6 +18,24 @@ Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind
 powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1
 ```
 
+Probe the machine and provider reality before or after install:
+
+```bash
+bash Probe_NULLA_Stack.sh
+```
+
+```powershell
+.\Probe_NULLA_Stack.bat
+```
+
+The probe reports:
+
+1. machine hardware summary
+2. installed Ollama models
+3. whether the machine can reasonably run one local model or a primary/helper local pair
+4. which remote provider credentials are actually configured
+5. which provider stacks are real, not wired yet, or unsupported
+
 Manual local shortcut:
 
 ```bash
@@ -34,7 +52,8 @@ bash Install_And_Run_NULLA.sh
 4. pulls the selected local model
 5. installs the OpenClaw bridge and registration path
 6. starts the NULLA API server on `127.0.0.1:11435`
-7. on macOS, hands off the final launch to `OpenClaw_NULLA.command` so the running services are owned by Terminal.app instead of the short-lived installer shell
+7. installs the `Probe_NULLA_Stack` command into the install root so the machine can be re-checked later without guesswork
+8. on macOS, hands off the final launch to `OpenClaw_NULLA.command` so the running services are owned by Terminal.app instead of the short-lived installer shell
 
 If you want the shortest user path, this is it.
 
@@ -79,6 +98,8 @@ The convenience launcher path remains:
 
 - macOS / Linux: `OpenClaw_NULLA.sh`
 - Windows: `OpenClaw_NULLA.bat`
+- macOS / Linux machine/provider probe: `Probe_NULLA_Stack.sh`
+- Windows machine/provider probe: `Probe_NULLA_Stack.bat`
 
 The launcher resolves the gateway token from the strongest available state source in this order:
 
@@ -95,6 +116,8 @@ If you deliberately run NULLA from a custom runtime home, set `NULLA_HOME` befor
 
 - NULLA is alpha. Read [STATUS.md](STATUS.md) before assuming a surface is production-ready.
 - The strongest current lane is local-first runtime plus Hive/public-web/OpenClaw surfaces.
+- The strongest current install lane is still local Ollama. Kimi/Tether/QVAC should not be treated as first-class installed stacks yet.
+- Safe machine reads are intentionally narrow: Desktop, Downloads, and Documents are supported; arbitrary filesystem reads outside the active workspace are not.
 - Broader WAN hardening and some payment/economy claims are still partial or simulated.
 
 ## Troubleshooting

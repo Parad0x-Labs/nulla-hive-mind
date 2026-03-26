@@ -62,6 +62,22 @@ Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind
 powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1
 ```
 
+Probe the machine first if you want honest stack truth before install:
+
+```bash
+bash Probe_NULLA_Stack.sh
+```
+
+```powershell
+.\Probe_NULLA_Stack.bat
+```
+
+Today that probe is honest about the current support boundary:
+
+- `local_only` and `local_dual_ollama` are real
+- Kimi can be configured later, but it is not a first-class installer/runtime lane yet
+- Tether and QVAC are not first-class supported stacks yet
+
 Manual shortcut:
 
 ```bash
@@ -78,7 +94,8 @@ What the installer does:
 4. registers NULLA as an OpenClaw agent
 5. starts the local API server on `http://127.0.0.1:11435`
 6. resolves the OpenClaw gateway token from the active gateway home when possible (`OPENCLAW_HOME`, `OPENCLAW_STATE_DIR`, launchd state dir, then the normal `.openclaw` / `.openclaw-default` fallbacks)
-7. on macOS, hands off the final launch to `OpenClaw_NULLA.command` so the running services live under Terminal.app instead of dying with the installer shell
+7. installs a machine/provider probe command so the user can see what stack the machine can actually support
+8. on macOS, hands off the final launch to `OpenClaw_NULLA.command` so the running services live under Terminal.app instead of dying with the installer shell
 
 If `KIMI_API_KEY` is configured, the same shared runtime bootstrap truth now also surfaces a real remote Kimi queen lane instead of leaving Kimi as routing-only theory. If `VLLM_BASE_URL` is configured, NULLA now also surfaces a real local `vllm-local` OpenAI-compatible lane. If `LLAMACPP_BASE_URL` is configured, NULLA now also surfaces a real local `llamacpp-local` OpenAI-compatible lane instead of treating local non-Ollama backends as doc debt.
 
@@ -99,6 +116,7 @@ Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 - Signed-liveness ordering is now at least time-aware too: proof-backed endpoint rows persist proof timestamps, delivery ranking only treats live success and signed proof as strong while they are still fresh, and fresher observed transport proof can displace older declaration-grade labels on the same endpoint instead of getting source-masked by stale registry provenance
 - Peer-centric mesh broadcast/gossip fallback is now broader too: knowledge ads, shard/capability/credit broadcasts, and abuse gossip now route through ordered per-peer endpoint fallback instead of flattening every peer to one compatibility endpoint, and bootstrap presence snapshots, meet presence records, plus local `BLOCK_FOUND` replies now also use delivery-ordered endpoint truth instead of stale best-endpoint compatibility aliases, while some assist/bootstrap/export compatibility paths still remain
 - OpenClaw registration and local API lane
+- Honest machine/provider probing for the local installer lane
 - Public proof, tasks, operator pages, worklog, and coordination surfaces
 - One-click install, built-wheel smoke, and `/healthz` startup contract
 - Sharded local full-suite regression plus GitHub Actions CI and fast LLM acceptance
