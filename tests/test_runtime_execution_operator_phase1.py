@@ -978,6 +978,125 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
                 "ANSWER = 42\n\n\ndef answer():\n    return ANSWER\n",
             )
 
+    def test_planned_repair_can_patch_imported_literal_binding_after_diagnosis(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            (workspace / "helpers.py").write_text("ANSWER = 41\n", encoding="utf-8")
+            (workspace / "app.py").write_text(
+                "from helpers import ANSWER\n\n\ndef answer():\n    return ANSWER\n",
+                encoding="utf-8",
+            )
+            (workspace / "test_app.py").write_text(
+                "from app import answer\n\n\ndef test_answer():\n    assert answer() == 42\n",
+                encoding="utf-8",
+            )
+
+            validation = plan_tool_workflow(
+                user_text="run `python3 -m pytest -q test_app.py` and fix the failing tests",
+                task_class="debugging",
+                executed_steps=[],
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
+            )
+            validation_result = execute_runtime_tool(
+                validation.next_payload["intent"],
+                dict(validation.next_payload["arguments"]),
+                source_context={"workspace": tmpdir, "session_id": "session-imported-binding-repair"},
+            )
+
+            decision = plan_tool_workflow(
+                user_text="run `python3 -m pytest -q test_app.py` and fix the failing tests",
+                task_class="debugging",
+                executed_steps=[
+                    {
+                        "tool_name": "workspace.run_tests",
+                        "arguments": dict(validation.next_payload["arguments"]),
+                        "observation": dict(validation_result.details["observation"]),
+                    },
+                    {
+                        "tool_name": "workspace.read_file",
+                        "arguments": {"path": "test_app.py", "start_line": 1, "max_lines": 60},
+                        "observation": {
+                            "intent": "workspace.read_file",
+                            "tool_surface": "workspace",
+                            "ok": True,
+                            "status": "executed",
+                            "path": "test_app.py",
+                            "start_line": 1,
+                            "line_count": 4,
+                            "lines": [
+                                {"line_number": 1, "text": "from app import answer"},
+                                {"line_number": 4, "text": "    assert answer() == 42"},
+                            ],
+                        },
+                    },
+                    {
+                        "tool_name": "workspace.symbol_search",
+                        "arguments": {"symbol": "answer", "limit": 10},
+                        "observation": {
+                            "intent": "workspace.symbol_search",
+                            "tool_surface": "workspace",
+                            "ok": True,
+                            "status": "executed",
+                            "symbol": "answer",
+                            "match_count": 3,
+                            "matches": [
+                                {"path": "test_app.py", "line": 1, "kind": "reference", "snippet": "from app import answer"},
+                                {"path": "app.py", "line": 3, "kind": "function_definition", "snippet": "def answer():"},
+                                {"path": "helpers.py", "line": 1, "kind": "reference", "snippet": "ANSWER = 41"},
+                            ],
+                        },
+                    },
+                    {
+                        "tool_name": "workspace.read_file",
+                        "arguments": {"path": "app.py", "start_line": 1, "max_lines": 60},
+                        "observation": {
+                            "intent": "workspace.read_file",
+                            "tool_surface": "workspace",
+                            "ok": True,
+                            "status": "executed",
+                            "path": "app.py",
+                            "start_line": 1,
+                            "line_count": 4,
+                            "lines": [
+                                {"line_number": 1, "text": "from helpers import ANSWER"},
+                                {"line_number": 3, "text": "def answer():"},
+                                {"line_number": 4, "text": "    return ANSWER"},
+                            ],
+                        },
+                    },
+                    {
+                        "tool_name": "workspace.read_file",
+                        "arguments": {"path": "helpers.py", "start_line": 1, "max_lines": 60},
+                        "observation": {
+                            "intent": "workspace.read_file",
+                            "tool_surface": "workspace",
+                            "ok": True,
+                            "status": "executed",
+                            "path": "helpers.py",
+                            "start_line": 1,
+                            "line_count": 1,
+                            "lines": [
+                                {"line_number": 1, "text": "ANSWER = 41"},
+                            ],
+                        },
+                    },
+                ],
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": tmpdir},
+            )
+
+            self.assertTrue(decision.handled)
+            self.assertEqual(decision.reason, "planned_candidate_repair_after_validation_diagnosis")
+            result = execute_runtime_tool(
+                decision.next_payload["intent"],
+                dict(decision.next_payload["arguments"]),
+                source_context={"workspace": tmpdir, "session_id": "session-imported-binding-envelope"},
+            )
+
+            assert result is not None
+            self.assertTrue(result.ok)
+            self.assertEqual(result.status, "completed")
+            self.assertEqual((workspace / "helpers.py").read_text(encoding="utf-8"), "ANSWER = 42\n")
+
     def test_planned_orchestrated_operator_envelope_can_apply_multi_file_diff_and_verify(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir)

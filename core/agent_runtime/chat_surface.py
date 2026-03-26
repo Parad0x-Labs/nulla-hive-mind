@@ -587,7 +587,10 @@ def postprocess_hive_chat_surface_text(
     )
     if any(marker in lowered for marker in hive_concept_hallucination_markers):
         return str(fallback_response or "").strip()
-    if response_value != agent.ResponseClass.TASK_LIST.value:
+    if response_value not in {
+        agent.ResponseClass.TASK_LIST.value,
+        agent.ResponseClass.TASK_SELECTION_CLARIFICATION.value,
+    }:
         return qualified
     topics = [
         dict(item)

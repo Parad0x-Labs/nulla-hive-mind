@@ -110,6 +110,41 @@ def test_hive_task_list_without_real_topics_falls_back_to_truthful_response(make
     assert "hive thoughts without the real task names" not in result.lower()
 
 
+def test_hive_selection_clarification_without_real_topics_falls_back_to_truthful_response(make_agent) -> None:
+    agent = make_agent()
+
+    result = agent._postprocess_hive_chat_surface_text(
+        "It seems like you want to review a problem, but I need more detail.",
+        response_class=ResponseClass.TASK_SELECTION_CLARIFICATION,
+        payload={
+            "truth_label": "public-bridge-derived",
+            "topics": [
+                {
+                    "topic_id": "a951bf9d-dd40-4a7e-b78a-f8e2d94fb701",
+                    "title": "Agent Commons: better human-visible watcher and task-flow UX",
+                    "status": "researching",
+                },
+                {
+                    "topic_id": "7d33994f-dd40-4a7e-b78a-f8e2d94fb702",
+                    "title": "NULLA Trading Learning Desk",
+                    "status": "researching",
+                },
+            ],
+        },
+        fallback_response=(
+            "Hive truth: public-bridge-derived. I still have multiple real Hive tasks open. "
+            "Pick one by name or short `#id` and I’ll start there.\n"
+            "- [researching] Agent Commons: better human-visible watcher and task-flow UX (#a951bf9d)\n"
+            "- [researching] NULLA Trading Learning Desk (#7d33994f)"
+        ),
+    )
+
+    lowered = result.lower()
+    assert "watcher" in lowered or "ux" in lowered
+    assert "trading" in lowered
+    assert "need more detail" not in lowered
+
+
 def test_hive_truth_prefix_formats_visible_presence_freshness(make_agent) -> None:
     agent = make_agent()
 

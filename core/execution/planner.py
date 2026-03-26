@@ -873,6 +873,20 @@ def _infer_literal_candidate_repair(
         prior_path = str(prior_read_hints.get("path") or "").strip()
         if not prior_path or prior_path in {current_path, error_path}:
             continue
+        imported_binding_name = _imported_binding_name_from_path(
+            lines=_read_hint_lines(prior_read_hints),
+            function_name=function_name,
+            current_path=current_path,
+        )
+        if imported_binding_name:
+            imported_binding_repair = _top_level_literal_binding_candidate_repair(
+                lines=current_lines,
+                binding_name=imported_binding_name,
+                expected_literal=expected_literal,
+                current_path=current_path,
+            )
+            if imported_binding_repair is not None:
+                return imported_binding_repair
         delegate_function = _single_delegate_function_name(
             lines=_read_hint_lines(prior_read_hints),
             function_name=function_name,
@@ -962,6 +976,21 @@ def _literal_binding_candidate_repair(
     binding_name = str(binding_return_match.group("name") or "").strip()
     if not binding_name:
         return None
+    return _top_level_literal_binding_candidate_repair(
+        lines=lines,
+        binding_name=binding_name,
+        expected_literal=expected_literal,
+        current_path=current_path,
+    )
+
+
+def _top_level_literal_binding_candidate_repair(
+    *,
+    lines: list[str],
+    binding_name: str,
+    expected_literal: str,
+    current_path: str,
+) -> dict[str, str] | None:
     binding_matches: list[tuple[str, str]] = []
     binding_pattern = re.compile(
         rf"^(?P<name>{re.escape(binding_name)})\s*=\s*(?P<value>-?\d+|True|False|None|'[^']*'|\"[^\"]*\")\s*$"
@@ -983,6 +1012,57 @@ def _literal_binding_candidate_repair(
         "old_text": binding_line.strip(),
         "new_text": f"{binding_name} = {expected_literal}",
     }
+
+
+def _imported_binding_name_from_path(
+    *,
+    lines: list[str],
+    function_name: str,
+    current_path: str,
+) -> str:
+    body_line = _single_function_body_line(lines, function_name)
+    if not body_line:
+        return ""
+    binding_return_match = re.match(r"^\s*return\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*$", body_line)
+    if not binding_return_match:
+        return ""
+    local_binding_name = str(binding_return_match.group("name") or "").strip()
+    if not local_binding_name:
+        return ""
+    path_value = str(current_path or "").strip()
+    if not path_value:
+        return ""
+    module_stem = Path(path_value).with_suffix("").as_posix().replace("/", ".").strip(".")
+    module_variants = {module_stem}
+    if "." in module_stem:
+        module_variants.add(module_stem.split(".")[-1])
+    import_pattern = re.compile(
+        r"^\s*from\s+(?P<module>[A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+(?P<imports>.+?)\s*$"
+    )
+    alias_pattern = re.compile(
+        r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+as\s+(?P<alias>[A-Za-z_][A-Za-z0-9_]*)$"
+    )
+    for raw_line in list(lines or []):
+        if raw_line.startswith((" ", "\t")):
+            continue
+        match = import_pattern.match(raw_line)
+        if not match:
+            continue
+        module_name = str(match.group("module") or "").strip()
+        if module_name not in module_variants:
+            continue
+        imports_text = str(match.group("imports") or "").strip()
+        for part in [item.strip() for item in imports_text.split(",") if item.strip()]:
+            alias_match = alias_pattern.match(part)
+            if alias_match:
+                imported_name = str(alias_match.group("name") or "").strip()
+                local_name = str(alias_match.group("alias") or "").strip()
+                if local_name == local_binding_name:
+                    return imported_name
+                continue
+            if part == local_binding_name:
+                return part
+    return ""
 
 
 def _single_delegate_function_name(*, lines: list[str], function_name: str) -> str:
