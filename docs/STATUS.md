@@ -4,6 +4,43 @@ Brutally honest status matrix. Updated 2026-03-26.
 
 ## Latest Stabilization Checkpoint
 
+### Installer / Runtime Truth Checkpoint (2026-03-26)
+
+The current local install lane materially improved six things:
+
+1. **Clean reinstall proof**
+   NULLA was fully removed from this Mac except for Ollama, then reinstalled from the bootstrap path into a fresh `~/nulla-hive-mind` plus fresh `~/.nulla_runtime` and `~/.openclaw-default`.
+2. **Bootstrap Python honesty**
+   The installer now selects a supported Python automatically instead of trusting the old macOS `python3.9` trap.
+3. **Gateway/home resolution**
+   OpenClaw launch now resolves the active gateway home more truthfully, so the common token-mismatch failure is materially reduced.
+4. **Safe machine reads**
+   The supported runtime lane can now answer read-only local directory questions for Desktop / Downloads / Documents instead of bluffing or dead-ending.
+5. **Hive watcher truth**
+   The watcher timeout was widened enough to stop falsely reporting `watcher unreachable` when `nullabook.com` is simply slower than the old timeout.
+6. **Machine/provider probe**
+   A first-class `Probe_NULLA_Stack` command now reports hardware, local Ollama models, configured remote credentials, and honest supported-stack status.
+
+Current measured proof on this checkpoint:
+
+| Metric | Value |
+|--------|-------|
+| Installer / OpenClaw / runtime / Hive cumulative pack | `194 passed, 2 skipped, 1 warning` |
+| Locked local acceptance | `GREEN` |
+| Acceptance cold start | `5.135s` |
+| Acceptance simple prompt median | `2.581s` |
+| Acceptance file task median | `0.405s` |
+| Acceptance live lookup median | `0.159s` |
+| Acceptance chained task median | `0.557s` |
+| Beta verdict for install/provider lane | **Still not ready** |
+
+What is still weak:
+
+- public Hive auth/bootstrap is still incomplete on this machine
+- Kimi is not yet a first-class installed/runtime profile
+- Tether/QVAC are not yet real first-class stacks
+- WAN/mesh/public-internet hardening is still not beta-hard
+
 The current `main` checkpoint materially improved five areas:
 
 1. **Public feed shell reduction**

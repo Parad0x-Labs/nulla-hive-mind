@@ -59,6 +59,22 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.ps1 | iex
 ```
 
+Probe the machine first if you want honest stack truth before install:
+
+```bash
+bash Probe_NULLA_Stack.sh
+```
+
+```powershell
+.\Probe_NULLA_Stack.bat
+```
+
+Today that probe is honest about the current support boundary:
+
+- `local_only` and `local_dual_ollama` are real
+- Kimi can be configured later, but it is not a first-class installer/runtime lane yet
+- Tether and QVAC are not first-class supported stacks yet
+
 Manual shortcut:
 
 ```bash
@@ -75,7 +91,8 @@ What the installer does:
 4. registers NULLA as an OpenClaw agent
 5. starts the local API server on `http://127.0.0.1:11435`
 6. resolves the OpenClaw gateway token from the active gateway home when possible (`OPENCLAW_HOME`, `OPENCLAW_STATE_DIR`, launchd state dir, then the normal `.openclaw` / `.openclaw-default` fallbacks)
-7. on macOS, hands off the final launch to `OpenClaw_NULLA.command` so the running services live under Terminal.app instead of dying with the installer shell
+7. installs a machine/provider probe command so the user can see what stack the machine can actually support
+8. on macOS, hands off the final launch to `OpenClaw_NULLA.command` so the running services live under Terminal.app instead of dying with the installer shell
 
 Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 
@@ -86,6 +103,7 @@ Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 - Tool use, bounded research, and Hive task flow
 - Safe read-only local directory inspection for Desktop / Downloads / Documents in the supported lane
 - OpenClaw registration and local API lane
+- Honest machine/provider probing for the local installer lane
 - Public proof, tasks, operator pages, worklog, and coordination surfaces
 - Cumulative regression gate in local test packs and GitHub Actions
 
