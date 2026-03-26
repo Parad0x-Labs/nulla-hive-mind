@@ -68,7 +68,8 @@ Core lane:
 - `retrieval/swarm_query.py`: shard/query/capability/credit broadcasts now use peer-centric ordered fallback while targeted shard delivery still goes through direct ordered endpoint selection
 - `core/daemon/messages.py`: abuse-gossip fanout now reuses the same peer-centric fallback seam instead of retrying a single compatibility endpoint tuple
 - `core/maintenance.py`: scheduled bootstrap sync, bounded DHT discovery seeding, and candidate-endpoint probing with cooldown/failure backoff when verified coverage is sparse while still preferring verified endpoints from the authoritative multi-endpoint store first
-- `core/bootstrap_sync.py`: signed bootstrap snapshot export/import seam that now preserves endpoint lists plus best-endpoint compatibility while threading bootstrap proof into discovery state
+- `core/bootstrap_sync.py`: signed bootstrap snapshot export/import seam that now preserves endpoint lists, threads bootstrap proof into discovery state, and exports the compatibility `endpoint` alias from the same ordered delivery targets instead of a stale best-endpoint view
+- `network/assist_router.py`: signed assist ingress and helper-routing seam that now advertises verified peers only for `FIND_NODE`/missing-block replies and uses the best current delivery target when local `BLOCK_FOUND` self-advertising needs a reachable endpoint
 - `network/nat_probe.py`: local vs public NAT classification seam
 - `network/relay_fallback.py`: honest advertised transport-mode selection seam
 - `network/hole_punch.py`: hole-punch connectivity classification and attempt helpers

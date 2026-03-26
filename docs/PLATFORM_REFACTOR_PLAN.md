@@ -795,6 +795,28 @@ pytest -q \
 
 ## Current Beta Execution Frontier
 
+## Beta Execution Checklist
+
+- [ ] **Slice 1: Mesh truth completion**
+  - [ ] finish signed-liveness promotion and expiry rules beyond the current proof-age ordering
+  - [ ] convert remaining assist/bootstrap/export callers off best-endpoint compatibility where delivery truth matters
+  - [ ] add public-internet churn/NAT/relay proof pack instead of relying on trusted-cluster comfort
+- [ ] **Slice 2: Stronger repo-debug execution**
+  - [ ] widen bounded diagnosis from literal/wrapper/import cases into narrow multi-hop failing-test repair flows
+  - [ ] add candidate-repair planning that still fails closed when evidence is weak
+  - [ ] prove rollback/recovery on bad repair branches without workspace corruption
+- [ ] **Slice 3: Queen/coder/verifier hardening**
+  - [ ] classify retry causes instead of blindly retrying
+  - [ ] make merge rules and verifier veto behavior deterministic
+  - [ ] keep task/proof surfaces derived from the real envelope lifecycle state
+- [ ] **Slice 4: Hive quality proof**
+  - [ ] measure remote-shard benefit against task-class counterfactuals, not just reuse events
+  - [ ] only let stronger measured reuse affect ranking and wording
+- [ ] **Slice 5: Beta wedge polish**
+  - [ ] keep installer truth aligned with runtime truth
+  - [ ] make the first successful desktop-first operator run obvious and boring
+  - [ ] keep docs synced to exact runtime truth after every landed slice
+
 - Bounded local repair can now keep diagnosing after a failed repair envelope, but only when the nested verifier failure is explicit and the tracked rollback succeeded. That is deliberate; anything broader would turn into guessy retry spam.
 - That same lane can now take one bounded second repair shot when the post-rollback diagnosis becomes explicit. It still does not get infinite retries, and it still does not guess without concrete read/search evidence.
 - That retry lane also stops obeying stale explicit replacement text from the original prompt once a failed repair envelope has rolled back cleanly. After that point, only the newer diagnosis evidence can justify the next bounded patch attempt.
@@ -807,6 +829,7 @@ pytest -q \
 - Delivery targeting now also distinguishes live mesh proof from registry proof: recent successful sends and signed observed ingress can outrank signed API/bootstrap declarations when NULLA chooses actual delivery targets, while the older best-endpoint compatibility helpers remain deterministic for export and legacy paths.
 - Non-daemon broadcast/gossip callers are now a little less fake too: `core/knowledge_advertiser.py`, `retrieval/swarm_query.py`, and `core/daemon/messages.py` now reuse peer-centric ordered fallback instead of flattening every peer to one compatibility endpoint before fanout.
 - Signed liveness is now a little less fake too: verified endpoint rows persist `proof_timestamp`, older databases backfill it during migration instead of silently aging blind forever, delivery ordering only treats live success and signed proof as strong while they remain fresh, and fresher observed protocol proof on the same endpoint can now displace stale declaration-grade labels instead of losing transport truth behind an older `api` or `bootstrap` source.
+- Assist/bootstrap delivery export is now a little less fake too: `core/bootstrap_sync.py` now exports both `endpoints` and the legacy `endpoint` alias from `delivery_targets_for_peer(...)`, and `network/assist_router.py` now uses the same ordered verified-target seam when local `BLOCK_FOUND` replies advertise where the block actually lives instead of reusing a stale best-endpoint compatibility alias.
 - Provider routing truth is now a little less fake too: capability snapshots now carry availability state from recent provider health, circuit-open lanes get rejected instead of ranked like live candidates, and degraded lanes take a real routing penalty instead of hiding behind the same config-only manifest truth as healthy providers.
 - The next real gaps are still multi-hop repo debugging, deeper queen/coder/verifier retry-and-merge behavior, provider rollout beyond the current contract truth, stronger measured Hive-reuse impact on completion quality beyond task-class-scoped proof, and WAN/DHT hardening around firmer signed-liveness promotion rules beyond local send memory, the remaining assist/bootstrap/export callers that still lean on compatibility endpoint views, and public-internet churn.
 

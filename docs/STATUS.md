@@ -306,12 +306,14 @@ The current `main` checkpoint materially improved one hundred and forty-seven ar
    Broader mesh fanout no longer flattens every peer to one compatibility endpoint before sending. `core/knowledge_advertiser.py`, `retrieval/swarm_query.py`, and `core/daemon/messages.py` now all route hello/capability/query/credit/abuse-gossip fanout through `core/daemon/peer_delivery.py`, so those broadcast paths reuse the same ordered per-peer endpoint fallback and delivery writeback seam as the daemon task lanes. This is materially less fake, but assist/bootstrap/export compatibility paths still are not fully converted.
 150. **Proof-age-aware signed-liveness baseline**
    Verified endpoint truth no longer treats any signed proof or old delivery success as indefinitely live. `core/discovery_index.py` now persists `proof_timestamp` on authoritative `peer_endpoints` rows, backfills that field for both rebuilt legacy stores and already-multi-endpoint databases, limits strong liveness credit to recent delivery success and recent signed proof windows, and lets fresher observed protocol proof on the same endpoint displace stale declaration-grade `api`/`bootstrap` labels instead of hiding transport truth behind older provenance.
+151. **Bootstrap/assist delivery-export baseline**
+   Bootstrap presence snapshots and local assist self-advertising no longer export stale best-endpoint compatibility aliases when they actually need a real delivery target. `core/bootstrap_sync.py` now emits its `endpoints` list and legacy `endpoint` alias from `delivery_targets_for_peer(...)` instead of `endpoint_for_peer()`, and `network/assist_router.py` now uses that same ordered verified-target seam when local `BLOCK_FOUND` replies advertise where the block really lives. That is materially more honest, but broader assist/bootstrap/export compatibility callers still are not fully converted.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1556 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1563 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
