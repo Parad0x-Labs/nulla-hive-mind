@@ -10,6 +10,7 @@ from core.learning import record_procedure_reuse
 from core.runtime_execution_tools import RuntimeExecutionResult, execute_runtime_tool
 from core.runtime_tool_contracts import runtime_tool_contract_map
 
+from .proof_events import build_envelope_event_context, emit_task_envelope_event, receipt_type_list
 from .resource_scheduler import evaluate_task_envelope_capacity, schedule_task_envelopes
 from .result_merge import merge_task_results
 from .role_contracts import get_role_contract
@@ -53,6 +54,18 @@ def execute_task_envelope(
     if active_graph.get(envelope.task_id) is None:
         active_graph.add_task(envelope)
     active_graph.mark_status(envelope.task_id, "running")
+    event_context = build_envelope_event_context(source_context=source_context, session_id=session_id)
+    emit_task_envelope_event(
+        event_context,
+        envelope,
+        event_type="task_envelope_started",
+        message=f"{envelope.role} envelope `{envelope.task_id}` started.",
+        details={
+            "merge_strategy": envelope.merge_strategy,
+            "required_receipts": list(envelope.required_receipts),
+            "tool_permissions": list(envelope.tool_permissions),
+        },
+    )
     if envelope.role == "queen":
         result = _execute_queen_envelope(
             envelope,
@@ -60,6 +73,7 @@ def execute_task_envelope(
             workspace_root=workspace_root,
             session_id=session_id,
             source_context=source_context,
+            event_context=event_context,
             runtime_tool_executor=runtime_tool_executor,
             child_executor=child_executor,
         )
@@ -69,11 +83,30 @@ def execute_task_envelope(
             workspace_root=workspace_root,
             session_id=session_id,
             source_context=source_context,
+            event_context=event_context,
             runtime_tool_executor=runtime_tool_executor,
         )
     active_graph.mark_status(envelope.task_id, "completed" if result.ok else "failed", result=result.merge_payload())
     if "graph" in result.details:
         result.details["graph"] = _graph_snapshot(active_graph)
+    emit_task_envelope_event(
+        event_context,
+        envelope,
+        event_type="task_envelope_completed" if result.ok else "task_envelope_failed",
+        message=(
+            f"{envelope.role} envelope `{envelope.task_id}` completed."
+            if result.ok
+            else f"{envelope.role} envelope `{envelope.task_id}` failed."
+        ),
+        details={
+            "status": result.status,
+            "ok": result.ok,
+            "receipt_types": receipt_type_list(result.receipts),
+            "graph_status": "completed" if result.ok else "failed",
+            "step_count": len(list(result.details.get("step_results") or [])),
+            "winner_task_id": str(result.details.get("merged_result", {}).get("winner", {}).get("task_id") or ""),
+        },
+    )
     return _attach_reused_procedure_metrics(result)
 
 
@@ -83,12 +116,20 @@ def _execute_worker_envelope(
     workspace_root: str | None,
     session_id: str | None,
     source_context: dict[str, Any] | None,
+    event_context: dict[str, Any] | None,
     runtime_tool_executor: Callable[[str, dict[str, Any], dict[str, Any] | None], RuntimeExecutionResult] | None,
 ) -> EnvelopeExecutionResult:
     contract = get_role_contract(envelope.role)
     capacity_state = evaluate_task_envelope_capacity(envelope)
     if capacity_state.availability_state == "blocked":
         reason = ", ".join(capacity_state.notes) or "provider capacity gate blocked this task"
+        emit_task_envelope_event(
+            event_context,
+            envelope,
+            event_type="task_envelope_capacity_blocked",
+            message=f"{envelope.role} envelope `{envelope.task_id}` is blocked by capacity policy.",
+            details={"status": "capacity_blocked", "capacity_state": capacity_state.to_dict()},
+        )
         return EnvelopeExecutionResult(
             envelope=envelope,
             ok=False,
@@ -125,6 +166,8 @@ def _execute_worker_envelope(
         "task_class": str(envelope.inputs.get("task_class") or ""),
         "task_envelope": envelope.to_dict(),
     }
+    if event_context is not None:
+        active_context["runtime_session_id"] = str(event_context.get("runtime_session_id") or "").strip()
     for index, step in enumerate(steps):
         step_id = str(step.get("step_id") or f"step-{index + 1}").strip()
         if not step_id:
@@ -232,6 +275,25 @@ def _execute_worker_envelope(
         }
         step_results.append(step_payload)
         step_results_by_id[step_id] = step_payload
+        emit_task_envelope_event(
+            event_context,
+            envelope,
+            event_type="task_envelope_step_completed" if runtime_result.ok else "task_envelope_step_failed",
+            message=(
+                f"{envelope.role} envelope `{envelope.task_id}` ran `{intent}`."
+                if runtime_result.ok
+                else f"{envelope.role} envelope `{envelope.task_id}` failed while running `{intent}`."
+            ),
+            details={
+                "status": runtime_result.status,
+                "ok": runtime_result.ok,
+                "step_id": step_id,
+                "step_index": index,
+                "intent": intent,
+                "allow_failure": allow_failure,
+                "failure_allowed": bool(allow_failure and not runtime_result.ok),
+            },
+        )
         if "observation" in runtime_result.details:
             receipts.append(
                 {
@@ -258,6 +320,7 @@ def _execute_worker_envelope(
                 envelope,
                 failed_intent=intent,
                 active_context=active_context,
+                event_context=event_context,
                 execute_tool=execute_tool,
                 receipts=receipts,
                 step_results=step_results,
@@ -285,6 +348,17 @@ def _execute_worker_envelope(
 
     missing_receipts = _missing_required_receipts(envelope, receipts)
     if missing_receipts:
+        emit_task_envelope_event(
+            event_context,
+            envelope,
+            event_type="task_envelope_missing_receipts",
+            message=f"{envelope.role} envelope `{envelope.task_id}` finished without required receipts.",
+            details={
+                "status": "missing_required_receipts",
+                "missing_receipts": list(missing_receipts),
+                "receipt_types": receipt_type_list(receipts),
+            },
+        )
         return EnvelopeExecutionResult(
             envelope=envelope,
             ok=False,
@@ -322,11 +396,19 @@ def _execute_queen_envelope(
     workspace_root: str | None,
     session_id: str | None,
     source_context: dict[str, Any] | None,
+    event_context: dict[str, Any] | None,
     runtime_tool_executor: Callable[[str, dict[str, Any], dict[str, Any] | None], RuntimeExecutionResult] | None,
     child_executor: Callable[[TaskEnvelopeV1], EnvelopeExecutionResult] | None,
 ) -> EnvelopeExecutionResult:
     children = _child_envelopes(envelope)
     if not children:
+        emit_task_envelope_event(
+            event_context,
+            envelope,
+            event_type="task_envelope_missing_subtasks",
+            message=f"queen envelope `{envelope.task_id}` has no child envelopes.",
+            details={"status": "missing_subtasks"},
+        )
         return EnvelopeExecutionResult(
             envelope=envelope,
             ok=False,
@@ -340,6 +422,13 @@ def _execute_queen_envelope(
 
     scheduled, dependency_error = _schedule_child_envelopes(children)
     if dependency_error is not None:
+        emit_task_envelope_event(
+            event_context,
+            envelope,
+            event_type="task_envelope_dependency_blocked",
+            message=dependency_error["message"],
+            details={"status": "dependency_blocked", "dependency_error": dependency_error},
+        )
         return EnvelopeExecutionResult(
             envelope=envelope,
             ok=False,
@@ -350,6 +439,13 @@ def _execute_queen_envelope(
                 "dependency_error": dependency_error,
             },
         )
+    emit_task_envelope_event(
+        event_context,
+        envelope,
+        event_type="task_envelope_children_scheduled",
+        message=f"queen envelope `{envelope.task_id}` scheduled child envelopes.",
+        details={"scheduled_children": [item.task_id for item in scheduled]},
+    )
     ordered_children = {child.task_id: child for child in children}
     child_results: list[EnvelopeExecutionResult] = []
     child_result_map: dict[str, EnvelopeExecutionResult] = {}
@@ -382,6 +478,13 @@ def _execute_queen_envelope(
                 ),
                 details={"blocked_by": blocked_dependencies},
             )
+            emit_task_envelope_event(
+                event_context,
+                child,
+                event_type="task_envelope_dependency_failed",
+                message=child_result.output_text,
+                details={"status": child_result.status, "blocked_by": list(blocked_dependencies)},
+            )
         else:
             restore_step, restore_error = _maybe_restore_workspace_before_child(
                 child,
@@ -389,6 +492,7 @@ def _execute_queen_envelope(
                 workspace_root=workspace_root,
                 session_id=session_id,
                 source_context=source_context,
+                event_context=event_context,
                 execute_tool=runtime_tool_executor or _runtime_tool_executor,
             )
             if restore_error is not None:
@@ -400,6 +504,21 @@ def _execute_queen_envelope(
         graph.mark_status(child.task_id, "completed" if child_result.ok else "failed", result=child_result.merge_payload())
         child_results.append(child_result)
         child_result_map[child.task_id] = child_result
+        emit_task_envelope_event(
+            event_context,
+            child,
+            event_type="task_envelope_completed" if child_result.ok else "task_envelope_failed",
+            message=(
+                f"{child.role} envelope `{child.task_id}` completed under queen coordination."
+                if child_result.ok
+                else f"{child.role} envelope `{child.task_id}` failed under queen coordination."
+            ),
+            details={
+                "status": child_result.status,
+                "ok": child_result.ok,
+                "receipt_types": receipt_type_list(child_result.receipts),
+            },
+        )
 
     merged = merge_task_results(envelope, [item.merge_payload() for item in child_results])
     ok = bool(merged.get("ok", False))
@@ -409,6 +528,22 @@ def _execute_queen_envelope(
         output_text = str(merged.get("text") or "").strip()
     if not output_text:
         output_text = "queen envelope completed merge." if ok else "queen envelope failed to merge child results."
+    emit_task_envelope_event(
+        event_context,
+        envelope,
+        event_type="task_envelope_merge_completed" if ok else "task_envelope_merge_failed",
+        message=(
+            f"queen envelope `{envelope.task_id}` merged child results."
+            if ok
+            else f"queen envelope `{envelope.task_id}` failed to merge child results."
+        ),
+        details={
+            "status": "completed" if ok else "merge_failed",
+            "ok": ok,
+            "scheduled_children": [item.task_id for item in scheduled],
+            "winner_task_id": str(merged.get("winner", {}).get("task_id") or ""),
+        },
+    )
     return EnvelopeExecutionResult(
         envelope=envelope,
         ok=ok,
@@ -462,6 +597,7 @@ def _maybe_restore_workspace_before_child(
     workspace_root: str | None,
     session_id: str | None,
     source_context: dict[str, Any] | None,
+    event_context: dict[str, Any] | None,
     execute_tool: Callable[[str, dict[str, Any], dict[str, Any] | None], RuntimeExecutionResult],
 ) -> tuple[dict[str, Any] | None, EnvelopeExecutionResult | None]:
     if not blocked_dependencies or not _restore_workspace_before_run(envelope):
@@ -488,22 +624,32 @@ def _maybe_restore_workspace_before_child(
         restore_session_id = candidate_session_id
         break
     if not restore_session_id:
-        return (
-            {
-                "intent": "workspace.rollback_last_change",
+        restore_step = {
+            "intent": "workspace.rollback_last_change",
+            "status": "skipped",
+            "ok": True,
+            "response_text": "No tracked workspace mutation needed rollback before the recovery attempt.",
+            "triggered_by": list(blocked_dependencies),
+            "details": {
+                "blocked_by": list(blocked_dependencies),
+                "restored_paths": [],
+                "removed_paths": [],
+                "restore_session_id": "",
+            },
+        }
+        emit_task_envelope_event(
+            event_context,
+            envelope,
+            event_type="task_envelope_restore_completed",
+            message=f"{envelope.role} envelope `{envelope.task_id}` did not need workspace restore before retry.",
+            details={
                 "status": "skipped",
                 "ok": True,
-                "response_text": "No tracked workspace mutation needed rollback before the recovery attempt.",
-                "triggered_by": list(blocked_dependencies),
-                "details": {
-                    "blocked_by": list(blocked_dependencies),
-                    "restored_paths": [],
-                    "removed_paths": [],
-                    "restore_session_id": "",
-                },
+                "blocked_by": list(blocked_dependencies),
+                "restore_session_id": "",
             },
-            None,
         )
+        return restore_step, None
 
     restore_context = {
         **dict(source_context or {}),
@@ -528,7 +674,34 @@ def _maybe_restore_workspace_before_child(
         },
     }
     if rollback_result.ok:
+        emit_task_envelope_event(
+            event_context,
+            envelope,
+            event_type="task_envelope_restore_completed",
+            message=f"{envelope.role} envelope `{envelope.task_id}` restored workspace state before retry.",
+            details={
+                "status": rollback_result.status,
+                "ok": True,
+                "blocked_by": list(blocked_dependencies),
+                "restore_session_id": restore_session_id,
+            },
+        )
         return restore_step, None
+    emit_task_envelope_event(
+        event_context,
+        envelope,
+        event_type="task_envelope_restore_failed",
+        message=(
+            f"{envelope.role} envelope `{envelope.task_id}` could not restore the workspace before recovery: "
+            f"{rollback_result.response_text}"
+        ).strip(),
+        details={
+            "status": "restore_failed",
+            "ok": False,
+            "blocked_by": list(blocked_dependencies),
+            "restore_session_id": restore_session_id,
+        },
+    )
     return None, EnvelopeExecutionResult(
         envelope=envelope,
         ok=False,
@@ -585,6 +758,7 @@ def _maybe_rollback_after_failure(
     *,
     failed_intent: str,
     active_context: dict[str, Any],
+    event_context: dict[str, Any] | None,
     execute_tool: Callable[[str, dict[str, Any], dict[str, Any] | None], RuntimeExecutionResult],
     receipts: list[dict[str, Any]],
     step_results: list[dict[str, Any]],
@@ -607,6 +781,23 @@ def _maybe_rollback_after_failure(
         "triggered_by": failed_intent,
     }
     step_results.append(rollback_step)
+    emit_task_envelope_event(
+        event_context,
+        envelope,
+        event_type="task_envelope_rollback_completed" if rollback_result.ok else "task_envelope_rollback_failed",
+        message=(
+            f"{envelope.role} envelope `{envelope.task_id}` rolled back the last workspace mutation after failed validation."
+            if rollback_result.ok
+            else f"{envelope.role} envelope `{envelope.task_id}` failed to roll back after failed validation."
+        ),
+        details={
+            "status": rollback_result.status,
+            "ok": rollback_result.ok,
+            "intent": "workspace.rollback_last_change",
+            "triggered_by": failed_intent,
+            "step_id": rollback_step["step_id"],
+        },
+    )
     if "observation" in rollback_result.details:
         receipts.append(
             {

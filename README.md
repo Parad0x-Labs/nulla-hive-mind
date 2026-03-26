@@ -11,7 +11,7 @@ The public web, Hive, and OpenClaw are access and inspection surfaces around tha
 
 Current state:
 
-- Real now: local runtime, memory, tools, bounded research, Hive task flow, and public proof/work surfaces.
+- Real now: local runtime, memory, tools, bounded research, bounded local operator execution with append-only task/proof events, Hive task flow, and public proof/work surfaces.
 - Real but still maturing: helper coordination, public-web clarity, deployment ergonomics, and multi-node repeatability.
 - Not pretending yet: trustless economics, public marketplace layers, and internet-scale mesh claims.
 - Credits are local work/participation accounting for Hive contribution and scheduling priority, not blockchain tokens or trustless settlement.
@@ -89,6 +89,7 @@ Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 - Persistent memory and context carryover
 - Tool use, bounded research, and Hive task flow
 - Bounded coding/operator repair flow for concrete repo edits, including search/read/patch/validate, preflight failing-test capture, narrow diagnosis-to-repair promotion, and fail-closed rollback/recovery isolation
+- Append-only runtime task/proof event spine for bounded local envelope execution, so repair/orchestration lifecycle truth is no longer trapped inside executor-local details
 - Role-aware provider routing for local drone lanes vs higher-tier synthesis lanes
 - OpenClaw registration and local API lane
 - Public proof, tasks, operator pages, worklog, and coordination surfaces

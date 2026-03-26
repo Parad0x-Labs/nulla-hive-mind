@@ -223,7 +223,7 @@ Core lane:
 - `core/runtime_task_rail_client.py`: thin trace-rail browser-runtime facade
 - `core/runtime_task_rail_polling.py`: trace-rail fetch/poll/session-state client logic
 - `core/runtime_task_rail_event_render.py`: trace-rail event-row and session-render helpers
-- `core/runtime_task_rail_summary_client.py`: trace-rail session summary derivation and stage/status shaping
+- `core/runtime_task_rail_summary_client.py`: trace-rail session summary derivation and stage/status shaping, now aware of bounded envelope lifecycle events
 - `core/runtime_task_events.py`: runtime session/event store and list helpers
 - `core/web/api/service.py`: `/trace`, `/task-rail`, and `/api/runtime/*` frontdoor
 
@@ -238,14 +238,15 @@ Core lane:
 - `core/memory_first_router.py`: main model execution router that now honors provider-role routing for slow-lane synthesis and tool-intent selection
 - `core/runtime_tool_contracts.py`: authoritative runtime intent contract map for workspace, git, validation, envelope orchestration, sandbox, Hive, web, and operator execution
 - `core/runtime_execution_tools.py`: coding/operator execution surface for workspace inspection, diff patching, git status/diff, bounded validation, rollback, emitted artifacts, bounded `orchestration.execute_envelope` execution, validation-failure and symbol-search followup hints, and fresh-timestamp writes that stay honest across repeated same-size rewrites
+- `core/runtime_continuity.py`: append-only runtime session/receipt/event store plus normalized status derivation for task, tool, and envelope lifecycle events
 - `core/execution/workspace_tools.py`: workspace tree, symbol search, and strict unified-diff patch helpers that prefer full Python application before shell `patch` and now preserve fresh source mtimes across repeated write cycles
 - `core/execution/git_tools.py`: bounded git status/diff helpers
 - `core/execution/validation_tools.py`: bounded test/lint/format command helpers and result shaping
 - `core/execution/artifacts.py`: diff, command, failure, mutation-history, and rollback/procedure-link artifacts, including rollback-time source timestamp hardening for repeated recovery attempts
 - `core/execution/planner.py`: workflow planner for research/operator/hive flows, including the bounded search/read/patch/validate envelope path, raw fenced unified-diff repair planning, preflight failing-test repair planning for clear repo edit requests, validation-result followup planning into inspect/symbol-search/text-search steps that can continue past the first file read and across the next unread repo matches, narrow candidate-repair promotion from explicit diagnosis evidence, same-file literal-binding repair promotion for `NAME = <literal>` plus `return NAME`, one-hop delegated-helper repair promotion when the literal fix stays explicit, one explicit second-hop delegate lookup after reading a trivial wrapper like `return helper()`, one-hop imported-binding repair promotion when the already-read implementation imports a single explicit literal binding from the current helper/module, rollback-on-failure verifier planning for bounded repairs, post-rollback followthrough when a failed repair envelope leaves clean validation evidence behind, one bounded second repair envelope when that post-rollback diagnosis becomes explicit enough to retry safely, and stale-prompt suppression so a rolled-back failed repair no longer replays the original bad literal replacement on the next bounded attempt
-- `core/orchestration/executor.py`: local queen/coder/verifier executor, including fail-closed verifier rollback for bounded repair envelopes that opt into tracked cleanup and dependency-session restore before explicitly-marked fallback retries
 - `core/orchestration/task_envelope.py`: `TaskEnvelopeV1` schema and role-default builder
-- `core/orchestration/executor.py`: bounded local queen/coder/verifier envelope executor with permission enforcement, validation-only preflight failure capture, capacity-blocked worker fail-closed behavior, dependency-aware child ordering, explicit fallback-child recovery after failed dependencies, tracked workspace restore before recovery retries, step-to-step runtime reference resolution, and persisted procedure-reuse metrics
+- `core/orchestration/executor.py`: bounded local queen/coder/verifier envelope executor with permission enforcement, validation-only preflight failure capture, capacity-blocked worker fail-closed behavior, dependency-aware child ordering, explicit fallback-child recovery after failed dependencies, tracked workspace restore before recovery retries, step-to-step runtime reference resolution, persisted procedure-reuse metrics, and append-only `task_envelope_*` lifecycle/proof emission into the shared runtime continuity store
+- `core/orchestration/proof_events.py`: thin envelope-to-runtime-event adapter that keeps bounded orchestration lifecycle/proof emission on the existing runtime event spine instead of inventing a second ledger
 - `core/orchestration/role_contracts.py`: queen/coder/verifier/researcher/memory-clerk/narrator contracts
 - `core/orchestration/resource_scheduler.py`: capacity-state evaluation plus queue-pressure/locality-aware envelope scheduling helpers
 - `core/orchestration/task_graph.py`: task-graph node/status model

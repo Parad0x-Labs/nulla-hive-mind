@@ -8,6 +8,13 @@ from unittest import mock
 from core.learning import load_procedure_shards, promote_verified_procedure
 from core.orchestration import EnvelopeExecutionResult, build_task_envelope, execute_task_envelope
 from core.runtime_execution_tools import RuntimeExecutionResult, execute_runtime_tool
+from core.runtime_task_events import (
+    configure_runtime_event_store,
+    list_runtime_session_events,
+    list_runtime_sessions,
+    reset_runtime_event_state,
+)
+from storage.migrations import run_migrations
 
 
 class OrchestrationExecutionPhase1Tests(unittest.TestCase):
@@ -53,6 +60,76 @@ class OrchestrationExecutionPhase1Tests(unittest.TestCase):
             self.assertIn("tool_receipt", receipt_types)
             self.assertIn("validation_result", receipt_types)
             self.assertEqual(len(result.details["step_results"]), 2)
+
+    def test_execute_task_envelope_emits_append_only_runtime_events_for_worker_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            db_path = workspace / "runtime-events.db"
+            run_migrations(db_path=db_path)
+            configure_runtime_event_store(str(db_path))
+            reset_runtime_event_state()
+            try:
+                (workspace / "app.py").write_text("def answer():\n    return 41\n", encoding="utf-8")
+                (workspace / "test_app.py").write_text(
+                    "from app import answer\n\n\ndef test_answer():\n    assert answer() == 42\n",
+                    encoding="utf-8",
+                )
+                patch_text = "\n".join(
+                    [
+                        "--- a/app.py",
+                        "+++ b/app.py",
+                        "@@ -1,2 +1,2 @@",
+                        " def answer():",
+                        "-    return 41",
+                        "+    return 42",
+                        "",
+                    ]
+                )
+                envelope = build_task_envelope(
+                    role="coder",
+                    task_id="coder-proof-worker",
+                    goal="Patch and validate the answer function",
+                    inputs={
+                        "task_class": "debugging",
+                        "runtime_tools": [
+                            {"step_id": "patch", "intent": "workspace.apply_unified_diff", "arguments": {"patch": patch_text}},
+                            {
+                                "step_id": "verify",
+                                "intent": "workspace.run_tests",
+                                "arguments": {"command": "python3 -m pytest -q test_app.py"},
+                            },
+                        ],
+                    },
+                    required_receipts=("tool_receipt", "validation_result"),
+                )
+
+                result = execute_task_envelope(
+                    envelope,
+                    workspace_root=tmpdir,
+                    session_id="openclaw:proof-worker",
+                )
+
+                self.assertTrue(result.ok)
+                sessions = list_runtime_sessions(limit=10)
+                self.assertEqual(sessions[0]["session_id"], "openclaw:proof-worker")
+                self.assertEqual(sessions[0]["request_preview"], "Patch and validate the answer function")
+                self.assertEqual(sessions[0]["status"], "completed")
+                events = list_runtime_session_events("openclaw:proof-worker", after_seq=0, limit=20)
+                self.assertEqual(
+                    [item["event_type"] for item in events],
+                    [
+                        "task_envelope_started",
+                        "task_envelope_step_completed",
+                        "task_envelope_step_completed",
+                        "task_envelope_completed",
+                    ],
+                )
+                self.assertEqual(events[1]["intent"], "workspace.apply_unified_diff")
+                self.assertEqual(events[2]["intent"], "workspace.run_tests")
+                self.assertEqual(events[3]["receipt_types"], ["tool_receipt", "validation_result"])
+            finally:
+                reset_runtime_event_state()
+                configure_runtime_event_store(None)
 
     def test_coder_envelope_fails_closed_when_required_validation_receipt_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -261,6 +338,78 @@ class OrchestrationExecutionPhase1Tests(unittest.TestCase):
         self.assertEqual(graph_rows["queen-parent"]["status"], "failed")
         self.assertEqual(graph_rows["coder-child"]["status"], "completed")
         self.assertEqual(graph_rows["verify-child"]["status"], "failed")
+
+    def test_execute_task_envelope_emits_merge_and_child_runtime_events_for_queen_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            db_path = workspace / "runtime-events.db"
+            run_migrations(db_path=db_path)
+            configure_runtime_event_store(str(db_path))
+            reset_runtime_event_state()
+            try:
+                coder = build_task_envelope(
+                    role="coder",
+                    task_id="coder-child",
+                    parent_task_id="queen-parent",
+                    goal="Patch the code",
+                    latency_budget="deep",
+                )
+                verifier = build_task_envelope(
+                    role="verifier",
+                    task_id="verify-child",
+                    parent_task_id="queen-parent",
+                    goal="Validate the patch",
+                    latency_budget="low_latency",
+                )
+                queen = build_task_envelope(
+                    role="queen",
+                    task_id="queen-parent",
+                    goal="Coordinate patch and verification",
+                    merge_strategy="highest_score",
+                    inputs={"subtasks": [coder.to_dict(), verifier.to_dict()]},
+                )
+
+                def _child_executor(child: object) -> EnvelopeExecutionResult:
+                    envelope = child if hasattr(child, "role") else verifier
+                    if envelope.role == "verifier":
+                        return EnvelopeExecutionResult(
+                            envelope=envelope,
+                            ok=True,
+                            status="completed",
+                            output_text="Validated patch and tests passed.",
+                            receipts=({"receipt_type": "validation_result", "ok": True},),
+                            details={"score": 0.95},
+                        )
+                    return EnvelopeExecutionResult(
+                        envelope=envelope,
+                        ok=True,
+                        status="completed",
+                        output_text="Applied patch.",
+                        receipts=({"receipt_type": "tool_receipt", "ok": True},),
+                        details={"score": 0.55},
+                    )
+
+                result = execute_task_envelope(
+                    queen,
+                    session_id="openclaw:proof-queen",
+                    child_executor=_child_executor,
+                )
+
+                self.assertTrue(result.ok)
+                sessions = list_runtime_sessions(limit=10)
+                self.assertEqual(sessions[0]["status"], "completed")
+                events = list_runtime_session_events("openclaw:proof-queen", after_seq=0, limit=20)
+                event_types = [item["event_type"] for item in events]
+                self.assertIn("task_envelope_children_scheduled", event_types)
+                self.assertIn("task_envelope_merge_completed", event_types)
+                merge_event = next(item for item in events if item["event_type"] == "task_envelope_merge_completed")
+                self.assertEqual(merge_event["winner_task_id"], "verify-child")
+                child_events = [item for item in events if item["task_id"] in {"coder-child", "verify-child"}]
+                self.assertEqual(len(child_events), 2)
+                self.assertTrue(all(item["event_type"] == "task_envelope_completed" for item in child_events))
+            finally:
+                reset_runtime_event_state()
+                configure_runtime_event_store(None)
 
     def test_queen_envelope_respects_child_dependencies_for_real_runtime_steps(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

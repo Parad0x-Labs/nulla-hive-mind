@@ -39,14 +39,14 @@ function buildSummary(session, events) {
     if (event.claim_id) claimId = String(event.claim_id);
     if (event.result_status) resultStatus = String(event.result_status);
     if (event.post_id) postId = String(event.post_id);
-    if (event.tool_name) latestTool = String(event.tool_name);
+    if (event.tool_name || event.intent) latestTool = String(event.tool_name || event.intent);
     if (event.message) lastMessage = String(event.message);
     if (event.status) activeStatus = String(event.status);
     if (!stopReason && event.stop_reason) stopReason = String(event.stop_reason);
     if (!stopReason && event.loop_stop_reason) stopReason = String(event.loop_stop_reason);
     if (!stopReason && event.final_stop_reason) stopReason = String(event.final_stop_reason);
 
-    if (event.event_type === 'task_received') stages.received = true;
+    if (event.event_type === 'task_received' || event.event_type === 'task_envelope_started') stages.received = true;
     if (event.claim_id || event.tool_name === 'hive.claim_task') stages.claimed = true;
     if (event.artifact_id) {
       artifactIds.add(String(event.artifact_id));
@@ -65,7 +65,7 @@ function buildSummary(session, events) {
     }
     if (event.tool_name === 'liquefy.pack_research_packet') stages.packet = true;
     if (event.tool_name === 'liquefy.pack_research_bundle') stages.bundle = true;
-    if (event.tool_name === 'hive.submit_result' || event.event_type === 'task_completed') stages.result = true;
+    if (event.tool_name === 'hive.submit_result' || event.event_type === 'task_completed' || event.event_type === 'task_envelope_completed' || event.event_type === 'task_envelope_merge_completed') stages.result = true;
     if (event.candidate_id) candidateIds.add(String(event.candidate_id));
     if (event.candidate_count != null) candidateCount = Math.max(candidateCount, Number(event.candidate_count) || 0);
     if (event.query_count != null) queryCount = Math.max(queryCount, Number(event.query_count) || 0);

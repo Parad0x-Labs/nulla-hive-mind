@@ -18,6 +18,7 @@ Current execution truth:
 - workspace/git/validation actions are explicit runtime intents, not shell-only folklore
 - `orchestration.execute_envelope` is now a real bounded runtime intent for local queen/coder/verifier execution
 - queen envelope execution now respects child dependency order instead of blindly following latency sort order
+- bounded envelope execution now also emits append-only `task_envelope_*` lifecycle/proof events through the existing runtime continuity store, so task-rail and operator proof/status surfaces can derive the same start, step, dependency, rollback, merge, and final-result truth instead of inventing an executor-local ledger
 - envelope-aware provider routing now fails closed for local-private or mutating coder work without a local lane, and it penalizes saturated candidates instead of blindly taking the first ranked provider
 - that same provider-routing truth is now health-aware too: `ProviderCapabilityTruth` carries blocked-vs-degraded availability from recent provider health, circuit-open lanes get rejected instead of ranked like live options, and degraded lanes take a real routing penalty instead of hiding behind config-only optimism
 - envelope scheduling now also understands attached provider-capability truth: queue pressure degrades lane priority, incompatible worker lanes can fail closed with `capacity_blocked`, and queen execution exposes scheduling details instead of only child order
@@ -85,6 +86,7 @@ Current execution truth:
 - typed orchestration:
   - `orchestration/task_envelope.py`
   - `orchestration/executor.py`
+  - `orchestration/proof_events.py`
   - `orchestration/role_contracts.py`
   - `orchestration/resource_scheduler.py`
   - `orchestration/task_graph.py`

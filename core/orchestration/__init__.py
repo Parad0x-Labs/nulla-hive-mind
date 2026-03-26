@@ -1,5 +1,6 @@
 from .cancel_resume import request_cancellation, resume_task
 from .executor import EnvelopeExecutionResult, execute_task_envelope
+from .proof_events import build_envelope_event_context, emit_task_envelope_event, receipt_type_list
 from .resource_scheduler import (
     ScheduledTask,
     TaskCapacityState,
@@ -20,12 +21,15 @@ __all__ = [
     "TaskGraphNode",
     "TaskRole",
     "all_role_contracts",
+    "build_envelope_event_context",
     "build_task_envelope",
+    "emit_task_envelope_event",
     "evaluate_task_envelope_capacity",
     "execute_task_envelope",
     "get_role_contract",
     "merge_task_results",
     "provider_role_for_task_role",
+    "receipt_type_list",
     "request_cancellation",
     "resume_task",
     "schedule_task_envelopes",

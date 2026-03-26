@@ -790,15 +790,42 @@ def _normalize_for_hash(value: Any) -> Any:
 
 def _event_status(event_type: str) -> str:
     lowered = str(event_type or "").strip().lower()
-    if lowered in {"tool_failed", "task_failed"}:
+    if lowered in {
+        "tool_failed",
+        "task_failed",
+        "task_envelope_failed",
+        "task_envelope_step_failed",
+        "task_envelope_merge_failed",
+        "task_envelope_capacity_blocked",
+        "task_envelope_missing_receipts",
+        "task_envelope_missing_subtasks",
+        "task_envelope_dependency_blocked",
+        "task_envelope_dependency_failed",
+        "task_envelope_restore_failed",
+        "task_envelope_rollback_failed",
+    }:
         return "failed"
     if lowered in {"task_interrupted"}:
         return "interrupted"
     if lowered in {"tool_preview", "task_pending_approval"}:
         return "pending_approval"
-    if lowered in {"task_completed", "tool_loop_completed"}:
+    if lowered in {"task_completed", "tool_loop_completed", "task_envelope_completed", "task_envelope_merge_completed"}:
         return "completed"
-    if lowered in {"task_received", "task_resumed", "task_classified", "tool_selected", "tool_started", "tool_loop_resumed", "tool_executed", "tool_synthesizing"}:
+    if lowered in {
+        "task_received",
+        "task_resumed",
+        "task_classified",
+        "tool_selected",
+        "tool_started",
+        "tool_loop_resumed",
+        "tool_executed",
+        "tool_synthesizing",
+        "task_envelope_started",
+        "task_envelope_children_scheduled",
+        "task_envelope_step_completed",
+        "task_envelope_restore_completed",
+        "task_envelope_rollback_completed",
+    }:
         return "running"
     return lowered or "running"
 
