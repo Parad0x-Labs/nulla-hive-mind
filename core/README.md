@@ -38,6 +38,7 @@ Current execution truth:
 - and if that first unread implementation read still does not explain the failure, the bounded diagnosis lane can now walk the next unread symbol/text match before it wastes the next step on a premature rerun
 - and when that unread implementation read makes the literal fix explicit, planner can now promote the diagnosis back into the existing bounded repair envelope instead of making the user restate a trivial `replace X with Y` by hand
 - and that repair promotion now reaches one hop deeper too: if the failing function is just a single `return helper()` wrapper and the unread helper read shows a single conflicting literal `return`, planner can still promote that helper patch into the existing bounded repair envelope without pretending it solved broad arbitrary debugging
+- and it now covers the narrow imported-binding case too: if the already-read implementation returns `NAME`, imports that binding from one explicitly-read helper/module, and that helper/module exposes exactly one conflicting top-level literal binding, planner can still promote the helper patch without pretending it solved arbitrary constant chasing
 - bounded local repair flows now also clean up after a failed final verifier: planner marks repair verifiers with rollback-on-failure, and the executor can restore the last tracked workspace mutation while still returning an honestly failed overall result
 - and once that failed repair has rolled back cleanly, the planner can now continue bounded diagnosis from the nested verifier failure instead of dead-ending after the first bad repair guess
 - and if that post-rollback diagnosis turns the real literal fix into something explicit, the planner can now launch one bounded second repair envelope instead of pretending the first failed attempt made further bounded repair impossible
@@ -53,6 +54,7 @@ Current execution truth:
 - cached remote-shard ranking is now outcome-aware too: `shard_matcher.py` attaches measured reuse summaries to cached `peer_received` candidates, and `shard_ranker.py` gives only a bounded boost to remote shards that have actually backed successful answers instead of rewarding incidental citation history
 - `model_teacher_pipeline.py` now records routing requirements/rejections in provenance and backs off saturated provider lanes during execution instead of blindly fanning out across every selected candidate
 - `agent_runtime/response.py` now rewrites routing/capacity leak payloads and capacity-blocked worker failures into terse operator-safe language instead of dumping scheduler/provider JSON into chat surfaces
+- and concrete Hive task-selection clarifications are less flaky now too: `agent_runtime/chat_surface.py` falls back to the truthful queue wording when model prose drops the real task titles that are already known to the runtime
 
 ## Current Internal Zones
 
