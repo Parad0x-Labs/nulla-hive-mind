@@ -35,6 +35,12 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert 'Handing off launch to Terminal.app...' in script
 
 
+def test_install_script_surfaces_machine_probe_command() -> None:
+    script = (PROJECT_ROOT / "installer" / "install_nulla.sh").read_text(encoding="utf-8")
+
+    assert 'Probe:   ${PROJECT_ROOT}/Probe_NULLA_Stack.sh' in script
+
+
 def test_public_hive_auth_helper_is_tracked() -> None:
     helper = PROJECT_ROOT / "ops" / "ensure_public_hive_auth.py"
 

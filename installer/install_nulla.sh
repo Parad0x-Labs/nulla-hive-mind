@@ -1047,7 +1047,8 @@ main() {
     say "Desktop: ${DESKTOP_SHORTCUT_PATH}"
   fi
   say "Chat:    ${PROJECT_ROOT}/Talk_To_NULLA.sh"
-  say "Credits: ${VENV_DIR}/bin/python -m apps.nulla_cli credits"
+  say "Probe:   ${PROJECT_ROOT}/Probe_NULLA_Stack.sh"
+  say "Credits: PYTHONPATH='${PROJECT_ROOT}' ${VENV_DIR}/bin/python -m apps.nulla_cli credits"
   say
   say "NULLA is now wired for OpenClaw-friendly launch,"
   say "with Ollama checked, hardware-tier model selection applied,"
