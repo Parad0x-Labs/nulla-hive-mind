@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,17 @@ def _load_json(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def _resolve_binary(binary: str) -> str:
+    candidate = str(binary or "").strip()
+    if not candidate:
+        return ""
+    direct = Path(candidate).expanduser()
+    if direct.exists():
+        return str(direct)
+    resolved = shutil.which(candidate)
+    return str(resolved or "")
 
 
 def _public_hive_status(project: Path, runtime: Path) -> dict[str, Any]:
@@ -123,6 +135,7 @@ def build_report(
         model_tag=model_tag,
         runtime_home=runtime,
     )
+    ollama_path = _resolve_binary(ollama_binary)
 
     launchers = {
         "start": project / "Start_NULLA.sh",
@@ -170,7 +183,7 @@ def build_report(
             ),
             "liquefy": _status(liquefy_config.exists(), "Liquefy config present" if liquefy_config.exists() else "Liquefy config missing", path=str(liquefy_config)),
             "trainable_base": _status(bool(staged_bases), "staged trainable base found" if staged_bases else "no staged trainable base found", staged_bases=staged_bases),
-            "ollama": _status(bool(ollama_binary) and Path(ollama_binary).expanduser().exists(), "Ollama binary found" if ollama_binary and Path(ollama_binary).expanduser().exists() else "Ollama binary missing", path=str(ollama_binary or "")),
+            "ollama": _status(bool(ollama_path), "Ollama binary found" if ollama_path else "Ollama binary missing", path=str(ollama_path or ollama_binary or "")),
             "trace_surface": _status((project / "OpenClaw_NULLA.sh").exists(), "trace launcher path available" if (project / "OpenClaw_NULLA.sh").exists() else "trace launcher path missing", url="http://127.0.0.1:11435/trace"),
             "public_hive": _public_hive_status(project, runtime),
         },

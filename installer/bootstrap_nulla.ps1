@@ -28,7 +28,9 @@ function Test-InstallDir {
         return
     }
 
-    if (Test-Path -LiteralPath (Join-Path $InstallDir "Install_And_Run_NULLA.bat")) {
+    if ((Test-Path -LiteralPath (Join-Path $InstallDir "Install_And_Run_NULLA.bat")) -or
+        (Test-Path -LiteralPath (Join-Path $InstallDir "installer\\install_nulla.bat")) -or
+        (Test-Path -LiteralPath (Join-Path $InstallDir "install_nulla.bat"))) {
         Write-Info "Existing NULLA install detected at $InstallDir"
         return
     }
@@ -77,16 +79,47 @@ function Download-And-Extract {
 function Run-Installer {
     $launcher = Join-Path $InstallDir "Install_And_Run_NULLA.bat"
     $guided = Join-Path $InstallDir "Install_NULLA.bat"
-    if (-not (Test-Path -LiteralPath $launcher)) {
-        throw "Bootstrap download succeeded, but $launcher is missing."
+    $canonical = Join-Path $InstallDir "installer\\install_nulla.bat"
+    if (-not (Test-Path -LiteralPath $canonical)) {
+        $canonical = Join-Path $InstallDir "install_nulla.bat"
     }
 
     Write-Info "Running NULLA installer..."
     if ($NoStart) {
-        & $guided /Y "/OPENCLAW=default"
+        if (Test-Path -LiteralPath $guided) {
+            & $guided /Y "/OPENCLAW=default"
+            return
+        }
+        if (Test-Path -LiteralPath $canonical) {
+            & $canonical /Y "/OPENCLAW=default"
+            return
+        }
     }
     else {
+        if (Test-Path -LiteralPath $launcher) {
+            & $launcher
+            return
+        }
+        if (Test-Path -LiteralPath $canonical) {
+            & $canonical /Y /START "/OPENCLAW=default"
+            return
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $launcher) -and -not (Test-Path -LiteralPath $guided) -and -not (Test-Path -LiteralPath $canonical)) {
+        throw "Bootstrap download succeeded, but no usable installer entrypoint was found."
+    }
+    if ($NoStart) {
+        throw "Bootstrap download succeeded, but no guided installer entrypoint was found."
+    }
+    elseif (Test-Path -LiteralPath $launcher) {
         & $launcher
+    }
+    elseif (Test-Path -LiteralPath $canonical) {
+        & $canonical /Y /START "/OPENCLAW=default"
+    }
+    else {
+        throw "Bootstrap download succeeded, but no auto-start installer entrypoint was found."
     }
 }
 

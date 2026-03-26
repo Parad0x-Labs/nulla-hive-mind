@@ -77,6 +77,8 @@ What the installer does:
 3. installs Ollama if needed
 4. registers NULLA as an OpenClaw agent
 5. starts the local API server on `http://127.0.0.1:11435`
+6. resolves the OpenClaw gateway token from the active gateway home when possible (`OPENCLAW_HOME`, `OPENCLAW_STATE_DIR`, launchd state dir, then the normal `.openclaw` / `.openclaw-default` fallbacks)
+7. on macOS, hands off the final launch to `OpenClaw_NULLA.command` so the running services live under Terminal.app instead of dying with the installer shell
 
 If `KIMI_API_KEY` is configured, the same shared runtime bootstrap truth now also surfaces a real remote Kimi queen lane instead of leaving Kimi as routing-only theory. If `VLLM_BASE_URL` is configured, NULLA now also surfaces a real local `vllm-local` OpenAI-compatible lane. If `LLAMACPP_BASE_URL` is configured, NULLA now also surfaces a real local `llamacpp-local` OpenAI-compatible lane instead of treating local non-Ollama backends as doc debt.
 

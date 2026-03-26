@@ -34,6 +34,7 @@ bash Install_And_Run_NULLA.sh
 4. pulls the selected local model
 5. installs the OpenClaw bridge and registration path
 6. starts the NULLA API server on `127.0.0.1:11435`
+7. on macOS, hands off the final launch to `OpenClaw_NULLA.command` so the running services are owned by Terminal.app instead of the short-lived installer shell
 
 If you want the shortest user path, this is it.
 
@@ -79,6 +80,17 @@ The convenience launcher path remains:
 - macOS / Linux: `OpenClaw_NULLA.sh`
 - Windows: `OpenClaw_NULLA.bat`
 
+The launcher resolves the gateway token from the strongest available state source in this order:
+
+1. `OPENCLAW_CONFIG_PATH`
+2. `OPENCLAW_HOME`
+3. `OPENCLAW_STATE_DIR`
+4. the macOS launchd gateway state dir when that service is installed
+5. local home fallbacks like `.openclaw` and `.openclaw-default`
+
+If you deliberately run OpenClaw from a custom home, set `OPENCLAW_STATE_DIR` or `OPENCLAW_HOME` before opening NULLA so the launcher does not guess the wrong gateway token.
+If you deliberately run NULLA from a custom runtime home, set `NULLA_HOME` before opening the launcher so the OpenClaw bridge points at the runtime you actually want to test.
+
 ## Common Notes
 
 - NULLA is alpha. Read [STATUS.md](STATUS.md) before assuming a surface is production-ready.
@@ -89,4 +101,5 @@ The convenience launcher path remains:
 
 - If install succeeded but the local API is missing, verify `http://127.0.0.1:11435/healthz`.
 - If OpenClaw does not see NULLA, restart the launcher once after install.
+- If OpenClaw shows `gateway token mismatch`, you are almost always pointing the launcher at the wrong OpenClaw home. Export `OPENCLAW_STATE_DIR` or `OPENCLAW_HOME` for the gateway you actually started, then reopen the launcher.
 - If you need the broader maturity picture, read [STATUS.md](STATUS.md).

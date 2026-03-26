@@ -7,6 +7,8 @@ VENV_DIR="${PROJECT_ROOT}/.venv"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 NULLA_HOME_DEFAULT="${NULLA_HOME_DEFAULT:-$HOME/.nulla_runtime}"
 OPENCLAW_AGENT_DEFAULT="${OPENCLAW_AGENT_DEFAULT:-$HOME/.openclaw/agents/main/agent/nulla}"
+MIN_PYTHON_MAJOR=3
+MIN_PYTHON_MINOR=10
 AUTO_YES=0
 AUTO_START=0
 RUNTIME_HOME_OVERRIDE=""
@@ -179,15 +181,81 @@ prompt_yn() {
 
 
 ensure_python() {
-  if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
-    say "ERROR: '${PYTHON_BIN}' not found."
-    say "Install Python 3.10+ and rerun this installer."
-    exit 1
+  local explicit_python="${PYTHON_BIN:-}"
+  if [[ -n "${explicit_python}" && "${explicit_python}" != "python3" ]]; then
+    if ! command -v "${explicit_python}" >/dev/null 2>&1; then
+      say "ERROR: '${explicit_python}' not found."
+      say "Install Python ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR}+ and rerun this installer."
+      exit 1
+    fi
+    if ! python_supports_minimum "${explicit_python}"; then
+      say "ERROR: '${explicit_python}' is below Python ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR}."
+      say "Install Python ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR}+ and rerun this installer."
+      exit 1
+    fi
+    PYTHON_BIN="$(command -v "${explicit_python}")"
+  else
+    PYTHON_BIN="$(resolve_python_bin)"
+    if [[ -z "${PYTHON_BIN}" ]]; then
+      say "ERROR: No supported Python ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR}+ interpreter was found."
+      say "Tried local python commands first, then uv-managed Python if uv is installed."
+      say "Install Python ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR}+ or uv and rerun this installer."
+      exit 1
+    fi
   fi
+  say "Using Python: ${PYTHON_BIN} ($("${PYTHON_BIN}" --version 2>&1))"
+}
+
+
+python_supports_minimum() {
+  local candidate="$1"
+  "${candidate}" - <<PY >/dev/null 2>&1
+import sys
+sys.exit(0 if sys.version_info >= (${MIN_PYTHON_MAJOR}, ${MIN_PYTHON_MINOR}) else 1)
+PY
+}
+
+
+resolve_python_bin() {
+  local candidate=""
+  for candidate in python3.13 python3.12 python3.11 python3.10 python3 python; do
+    if command -v "${candidate}" >/dev/null 2>&1 && python_supports_minimum "${candidate}"; then
+      command -v "${candidate}"
+      return 0
+    fi
+  done
+
+  if command -v uv >/dev/null 2>&1; then
+    local uv_target=""
+    for uv_target in 3.13 3.12 3.11 3.10; do
+      candidate="$(uv python find "${uv_target}" 2>/dev/null || true)"
+      if [[ -n "${candidate}" && -x "${candidate}" ]] && python_supports_minimum "${candidate}"; then
+        printf '%s\n' "${candidate}"
+        return 0
+      fi
+    done
+
+    say "No supported system Python found. Attempting uv-managed Python bootstrap..."
+    for uv_target in 3.12 3.11 3.10; do
+      if uv python install "${uv_target}" >/tmp/nulla_uv_python_install.log 2>&1; then
+        candidate="$(uv python find "${uv_target}" 2>/dev/null || true)"
+        if [[ -n "${candidate}" && -x "${candidate}" ]] && python_supports_minimum "${candidate}"; then
+          printf '%s\n' "${candidate}"
+          return 0
+        fi
+      fi
+    done
+  fi
+
+  return 1
 }
 
 
 create_or_update_venv() {
+  if [[ -x "${VENV_DIR}/bin/python" ]] && ! python_supports_minimum "${VENV_DIR}/bin/python"; then
+    say "Step 1/14: Existing virtual environment uses unsupported Python. Rebuilding..."
+    rm -rf "${VENV_DIR}"
+  fi
   if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
     say "Step 1/14: Creating virtual environment..."
     "${PYTHON_BIN}" -m venv "${VENV_DIR}"
@@ -416,6 +484,7 @@ write_openclaw_launcher() {
   local target_path="$1"
   local runtime_home="$2"
   local model_tag="$3"
+  local openclaw_home="$4"
   cat >"${target_path}" <<'LAUNCHER_HEAD'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -428,32 +497,58 @@ MODEL_TAG="${model_tag}"
 export NULLA_HOME="${runtime_home}"
 export NULLA_OLLAMA_MODEL="\${NULLA_OLLAMA_MODEL:-\${MODEL_TAG}}"
 $(web_runtime_exports)
+EOF
+  if [[ -n "${openclaw_home}" ]]; then
+    cat >>"${target_path}" <<EOF
+export OPENCLAW_HOME="${openclaw_home}"
+export OPENCLAW_STATE_DIR="\${OPENCLAW_STATE_DIR:-${openclaw_home}}"
+EOF
+  fi
+  cat >>"${target_path}" <<EOF
 
-if ! curl -sf --max-time 2 http://127.0.0.1:11435 >/dev/null 2>&1; then
-  nohup "\${VENV_PY}" -m apps.nulla_api_server >/tmp/nulla_api_server.log 2>&1 &
+if ! curl -sf --max-time 2 http://127.0.0.1:11435/healthz >/dev/null 2>&1; then
+  nohup "\${VENV_PY}" -m apps.nulla_api_server >/tmp/nulla_api_server.log 2>&1 </dev/null &
+  api_pid=\$!
+  disown "\${api_pid}" 2>/dev/null || true
   for _ in \$(seq 1 30); do
     sleep 1
-    if curl -sf --max-time 2 http://127.0.0.1:11435 >/dev/null 2>&1; then
+    if curl -sf --max-time 2 http://127.0.0.1:11435/healthz >/dev/null 2>&1; then
       break
     fi
   done
 fi
 
 if ! curl -sf --max-time 2 http://127.0.0.1:18789 >/dev/null 2>&1; then
-  if command -v ollama >/dev/null 2>&1; then
-    nohup ollama launch openclaw --model "\${MODEL_TAG}" >/tmp/nulla_openclaw.log 2>&1 &
-    for _ in \$(seq 1 30); do
-      sleep 1
-      if curl -sf --max-time 2 http://127.0.0.1:18789 >/dev/null 2>&1; then
-        break
-      fi
-    done
+  if command -v openclaw >/dev/null 2>&1; then
+    nohup openclaw gateway run --force >/tmp/nulla_openclaw.log 2>&1 </dev/null &
+    openclaw_pid=\$!
+    disown "\${openclaw_pid}" 2>/dev/null || true
+  elif command -v ollama >/dev/null 2>&1; then
+    nohup ollama launch openclaw --yes --model "\${MODEL_TAG}" >/tmp/nulla_openclaw.log 2>&1 </dev/null &
+    openclaw_pid=\$!
+    disown "\${openclaw_pid}" 2>/dev/null || true
   fi
+  for _ in \$(seq 1 30); do
+    sleep 1
+    if curl -sf --max-time 2 http://127.0.0.1:18789 >/dev/null 2>&1; then
+      break
+    fi
+  done
 fi
 
-GW_TOKEN="\$("\${VENV_PY}" -c "import sys; sys.path.insert(0, '\${PROJECT_ROOT}'); \
-from core.openclaw_locator import load_gateway_token; \
-print(load_gateway_token())" 2>/dev/null || true)"
+if ! curl -sf --max-time 2 http://127.0.0.1:18789 >/dev/null 2>&1 && command -v openclaw >/dev/null 2>&1; then
+  nohup openclaw gateway run --force >/tmp/nulla_openclaw.log 2>&1 </dev/null &
+  openclaw_pid=\$!
+  disown "\${openclaw_pid}" 2>/dev/null || true
+  for _ in \$(seq 1 30); do
+    sleep 1
+    if curl -sf --max-time 2 http://127.0.0.1:18789 >/dev/null 2>&1; then
+      break
+    fi
+  done
+fi
+
+GW_TOKEN="\$("\${VENV_PY}" -c "import os, sys; sys.path.insert(0, '\${PROJECT_ROOT}'); from core.openclaw_locator import discover_openclaw_paths, load_gateway_token; paths = discover_openclaw_paths(explicit_home=os.environ.get('OPENCLAW_HOME') or os.environ.get('OPENCLAW_STATE_DIR'), create_default=True); print(load_gateway_token(paths))" 2>/dev/null || true)"
 OPENCLAW_URL="http://127.0.0.1:18789"
 TRACE_URL="http://127.0.0.1:11435/trace"
 if [[ -n "\${GW_TOKEN}" ]]; then
@@ -559,12 +654,38 @@ resolve_openclaw_agent_dir() {
 }
 
 
+resolve_openclaw_home_override() {
+  case "${OPENCLAW_MODE}" in
+    default)
+      printf '%s' "${HOME}/.openclaw-default"
+      ;;
+    *)
+      printf '%s' ""
+      ;;
+  esac
+}
+
+
 resolve_openclaw_config_path() {
+  local openclaw_home=""
+  openclaw_home="$(resolve_openclaw_home_override)"
+  if [[ -n "${openclaw_home}" ]]; then
+    OPENCLAW_HOME="${openclaw_home}" OPENCLAW_STATE_DIR="${openclaw_home}" \
+      "${VENV_DIR}/bin/python" -c "import sys; sys.path.insert(0, '${PROJECT_ROOT}'); from core.openclaw_locator import discover_openclaw_paths; print(discover_openclaw_paths(create_default=True).config_path)" 2>/dev/null || true
+    return
+  fi
   "${VENV_DIR}/bin/python" -c "import sys; sys.path.insert(0, '${PROJECT_ROOT}'); from core.openclaw_locator import discover_openclaw_paths; print(discover_openclaw_paths(create_default=True).config_path)" 2>/dev/null || true
 }
 
 
 resolve_openclaw_compat_dir() {
+  local openclaw_home=""
+  openclaw_home="$(resolve_openclaw_home_override)"
+  if [[ -n "${openclaw_home}" ]]; then
+    OPENCLAW_HOME="${openclaw_home}" OPENCLAW_STATE_DIR="${openclaw_home}" \
+      "${VENV_DIR}/bin/python" -c "import sys; sys.path.insert(0, '${PROJECT_ROOT}'); from core.openclaw_locator import discover_openclaw_paths; print(discover_openclaw_paths(create_default=True).compat_bridge_dir)" 2>/dev/null || true
+    return
+  fi
   "${VENV_DIR}/bin/python" -c "import sys; sys.path.insert(0, '${PROJECT_ROOT}'); from core.openclaw_locator import discover_openclaw_paths; print(discover_openclaw_paths(create_default=True).compat_bridge_dir)" 2>/dev/null || true
 }
 
@@ -661,6 +782,7 @@ configure_openclaw_with_ollama() {
   local ollama_exe="$1"
   local model_tag="$2"
   local openclaw_enabled="$3"
+  local openclaw_home="$4"
 
   if [[ "${openclaw_enabled}" != "1" ]]; then
     say "Step 10/14: OpenClaw integration skipped."
@@ -671,8 +793,13 @@ configure_openclaw_with_ollama() {
     return
   fi
 
+  if [[ -n "${openclaw_home}" ]]; then
+    say "Step 10/14: Skipping Ollama OpenClaw auto-config for isolated home ${openclaw_home}."
+    return
+  fi
+
   say "Step 10/14: Configuring OpenClaw through Ollama..."
-  if ! "${ollama_exe}" launch openclaw --config --model "${model_tag}" >/tmp/nulla_openclaw_config.log 2>&1; then
+  if ! "${ollama_exe}" launch openclaw --yes --config --model "${model_tag}" >/tmp/nulla_openclaw_config.log 2>&1; then
     say "WARNING: OpenClaw auto-config via Ollama failed. Continuing with direct config patch."
   fi
 }
@@ -683,7 +810,8 @@ register_openclaw() {
   local model_tag="$2"
   local openclaw_agent_dir="$3"
   local openclaw_enabled="$4"
-  local agent_name="$5"
+  local openclaw_home="$5"
+  local agent_name="$6"
 
   if [[ "${openclaw_enabled}" != "1" ]]; then
     say "Step 11/14: OpenClaw registration skipped."
@@ -695,6 +823,15 @@ register_openclaw() {
   fi
 
   say "Step 11/14: Registering NULLA in OpenClaw..."
+  if [[ -n "${openclaw_home}" ]]; then
+    if ! OPENCLAW_HOME="${openclaw_home}" OPENCLAW_STATE_DIR="${openclaw_home}" \
+      NULLA_OPENCLAW_GATEWAY_BIND="${OPENCLAW_GATEWAY_BIND}" \
+      NULLA_OPENCLAW_GATEWAY_CUSTOM_HOST="${OPENCLAW_GATEWAY_CUSTOM_HOST}" \
+      "${VENV_DIR}/bin/python" "${SCRIPT_DIR}/register_openclaw_agent.py" "${PROJECT_ROOT}" "${runtime_home}" "${model_tag}" "${agent_name}"; then
+      say "WARNING: Could not register NULLA in OpenClaw config. You can register manually later."
+    fi
+    return
+  fi
   if ! NULLA_OPENCLAW_GATEWAY_BIND="${OPENCLAW_GATEWAY_BIND}" \
     NULLA_OPENCLAW_GATEWAY_CUSTOM_HOST="${OPENCLAW_GATEWAY_CUSTOM_HOST}" \
     "${VENV_DIR}/bin/python" "${SCRIPT_DIR}/register_openclaw_agent.py" "${PROJECT_ROOT}" "${runtime_home}" "${model_tag}" "${agent_name}"; then
@@ -854,10 +991,12 @@ main() {
   local model_tag
   local install_profile
   local install_profile_summary
+  local openclaw_home_override
   hardware_summary="$(detect_hardware_summary)"
   model_tag="$(detect_model_tag)"
   install_profile="$(detect_install_profile "${runtime_home}" "${model_tag}")"
   install_profile_summary="$(detect_install_profile_summary "${runtime_home}" "${model_tag}")"
+  openclaw_home_override="$(resolve_openclaw_home_override)"
   say "Step 6/14: Hardware probe complete."
   say "Detected: ${hardware_summary}"
   say "Selected model: ${model_tag}"
@@ -867,7 +1006,7 @@ main() {
   say "Step 7/14: Creating launchers..."
   write_launcher "${PROJECT_ROOT}/Start_NULLA.sh" "${runtime_home}"
   write_chat_launcher "${PROJECT_ROOT}/Talk_To_NULLA.sh" "${runtime_home}"
-  write_openclaw_launcher "${PROJECT_ROOT}/OpenClaw_NULLA.sh" "${runtime_home}" "${model_tag}"
+  write_openclaw_launcher "${PROJECT_ROOT}/OpenClaw_NULLA.sh" "${runtime_home}" "${model_tag}" "${openclaw_home_override}"
   write_mac_wrapper "${PROJECT_ROOT}/Start_NULLA.command" "${PROJECT_ROOT}/Start_NULLA.sh"
   write_mac_wrapper "${PROJECT_ROOT}/Talk_To_NULLA.command" "${PROJECT_ROOT}/Talk_To_NULLA.sh"
   write_mac_wrapper "${PROJECT_ROOT}/OpenClaw_NULLA.command" "${PROJECT_ROOT}/OpenClaw_NULLA.sh"
@@ -889,8 +1028,8 @@ main() {
   local ollama_exe
   ollama_exe="$(ensure_ollama_installed)"
   start_ollama_server "${ollama_exe}"
-  configure_openclaw_with_ollama "${ollama_exe}" "${model_tag}" "${openclaw_enabled}"
-  register_openclaw "${runtime_home}" "${model_tag}" "${openclaw_agent_dir}" "${openclaw_enabled}" "${agent_name}"
+  configure_openclaw_with_ollama "${ollama_exe}" "${model_tag}" "${openclaw_enabled}" "${openclaw_home_override}"
+  register_openclaw "${runtime_home}" "${model_tag}" "${openclaw_agent_dir}" "${openclaw_enabled}" "${openclaw_home_override}" "${agent_name}"
   pull_model "${ollama_exe}" "${model_tag}"
   configure_liquefy
   write_install_receipt "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}"
@@ -920,6 +1059,13 @@ main() {
   if [[ "${AUTO_START}" -eq 1 ]]; then
     say
     say "Launching NULLA now..."
+    if [[ "$(uname)" == "Darwin" && -f "${PROJECT_ROOT}/OpenClaw_NULLA.command" ]]; then
+      say "Handing off launch to Terminal.app..."
+      if open "${PROJECT_ROOT}/OpenClaw_NULLA.command"; then
+        exit 0
+      fi
+      say "WARNING: macOS handoff failed; falling back to shell launcher."
+    fi
     exec "${PROJECT_ROOT}/OpenClaw_NULLA.sh"
   fi
 }

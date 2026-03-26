@@ -126,7 +126,6 @@ def test_build_report_accepts_bundled_public_hive_auth() -> None:
     assert report["components"]["public_hive"]["write_enabled"] is True
     assert report["components"]["public_hive"]["bundled_auth_loaded"] is True
 
-
 def test_build_report_exposes_provider_snapshot_truth_and_profile_mix() -> None:
     snapshot = mock.Mock(
         capability_truth=(
@@ -164,6 +163,9 @@ def test_build_report_exposes_provider_snapshot_truth_and_profile_mix() -> None:
             ),
         )
     )
+=======
+def test_build_report_resolves_ollama_binary_from_path_lookup() -> None:
+>>>>>>> a3a6bd0 (fix(installer): harden one-line nulla bootstrap)
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
         (root / ".venv").mkdir()
@@ -174,6 +176,7 @@ def test_build_report_exposes_provider_snapshot_truth_and_profile_mix() -> None:
         (root / "install_receipt.json").write_text("{}\n", encoding="utf-8")
         runtime_home = root / ".nulla_runtime"
         runtime_home.mkdir()
+<<<<<<< HEAD
         with mock.patch("core.trainable_base_manager.list_staged_trainable_bases", return_value=[]), mock.patch(
             "installer.doctor.build_provider_registry_snapshot",
             return_value=snapshot,
@@ -264,3 +267,30 @@ def test_build_report_marks_degraded_install_profile_as_degraded() -> None:
 
     assert report["install_profile"]["degraded"] is True
     assert "install_profile" in report["degraded_components"]
+
+
+def test_build_report_resolves_ollama_binary_from_path_lookup() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / ".venv").mkdir()
+        (root / "Start_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "Talk_To_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "OpenClaw_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "Stage_Trainable_Base.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "install_receipt.json").write_text("{}\n", encoding="utf-8")
+        runtime_home = root / ".nulla_runtime"
+        runtime_home.mkdir()
+        with mock.patch("core.trainable_base_manager.list_staged_trainable_bases", return_value=[]):
+            with mock.patch("shutil.which", return_value="/usr/local/bin/ollama"):
+                report = build_report(
+                    project_root=str(root),
+                    runtime_home=str(runtime_home),
+                    model_tag="qwen2.5:7b",
+                    openclaw_enabled=False,
+                    openclaw_config_path="",
+                    openclaw_agent_dir="",
+                    ollama_binary="ollama",
+                )
+
+    assert report["components"]["ollama"]["ok"] is True
+    assert report["components"]["ollama"]["path"] == "/usr/local/bin/ollama"

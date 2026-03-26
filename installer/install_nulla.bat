@@ -332,7 +332,7 @@ echo Step 7/14: Creating launchers...
   echo   if "^^!OLLAMA_EXE^^!"=="" if exist "%%LOCALAPPDATA%%\Programs\Ollama\ollama.exe" set "OLLAMA_EXE=%%LOCALAPPDATA%%\Programs\Ollama\ollama.exe"
   echo   if "^^!OLLAMA_EXE^^!"=="" if exist "%%SystemDrive%%\Ollama\ollama.exe" set "OLLAMA_EXE=%%SystemDrive%%\Ollama\ollama.exe"
   echo   if not "^^!OLLAMA_EXE^^!"=="" ^(
-  echo     start "" /B "^^!OLLAMA_EXE^^!" launch openclaw --model "%%MODEL_TAG%%"
+  echo     start "" /B "^^!OLLAMA_EXE^^!" launch openclaw --yes --model "%%MODEL_TAG%%"
   echo     for /L %%%%j in ^(1,1,30^) do ^(
   echo       timeout /t 1 /nobreak ^>nul
   echo       powershell -NoProfile -Command "try { $null = Invoke-WebRequest -Uri 'http://127.0.0.1:18789' -UseBasicParsing -TimeoutSec 2; exit 0 } catch { exit 1 }" ^>nul 2^>^&1
@@ -452,7 +452,7 @@ if %errorlevel% neq 0 (
 
 if "%OPENCLAW_ENABLED%"=="1" (
   echo Step 11/14: Configuring OpenClaw through Ollama...
-  "%OLLAMA_EXE%" launch openclaw --config --model "%MODEL_TAG%" >nul 2>&1
+  "%OLLAMA_EXE%" launch openclaw --yes --config --model "%MODEL_TAG%" >nul 2>&1
   if %errorlevel% neq 0 (
     echo WARNING: OpenClaw auto-config via Ollama failed. Reapplying NULLA registration directly.
   )

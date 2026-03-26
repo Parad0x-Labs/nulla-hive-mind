@@ -138,7 +138,7 @@ require_command() {
 
 prepare_install_dir() {
   mkdir -p "${INSTALL_DIR}"
-  if [[ -f "${INSTALL_DIR}/Install_And_Run_NULLA.sh" ]]; then
+  if [[ -f "${INSTALL_DIR}/Install_And_Run_NULLA.sh" || -f "${INSTALL_DIR}/installer/install_nulla.sh" || -f "${INSTALL_DIR}/install_nulla.sh" ]]; then
     say "Existing NULLA install detected at ${INSTALL_DIR}"
     return
   fi
@@ -168,14 +168,30 @@ download_and_extract() {
 launch_installer() {
   local launcher="${INSTALL_DIR}/Install_And_Run_NULLA.sh"
   local guided="${INSTALL_DIR}/Install_NULLA.sh"
+  local canonical="${INSTALL_DIR}/installer/install_nulla.sh"
+  if [[ ! -f "${canonical}" ]]; then
+    canonical="${INSTALL_DIR}/install_nulla.sh"
+  fi
 
-  chmod +x "${launcher}" "${guided}" 2>/dev/null || true
+  chmod +x "${launcher}" "${guided}" "${canonical}" 2>/dev/null || true
 
   say "Running NULLA installer..."
   if [[ "${AUTO_START}" -eq 1 ]]; then
-    exec "${launcher}"
+    if [[ -f "${launcher}" ]]; then
+      exec "${launcher}"
+    fi
+    if [[ -f "${canonical}" ]]; then
+      exec "${canonical}" --yes --start --openclaw default
+    fi
   fi
-  exec "${guided}" --yes --openclaw default
+  if [[ -f "${guided}" ]]; then
+    exec "${guided}" --yes --openclaw default
+  fi
+  if [[ -f "${canonical}" ]]; then
+    exec "${canonical}" --yes --openclaw default
+  fi
+  say "ERROR: Bootstrap download succeeded, but no usable installer entrypoint was found."
+  exit 1
 }
 
 
