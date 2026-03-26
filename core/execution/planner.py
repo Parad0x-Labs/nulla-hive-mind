@@ -587,6 +587,18 @@ def _latest_read_file_hints(steps: list[dict[str, Any]], *, path: str) -> dict[s
     return {}
 
 
+def _iter_read_file_hints(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    hints_list: list[dict[str, Any]] = []
+    for step in reversed(list(steps or [])):
+        observation = dict(step.get("observation") or {})
+        if str(observation.get("intent") or "").strip() != "workspace.read_file":
+            continue
+        hints = extract_observation_followup_hints(observation)
+        if hints:
+            hints_list.append(hints)
+    return hints_list
+
+
 def _latest_lookup_hints(steps: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
     for step in reversed(list(steps or [])):
         observation = dict(step.get("observation") or {})
@@ -693,39 +705,95 @@ def _infer_literal_candidate_repair(
     if not function_name or not expected_literal:
         return None
 
-    lines = [str(item.get("text") or "") for item in list(current_read_hints.get("lines") or []) if isinstance(item, dict)]
-    if not lines:
-        return None
+    direct_repair = _literal_return_candidate_repair(
+        lines=_read_hint_lines(current_read_hints),
+        function_name=function_name,
+        expected_literal=expected_literal,
+        current_path=current_path,
+    )
+    if direct_repair is not None:
+        return direct_repair
 
+    current_lines = _read_hint_lines(current_read_hints)
+    if not current_lines:
+        return None
+    for prior_read_hints in _iter_read_file_hints(steps):
+        prior_path = str(prior_read_hints.get("path") or "").strip()
+        if not prior_path or prior_path in {current_path, error_path}:
+            continue
+        delegate_function = _single_delegate_function_name(
+            lines=_read_hint_lines(prior_read_hints),
+            function_name=function_name,
+        )
+        if not delegate_function:
+            continue
+        delegated_repair = _literal_return_candidate_repair(
+            lines=current_lines,
+            function_name=delegate_function,
+            expected_literal=expected_literal,
+            current_path=current_path,
+        )
+        if delegated_repair is not None:
+            return delegated_repair
+    return None
+
+
+def _read_hint_lines(read_hints: dict[str, Any]) -> list[str]:
+    return [str(item.get("text") or "") for item in list(read_hints.get("lines") or []) if isinstance(item, dict)]
+
+
+def _single_function_body_line(lines: list[str], function_name: str) -> str:
     function_start = None
-    for index, raw_line in enumerate(lines):
+    for index, raw_line in enumerate(list(lines or [])):
         if re.match(rf"^\s*def\s+{re.escape(function_name)}\s*\(", raw_line):
             function_start = index
             break
     if function_start is None:
-        return None
-
-    candidate_old = ""
-    candidate_new = ""
-    for raw_line in lines[function_start + 1 :]:
+        return ""
+    body_lines: list[str] = []
+    for raw_line in list(lines or [])[function_start + 1 :]:
         if re.match(r"^\s*(def|class)\s+", raw_line):
             break
-        return_match = re.match(r"^(?P<indent>\s*)return\s+(?P<value>-?\d+|True|False|None|'[^']*'|\"[^\"]*\")\s*$", raw_line)
-        if not return_match:
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
-        actual_literal = str(return_match.group("value") or "").strip()
-        if actual_literal == expected_literal:
-            return None
-        candidate_old = raw_line.strip()
-        candidate_new = f"return {expected_literal}"
-        break
-    if not candidate_old or not candidate_new:
+        body_lines.append(raw_line)
+    if len(body_lines) != 1:
+        return ""
+    return str(body_lines[0] or "")
+
+
+def _literal_return_candidate_repair(
+    *,
+    lines: list[str],
+    function_name: str,
+    expected_literal: str,
+    current_path: str,
+) -> dict[str, str] | None:
+    body_line = _single_function_body_line(lines, function_name)
+    if not body_line:
+        return None
+    return_match = re.match(r"^(?P<indent>\s*)return\s+(?P<value>-?\d+|True|False|None|'[^']*'|\"[^\"]*\")\s*$", body_line)
+    if not return_match:
+        return None
+    actual_literal = str(return_match.group("value") or "").strip()
+    if actual_literal == expected_literal:
         return None
     return {
         "path": current_path,
-        "old_text": candidate_old,
-        "new_text": candidate_new,
+        "old_text": body_line.strip(),
+        "new_text": f"return {expected_literal}",
     }
+
+
+def _single_delegate_function_name(*, lines: list[str], function_name: str) -> str:
+    body_line = _single_function_body_line(lines, function_name)
+    if not body_line:
+        return ""
+    delegate_match = re.match(r"^\s*return\s+(?P<callee>[A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*$", body_line)
+    if not delegate_match:
+        return ""
+    return str(delegate_match.group("callee") or "").strip()
 
 
 def _explicit_replace_request(user_text: str) -> dict[str, str] | None:
