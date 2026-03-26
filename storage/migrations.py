@@ -700,7 +700,7 @@ CREATE TABLE IF NOT EXISTS finalized_responses (
 );
 
 CREATE TABLE IF NOT EXISTS peer_endpoints (
-    peer_id TEXT PRIMARY KEY,
+    peer_id TEXT NOT NULL,
     host TEXT NOT NULL,
     port INTEGER NOT NULL,
     source TEXT NOT NULL DEFAULT 'direct',   -- self, bootstrap, observed
@@ -711,8 +711,15 @@ CREATE TABLE IF NOT EXISTS peer_endpoints (
     proof_message_id TEXT NOT NULL DEFAULT '',
     proof_message_type TEXT NOT NULL DEFAULT '',
     proof_hash TEXT NOT NULL DEFAULT '',
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (peer_id, host, port)
 );
+
+CREATE INDEX IF NOT EXISTS idx_peer_endpoints_peer_recent
+ON peer_endpoints(peer_id, last_verified_at DESC, last_seen_at DESC, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_peer_endpoints_recent
+ON peer_endpoints(updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS peer_endpoint_observations (
     peer_id TEXT NOT NULL,
@@ -1270,6 +1277,7 @@ def run_migrations(db_path=None) -> None:
         _add_column_if_missing(conn, "peer_endpoints", "proof_message_id", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "peer_endpoints", "proof_message_type", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "peer_endpoints", "proof_hash", "TEXT NOT NULL DEFAULT ''")
+        _rebuild_peer_endpoints_if_needed(conn)
         _add_column_if_missing(conn, "peer_endpoint_candidates", "last_probe_attempt_at", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "peer_endpoint_candidates", "last_probe_delivery_ok", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(conn, "peer_endpoint_candidates", "consecutive_probe_failures", "INTEGER NOT NULL DEFAULT 0")
@@ -1440,6 +1448,179 @@ def _add_column_if_missing(conn, table: str, column: str, type_def: str) -> None
     columns = [row["name"] for row in cursor.fetchall()]
     if column not in columns:
         cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {type_def}")
+
+
+def _peer_endpoints_requires_rebuild(conn) -> bool:
+    rows = conn.execute("PRAGMA table_info(peer_endpoints)").fetchall()
+    if not rows:
+        return False
+    pk_columns = [item["name"] for item in sorted(rows, key=lambda item: int(item["pk"] or 0)) if int(item["pk"] or 0)]
+    return pk_columns != ["peer_id", "host", "port"]
+
+
+def _endpoint_source_priority(value: str) -> int:
+    normalized = str(value or "").strip().lower()
+    return {
+        "self": 500,
+        "api": 450,
+        "observed": 400,
+        "bootstrap": 300,
+        "advertised": 200,
+        "dht": 100,
+        "block_found": 90,
+    }.get(normalized, 0)
+
+
+def _max_timestamp(left: str, right: str) -> str:
+    if not left:
+        return right
+    if not right:
+        return left
+    return right if right >= left else left
+
+
+def _rebuild_peer_endpoints_if_needed(conn) -> None:
+    if not _peer_endpoints_requires_rebuild(conn):
+        return
+
+    conn.execute("ALTER TABLE peer_endpoints RENAME TO peer_endpoints_legacy")
+    conn.execute(
+        """
+        CREATE TABLE peer_endpoints (
+            peer_id TEXT NOT NULL,
+            host TEXT NOT NULL,
+            port INTEGER NOT NULL,
+            source TEXT NOT NULL DEFAULT 'direct',
+            last_seen_at TEXT NOT NULL,
+            last_verified_at TEXT NOT NULL DEFAULT '',
+            verification_kind TEXT NOT NULL DEFAULT '',
+            proof_count INTEGER NOT NULL DEFAULT 0,
+            proof_message_id TEXT NOT NULL DEFAULT '',
+            proof_message_type TEXT NOT NULL DEFAULT '',
+            proof_hash TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (peer_id, host, port)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO peer_endpoints (
+            peer_id, host, port, source, last_seen_at, last_verified_at,
+            verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash, updated_at
+        )
+        SELECT
+            peer_id,
+            host,
+            port,
+            source,
+            last_seen_at,
+            last_verified_at,
+            verification_kind,
+            proof_count,
+            proof_message_id,
+            proof_message_type,
+            proof_hash,
+            updated_at
+        FROM peer_endpoints_legacy
+        """
+    )
+    observation_rows = conn.execute(
+        """
+        SELECT
+            peer_id, host, port, source, verification_kind,
+            proof_message_id, proof_message_type, proof_hash,
+            last_verified_at, proof_count, updated_at
+        FROM peer_endpoint_observations AS obs
+        """
+    ).fetchall()
+    for row in observation_rows:
+        existing = conn.execute(
+            """
+            SELECT source, last_seen_at, last_verified_at, verification_kind,
+                   proof_count, proof_message_id, proof_message_type, proof_hash, updated_at
+            FROM peer_endpoints
+            WHERE peer_id = ? AND host = ? AND port = ?
+            LIMIT 1
+            """,
+            (row["peer_id"], row["host"], int(row["port"])),
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                """
+                INSERT INTO peer_endpoints (
+                    peer_id, host, port, source, last_seen_at, last_verified_at,
+                    verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row["peer_id"],
+                    row["host"],
+                    int(row["port"]),
+                    row["source"],
+                    row["last_verified_at"],
+                    row["last_verified_at"],
+                    row["verification_kind"],
+                    int(row["proof_count"] or 0),
+                    row["proof_message_id"],
+                    row["proof_message_type"],
+                    row["proof_hash"],
+                    row["updated_at"],
+                ),
+            )
+            continue
+
+        selected_source = str(existing["source"] or "")
+        if _endpoint_source_priority(row["source"]) >= _endpoint_source_priority(selected_source):
+            selected_source = str(row["source"] or "")
+        selected_last_seen_at = _max_timestamp(str(existing["last_seen_at"] or ""), str(row["last_verified_at"] or ""))
+        selected_last_verified_at = _max_timestamp(str(existing["last_verified_at"] or ""), str(row["last_verified_at"] or ""))
+        selected_proof_count = max(int(existing["proof_count"] or 0), int(row["proof_count"] or 0))
+        selected_verification_kind = str(existing["verification_kind"] or "")
+        selected_proof_message_id = str(existing["proof_message_id"] or "")
+        selected_proof_message_type = str(existing["proof_message_type"] or "")
+        selected_proof_hash = str(existing["proof_hash"] or "")
+        if int(row["proof_count"] or 0) >= int(existing["proof_count"] or 0):
+            selected_verification_kind = str(row["verification_kind"] or "") or selected_verification_kind
+            selected_proof_message_id = str(row["proof_message_id"] or "") or selected_proof_message_id
+            selected_proof_message_type = str(row["proof_message_type"] or "") or selected_proof_message_type
+            selected_proof_hash = str(row["proof_hash"] or "") or selected_proof_hash
+
+        conn.execute(
+            """
+            UPDATE peer_endpoints
+            SET source = ?,
+                last_seen_at = ?,
+                last_verified_at = ?,
+                verification_kind = ?,
+                proof_count = ?,
+                proof_message_id = ?,
+                proof_message_type = ?,
+                proof_hash = ?,
+                updated_at = ?
+            WHERE peer_id = ? AND host = ? AND port = ?
+            """,
+            (
+                selected_source,
+                selected_last_seen_at,
+                selected_last_verified_at,
+                selected_verification_kind,
+                selected_proof_count,
+                selected_proof_message_id,
+                selected_proof_message_type,
+                selected_proof_hash,
+                _max_timestamp(str(existing["updated_at"] or ""), str(row["updated_at"] or "")),
+                row["peer_id"],
+                row["host"],
+                int(row["port"]),
+            ),
+        )
+    conn.execute("DROP TABLE peer_endpoints_legacy")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_peer_endpoints_peer_recent "
+        "ON peer_endpoints(peer_id, last_verified_at DESC, last_seen_at DESC, updated_at DESC)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_peer_endpoints_recent ON peer_endpoints(updated_at DESC)")
 
 
 def build_parser() -> argparse.ArgumentParser:

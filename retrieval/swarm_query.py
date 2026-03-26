@@ -5,6 +5,7 @@ from typing import Any
 
 from core import audit_logger, policy_engine
 from core.discovery_index import (
+    delivery_endpoints_for_peer,
     endpoint_for_peer,
     get_best_helpers,
     recent_peer_endpoints,
@@ -16,6 +17,25 @@ from network.transport import send_message
 
 def _nonce() -> str:
     return uuid.uuid4().hex
+
+
+def _send_to_peer(
+    peer_id: str,
+    raw_message: bytes,
+    *,
+    verified_limit: int = 4,
+    include_candidates: bool = False,
+    candidate_limit: int = 2,
+) -> bool:
+    for host, port in delivery_endpoints_for_peer(
+        peer_id,
+        verified_limit=verified_limit,
+        include_candidates=include_candidates,
+        candidate_limit=candidate_limit,
+    ):
+        if send_message(host, int(port), raw_message):
+            return True
+    return False
 
 
 def broadcast_capability_ad(raw_message: bytes, *, limit: int = 25) -> int:
@@ -61,11 +81,6 @@ def dispatch_query_shard(query: dict[str, Any], *, limit: int = 5) -> int:
 
 
 def request_specific_shard(*, peer_id: str, query_id: str, shard_id: str) -> bool:
-    endpoint = endpoint_for_peer(peer_id)
-    if not endpoint:
-        return False
-
-    host, port = endpoint
     msg = encode_message(
         msg_id=str(uuid.uuid4()),
         msg_type="REQUEST_SHARD",
@@ -76,7 +91,7 @@ def request_specific_shard(*, peer_id: str, query_id: str, shard_id: str) -> boo
             "shard_id": shard_id,
         },
     )
-    ok = send_message(host, port, msg)
+    ok = _send_to_peer(peer_id, msg, include_candidates=True, candidate_limit=2)
 
     audit_logger.log(
         "request_shard_sent",
@@ -115,11 +130,7 @@ def broadcast_task_offer(
 
     sent = 0
     for helper in helpers:
-        endpoint = endpoint_for_peer(helper.peer_id)
-        if not endpoint:
-            continue
-        host, port = endpoint
-        if send_message(host, port, msg):
+        if _send_to_peer(helper.peer_id, msg):
             sent += 1
 
     if sent == 0 and bool(policy_engine.get("orchestration.local_loopback_offer_on_no_helpers", True)):

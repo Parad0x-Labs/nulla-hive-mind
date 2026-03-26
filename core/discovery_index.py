@@ -95,25 +95,6 @@ def _verified_endpoint_sort_key(endpoint: VerifiedPeerEndpoint) -> tuple[int, fl
     )
 
 
-def _should_promote_observation(
-    current: VerifiedPeerEndpoint | None,
-    observation: VerifiedPeerEndpoint,
-) -> bool:
-    if current is None:
-        return True
-    if (current.host, int(current.port), current.source) == (
-        observation.host,
-        int(observation.port),
-        observation.source,
-    ):
-        return _verified_endpoint_sort_key(observation) > _verified_endpoint_sort_key(current)
-    current_source = str(current.source or "").strip().lower()
-    observation_source = str(observation.source or "").strip().lower()
-    if current_source in {"self", "api", "bootstrap"} and observation_source == "observed":
-        return False
-    return _verified_endpoint_sort_key(observation) > _verified_endpoint_sort_key(current)
-
-
 def _row_value(row: Any, key: str, default: Any = "") -> Any:
     try:
         value = row[key]
@@ -122,7 +103,7 @@ def _row_value(row: Any, key: str, default: Any = "") -> Any:
     return default if value is None else value
 
 
-def _selected_endpoint_from_row(row: Any) -> VerifiedPeerEndpoint:
+def _verified_endpoint_from_row(row: Any) -> VerifiedPeerEndpoint:
     return VerifiedPeerEndpoint(
         peer_id=str(_row_value(row, "peer_id")),
         host=str(_row_value(row, "host")),
@@ -155,52 +136,82 @@ def _observation_endpoint_from_row(row: Any) -> VerifiedPeerEndpoint:
     )
 
 
-def _sync_selected_verified_endpoint(conn: Any, peer_id: str) -> None:
-    candidates: dict[tuple[str, int, str], VerifiedPeerEndpoint] = {}
-    current_endpoint: VerifiedPeerEndpoint | None = None
-
-    current = conn.execute(
+def _load_verified_endpoint_row(conn: Any, *, peer_id: str, host: str, port: int) -> VerifiedPeerEndpoint | None:
+    row = conn.execute(
         """
         SELECT peer_id, host, port, source, last_seen_at, last_verified_at,
                verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash
         FROM peer_endpoints
-        WHERE peer_id = ?
+        WHERE peer_id = ? AND host = ? AND port = ?
         LIMIT 1
         """,
-        (peer_id,),
+        (peer_id, str(host), int(port)),
     ).fetchone()
-    if current:
-        endpoint = _selected_endpoint_from_row(current)
-        current_endpoint = endpoint
-        candidates[(endpoint.host, endpoint.port, endpoint.source)] = endpoint
+    return _verified_endpoint_from_row(row) if row else None
 
-    rows = conn.execute(
-        """
-        SELECT peer_id, host, port, source, verification_kind,
-               proof_message_id, proof_message_type, proof_hash,
-               last_verified_at, proof_count
-        FROM peer_endpoint_observations
-        WHERE peer_id = ?
-        """,
-        (peer_id,),
-    ).fetchall()
-    for row in rows:
-        endpoint = _observation_endpoint_from_row(row)
-        key = (endpoint.host, endpoint.port, endpoint.source)
-        existing = candidates.get(key)
-        if existing is None or _verified_endpoint_sort_key(endpoint) > _verified_endpoint_sort_key(existing):
-            candidates[key] = endpoint
 
-    if not candidates:
-        return
+def _max_timestamp(left: str, right: str) -> str:
+    left_dt = _parse_dt(left)
+    right_dt = _parse_dt(right)
+    if left_dt is None:
+        return right
+    if right_dt is None:
+        return left
+    return right if right_dt >= left_dt else left
 
-    selected = current_endpoint
-    if selected is None:
-        selected = sorted(candidates.values(), key=_verified_endpoint_sort_key, reverse=True)[0]
-    else:
-        for candidate in sorted(candidates.values(), key=_verified_endpoint_sort_key, reverse=True):
-            if _should_promote_observation(selected, candidate):
-                selected = candidate
+
+def _merge_verified_endpoint(
+    existing: VerifiedPeerEndpoint | None,
+    incoming: VerifiedPeerEndpoint,
+) -> VerifiedPeerEndpoint:
+    if existing is None:
+        return incoming
+
+    selected_source = existing.source
+    if _endpoint_source_priority(incoming.source) >= _endpoint_source_priority(existing.source):
+        selected_source = incoming.source
+
+    selected_last_verified_at = _max_timestamp(existing.last_verified_at, incoming.last_verified_at)
+    selected_proof_count = max(int(existing.proof_count or 0), int(incoming.proof_count or 0))
+    incoming_reference_dt = _parse_dt(incoming.last_verified_at or incoming.last_seen_at or "")
+    existing_reference_dt = _parse_dt(existing.last_verified_at or existing.last_seen_at or "")
+    incoming_more_proven = (
+        int(incoming.proof_count or 0) > int(existing.proof_count or 0)
+        or (incoming_reference_dt is not None and (existing_reference_dt is None or incoming_reference_dt >= existing_reference_dt))
+    )
+
+    selected_verification_kind = existing.verification_kind
+    selected_proof_message_id = existing.proof_message_id
+    selected_proof_message_type = existing.proof_message_type
+    selected_proof_hash = existing.proof_hash
+    if incoming_more_proven:
+        if incoming.verification_kind:
+            selected_verification_kind = incoming.verification_kind
+        if incoming.proof_message_id:
+            selected_proof_message_id = incoming.proof_message_id
+        if incoming.proof_message_type:
+            selected_proof_message_type = incoming.proof_message_type
+        if incoming.proof_hash:
+            selected_proof_hash = incoming.proof_hash
+
+    return VerifiedPeerEndpoint(
+        peer_id=existing.peer_id,
+        host=existing.host,
+        port=int(existing.port),
+        source=selected_source,
+        last_seen_at=_max_timestamp(existing.last_seen_at, incoming.last_seen_at),
+        last_verified_at=selected_last_verified_at,
+        verification_kind=selected_verification_kind,
+        proof_count=selected_proof_count,
+        proof_message_id=selected_proof_message_id,
+        proof_message_type=selected_proof_message_type,
+        proof_hash=selected_proof_hash,
+    )
+
+
+def _upsert_verified_endpoint_row(conn: Any, endpoint: VerifiedPeerEndpoint) -> None:
+    current = _load_verified_endpoint_row(conn, peer_id=endpoint.peer_id, host=endpoint.host, port=int(endpoint.port))
+    merged = _merge_verified_endpoint(current, endpoint)
     conn.execute(
         """
         INSERT OR REPLACE INTO peer_endpoints (
@@ -209,17 +220,17 @@ def _sync_selected_verified_endpoint(conn: Any, peer_id: str) -> None:
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            selected.peer_id,
-            selected.host,
-            int(selected.port),
-            selected.source,
-            selected.last_seen_at or _utcnow(),
-            selected.last_verified_at or "",
-            selected.verification_kind or "",
-            int(selected.proof_count or 0),
-            selected.proof_message_id or "",
-            selected.proof_message_type or "",
-            selected.proof_hash or "",
+            merged.peer_id,
+            merged.host,
+            int(merged.port),
+            merged.source,
+            merged.last_seen_at or _utcnow(),
+            merged.last_verified_at or "",
+            merged.verification_kind or "",
+            int(merged.proof_count or 0),
+            merged.proof_message_id or "",
+            merged.proof_message_type or "",
+            merged.proof_hash or "",
             _utcnow(),
         ),
     )
@@ -281,7 +292,19 @@ def _upsert_verified_endpoint_proof(
         """,
         (peer_id, str(host), int(port)),
     )
-    _sync_selected_verified_endpoint(conn, peer_id)
+    row = conn.execute(
+        """
+        SELECT peer_id, host, port, source, verification_kind,
+               proof_message_id, proof_message_type, proof_hash,
+               last_verified_at, proof_count
+        FROM peer_endpoint_observations
+        WHERE peer_id = ? AND host = ? AND port = ? AND source = ?
+        LIMIT 1
+        """,
+        (peer_id, str(host), int(port), source),
+    ).fetchone()
+    if row is not None:
+        _upsert_verified_endpoint_row(conn, _observation_endpoint_from_row(row))
 
 
 def upsert_peer_minimal(peer_id: str) -> None:
@@ -592,71 +615,23 @@ def prune_stale_capabilities(max_age_hours: int = 24) -> int:
 def register_peer_endpoint(peer_id: str, host: str, port: int, source: str = "observed") -> None:
     if not host or port <= 0:
         return
-    incoming_source = str(source or "observed")
+    incoming_source = str(source or "observed").strip().lower() or "observed"
     if not _is_verified_endpoint_source(incoming_source):
         register_peer_endpoint_candidate(peer_id, host, port, source=incoming_source)
         return
 
     conn = get_connection()
     try:
-        existing = conn.execute(
-            """
-            SELECT host, port, source, last_verified_at, verification_kind,
-                   proof_count, proof_message_id, proof_message_type, proof_hash
-            FROM peer_endpoints
-            WHERE peer_id = ?
-            LIMIT 1
-            """,
-            (peer_id,),
-        ).fetchone()
-
         incoming_host = str(host)
         incoming_port = int(port)
-        if existing:
-            current_host = str(existing["host"])
-            current_port = int(existing["port"])
-            current_source = str(existing["source"] or "observed")
-            same_endpoint = current_host == incoming_host and current_port == incoming_port
-            if not same_endpoint and _endpoint_source_priority(incoming_source) < _endpoint_source_priority(current_source):
-                return
-            if same_endpoint and _endpoint_source_priority(incoming_source) < _endpoint_source_priority(current_source):
-                incoming_source = current_source
-            existing_last_verified_at = str(existing["last_verified_at"] or "")
-            existing_verification_kind = str(existing["verification_kind"] or "")
-            existing_proof_count = int(existing["proof_count"] or 0)
-            existing_proof_message_id = str(existing["proof_message_id"] or "")
-            existing_proof_message_type = str(existing["proof_message_type"] or "")
-            existing_proof_hash = str(existing["proof_hash"] or "")
-        else:
-            existing_last_verified_at = ""
-            existing_verification_kind = ""
-            existing_proof_count = 0
-            existing_proof_message_id = ""
-            existing_proof_message_type = ""
-            existing_proof_hash = ""
-
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO peer_endpoints (
-                peer_id, host, port, source, last_seen_at, last_verified_at,
-                verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash, updated_at
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-            )
-            """,
-            (
-                peer_id,
-                incoming_host,
-                incoming_port,
-                incoming_source,
-                _utcnow(),
-                existing_last_verified_at,
-                existing_verification_kind,
-                existing_proof_count,
-                existing_proof_message_id,
-                existing_proof_message_type,
-                existing_proof_hash,
-                _utcnow(),
+        _upsert_verified_endpoint_row(
+            conn,
+            VerifiedPeerEndpoint(
+                peer_id=peer_id,
+                host=incoming_host,
+                port=incoming_port,
+                source=incoming_source,
+                last_seen_at=_utcnow(),
             ),
         )
         conn.execute(
@@ -816,50 +791,33 @@ def signed_observed_endpoints_for_peer(peer_id: str, *, limit: int = 8) -> list[
     return [_observation_endpoint_from_row(row) for row in rows]
 
 
-def verified_endpoints_for_peer(peer_id: str, *, limit: int = 8) -> list[VerifiedPeerEndpoint]:
+def _verified_peer_endpoint_rows(
+    peer_id: str,
+    *,
+    limit: int,
+) -> list[VerifiedPeerEndpoint]:
     conn = get_connection()
     try:
-        primary_row = conn.execute(
+        rows = conn.execute(
             """
             SELECT peer_id, host, port, source, last_seen_at, last_verified_at,
                    verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash
             FROM peer_endpoints
             WHERE peer_id = ?
-            LIMIT 1
-            """,
-            (peer_id,),
-        ).fetchone()
-        backup_rows = conn.execute(
-            """
-            SELECT peer_id, host, port, source, verification_kind,
-                   proof_message_id, proof_message_type, proof_hash,
-                   last_verified_at, proof_count
-            FROM peer_endpoint_observations
-            WHERE peer_id = ?
-            ORDER BY last_verified_at DESC, proof_count DESC
+            ORDER BY updated_at DESC
             LIMIT ?
             """,
-            (peer_id, max(1, int(limit)) * 4),
+            (peer_id, max(1, int(limit))),
         ).fetchall()
     finally:
         conn.close()
+    endpoints = [_verified_endpoint_from_row(row) for row in rows]
+    endpoints.sort(key=_verified_endpoint_sort_key, reverse=True)
+    return endpoints
 
-    out: list[VerifiedPeerEndpoint] = []
-    seen: set[tuple[str, int, str]] = set()
-    if primary_row is not None:
-        primary = _selected_endpoint_from_row(primary_row)
-        out.append(primary)
-        seen.add((primary.host, int(primary.port), primary.source))
-    for row in backup_rows:
-        endpoint = _observation_endpoint_from_row(row)
-        key = (endpoint.host, int(endpoint.port), endpoint.source)
-        if key in seen:
-            continue
-        out.append(endpoint)
-        seen.add(key)
-        if len(out) >= max(1, int(limit)):
-            break
-    return out
+
+def verified_endpoints_for_peer(peer_id: str, *, limit: int = 8) -> list[VerifiedPeerEndpoint]:
+    return _verified_peer_endpoint_rows(peer_id, limit=limit)
 
 
 def candidate_endpoints_for_peer(peer_id: str, *, limit: int = 8) -> list[PeerEndpointCandidate]:
@@ -995,25 +953,10 @@ def note_peer_endpoint_candidate_probe_result(
 
 
 def recent_peer_endpoints(*, exclude_peer_id: str | None = None, limit: int = 32) -> list[tuple[str, str, int]]:
-    conn = get_connection()
-    try:
-        rows = conn.execute(
-            """
-            SELECT peer_id, host, port
-            FROM peer_endpoints
-            ORDER BY updated_at DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-    finally:
-        conn.close()
-
+    rows = recent_peer_verified_endpoints(exclude_peer_id=exclude_peer_id, limit=limit, per_peer_limit=1)
     out: list[tuple[str, str, int]] = []
-    for row in rows:
-        if exclude_peer_id and row["peer_id"] == exclude_peer_id:
-            continue
-        out.append((str(row["peer_id"]), str(row["host"]), int(row["port"])))
+    for endpoint in rows:
+        out.append((endpoint.peer_id, endpoint.host, int(endpoint.port)))
     return out
 
 
@@ -1025,7 +968,7 @@ def recent_peer_verified_endpoints(
 ) -> list[VerifiedPeerEndpoint]:
     conn = get_connection()
     try:
-        primary_rows = conn.execute(
+        rows = conn.execute(
             """
             SELECT peer_id, host, port, source, last_seen_at, last_verified_at,
                    verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash
@@ -1033,47 +976,60 @@ def recent_peer_verified_endpoints(
             ORDER BY updated_at DESC
             LIMIT ?
             """,
-            (max(1, int(limit)) * max(1, int(per_peer_limit)),),
-        ).fetchall()
-        backup_rows = conn.execute(
-            """
-            SELECT peer_id, host, port, source, verification_kind,
-                   proof_message_id, proof_message_type, proof_hash,
-                   last_verified_at, proof_count
-            FROM peer_endpoint_observations
-            ORDER BY last_verified_at DESC, proof_count DESC
-            LIMIT ?
-            """,
-            (max(1, int(limit)) * max(1, int(per_peer_limit)) * 4,),
+            (max(1, int(limit)) * max(1, int(per_peer_limit)) * 8,),
         ).fetchall()
     finally:
         conn.close()
 
     max_per_peer = max(1, int(per_peer_limit))
-    seen_endpoints: set[tuple[str, str, int, str]] = set()
+    seen_endpoints: set[tuple[str, str, int]] = set()
     per_peer_counts: dict[str, int] = {}
     out: list[VerifiedPeerEndpoint] = []
+    sorted_rows = sorted((_verified_endpoint_from_row(row) for row in rows), key=_verified_endpoint_sort_key, reverse=True)
 
     def _try_add(endpoint: VerifiedPeerEndpoint) -> None:
         if exclude_peer_id and endpoint.peer_id == exclude_peer_id:
             return
         if per_peer_counts.get(endpoint.peer_id, 0) >= max_per_peer:
             return
-        key = (endpoint.peer_id, endpoint.host, int(endpoint.port), endpoint.source)
+        key = (endpoint.peer_id, endpoint.host, int(endpoint.port))
         if key in seen_endpoints:
             return
         seen_endpoints.add(key)
         per_peer_counts[endpoint.peer_id] = per_peer_counts.get(endpoint.peer_id, 0) + 1
         out.append(endpoint)
 
-    for row in primary_rows:
-        _try_add(_selected_endpoint_from_row(row))
+    for endpoint in sorted_rows:
+        _try_add(endpoint)
         if len(out) >= max(1, int(limit)):
             return out
-    for row in backup_rows:
-        _try_add(_observation_endpoint_from_row(row))
-        if len(out) >= max(1, int(limit)):
-            return out
+    return out
+
+
+def delivery_endpoints_for_peer(
+    peer_id: str,
+    *,
+    verified_limit: int = 4,
+    include_candidates: bool = False,
+    candidate_limit: int = 2,
+) -> list[tuple[str, int]]:
+    out: list[tuple[str, int]] = []
+    seen: set[tuple[str, int]] = set()
+
+    for endpoint in verified_endpoints_for_peer(peer_id, limit=max(1, int(verified_limit))):
+        key = (endpoint.host, int(endpoint.port))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+
+    if include_candidates:
+        for candidate in candidate_endpoints_for_peer(peer_id, limit=max(1, int(candidate_limit))):
+            key = (candidate.host, int(candidate.port))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(key)
     return out
 
 # Phase 28: Progressive Trust Spot-Check Probability

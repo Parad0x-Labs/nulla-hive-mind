@@ -153,8 +153,8 @@ def test_recent_peer_verified_endpoints_includes_signed_backup_before_candidates
     endpoints = recent_peer_verified_endpoints(limit=3, per_peer_limit=2)
 
     assert [(item.peer_id, item.host, item.port) for item in endpoints[:2]] == [
-        (peer_id, "203.0.113.20", 49020),
         (peer_id, "203.0.113.21", 49021),
+        (peer_id, "203.0.113.20", 49020),
     ]
 
 
@@ -327,8 +327,8 @@ def test_maintenance_tick_uses_signed_backup_endpoint_before_candidate_when_veri
         loop.run_tick()
 
     assert send_message.call_args_list == [
-        mock.call("203.0.113.30", 49030, b"find-node"),
         mock.call("203.0.113.31", 49031, b"find-node"),
+        mock.call("203.0.113.30", 49030, b"find-node"),
     ]
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from retrieval.swarm_query import broadcast_task_offer
+from retrieval.swarm_query import broadcast_task_offer, request_specific_shard
 
 
 class _FakeOrderBook:
@@ -32,3 +32,23 @@ def test_broadcast_task_offer_enqueues_local_loopback_when_no_helpers(monkeypatc
     assert sent == 1
     assert len(fake_book.pushed) == 1
     assert fake_book.pushed[0][1] == ("127.0.0.1", 49152)
+
+
+def test_request_specific_shard_falls_back_to_second_endpoint(monkeypatch) -> None:
+    attempts: list[tuple[str, int]] = []
+
+    def _send(host: str, port: int, payload: bytes) -> bool:
+        attempts.append((host, port))
+        return (host, port) == ("198.51.100.51", 49151)
+
+    monkeypatch.setattr(
+        "retrieval.swarm_query.delivery_endpoints_for_peer",
+        lambda peer_id, **kwargs: [("198.51.100.50", 49150), ("198.51.100.51", 49151)],
+    )
+    monkeypatch.setattr("retrieval.swarm_query.send_message", _send)
+    monkeypatch.setattr("retrieval.swarm_query.audit_logger.log", lambda *args, **kwargs: None)
+
+    ok = request_specific_shard(peer_id="peer-remote", query_id="query-1", shard_id="shard-1")
+
+    assert ok is True
+    assert attempts == [("198.51.100.50", 49150), ("198.51.100.51", 49151)]

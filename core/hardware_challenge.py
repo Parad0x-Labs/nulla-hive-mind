@@ -8,7 +8,7 @@ from typing import Any
 
 from core import audit_logger
 from core.challenge_engine import issue_challenge
-from core.discovery_index import endpoint_for_peer
+from core.discovery_index import delivery_endpoints_for_peer
 from core.task_capsule import build_task_capsule
 from network.assist_models import RewardHint, TaskOffer
 from network.dht import get_routing_table
@@ -93,9 +93,6 @@ def initiate_random_hardware_challenge() -> None:
             "compute_class": compute_class,
         }
 
-    endpoint = endpoint_for_peer(target.peer_id)
-    host = endpoint[0] if endpoint else target.ip
-    port = int(endpoint[1] if endpoint else target.port)
     msg = encode_message(
         msg_id=str(uuid.uuid4()),
         msg_type="TASK_OFFER",
@@ -103,12 +100,26 @@ def initiate_random_hardware_challenge() -> None:
         nonce=uuid.uuid4().hex,
         payload=offer.model_dump(mode="json"),
     )
-    send_message(host, port, msg)
+    sent = False
+    attempts = 0
+    for host, port in delivery_endpoints_for_peer(
+        target.peer_id,
+        verified_limit=4,
+        include_candidates=True,
+        candidate_limit=1,
+    ):
+        attempts += 1
+        if send_message(host, int(port), msg):
+            sent = True
+            break
+    if not sent:
+        attempts += 1
+        send_message(target.ip, int(target.port), msg)
     audit_logger.log(
         "hardware_challenge_dispatched",
         target_id=target.peer_id,
         target_type="peer",
-        details={"benchmark_id": task_id, "expected_class": compute_class},
+        details={"benchmark_id": task_id, "expected_class": compute_class, "endpoint_attempts": attempts},
         trace_id=task_id,
     )
 
