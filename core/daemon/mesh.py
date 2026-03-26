@@ -6,7 +6,8 @@ from typing import Any
 
 from core import audit_logger, policy_engine
 from core.capability_tokens import revoke_capability_tokens_for_task
-from core.discovery_index import endpoint_for_peer, peer_trust
+from core.daemon.peer_delivery import send_to_peer_or_log
+from core.discovery_index import peer_trust
 from core.idle_assist_policy import IdleAssistConfig
 from core.task_state_machine import current_state, transition
 from network.assist_router import (
@@ -83,14 +84,20 @@ def run_order_book_loop(daemon: Any) -> None:
                     host_group_hint_hash=daemon.local_capability_ad.assist_filters.host_group_hint_hash,
                 )
 
-                endpoint = endpoint_for_peer(parent_peer_id)
-                host, port = endpoint if endpoint else best_offer.source_addr
-                if daemon._send_or_log(
-                    host,
-                    int(port),
+                if send_to_peer_or_log(
+                    parent_peer_id,
                     claim_msg,
                     message_type="TASK_CLAIM",
                     target_id=str(task_id),
+                    include_candidates=True,
+                    fallback_addr=best_offer.source_addr,
+                    send_attempt=lambda host, port, raw, _task_id=str(task_id): daemon._send_or_log(
+                        host,
+                        int(port),
+                        raw,
+                        message_type="TASK_CLAIM",
+                        target_id=_task_id,
+                    ),
                 ):
                     current_assignments += 1
                     stream_telemetry_event("ORDER_BOOK_CLAIM", task_id, {"bid_price": best_offer.bid_price})
@@ -334,9 +341,6 @@ def assign_pending_claims_for_open_offers(daemon: Any, *, hooks: Any, limit: int
         if not best:
             continue
         claim_id, helper_peer_id = best
-        endpoint = hooks.endpoint_for_peer(helper_peer_id)
-        if not endpoint:
-            continue
         assign = prepare_task_assignment(
             task_id=task_id,
             claim_id=claim_id,
@@ -348,12 +352,19 @@ def assign_pending_claims_for_open_offers(daemon: Any, *, hooks: Any, limit: int
         if not assign:
             continue
         persist_task_assignment(assign)
-        if daemon._send_or_log(
-            endpoint[0],
-            int(endpoint[1]),
+        if send_to_peer_or_log(
+            helper_peer_id,
             build_task_assign_message(assign),
             message_type="TASK_ASSIGN",
             target_id=task_id,
+            include_candidates=True,
+            send_attempt=lambda host, port, raw, _task_id=str(task_id): daemon._send_or_log(
+                host,
+                int(port),
+                raw,
+                message_type="TASK_ASSIGN",
+                target_id=_task_id,
+            ),
         ):
             assigned += 1
     return assigned

@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 import uuid
 from typing import Any
 
 from core import audit_logger, policy_engine
 from core.capability_tokens import mark_capability_token_used, verify_assignment_capability
+from core.daemon.peer_delivery import send_or_log as _send_or_log_via_transport
+from core.daemon.peer_delivery import send_to_peer_or_log
 from core.liquefy_bridge import apply_local_execution_safety
 from network.assist_router import build_task_progress_message
 from network.protocol import Envelope, Protocol, encode_message, validate_payload, verify_signature
 from network.signer import get_local_peer_id as local_peer_id
-from network.transport import send_message
 
 
 def maybe_auto_review_result_from_raw(
@@ -47,11 +47,22 @@ def maybe_auto_review_result_from_raw(
     if not artifacts:
         return
 
-    endpoint = hooks.endpoint_for_peer(helper_peer_id)
-    host, port = endpoint if endpoint else fallback_addr
-
     for msg in artifacts.outbound_messages:
-        daemon._send_or_log(host, int(port), msg, message_type="TASK_REVIEW", target_id=str(payload.get("task_id", "")))
+        send_to_peer_or_log(
+            helper_peer_id,
+            msg,
+            message_type="TASK_REVIEW",
+            target_id=str(payload.get("task_id", "")),
+            include_candidates=True,
+            fallback_addr=fallback_addr,
+            send_attempt=lambda host, port, raw: daemon._send_or_log(
+                host,
+                int(port),
+                raw,
+                message_type="TASK_REVIEW",
+                target_id=str(payload.get("task_id", "")),
+            ),
+        )
 
     audit_logger.log(
         "task_result_review_reply_sent",
@@ -166,8 +177,6 @@ def maybe_execute_local_assignment_from_raw(
         return
 
     try:
-        parent_endpoint = hooks.endpoint_for_peer(parent_peer_id)
-        host, port = parent_endpoint if parent_endpoint else fallback_addr
         started_progress = build_task_progress_message(
             assignment_id=assignment_id,
             task_id=task_id,
@@ -175,12 +184,24 @@ def maybe_execute_local_assignment_from_raw(
             progress_state="started",
             progress_note="lease verified; helper execution started",
         )
-        daemon._send_or_log(host, int(port), started_progress, message_type="TASK_PROGRESS", target_id=task_id)
+        send_to_peer_or_log(
+            parent_peer_id,
+            started_progress,
+            message_type="TASK_PROGRESS",
+            target_id=task_id,
+            include_candidates=True,
+            fallback_addr=fallback_addr,
+            send_attempt=lambda host, port, raw: daemon._send_or_log(
+                host,
+                int(port),
+                raw,
+                message_type="TASK_PROGRESS",
+                target_id=task_id,
+            ),
+        )
 
         worker_outcome = hooks.run_task_capsule(capsule, helper_agent_id=local_peer_id())
     except Exception as exc:
-        parent_endpoint = hooks.endpoint_for_peer(parent_peer_id)
-        host, port = parent_endpoint if parent_endpoint else fallback_addr
         blocked_progress = build_task_progress_message(
             assignment_id=assignment_id,
             task_id=task_id,
@@ -188,7 +209,21 @@ def maybe_execute_local_assignment_from_raw(
             progress_state="blocked",
             progress_note=f"helper execution failed: {str(exc)[:180]}",
         )
-        daemon._send_or_log(host, int(port), blocked_progress, message_type="TASK_PROGRESS", target_id=task_id)
+        send_to_peer_or_log(
+            parent_peer_id,
+            blocked_progress,
+            message_type="TASK_PROGRESS",
+            target_id=task_id,
+            include_candidates=True,
+            fallback_addr=fallback_addr,
+            send_attempt=lambda host, port, raw: daemon._send_or_log(
+                host,
+                int(port),
+                raw,
+                message_type="TASK_PROGRESS",
+                target_id=task_id,
+            ),
+        )
         audit_logger.log(
             "assignment_execution_failed",
             target_id=task_id,
@@ -197,9 +232,6 @@ def maybe_execute_local_assignment_from_raw(
         )
         return
 
-    parent_endpoint = hooks.endpoint_for_peer(parent_peer_id)
-    host, port = parent_endpoint if parent_endpoint else fallback_addr
-
     done_progress = build_task_progress_message(
         assignment_id=assignment_id,
         task_id=task_id,
@@ -207,7 +239,21 @@ def maybe_execute_local_assignment_from_raw(
         progress_state="done",
         progress_note="helper execution finished; sending result",
     )
-    daemon._send_or_log(host, int(port), done_progress, message_type="TASK_PROGRESS", target_id=task_id)
+    send_to_peer_or_log(
+        parent_peer_id,
+        done_progress,
+        message_type="TASK_PROGRESS",
+        target_id=task_id,
+        include_candidates=True,
+        fallback_addr=fallback_addr,
+        send_attempt=lambda host, port, raw: daemon._send_or_log(
+            host,
+            int(port),
+            raw,
+            message_type="TASK_PROGRESS",
+            target_id=task_id,
+        ),
+    )
 
     raw_result = encode_message(
         msg_id=str(uuid.uuid4()),
@@ -216,7 +262,21 @@ def maybe_execute_local_assignment_from_raw(
         nonce=uuid.uuid4().hex,
         payload=worker_outcome.result.model_dump(mode="json"),
     )
-    daemon._send_or_log(host, int(port), raw_result, message_type="TASK_RESULT", target_id=task_id)
+    send_to_peer_or_log(
+        parent_peer_id,
+        raw_result,
+        message_type="TASK_RESULT",
+        target_id=task_id,
+        include_candidates=True,
+        fallback_addr=fallback_addr,
+        send_attempt=lambda host, port, raw: daemon._send_or_log(
+            host,
+            int(port),
+            raw,
+            message_type="TASK_RESULT",
+            target_id=task_id,
+        ),
+    )
 
     audit_logger.log(
         "assignment_executed_locally",
@@ -305,27 +365,10 @@ def spawn_limited_worker(
 
 
 def send_or_log(host: str, port: int, payload: bytes, *, message_type: str, target_id: str) -> bool:
-    critical_types = {"TASK_ASSIGN", "TASK_RESULT", "TASK_REVIEW", "TASK_REWARD", "TASK_CLAIM"}
-    retries = int(policy_engine.get("network.critical_send_retries", 2)) if message_type in critical_types else 0
-    retries = max(0, retries)
-    attempts = 1 + retries
-
-    for attempt in range(1, attempts + 1):
-        ok = send_message(host, int(port), payload)
-        if ok:
-            return True
-        if attempt < attempts:
-            time.sleep(min(0.25, 0.05 * attempt))
-
-    audit_logger.log(
-        "outbound_send_failed",
+    return _send_or_log_via_transport(
+        host,
+        int(port),
+        payload,
+        message_type=message_type,
         target_id=target_id,
-        target_type="network",
-        details={
-            "host": host,
-            "port": int(port),
-            "message_type": message_type,
-            "attempts": attempts,
-        },
     )
-    return False

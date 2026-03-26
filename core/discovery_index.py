@@ -58,6 +58,19 @@ class VerifiedPeerEndpoint:
     proof_message_id: str = ""
     proof_message_type: str = ""
     proof_hash: str = ""
+    last_delivery_attempt_at: str = ""
+    last_delivery_success_at: str = ""
+    last_delivery_failure_at: str = ""
+    consecutive_delivery_failures: int = 0
+
+
+@dataclass(frozen=True)
+class PeerDeliveryTarget:
+    peer_id: str
+    host: str
+    port: int
+    source: str
+    verified: bool
 
 
 def _utcnow() -> str:
@@ -82,14 +95,18 @@ def _is_verified_endpoint_source(value: str) -> bool:
     return str(value or "").strip().lower() in _VERIFIED_ENDPOINT_SOURCES
 
 
-def _verified_endpoint_sort_key(endpoint: VerifiedPeerEndpoint) -> tuple[int, float, int, float]:
+def _verified_endpoint_sort_key(endpoint: VerifiedPeerEndpoint) -> tuple[int, float, float, int, int, float]:
     verified_dt = _parse_dt(endpoint.last_verified_at) or _parse_dt(endpoint.last_seen_at)
     seen_dt = _parse_dt(endpoint.last_seen_at)
+    success_dt = _parse_dt(endpoint.last_delivery_success_at)
     verified_ts = verified_dt.timestamp() if verified_dt is not None else 0.0
     seen_ts = seen_dt.timestamp() if seen_dt is not None else 0.0
+    success_ts = success_dt.timestamp() if success_dt is not None else 0.0
     return (
         _endpoint_source_priority(endpoint.source),
+        success_ts,
         verified_ts,
+        -int(endpoint.consecutive_delivery_failures or 0),
         int(endpoint.proof_count or 0),
         seen_ts,
     )
@@ -116,6 +133,10 @@ def _verified_endpoint_from_row(row: Any) -> VerifiedPeerEndpoint:
         proof_message_id=str(_row_value(row, "proof_message_id", "")),
         proof_message_type=str(_row_value(row, "proof_message_type", "")),
         proof_hash=str(_row_value(row, "proof_hash", "")),
+        last_delivery_attempt_at=str(_row_value(row, "last_delivery_attempt_at", "")),
+        last_delivery_success_at=str(_row_value(row, "last_delivery_success_at", "")),
+        last_delivery_failure_at=str(_row_value(row, "last_delivery_failure_at", "")),
+        consecutive_delivery_failures=int(_row_value(row, "consecutive_delivery_failures", 0) or 0),
     )
 
 
@@ -133,6 +154,10 @@ def _observation_endpoint_from_row(row: Any) -> VerifiedPeerEndpoint:
         proof_message_id=str(_row_value(row, "proof_message_id", "")),
         proof_message_type=str(_row_value(row, "proof_message_type", "")),
         proof_hash=str(_row_value(row, "proof_hash", "")),
+        last_delivery_attempt_at="",
+        last_delivery_success_at="",
+        last_delivery_failure_at="",
+        consecutive_delivery_failures=0,
     )
 
 
@@ -140,7 +165,9 @@ def _load_verified_endpoint_row(conn: Any, *, peer_id: str, host: str, port: int
     row = conn.execute(
         """
         SELECT peer_id, host, port, source, last_seen_at, last_verified_at,
-               verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash
+               verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash,
+               last_delivery_attempt_at, last_delivery_success_at, last_delivery_failure_at,
+               consecutive_delivery_failures
         FROM peer_endpoints
         WHERE peer_id = ? AND host = ? AND port = ?
         LIMIT 1
@@ -206,6 +233,18 @@ def _merge_verified_endpoint(
         proof_message_id=selected_proof_message_id,
         proof_message_type=selected_proof_message_type,
         proof_hash=selected_proof_hash,
+        last_delivery_attempt_at=_max_timestamp(existing.last_delivery_attempt_at, incoming.last_delivery_attempt_at),
+        last_delivery_success_at=_max_timestamp(existing.last_delivery_success_at, incoming.last_delivery_success_at),
+        last_delivery_failure_at=_max_timestamp(existing.last_delivery_failure_at, incoming.last_delivery_failure_at),
+        consecutive_delivery_failures=min(
+            int(existing.consecutive_delivery_failures or 0),
+            int(incoming.consecutive_delivery_failures or 0),
+        )
+        if incoming.last_delivery_success_at
+        else max(
+            int(existing.consecutive_delivery_failures or 0),
+            int(incoming.consecutive_delivery_failures or 0),
+        ),
     )
 
 
@@ -216,8 +255,10 @@ def _upsert_verified_endpoint_row(conn: Any, endpoint: VerifiedPeerEndpoint) -> 
         """
         INSERT OR REPLACE INTO peer_endpoints (
             peer_id, host, port, source, last_seen_at, last_verified_at,
-            verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash,
+            last_delivery_attempt_at, last_delivery_success_at, last_delivery_failure_at,
+            consecutive_delivery_failures, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             merged.peer_id,
@@ -231,6 +272,10 @@ def _upsert_verified_endpoint_row(conn: Any, endpoint: VerifiedPeerEndpoint) -> 
             merged.proof_message_id or "",
             merged.proof_message_type or "",
             merged.proof_hash or "",
+            merged.last_delivery_attempt_at or "",
+            merged.last_delivery_success_at or "",
+            merged.last_delivery_failure_at or "",
+            int(merged.consecutive_delivery_failures or 0),
             _utcnow(),
         ),
     )
@@ -801,7 +846,9 @@ def _verified_peer_endpoint_rows(
         rows = conn.execute(
             """
             SELECT peer_id, host, port, source, last_seen_at, last_verified_at,
-                   verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash
+                   verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash,
+                   last_delivery_attempt_at, last_delivery_success_at, last_delivery_failure_at,
+                   consecutive_delivery_failures
             FROM peer_endpoints
             WHERE peer_id = ?
             ORDER BY updated_at DESC
@@ -818,6 +865,57 @@ def _verified_peer_endpoint_rows(
 
 def verified_endpoints_for_peer(peer_id: str, *, limit: int = 8) -> list[VerifiedPeerEndpoint]:
     return _verified_peer_endpoint_rows(peer_id, limit=limit)
+
+
+def note_verified_peer_endpoint_delivery_result(
+    peer_id: str,
+    host: str,
+    port: int,
+    *,
+    delivered: bool,
+) -> None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT last_seen_at, last_delivery_success_at, consecutive_delivery_failures
+                 , last_delivery_failure_at
+            FROM peer_endpoints
+            WHERE peer_id = ? AND host = ? AND port = ?
+            LIMIT 1
+            """,
+            (peer_id, str(host), int(port)),
+        ).fetchone()
+        if not row:
+            return
+        now = _utcnow()
+        delivery_failures = 0 if delivered else (int(row["consecutive_delivery_failures"] or 0) + 1)
+        conn.execute(
+            """
+            UPDATE peer_endpoints
+            SET last_seen_at = ?,
+                last_delivery_attempt_at = ?,
+                last_delivery_success_at = ?,
+                last_delivery_failure_at = ?,
+                consecutive_delivery_failures = ?,
+                updated_at = ?
+            WHERE peer_id = ? AND host = ? AND port = ?
+            """,
+            (
+                _max_timestamp(str(row["last_seen_at"] or ""), now) if delivered else str(row["last_seen_at"] or ""),
+                now,
+                now if delivered else str(row["last_delivery_success_at"] or ""),
+                str(row["last_delivery_failure_at"] or "") if delivered else now,
+                delivery_failures,
+                now,
+                peer_id,
+                str(host),
+                int(port),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def candidate_endpoints_for_peer(peer_id: str, *, limit: int = 8) -> list[PeerEndpointCandidate]:
@@ -971,7 +1069,9 @@ def recent_peer_verified_endpoints(
         rows = conn.execute(
             """
             SELECT peer_id, host, port, source, last_seen_at, last_verified_at,
-                   verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash
+                   verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash,
+                   last_delivery_attempt_at, last_delivery_success_at, last_delivery_failure_at,
+                   consecutive_delivery_failures
             FROM peer_endpoints
             ORDER BY updated_at DESC
             LIMIT ?
@@ -1013,7 +1113,25 @@ def delivery_endpoints_for_peer(
     include_candidates: bool = False,
     candidate_limit: int = 2,
 ) -> list[tuple[str, int]]:
-    out: list[tuple[str, int]] = []
+    return [
+        (item.host, int(item.port))
+        for item in delivery_targets_for_peer(
+            peer_id,
+            verified_limit=verified_limit,
+            include_candidates=include_candidates,
+            candidate_limit=candidate_limit,
+        )
+    ]
+
+
+def delivery_targets_for_peer(
+    peer_id: str,
+    *,
+    verified_limit: int = 4,
+    include_candidates: bool = False,
+    candidate_limit: int = 2,
+) -> list[PeerDeliveryTarget]:
+    targets: list[PeerDeliveryTarget] = []
     seen: set[tuple[str, int]] = set()
 
     for endpoint in verified_endpoints_for_peer(peer_id, limit=max(1, int(verified_limit))):
@@ -1021,7 +1139,15 @@ def delivery_endpoints_for_peer(
         if key in seen:
             continue
         seen.add(key)
-        out.append(key)
+        targets.append(
+            PeerDeliveryTarget(
+                peer_id=peer_id,
+                host=endpoint.host,
+                port=int(endpoint.port),
+                source=endpoint.source,
+                verified=True,
+            )
+        )
 
     if include_candidates:
         for candidate in candidate_endpoints_for_peer(peer_id, limit=max(1, int(candidate_limit))):
@@ -1029,8 +1155,16 @@ def delivery_endpoints_for_peer(
             if key in seen:
                 continue
             seen.add(key)
-            out.append(key)
-    return out
+            targets.append(
+                PeerDeliveryTarget(
+                    peer_id=peer_id,
+                    host=candidate.host,
+                    port=int(candidate.port),
+                    source=candidate.source,
+                    verified=False,
+                )
+            )
+    return targets
 
 # Phase 28: Progressive Trust Spot-Check Probability
 def get_spot_check_probability(peer_id: str) -> float:

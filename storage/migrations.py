@@ -711,6 +711,10 @@ CREATE TABLE IF NOT EXISTS peer_endpoints (
     proof_message_id TEXT NOT NULL DEFAULT '',
     proof_message_type TEXT NOT NULL DEFAULT '',
     proof_hash TEXT NOT NULL DEFAULT '',
+    last_delivery_attempt_at TEXT NOT NULL DEFAULT '',
+    last_delivery_success_at TEXT NOT NULL DEFAULT '',
+    last_delivery_failure_at TEXT NOT NULL DEFAULT '',
+    consecutive_delivery_failures INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (peer_id, host, port)
 );
@@ -1277,6 +1281,10 @@ def run_migrations(db_path=None) -> None:
         _add_column_if_missing(conn, "peer_endpoints", "proof_message_id", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "peer_endpoints", "proof_message_type", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "peer_endpoints", "proof_hash", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "last_delivery_attempt_at", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "last_delivery_success_at", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "last_delivery_failure_at", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "consecutive_delivery_failures", "INTEGER NOT NULL DEFAULT 0")
         _rebuild_peer_endpoints_if_needed(conn)
         _add_column_if_missing(conn, "peer_endpoint_candidates", "last_probe_attempt_at", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "peer_endpoint_candidates", "last_probe_delivery_ok", "INTEGER NOT NULL DEFAULT 0")
@@ -1498,6 +1506,10 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
             proof_message_id TEXT NOT NULL DEFAULT '',
             proof_message_type TEXT NOT NULL DEFAULT '',
             proof_hash TEXT NOT NULL DEFAULT '',
+            last_delivery_attempt_at TEXT NOT NULL DEFAULT '',
+            last_delivery_success_at TEXT NOT NULL DEFAULT '',
+            last_delivery_failure_at TEXT NOT NULL DEFAULT '',
+            consecutive_delivery_failures INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL,
             PRIMARY KEY (peer_id, host, port)
         )
@@ -1507,7 +1519,9 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
         """
         INSERT INTO peer_endpoints (
             peer_id, host, port, source, last_seen_at, last_verified_at,
-            verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash, updated_at
+            verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash,
+            last_delivery_attempt_at, last_delivery_success_at, last_delivery_failure_at,
+            consecutive_delivery_failures, updated_at
         )
         SELECT
             peer_id,
@@ -1521,6 +1535,10 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
             proof_message_id,
             proof_message_type,
             proof_hash,
+            '',
+            '',
+            '',
+            0,
             updated_at
         FROM peer_endpoints_legacy
         """
@@ -1550,8 +1568,10 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
                 """
                 INSERT INTO peer_endpoints (
                     peer_id, host, port, source, last_seen_at, last_verified_at,
-                    verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash,
+                    last_delivery_attempt_at, last_delivery_success_at, last_delivery_failure_at,
+                    consecutive_delivery_failures, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["peer_id"],
@@ -1565,6 +1585,10 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
                     row["proof_message_id"],
                     row["proof_message_type"],
                     row["proof_hash"],
+                    "",
+                    "",
+                    "",
+                    0,
                     row["updated_at"],
                 ),
             )
@@ -1597,6 +1621,10 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
                 proof_message_id = ?,
                 proof_message_type = ?,
                 proof_hash = ?,
+                last_delivery_attempt_at = COALESCE(last_delivery_attempt_at, ''),
+                last_delivery_success_at = COALESCE(last_delivery_success_at, ''),
+                last_delivery_failure_at = COALESCE(last_delivery_failure_at, ''),
+                consecutive_delivery_failures = COALESCE(consecutive_delivery_failures, 0),
                 updated_at = ?
             WHERE peer_id = ? AND host = ? AND port = ?
             """,
