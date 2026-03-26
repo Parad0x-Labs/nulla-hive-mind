@@ -343,24 +343,58 @@ def register_peer_endpoint(peer_id: str, host: str, port: int, source: str = "ob
     if not host or port <= 0:
         return
 
+    def _priority(value: str) -> int:
+        normalized = str(value or "").strip().lower()
+        priorities = {
+            "self": 500,
+            "api": 450,
+            "observed": 400,
+            "bootstrap": 300,
+            "advertised": 200,
+            "dht": 100,
+            "block_found": 90,
+        }
+        return priorities.get(normalized, 0)
+
     conn = get_connection()
     try:
+        existing = conn.execute(
+            """
+            SELECT host, port, source
+            FROM peer_endpoints
+            WHERE peer_id = ?
+            LIMIT 1
+            """,
+            (peer_id,),
+        ).fetchone()
+
+        incoming_host = str(host)
+        incoming_port = int(port)
+        incoming_source = str(source or "observed")
+        if existing:
+            current_host = str(existing["host"])
+            current_port = int(existing["port"])
+            current_source = str(existing["source"] or "observed")
+            same_endpoint = current_host == incoming_host and current_port == incoming_port
+            if not same_endpoint and _priority(incoming_source) < _priority(current_source):
+                return
+            if same_endpoint and _priority(incoming_source) < _priority(current_source):
+                incoming_source = current_source
+
         conn.execute(
             """
             INSERT OR REPLACE INTO peer_endpoints (
                 peer_id, host, port, source, last_seen_at, updated_at
             ) VALUES (
-                ?, ?, ?, ?, ?,
-                COALESCE((SELECT updated_at FROM peer_endpoints WHERE peer_id = ?), ?)
+                ?, ?, ?, ?, ?, ?
             )
             """,
             (
                 peer_id,
-                host,
-                int(port),
-                source,
+                incoming_host,
+                incoming_port,
+                incoming_source,
                 _utcnow(),
-                peer_id,
                 _utcnow(),
             ),
         )

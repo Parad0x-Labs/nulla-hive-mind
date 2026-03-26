@@ -853,18 +853,18 @@ def handle_incoming_assist_message(
     from network.dht import get_routing_table
     table = get_routing_table()
     if source_addr:
-        table.add_node(sender, source_addr[0], int(source_addr[1]))
+        table.add_node(sender, source_addr[0], int(source_addr[1]), source="observed")
 
     if msg_type == "FIND_NODE":
         target = payload_model.target_id
-        closest = table.find_closest_peers(target, count=10)
+        closest = table.find_closest_peers(target, count=10, verified_only=True)
         generated.append(build_node_found_message(target, closest))
         return RouteResult(True, f"DHT FIND_NODE processed. Found {len(closest)} peers.", generated)
 
     if msg_type == "NODE_FOUND":
         nodes = payload_model.nodes
         for n in nodes:
-            table.add_node(n.peer_id, n.ip, n.port)
+            table.add_node(n.peer_id, n.ip, n.port, source="dht")
             register_peer_endpoint(n.peer_id, n.ip, n.port, source="dht")
         return RouteResult(True, f"DHT NODE_FOUND processed. Integrated {len(nodes)} peers.", generated)
 
@@ -886,7 +886,7 @@ def handle_incoming_assist_message(
             return RouteResult(True, "FIND_BLOCK processed. We have the block, returning BLOCK_FOUND.", generated)
         else:
             # We don't have it, route to closest peers in DHT
-            closest = table.find_closest_peers(block_hash[:64], count=10) # approximate distance by block hash
+            closest = table.find_closest_peers(block_hash[:64], count=10, verified_only=True) # approximate distance by block hash
             generated.append(build_block_found_message(block_hash, closest))
             return RouteResult(True, f"FIND_BLOCK processed. Routed to {len(closest)} closer peers.", generated)
 

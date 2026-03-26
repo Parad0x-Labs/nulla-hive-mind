@@ -12,6 +12,7 @@ class DHTNode:
     ip: str
     port: int
     last_seen: float
+    endpoint_source: str = "observed"
 
 
 @dataclass(frozen=True)
@@ -58,7 +59,23 @@ class RoutingTable:
             return None
         return min(idx, self.bucket_count - 1)
 
-    def add_node(self, peer_id: str, ip: str, port: int) -> None:
+    def _endpoint_source_priority(self, source: str) -> int:
+        normalized = str(source or "").strip().lower()
+        priorities = {
+            "self": 500,
+            "api": 450,
+            "observed": 400,
+            "bootstrap": 300,
+            "advertised": 200,
+            "dht": 100,
+            "block_found": 90,
+        }
+        return priorities.get(normalized, 0)
+
+    def _is_verified_endpoint_source(self, source: str) -> bool:
+        return str(source or "").strip().lower() in {"self", "api", "observed", "bootstrap"}
+
+    def add_node(self, peer_id: str, ip: str, port: int, *, source: str = "observed") -> None:
         bucket_index = self._bucket_index(peer_id)
         if bucket_index is None:
             return
@@ -68,8 +85,16 @@ class RoutingTable:
 
         existing = self.nodes.get(peer_id)
         if existing is not None:
-            existing.ip = ip
-            existing.port = int(port)
+            same_endpoint = existing.ip == ip and int(existing.port) == int(port)
+            existing_priority = self._endpoint_source_priority(existing.endpoint_source)
+            incoming_priority = self._endpoint_source_priority(source)
+            if same_endpoint:
+                if incoming_priority > existing_priority:
+                    existing.endpoint_source = source
+            elif incoming_priority >= existing_priority:
+                existing.ip = ip
+                existing.port = int(port)
+                existing.endpoint_source = source
             existing.last_seen = now
             if peer_id in bucket:
                 bucket.move_to_end(peer_id, last=True)
@@ -79,11 +104,19 @@ class RoutingTable:
             self._bucket_touched_at[bucket_index] = now
             return
 
-        node = DHTNode(peer_id=peer_id, ip=ip, port=int(port), last_seen=now)
+        node = DHTNode(peer_id=peer_id, ip=ip, port=int(port), last_seen=now, endpoint_source=source)
         if peer_id in replacements:
             cached = replacements[peer_id]
-            cached.ip = ip
-            cached.port = int(port)
+            same_endpoint = cached.ip == ip and int(cached.port) == int(port)
+            cached_priority = self._endpoint_source_priority(cached.endpoint_source)
+            incoming_priority = self._endpoint_source_priority(source)
+            if same_endpoint:
+                if incoming_priority > cached_priority:
+                    cached.endpoint_source = source
+            elif incoming_priority >= cached_priority:
+                cached.ip = ip
+                cached.port = int(port)
+                cached.endpoint_source = source
             cached.last_seen = now
             replacements.move_to_end(peer_id, last=True)
         elif len(bucket) >= self.k_bucket_size:
@@ -115,7 +148,7 @@ class RoutingTable:
         self._promote_replacement(bucket_index, now=time.time())
         self._bucket_touched_at[bucket_index] = time.time()
 
-    def find_closest_peers(self, target_id: str, count: int = 20) -> list[DHTNode]:
+    def find_closest_peers(self, target_id: str, count: int = 20, *, verified_only: bool = False) -> list[DHTNode]:
         """
         Returns up to 'count' closest peers to 'target_id' according to XOR metric.
         """
@@ -124,6 +157,8 @@ class RoutingTable:
 
         distances = []
         for node in self.nodes.values():
+            if verified_only and not self._is_verified_endpoint_source(node.endpoint_source):
+                continue
             dist = self._distance(target_id, node.peer_id)
             distances.append((dist, node))
 

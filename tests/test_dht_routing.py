@@ -154,6 +154,40 @@ class DhtRoutingTests(unittest.TestCase):
         self.assertEqual(list(table._buckets[bucket_index].keys()), [second, challenger])
         self.assertEqual(len(table._replacement_caches[bucket_index]), 0)
 
+    def test_add_node_does_not_replace_observed_endpoint_with_weaker_dht_source(self) -> None:
+        table = RoutingTable(local_peer_id="0" * 64, k_bucket_size=20, bucket_count=64)
+        peer_id = "a" * 64
+
+        table.add_node(peer_id, "203.0.113.10", 49001, source="observed")
+        table.add_node(peer_id, "198.51.100.99", 49999, source="dht")
+
+        node = table.nodes[peer_id]
+        self.assertEqual((node.ip, node.port), ("203.0.113.10", 49001))
+        self.assertEqual(node.endpoint_source, "observed")
+
+    def test_add_node_allows_stronger_observed_endpoint_to_replace_weaker_dht_source(self) -> None:
+        table = RoutingTable(local_peer_id="0" * 64, k_bucket_size=20, bucket_count=64)
+        peer_id = "b" * 64
+
+        table.add_node(peer_id, "198.51.100.99", 49999, source="dht")
+        table.add_node(peer_id, "203.0.113.10", 49001, source="observed")
+
+        node = table.nodes[peer_id]
+        self.assertEqual((node.ip, node.port), ("203.0.113.10", 49001))
+        self.assertEqual(node.endpoint_source, "observed")
+
+    def test_find_closest_peers_verified_only_skips_unverified_referrals(self) -> None:
+        table = RoutingTable(local_peer_id="0" * 64, k_bucket_size=20, bucket_count=64)
+        referral_peer = "0" * 63 + "1"
+        observed_peer = "f" * 64
+
+        table.add_node(referral_peer, "198.51.100.99", 49999, source="dht")
+        table.add_node(observed_peer, "203.0.113.10", 49001, source="observed")
+
+        out = table.find_closest_peers("0" * 64, count=2, verified_only=True)
+
+        self.assertEqual([item.peer_id for item in out], [observed_peer])
+
 
 if __name__ == "__main__":
     unittest.main()
