@@ -39,6 +39,7 @@ class InstallProfileProvider:
     required: bool
     api_key_envs: tuple[str, ...] = ()
     configured: bool = True
+    availability_state: str = "unregistered"
     notes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -49,6 +50,7 @@ class InstallProfileProvider:
             "required": self.required,
             "api_key_envs": list(self.api_key_envs),
             "configured": self.configured,
+            "availability_state": self.availability_state,
             "notes": self.notes,
         }
 
@@ -87,6 +89,7 @@ class InstallProfileTruth:
     ram_expectation_gb: float
     vram_expectation_gb: float
     ready: bool
+    degraded: bool
     single_volume_ready: bool
     reasons: tuple[str, ...]
     volume_checks: tuple[InstallProfileVolumeCheck, ...]
@@ -106,6 +109,7 @@ class InstallProfileTruth:
             "ram_expectation_gb": self.ram_expectation_gb,
             "vram_expectation_gb": self.vram_expectation_gb,
             "ready": self.ready,
+            "degraded": self.degraded,
             "single_volume_ready": self.single_volume_ready,
             "reasons": list(self.reasons),
             "volume_checks": [item.to_dict() for item in self.volume_checks],
@@ -157,12 +161,32 @@ def build_install_profile_truth(
     single_volume_ready = all(item.ok for item in volume_checks)
     reasons = list(selection_reasons)
     reasons.extend(provider_reasons)
+    required_provider_mix = tuple(item for item in provider_mix if item.required)
+    blocked_provider_mix = tuple(
+        item for item in required_provider_mix if item.availability_state in {"blocked", "unregistered"}
+    )
+    degraded_provider_mix = tuple(item for item in required_provider_mix if item.availability_state == "degraded")
     if not single_volume_ready:
         reasons.append(
             "No single target volume currently has enough free space for the selected runtime + model footprint."
         )
-    ready = single_volume_ready and all(item.configured for item in provider_mix if item.required)
-    if not ready and all(item.configured for item in provider_mix if item.required) and single_volume_ready:
+    if blocked_provider_mix:
+        for item in blocked_provider_mix:
+            reasons.append(
+                f"Required provider lane `{item.provider_id}` is {item.availability_state} and cannot be treated as beta-ready."
+            )
+    if degraded_provider_mix:
+        for item in degraded_provider_mix:
+            reasons.append(
+                f"Required provider lane `{item.provider_id}` is degraded and may still work, but the profile is not fully healthy."
+            )
+    ready = (
+        single_volume_ready
+        and all(item.configured for item in required_provider_mix)
+        and not blocked_provider_mix
+    )
+    degraded = bool(degraded_provider_mix)
+    if not ready and all(item.configured for item in required_provider_mix) and single_volume_ready and not blocked_provider_mix:
         reasons.append("Profile is selected but not fully ready.")
     return InstallProfileTruth(
         profile_id=profile_id,
@@ -177,6 +201,7 @@ def build_install_profile_truth(
         ram_expectation_gb=estimates["ram_expectation_gb"],
         vram_expectation_gb=estimates["vram_expectation_gb"],
         ready=ready,
+        degraded=degraded,
         single_volume_ready=single_volume_ready,
         reasons=tuple(dict.fromkeys(reason.strip() for reason in reasons if reason.strip())),
         volume_checks=volume_checks,
@@ -253,6 +278,7 @@ def _provider_mix(
     provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
     env: Mapping[str, str],
 ) -> tuple[tuple[InstallProfileProvider, ...], list[str]]:
+    truth_index = _provider_truth_index(provider_capability_truth)
     local_provider_id = _find_local_provider_id(provider_capability_truth, model_tag=model_tag)
     secondary_local_provider_id = _find_secondary_local_provider_id(
         provider_capability_truth,
@@ -270,6 +296,7 @@ def _provider_mix(
             locality="local",
             required=True,
             configured=True,
+            availability_state=_provider_availability_state(local_provider_id, truth_index),
             notes="Primary local Ollama lane.",
         )
     )
@@ -281,6 +308,7 @@ def _provider_mix(
                 locality="local",
                 required=True,
                 configured=True,
+                availability_state=_provider_availability_state(secondary_local_provider_id, truth_index),
                 notes=(
                     "Secondary local verification lane."
                     if secondary_local_provider_id != local_provider_id
@@ -298,6 +326,7 @@ def _provider_mix(
                 required=True,
                 api_key_envs=("KIMI_API_KEY",),
                 configured=configured,
+                availability_state=_provider_availability_state(kimi_provider_id, truth_index),
                 notes="Remote reasoning/synthesis lane.",
             )
         )
@@ -313,6 +342,7 @@ def _provider_mix(
                 required=True,
                 api_key_envs=("OPENAI_API_KEY", "KIMI_API_KEY"),
                 configured=configured,
+                availability_state=_provider_availability_state(fallback_provider_id, truth_index),
                 notes="Remote fallback lane for when local quality or availability is insufficient.",
             )
         )
@@ -330,6 +360,7 @@ def _provider_mix(
                     required=True,
                     api_key_envs=("KIMI_API_KEY",),
                     configured=kimi_configured,
+                    availability_state=_provider_availability_state(kimi_provider_id, truth_index),
                     notes="Primary remote synthesis lane.",
                 ),
                 InstallProfileProvider(
@@ -339,6 +370,7 @@ def _provider_mix(
                     required=True,
                     api_key_envs=("OPENAI_API_KEY", "KIMI_API_KEY"),
                     configured=fallback_configured,
+                    availability_state=_provider_availability_state(fallback_provider_id, truth_index),
                     notes="Remote fallback/research lane.",
                 ),
             ]
@@ -356,17 +388,19 @@ def _find_local_provider_id(
     *,
     model_tag: str,
 ) -> str:
-    preferred_provider_id = ""
-    fallback_provider_id = ""
-    for item in provider_capability_truth:
-        if item.locality != "local":
-            continue
-        if not fallback_provider_id:
-            fallback_provider_id = item.provider_id
-        if item.provider_id.lower().startswith("ollama-local:"):
-            preferred_provider_id = item.provider_id
-            break
-    return preferred_provider_id or fallback_provider_id or f"ollama-local:{model_tag}"
+    candidates = [item for item in provider_capability_truth if item.locality == "local"]
+    if not candidates:
+        return f"ollama-local:{model_tag}"
+    candidates.sort(
+        key=lambda item: (
+            _availability_rank(item.availability_state),
+            1 if item.provider_id.lower().startswith("ollama-local:") else 0,
+            1 if item.role_fit == "coder" else 0,
+            -float(item.queue_depth) / float(max(1, item.max_safe_concurrency)),
+        ),
+        reverse=True,
+    )
+    return candidates[0].provider_id
 
 
 def _find_secondary_local_provider_id(
@@ -374,18 +408,32 @@ def _find_secondary_local_provider_id(
     *,
     primary_provider_id: str,
 ) -> str:
-    preferred_provider_id = ""
-    fallback_provider_id = ""
-    for item in provider_capability_truth:
-        if item.locality != "local" or item.provider_id == primary_provider_id:
-            continue
-        if not fallback_provider_id:
-            fallback_provider_id = item.provider_id
-        lowered = item.provider_id.lower()
-        if item.role_fit == "verifier" or lowered.startswith("vllm-local:") or lowered.startswith("llamacpp-local:"):
-            preferred_provider_id = item.provider_id
-            break
-    return preferred_provider_id or fallback_provider_id or primary_provider_id
+    primary_capability = next(
+        (item for item in provider_capability_truth if item.provider_id == primary_provider_id),
+        None,
+    )
+    candidates = [
+        item for item in provider_capability_truth if item.locality == "local" and item.provider_id != primary_provider_id
+    ]
+    if not candidates:
+        return primary_provider_id
+    candidates.sort(
+        key=lambda item: (
+            _availability_rank(item.availability_state),
+            1 if item.role_fit == "verifier" else 0,
+            1 if item.provider_id.lower().startswith(("vllm-local:", "llamacpp-local:")) else 0,
+            -float(item.queue_depth) / float(max(1, item.max_safe_concurrency)),
+        ),
+        reverse=True,
+    )
+    best_candidate = candidates[0]
+    if primary_capability is not None and _availability_rank(best_candidate.availability_state) < _availability_rank(
+        primary_capability.availability_state
+    ):
+        return primary_provider_id
+    if _availability_rank(best_candidate.availability_state) < _availability_rank("degraded"):
+        return primary_provider_id
+    return best_candidate.provider_id
 
 
 def _find_remote_provider_id(
@@ -396,19 +444,51 @@ def _find_remote_provider_id(
 ) -> str:
     excluded = {item for item in list(exclude or set()) if item}
     hinted = [
-        item.provider_id
+        item
         for item in provider_capability_truth
         if item.locality == "remote" and item.provider_id not in excluded
     ]
-    if hint:
-        for provider_id in hinted:
-            if hint in provider_id.lower():
-                return provider_id
     if hinted:
-        return hinted[0]
+        hinted.sort(
+            key=lambda item: (
+                1 if hint and hint in item.provider_id.lower() else 0,
+                _availability_rank(item.availability_state),
+                1 if item.role_fit == "queen" else 0,
+                -float(item.queue_depth) / float(max(1, item.max_safe_concurrency)),
+            ),
+            reverse=True,
+        )
+        return hinted[0].provider_id
     if hint == "kimi":
         return "kimi-remote"
     return "openai-compatible-remote"
+
+
+def _provider_truth_index(
+    provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
+) -> dict[str, ProviderCapabilityTruth]:
+    return {item.provider_id: item for item in provider_capability_truth if item.provider_id}
+
+
+def _provider_availability_state(
+    provider_id: str,
+    truth_index: Mapping[str, ProviderCapabilityTruth],
+) -> str:
+    if not provider_id:
+        return "unregistered"
+    capability = truth_index.get(provider_id)
+    if capability is None:
+        return "unregistered"
+    return str(capability.availability_state or "unregistered")
+
+
+def _availability_rank(state: str) -> int:
+    return {
+        "ready": 3,
+        "degraded": 2,
+        "blocked": 1,
+        "unregistered": 0,
+    }.get(str(state or "").strip().lower(), 0)
 
 
 def _volume_checks(

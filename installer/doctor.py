@@ -177,7 +177,7 @@ def build_report(
     }
 
     degraded = []
-    if not install_profile.ready:
+    if not install_profile.ready or install_profile.degraded:
         degraded.append("install_profile")
     for key, value in report["components"].items():
         if isinstance(value, dict) and "ok" in value and not bool(value["ok"]):

@@ -4,7 +4,7 @@ Current status matrix. Updated 2026-03-26.
 
 ## Latest Stabilization Checkpoint
 
-The current `main` checkpoint materially improved one hundred and thirty-six areas:
+The current `main` checkpoint materially improved one hundred and thirty-seven areas:
 
 1. **Provider routing and model orchestration**
    NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
@@ -278,12 +278,14 @@ The current `main` checkpoint materially improved one hundred and thirty-six are
    DHT and block-location gossip no longer get to masquerade as live transport state just because they were heard recently. `core/discovery_index.py` now stores weaker `dht` and `block_found` referrals in a separate candidate table instead of the authoritative `peer_endpoints` row, `network/assist_router.py` now records those referrals through that candidate-only seam, and `network/dht.py` now refuses to refresh `last_seen` or stale-bucket freshness on already-observed peers when the new signal is only weaker referral gossip. That still is not full multi-endpoint public-network hardening, but it closes one of the easiest self-deception paths in the current mesh.
 136. **Health-aware provider routing baseline**
    Configured provider lanes no longer pretend to be equally available just because they are registered. `core/provider_routing.py` now threads `core.model_health` state into `ProviderCapabilityTruth`, marks circuit-open lanes as `blocked`, marks recent-failure lanes as `degraded`, rejects blocked providers during routing, and penalizes degraded ones instead of ranking them like clean ready lanes. Because `core/runtime_backbone.py` and `core/runtime_capabilities.py` already surface that capability truth, runtime/provider snapshots now carry the same health-aware availability view instead of drifting back to config-only optimism.
+137. **Health-aware install-profile truth baseline**
+   Installer/runtime profile truth no longer treats selected provider lanes as beta-ready just because they are configured. `core/runtime_install_profiles.py` now carries each selected lane's `availability_state`, routes local coder/verifier selection around blocked alternatives when a healthier local lane exists, fails closed when a required remote lane is blocked or unregistered, and marks degraded required lanes as degraded instead of calling the whole profile clean. `installer/doctor.py` now also degrades the install profile when those required lanes are unhealthy, so doctor/receipt/runtime surfaces stop spreading config-only optimism.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1518 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1522 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -315,8 +317,8 @@ Current test gate on this checkpoint:
 | **Telegram relay bridge** | **Works** | Bot API with group chat support. |
 | **Contribution scoring** | **Works** | Glory scores, local credits, receipts, evidence-based grading, and partial-result paths are present. Credits here are local work/participation accounting, not blockchain tokens. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. Remote fetches now also record explicit receipts, cached remote-shard reuse surfaces citation metadata, grounded turns persist downstream reuse outcomes with selected-vs-answer-backed attribution, selected shards now need counterfactual loss proof before they count as strongly answer-backed, and future cached-remote retrieval can prefer shards that have actually backed successful answers before instead of replaying static trust/quality only. |
-| **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection, explicit install profiles, single-volume free-space checks, built-wheel smoke coverage, and aligned `/healthz` startup checks. Doctor, receipt, and both installer launchers now derive profile truth from the same runtime provider snapshot seam and expose machine-readable `provider_capability_truth`, so install surfaces stop drifting from the live runtime lane ledger. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1518 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
+| **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection, explicit install profiles, single-volume free-space checks, built-wheel smoke coverage, and aligned `/healthz` startup checks. Doctor, receipt, and both installer launchers now derive profile truth from the same runtime provider snapshot seam, expose machine-readable `provider_capability_truth`, carry selected-lane health state, route around blocked local alternatives when a healthier local lane exists, and stop calling degraded required lanes “ready” just because the API key is present. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1522 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist, NAT-mapped nodes now advertise `hole_punch` instead of pretending they are direct, and private-LAN nodes now stay `lan_only` unless a real relay is configured. This is more honest, but it is still not proven at scale over internet. |
 | **DHT routing** | **Partial** | Bucketed routing now has iterative lookup-frontier helpers that can exclude already-contacted peers, deterministic refresh targets for stale non-empty buckets, a bounded replacement-cache path so fresh full buckets queue challengers instead of evicting live incumbents immediately, and endpoint-provenance guardrails so referral-only `NODE_FOUND` / `BLOCK_FOUND` peers do not overwrite observed endpoint truth, do not refresh observed-peer liveness, and do not get re-exported in verified-only DHT replies. It is still not hardened as a public multi-hop routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
@@ -352,7 +354,7 @@ Credits in this repo are local proof-of-work / proof-of-participation accounting
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1518 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1522 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Passing | 1507 |
 | Skipped | 13 |
 | Expected failures (xfail) | 13 |

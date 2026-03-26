@@ -152,3 +152,220 @@ def test_local_max_profile_prefers_ollama_coder_even_when_llamacpp_is_listed_fir
         item.provider_id == "llamacpp-local:qwen2.5:14b-gguf" and item.role == "verifier"
         for item in profile.provider_mix
     )
+
+
+def test_local_max_profile_routes_around_blocked_ollama_lane() -> None:
+    probe = MachineProbe(
+        cpu_cores=16,
+        ram_gb=32.0,
+        gpu_name="Apple Silicon",
+        vram_gb=18.0,
+        accelerator="mps",
+    )
+    tier = QwenTier("mid", "qwen2.5:14b", 14.0, 10.0, 24.0)
+    profile = build_install_profile_truth(
+        requested_profile="local-max",
+        probe=probe,
+        tier=tier,
+        selected_model="qwen2.5:14b",
+        env={},
+        provider_capability_truth=(
+            ProviderCapabilityTruth(
+                provider_id="ollama-local:qwen2.5:14b",
+                model_id="qwen2.5:14b",
+                role_fit="coder",
+                context_window=32768,
+                tool_support=("structured_json",),
+                structured_output_support=True,
+                tokens_per_second=16.0,
+                ram_budget_gb=24.0,
+                vram_budget_gb=0.0,
+                quantization="Q4_K_M",
+                locality="local",
+                privacy_class="local_private",
+                queue_depth=4,
+                max_safe_concurrency=1,
+                availability_state="blocked",
+                circuit_open=True,
+                last_error="backend down",
+            ),
+            ProviderCapabilityTruth(
+                provider_id="llamacpp-local:qwen2.5:14b-gguf",
+                model_id="qwen2.5:14b-gguf",
+                role_fit="verifier",
+                context_window=16384,
+                tool_support=("structured_json",),
+                structured_output_support=True,
+                tokens_per_second=22.0,
+                ram_budget_gb=20.0,
+                vram_budget_gb=0.0,
+                quantization="Q6_K",
+                locality="local",
+                privacy_class="local_private",
+                queue_depth=0,
+                max_safe_concurrency=1,
+                availability_state="ready",
+            ),
+        ),
+        runtime_home="/tmp/nulla-runtime",
+    )
+
+    assert profile.ready is True
+    assert profile.degraded is False
+    coder = next(item for item in profile.provider_mix if item.role == "coder")
+    assert coder.provider_id == "llamacpp-local:qwen2.5:14b-gguf"
+    assert coder.availability_state == "ready"
+
+
+def test_hybrid_kimi_profile_fails_closed_when_selected_remote_lane_is_blocked() -> None:
+    probe = MachineProbe(
+        cpu_cores=8,
+        ram_gb=12.0,
+        gpu_name=None,
+        vram_gb=None,
+        accelerator="cpu",
+    )
+    tier = QwenTier("base", "qwen2.5:7b", 7.0, 4.0, 12.0)
+    profile = build_install_profile_truth(
+        requested_profile="hybrid-kimi",
+        probe=probe,
+        tier=tier,
+        env={"KIMI_API_KEY": "test-key"},
+        provider_capability_truth=(
+            ProviderCapabilityTruth(
+                provider_id="ollama-local:qwen2.5:7b",
+                model_id="qwen2.5:7b",
+                role_fit="coder",
+                context_window=32768,
+                tool_support=("structured_json",),
+                structured_output_support=True,
+                tokens_per_second=14.0,
+                ram_budget_gb=12.0,
+                vram_budget_gb=0.0,
+                quantization="Q4_K_M",
+                locality="local",
+                privacy_class="local_private",
+                queue_depth=0,
+                max_safe_concurrency=1,
+                availability_state="ready",
+            ),
+            ProviderCapabilityTruth(
+                provider_id="kimi-remote:kimi-k2",
+                model_id="kimi-k2",
+                role_fit="queen",
+                context_window=131072,
+                tool_support=("tool_calls", "structured_json"),
+                structured_output_support=True,
+                tokens_per_second=0.0,
+                ram_budget_gb=0.0,
+                vram_budget_gb=0.0,
+                quantization="provider",
+                locality="remote",
+                privacy_class="remote_provider",
+                queue_depth=3,
+                max_safe_concurrency=1,
+                availability_state="blocked",
+                circuit_open=True,
+                last_error="upstream unavailable",
+            ),
+        ),
+        runtime_home="/tmp/nulla-runtime",
+    )
+
+    assert profile.ready is False
+    assert any(item.availability_state == "blocked" for item in profile.provider_mix if item.role == "queen")
+    assert any("beta-ready" in reason for reason in profile.reasons)
+
+
+def test_full_orchestrated_profile_marks_degraded_required_lane_honestly() -> None:
+    probe = MachineProbe(
+        cpu_cores=12,
+        ram_gb=24.0,
+        gpu_name="Apple Silicon",
+        vram_gb=24.0,
+        accelerator="mps",
+    )
+    tier = QwenTier("mid", "qwen2.5:14b", 14.0, 10.0, 24.0)
+    profile = build_install_profile_truth(
+        requested_profile="full-orchestrated",
+        probe=probe,
+        tier=tier,
+        selected_model="qwen2.5:14b",
+        env={"KIMI_API_KEY": "test-key"},
+        provider_capability_truth=(
+            ProviderCapabilityTruth(
+                provider_id="ollama-local:qwen2.5:14b",
+                model_id="qwen2.5:14b",
+                role_fit="coder",
+                context_window=32768,
+                tool_support=("structured_json",),
+                structured_output_support=True,
+                tokens_per_second=16.0,
+                ram_budget_gb=24.0,
+                vram_budget_gb=0.0,
+                quantization="Q4_K_M",
+                locality="local",
+                privacy_class="local_private",
+                queue_depth=0,
+                max_safe_concurrency=1,
+                availability_state="ready",
+            ),
+            ProviderCapabilityTruth(
+                provider_id="vllm-local:qwen2.5:32b-vllm",
+                model_id="qwen2.5:32b-vllm",
+                role_fit="verifier",
+                context_window=65536,
+                tool_support=("structured_json", "code_complex"),
+                structured_output_support=True,
+                tokens_per_second=20.0,
+                ram_budget_gb=20.0,
+                vram_budget_gb=12.0,
+                quantization="provider",
+                locality="local",
+                privacy_class="local_private",
+                queue_depth=0,
+                max_safe_concurrency=1,
+                availability_state="ready",
+            ),
+            ProviderCapabilityTruth(
+                provider_id="kimi-remote:kimi-k2",
+                model_id="kimi-k2",
+                role_fit="queen",
+                context_window=131072,
+                tool_support=("tool_calls", "structured_json"),
+                structured_output_support=True,
+                tokens_per_second=0.0,
+                ram_budget_gb=0.0,
+                vram_budget_gb=0.0,
+                quantization="provider",
+                locality="remote",
+                privacy_class="remote_provider",
+                queue_depth=1,
+                max_safe_concurrency=2,
+                availability_state="degraded",
+            ),
+            ProviderCapabilityTruth(
+                provider_id="openai-compatible-remote:gpt-fallback",
+                model_id="gpt-fallback",
+                role_fit="researcher",
+                context_window=131072,
+                tool_support=("tool_calls", "structured_json"),
+                structured_output_support=True,
+                tokens_per_second=0.0,
+                ram_budget_gb=0.0,
+                vram_budget_gb=0.0,
+                quantization="provider",
+                locality="remote",
+                privacy_class="remote_provider",
+                queue_depth=0,
+                max_safe_concurrency=2,
+                availability_state="ready",
+            ),
+        ),
+        runtime_home="/tmp/nulla-runtime",
+    )
+
+    assert profile.ready is True
+    assert profile.degraded is True
+    assert any(item.role == "queen" and item.availability_state == "degraded" for item in profile.provider_mix)
+    assert any("not fully healthy" in reason for reason in profile.reasons)

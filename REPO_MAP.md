@@ -34,8 +34,8 @@ Core lane:
 
 - `installer/install_nulla.sh`: POSIX installer entrypoint that now derives install-profile summaries from the runtime provider snapshot seam instead of shell-local profile guesses
 - `installer/install_nulla.bat`: Windows installer entrypoint that now derives install-profile summaries from the runtime provider snapshot seam instead of shell-local profile guesses
-- `installer/write_install_receipt.py`: machine-readable install receipt writer that now emits top-level `provider_capability_truth` plus install-profile truth from the shared runtime provider snapshot
-- `installer/doctor.py`: post-install machine-readable health report that now emits top-level `provider_capability_truth` plus install-profile truth from the shared runtime provider snapshot
+- `installer/write_install_receipt.py`: machine-readable install receipt writer that now emits top-level `provider_capability_truth` plus install-profile truth from the shared runtime provider snapshot, including selected-lane availability state
+- `installer/doctor.py`: post-install machine-readable health report that now emits top-level `provider_capability_truth` plus install-profile truth from the shared runtime provider snapshot and degrades the install profile when required lanes are unhealthy
 
 ## First 3-Minute Inspection Path
 
@@ -230,7 +230,7 @@ Core lane:
 - `apps/nulla_agent.py`: thin runtime composition root
 - `core/runtime_backbone.py`: startup/runtime/provider snapshot facade for hardware tier, provider audit rows, install-profile truth, and shared default-provider bootstrap
 - `core/runtime_provider_defaults.py`: shared default-provider bootstrap for local Ollama plus configured local vLLM, local llama.cpp, and remote Kimi manifests
-- `core/runtime_install_profiles.py`: authoritative install/runtime profile selection, disk-volume checks, provider-key readiness truth, explicit primary-local-vs-secondary-verifier lane choice, and distinct configured local verifier-lane selection for heavier local profiles
+- `core/runtime_install_profiles.py`: authoritative install/runtime profile selection, disk-volume checks, provider-key readiness truth, selected-lane availability state, explicit primary-local-vs-secondary-verifier lane choice, blocked-lane fallback to healthier locals, and distinct configured local verifier-lane selection for heavier local profiles
 - `core/task_router.py`: task classification, typed envelope emission, reusable-procedure citations, route-level model constraints, promoted queen-lane routing for explicit patch-and-validate repo work, and bounded-repair normalization that keeps readonly `ruff format --check` validation off the risky-action lane
 - `core/provider_routing.py`: envelope-aware provider routing for local drone lanes vs higher-tier synthesis lanes, including local fail-closed checks for private/mutating work, queue-pressure and role-fit scoring, and health-aware availability truth so circuit-open lanes stop looking ready
 - `core/memory_first_router.py`: main model execution router that now honors provider-role routing for slow-lane synthesis and tool-intent selection

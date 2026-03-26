@@ -61,6 +61,7 @@ def test_runtime_capability_snapshot_exposes_feature_flags_and_capability_rows()
         ram_expectation_gb=12.0,
         vram_expectation_gb=4.0,
         ready=True,
+        degraded=False,
         single_volume_ready=True,
         reasons=tuple(),
         volume_checks=tuple(),

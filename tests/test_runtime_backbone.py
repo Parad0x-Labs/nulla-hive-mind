@@ -185,6 +185,7 @@ def test_build_runtime_backbone_reuses_bootstrap_probe_and_provider_facades() ->
         ram_expectation_gb=48.0,
         vram_expectation_gb=20.0,
         ready=True,
+        degraded=False,
         single_volume_ready=True,
         reasons=tuple(),
         volume_checks=tuple(),

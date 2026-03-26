@@ -193,3 +193,74 @@ def test_build_report_exposes_provider_snapshot_truth_and_profile_mix() -> None:
     mix_ids = {item["provider_id"] for item in report["install_profile"]["provider_mix"]}
     assert provider_ids == {"ollama-local:qwen2.5:7b", "llamacpp-local:qwen2.5:14b-gguf"}
     assert mix_ids <= provider_ids
+
+
+def test_build_report_marks_degraded_install_profile_as_degraded() -> None:
+    snapshot = mock.Mock(
+        capability_truth=(
+            ProviderCapabilityTruth(
+                provider_id="ollama-local:qwen2.5:7b",
+                model_id="qwen2.5:7b",
+                role_fit="coder",
+                context_window=32768,
+                tool_support=("workspace.read_file",),
+                structured_output_support=True,
+                tokens_per_second=22.0,
+                ram_budget_gb=8.0,
+                vram_budget_gb=0.0,
+                quantization="q4",
+                locality="local",
+                privacy_class="private",
+                queue_depth=0,
+                max_safe_concurrency=1,
+                availability_state="ready",
+            ),
+            ProviderCapabilityTruth(
+                provider_id="kimi-remote:kimi-k2",
+                model_id="kimi-k2",
+                role_fit="queen",
+                context_window=131072,
+                tool_support=("workspace.read_file", "workspace.run_tests"),
+                structured_output_support=True,
+                tokens_per_second=48.0,
+                ram_budget_gb=0.0,
+                vram_budget_gb=0.0,
+                quantization="remote",
+                locality="remote",
+                privacy_class="delegated",
+                queue_depth=1,
+                max_safe_concurrency=2,
+                availability_state="degraded",
+            ),
+        )
+    )
+    with tempfile.TemporaryDirectory() as tmpdir, mock.patch.dict(
+        "os.environ",
+        {"NULLA_INSTALL_PROFILE": "hybrid-kimi", "KIMI_API_KEY": "test-key"},
+        clear=False,
+    ):
+        root = Path(tmpdir)
+        (root / ".venv").mkdir()
+        (root / "Start_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "Talk_To_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "OpenClaw_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "Stage_Trainable_Base.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "install_receipt.json").write_text("{}\n", encoding="utf-8")
+        runtime_home = root / ".nulla_runtime"
+        runtime_home.mkdir()
+        with mock.patch("core.trainable_base_manager.list_staged_trainable_bases", return_value=[]), mock.patch(
+            "installer.doctor.build_provider_registry_snapshot",
+            return_value=snapshot,
+        ):
+            report = build_report(
+                project_root=str(root),
+                runtime_home=str(runtime_home),
+                model_tag="qwen2.5:7b",
+                openclaw_enabled=False,
+                openclaw_config_path="",
+                openclaw_agent_dir="",
+                ollama_binary="",
+            )
+
+    assert report["install_profile"]["degraded"] is True
+    assert "install_profile" in report["degraded_components"]
