@@ -260,6 +260,8 @@ The current `main` checkpoint materially improved one hundred and twenty-two are
    A failed bounded repair envelope no longer consumes the only repair shot when the next diagnosis makes the real fix explicit. `core/execution/planner.py` now preserves nested failed validation context from a rolled-back envelope through later read/search steps, treats that validation command as already attempted so diagnosis keeps moving instead of rerunning pytest too early, and allows one bounded second repair envelope when the post-rollback evidence is still explicit enough for the same fail-closed queen/coder/verifier lane.
 127. **Fresh-first DHT lookup baseline**
    DHT lookup candidate selection no longer treats stale peers as equally valid just because they are XOR-close. `network/dht.py` now ranks fresh peers ahead of stale ones for `find_lookup_candidates()` while still keeping stale peers as fallback when no fresher route exists, which makes the routing table more honest under churn without pretending the broader endpoint-provenance problem is solved.
+128. **Stale prompt suppression baseline**
+   A rolled-back bounded repair no longer keeps obeying the original bad literal from the user prompt just because that text is still present in the conversation. `core/execution/planner.py` now suppresses stale explicit replacement hints after a failed `orchestration.execute_envelope` when the nested verifier failure is explicit and the tracked rollback succeeded, so the next bounded retry uses the newer diagnosis evidence instead of replaying the same wrong patch.
 
 Current test gate on this checkpoint:
 
