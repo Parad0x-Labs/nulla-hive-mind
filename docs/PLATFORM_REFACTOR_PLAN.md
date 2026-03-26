@@ -768,8 +768,8 @@ pytest -q \
 - Bounded local repair can now keep diagnosing after a failed repair envelope, but only when the nested verifier failure is explicit and the tracked rollback succeeded. That is deliberate; anything broader would turn into guessy retry spam.
 - That same lane can now take one bounded second repair shot when the post-rollback diagnosis becomes explicit. It still does not get infinite retries, and it still does not guess without concrete read/search evidence.
 - That retry lane also stops obeying stale explicit replacement text from the original prompt once a failed repair envelope has rolled back cleanly. After that point, only the newer diagnosis evidence can justify the next bounded patch attempt.
-- DHT lookup candidates now also prefer fresh peers over stale ones instead of treating age-blind XOR closeness as good enough. That improves lookup honesty under churn, but it does not solve the larger endpoint-provenance gap in `assist_router.py`.
-- The next real gaps are still multi-hop repo debugging, deeper queen/coder/verifier retry-and-merge behavior, provider rollout beyond the current contract truth, stronger measured Hive-reuse impact on completion quality, and WAN/DHT hardening.
+- DHT lookup candidates now also prefer fresh peers over stale ones instead of treating age-blind XOR closeness as good enough, and referral-only `NODE_FOUND` / `BLOCK_FOUND` endpoints are now candidate-only: they no longer overwrite observed endpoint truth, and verified-only DHT replies no longer echo them back out as if they were authoritative transport state.
+- The next real gaps are still multi-hop repo debugging, deeper queen/coder/verifier retry-and-merge behavior, provider rollout beyond the current contract truth, stronger measured Hive-reuse impact on completion quality, and WAN/DHT hardening around liveness, multi-endpoint truth, and public-internet churn.
 
 ## Shared Refactor Rules
 

@@ -259,15 +259,17 @@ The current `main` checkpoint materially improved one hundred and twenty-two are
 126. **Second-attempt repair baseline**
    A failed bounded repair envelope no longer consumes the only repair shot when the next diagnosis makes the real fix explicit. `core/execution/planner.py` now preserves nested failed validation context from a rolled-back envelope through later read/search steps, treats that validation command as already attempted so diagnosis keeps moving instead of rerunning pytest too early, and allows one bounded second repair envelope when the post-rollback evidence is still explicit enough for the same fail-closed queen/coder/verifier lane.
 127. **Fresh-first DHT lookup baseline**
-   DHT lookup candidate selection no longer treats stale peers as equally valid just because they are XOR-close. `network/dht.py` now ranks fresh peers ahead of stale ones for `find_lookup_candidates()` while still keeping stale peers as fallback when no fresher route exists, which makes the routing table more honest under churn without pretending the broader endpoint-provenance problem is solved.
+   DHT lookup candidate selection no longer treats stale peers as equally valid just because they are XOR-close. `network/dht.py` now ranks fresh peers ahead of stale ones for `find_lookup_candidates()` while still keeping stale peers as fallback when no fresher route exists, which makes the routing table more honest under churn while the remaining DHT gaps stay about liveness and wider network hardening, not age-blind candidate choice.
 128. **Stale prompt suppression baseline**
    A rolled-back bounded repair no longer keeps obeying the original bad literal from the user prompt just because that text is still present in the conversation. `core/execution/planner.py` now suppresses stale explicit replacement hints after a failed `orchestration.execute_envelope` when the nested verifier failure is explicit and the tracked rollback succeeded, so the next bounded retry uses the newer diagnosis evidence instead of replaying the same wrong patch.
+129. **DHT endpoint provenance baseline**
+   Signed referral gossip no longer overwrites directly observed endpoint truth or gets re-exported as if it were authoritative transport state. `core/discovery_index.py` now keeps stronger endpoint sources like `observed`, `self`, `api`, and `bootstrap` ahead of weaker `dht` and `block_found` referrals, `network/dht.py` now tracks endpoint source provenance on routing nodes, and `network/assist_router.py` now answers `FIND_NODE` and missing-block `FIND_BLOCK` with verified peers only instead of echoing referral-only candidates back into the mesh.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1492 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1499 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -300,9 +302,9 @@ Current test gate on this checkpoint:
 | **Contribution scoring** | **Works** | Glory scores, local credits, receipts, evidence-based grading, and partial-result paths are present. Credits here are local work/participation accounting, not blockchain tokens. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. Remote fetches now also record explicit receipts, cached remote-shard reuse surfaces citation metadata, grounded turns persist downstream reuse outcomes with selected-vs-answer-backed attribution, and future cached-remote retrieval can prefer shards that have actually backed successful answers before instead of replaying static trust/quality only. |
 | **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection, explicit install profiles, single-volume free-space checks, built-wheel smoke coverage, and aligned `/healthz` startup checks. The doctor/receipt now report whether the selected install profile is actually ready, and the heavier local profiles can now prefer distinct configured local verifier lanes like `vllm-local` or `llamacpp-local` instead of flattening every local role back into one backend. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1470 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1499 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist, NAT-mapped nodes now advertise `hole_punch` instead of pretending they are direct, and private-LAN nodes now stay `lan_only` unless a real relay is configured. This is more honest, but it is still not proven at scale over internet. |
-| **DHT routing** | **Partial** | Bucketed routing now has iterative lookup-frontier helpers that can exclude already-contacted peers, deterministic refresh targets for stale non-empty buckets, and a bounded replacement-cache path so fresh full buckets queue challengers instead of evicting live incumbents immediately. It is still not hardened as a public multi-hop routing layer. |
+| **DHT routing** | **Partial** | Bucketed routing now has iterative lookup-frontier helpers that can exclude already-contacted peers, deterministic refresh targets for stale non-empty buckets, a bounded replacement-cache path so fresh full buckets queue challengers instead of evicting live incumbents immediately, and endpoint-provenance guardrails so referral-only `NODE_FOUND` / `BLOCK_FOUND` peers do not overwrite observed endpoint truth or get re-exported in verified-only DHT replies. It is still not hardened as a public multi-hop routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
 | **Channel gateway** | **Partial** | Platform-neutral gateway exists. Live surface wiring pending. |
 | **OpenClaw integration** | **Partial** | Agent registers and responds. Live-info routing and Hive create/confirm flow are better, but chat quality and product polish are still uneven. |
