@@ -7,6 +7,7 @@ from typing import Any
 from adapters.base_adapter import ModelRequest
 from core import audit_logger
 from core.candidate_knowledge_lane import build_task_hash, record_candidate_output
+from core.model_health import circuit_is_open, record_provider_failure, record_provider_success
 from core.model_registry import ModelRegistry
 from core.model_trust import output_trust_score
 from core.orchestration import TaskEnvelopeV1, provider_role_for_task_role
@@ -46,6 +47,25 @@ class _PipelineCandidateResult:
     validation_state: str
     license_metadata: dict[str, Any]
     rank_index: int
+
+
+@dataclass(frozen=True)
+class _PipelineAttemptResult:
+    manifest: ModelProviderManifest
+    candidate: _PipelineCandidateResult | None
+    status: str
+    error: str | None = None
+    health: dict[str, Any] = field(default_factory=dict)
+
+    def provenance_payload(self) -> dict[str, Any]:
+        return {
+            "provider_id": self.manifest.provider_id,
+            "provider_name": self.manifest.provider_name,
+            "model_name": self.manifest.model_name,
+            "status": self.status,
+            "error": self.error,
+            "health": dict(self.health or {}),
+        }
 
 
 class ModelTeacherPipeline:
@@ -113,7 +133,7 @@ class ModelTeacherPipeline:
             output_mode=output_mode,
             trace_id=trace_id,
         )
-        results = self._collect_candidate_results(
+        results, failed_attempts = self._collect_candidate_results(
             plan=plan,
             request=request,
             output_mode=output_mode,
@@ -121,9 +141,13 @@ class ModelTeacherPipeline:
         )
         if not results:
             return None
-        execution_metadata = self._execution_metadata(plan, results)
+        execution_metadata = self._execution_metadata(plan, results=results, failed_attempts=failed_attempts)
         winner = max(results, key=lambda item: (item.trust_score, item.confidence, -item.rank_index))
         swarm_provider_ids = [item.manifest.provider_id for item in results]
+        failed_attempt_payloads = [item.provenance_payload() for item in failed_attempts]
+        attempted_provider_ids = [item.manifest.provider_id for item in results] + [
+            item.manifest.provider_id for item in failed_attempts
+        ]
         candidate_id = record_candidate_output(
             task_hash=build_task_hash(normalized_input=prompt, task_class=task_kind, output_mode=output_mode),
             task_id=None,
@@ -145,6 +169,8 @@ class ModelTeacherPipeline:
                 "swarm_size": plan.swarm_size,
                 "effective_swarm_size": execution_metadata["effective_swarm_size"],
                 "swarm_provider_ids": swarm_provider_ids,
+                "attempted_provider_ids": attempted_provider_ids,
+                "failed_attempts": failed_attempt_payloads,
                 "task_envelope": dict(plan.task_envelope or {}),
                 "capability_truth": [item.to_dict() for item in plan.capability_truth],
                 "routing_requirements": dict(plan.routing_requirements or {}),
@@ -161,6 +187,8 @@ class ModelTeacherPipeline:
                 "task_kind": task_kind,
                 "provider_role": plan.role,
                 "swarm_provider_ids": swarm_provider_ids,
+                "attempted_provider_ids": attempted_provider_ids,
+                "failed_attempts": failed_attempt_payloads,
                 "task_envelope": dict(plan.task_envelope or {}),
                 "routing_requirements": dict(plan.routing_requirements or {}),
                 "rejected_candidates": list(plan.rejected_candidates),
@@ -190,6 +218,8 @@ class ModelTeacherPipeline:
                 "runtime_dependency": winner.manifest.runtime_dependency,
                 "provider_role": plan.role,
                 "swarm_provider_ids": swarm_provider_ids,
+                "attempted_provider_ids": attempted_provider_ids,
+                "failed_attempts": failed_attempt_payloads,
                 "task_envelope": dict(plan.task_envelope or {}),
                 "capability_truth": [item.to_dict() for item in plan.capability_truth],
                 "routing_requirements": dict(plan.routing_requirements or {}),
@@ -230,21 +260,25 @@ class ModelTeacherPipeline:
         request: ModelRequest,
         output_mode: str,
         trace_id: str | None,
-    ) -> list[_PipelineCandidateResult]:
+    ) -> tuple[list[_PipelineCandidateResult], list[_PipelineAttemptResult]]:
         manifests, max_workers, _ = self._execution_manifests(plan)
         if not manifests:
-            return []
+            return [], []
         if len(manifests) == 1:
-            result = self._run_candidate(
+            attempt = self._run_candidate(
                 manifests[0],
                 request=request,
                 output_mode=output_mode,
                 trace_id=trace_id,
                 rank_index=0,
             )
-            return [result] if result else []
+            return (
+                [attempt.candidate] if attempt.candidate is not None else [],
+                [] if attempt.candidate is not None else [attempt],
+            )
 
         results: list[_PipelineCandidateResult] = []
+        failed_attempts: list[_PipelineAttemptResult] = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {
                 executor.submit(
@@ -258,11 +292,14 @@ class ModelTeacherPipeline:
                 for index, manifest in enumerate(manifests)
             }
             for future in as_completed(future_map):
-                candidate = future.result()
-                if candidate is not None:
-                    results.append(candidate)
+                attempt = future.result()
+                if attempt.candidate is not None:
+                    results.append(attempt.candidate)
+                else:
+                    failed_attempts.append(attempt)
         results.sort(key=lambda item: item.rank_index)
-        return results
+        failed_attempts.sort(key=lambda item: item.manifest.provider_id)
+        return results, failed_attempts
 
     @staticmethod
     def _envelope_bool_constraint(task_envelope: TaskEnvelopeV1 | None, key: str) -> bool | None:
@@ -314,11 +351,14 @@ class ModelTeacherPipeline:
     def _execution_metadata(
         self,
         plan: ProviderRoutingPlan,
+        *,
         results: list[_PipelineCandidateResult],
+        failed_attempts: list[_PipelineAttemptResult],
     ) -> dict[str, Any]:
         executed_manifests, _, backoff_notes = self._execution_manifests(plan)
         return {
             "effective_swarm_size": len(results),
+            "failed_attempt_count": len(failed_attempts),
             "capacity_backoff_applied": bool(backoff_notes) or len(executed_manifests) < len(plan.candidates),
             "capacity_backoff_notes": backoff_notes,
         }
@@ -331,13 +371,38 @@ class ModelTeacherPipeline:
         output_mode: str,
         trace_id: str | None,
         rank_index: int,
-    ) -> _PipelineCandidateResult | None:
+    ) -> _PipelineAttemptResult:
         try:
+            if circuit_is_open(manifest.provider_id):
+                return _PipelineAttemptResult(
+                    manifest=manifest,
+                    candidate=None,
+                    status="circuit_open",
+                    error="provider circuit is open",
+                )
             adapter = self.registry.build_adapter(manifest)
+            health = dict(adapter.health_check() or {})
+            if not bool(health.get("ok", False)):
+                error = str(health.get("error") or "health_check_failed")
+                record_provider_failure(manifest.provider_id, error=error)
+                return _PipelineAttemptResult(
+                    manifest=manifest,
+                    candidate=None,
+                    status="health_check_failed",
+                    error=error,
+                    health=health,
+                )
             response = adapter.invoke(request)
             raw_output = str(response.output_text or "").strip()
             if not raw_output:
-                return None
+                record_provider_failure(manifest.provider_id, error="empty_output")
+                return _PipelineAttemptResult(
+                    manifest=manifest,
+                    candidate=None,
+                    status="empty_output",
+                    error="empty_output",
+                    health=health,
+                )
             validation = validate_provider_output(
                 provider_id=manifest.provider_id,
                 output_mode=output_mode,
@@ -346,7 +411,14 @@ class ModelTeacherPipeline:
             )
             normalized_output = str(validation.normalized_text or raw_output).strip()
             if not normalized_output:
-                return None
+                record_provider_failure(manifest.provider_id, error="normalized_output_empty")
+                return _PipelineAttemptResult(
+                    manifest=manifest,
+                    candidate=None,
+                    status="normalized_output_empty",
+                    error="normalized_output_empty",
+                    health=health,
+                )
             trust = output_trust_score(
                 manifest=manifest,
                 raw_confidence=float(response.confidence or 0.5),
@@ -355,18 +427,35 @@ class ModelTeacherPipeline:
                 freshness_score=1.0,
             )
             confidence = max(0.0, min(1.0, float(response.confidence or 0.5) - validation.trust_penalty))
-            return _PipelineCandidateResult(
+            record_provider_success(manifest.provider_id)
+            return _PipelineAttemptResult(
                 manifest=manifest,
-                output_text=normalized_output,
-                structured_output=validation.structured_output,
-                confidence=confidence,
-                trust_score=trust,
-                validation_state="valid" if validation.ok else "contract_failed",
-                license_metadata=adapter.get_license_metadata(),
-                rank_index=rank_index,
+                candidate=_PipelineCandidateResult(
+                    manifest=manifest,
+                    output_text=normalized_output,
+                    structured_output=validation.structured_output,
+                    confidence=confidence,
+                    trust_score=trust,
+                    validation_state="valid" if validation.ok else "contract_failed",
+                    license_metadata=adapter.get_license_metadata(),
+                    rank_index=rank_index,
+                ),
+                status="completed",
+                health=health,
             )
-        except Exception:
-            return None
+        except Exception as exc:
+            message = str(exc)
+            record_provider_failure(
+                manifest.provider_id,
+                error=message or "invoke_failed",
+                timeout="timeout" in message.lower(),
+            )
+            return _PipelineAttemptResult(
+                manifest=manifest,
+                candidate=None,
+                status="invoke_failed",
+                error=message or "invoke_failed",
+            )
 
     def summarize(self, text: str, *, trace_id: str | None = None) -> TeacherCandidate | None:
         return self.run(task_kind="summarization", prompt=text, trace_id=trace_id)

@@ -336,7 +336,7 @@ Core lane:
 - `core/agent_runtime/hive_research_status.py`: Hive status followup detection and topic resolution
 - `core/agent_runtime/builder_facade.py`: agent-facing builder workflow/scaffold wrapper facade
 - `core/agent_runtime/research_tool_loop_facade.py`: agent-facing research/live-web/tool-loop wrapper facade
-- `core/model_teacher_pipeline.py`: bounded provider-swarm selection for helper/teacher candidate generation, now with routing-note provenance and saturated-lane execution backoff
+- `core/model_teacher_pipeline.py`: bounded provider-swarm selection for helper/teacher candidate generation, now with routing-note provenance, saturated-lane execution backoff, provider health checks, circuit-open skips, and failed-attempt provenance
 - `core/agent_runtime/fast_paths.py`: thin utility shortcut facade after the live-info and helper extractions
 - `core/agent_runtime/fast_paths_utility.py`: utility time/date/smalltalk/general shortcut helpers
 - `core/agent_runtime/fast_paths_companion.py`: companion-memory and personalized-plan shortcut helpers

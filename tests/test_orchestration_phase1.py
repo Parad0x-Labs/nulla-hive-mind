@@ -4,6 +4,7 @@ import unittest
 from unittest import mock
 
 from core.learning.procedure_shards import ProcedureShardV1
+from core.model_health import get_provider_health, reset_provider_health
 from core.model_registry import ModelRegistry
 from core.model_teacher_pipeline import ModelTeacherPipeline
 from core.orchestration import (
@@ -24,6 +25,7 @@ from storage.migrations import run_migrations
 
 def _clear_manifests() -> None:
     run_migrations()
+    reset_provider_health()
     conn = get_connection()
     try:
         conn.execute("DELETE FROM model_provider_manifests")
@@ -419,6 +421,7 @@ class OrchestrationPhase1Tests(unittest.TestCase):
         fake_response = mock.Mock(output_text="Merged answer", confidence=0.88)
 
         with mock.patch.object(registry, "build_adapter") as build_adapter:
+            build_adapter.return_value.health_check.return_value = {"ok": True, "provider_id": "kimi-remote:kimi-k2"}
             build_adapter.return_value.invoke.return_value = fake_response
             build_adapter.return_value.get_license_metadata.return_value = {
                 "provider_name": "kimi-remote",
@@ -526,6 +529,7 @@ class OrchestrationPhase1Tests(unittest.TestCase):
         def build_adapter(manifest):
             adapter = mock.Mock()
             invoked.append(manifest.provider_name)
+            adapter.health_check.return_value = {"ok": True, "provider_id": manifest.provider_id}
             adapter.invoke.return_value = mock.Mock(
                 output_text=f"{manifest.provider_name} says patch the code",
                 confidence=0.75 if manifest.provider_name == "local-ready" else 0.52,
@@ -551,6 +555,78 @@ class OrchestrationPhase1Tests(unittest.TestCase):
         self.assertEqual(invoked, ["local-ready"])
         self.assertTrue(candidate.provenance["capacity_backoff_applied"])
         self.assertIn("skipped_saturated_candidates", candidate.provenance["capacity_backoff_notes"])
+
+    def test_teacher_pipeline_fails_over_after_health_check_failure(self) -> None:
+        _clear_manifests()
+        registry = ModelRegistry()
+        registry.register_manifest(
+            {
+                "provider_name": "local-dead",
+                "model_name": "qwen2.5:14b-dead",
+                "source_type": "http",
+                "adapter_type": "local_qwen_provider",
+                "license_name": "Apache-2.0",
+                "license_reference": "https://www.apache.org/licenses/LICENSE-2.0",
+                "weight_location": "user-supplied",
+                "weights_bundled": False,
+                "redistribution_allowed": True,
+                "runtime_dependency": "ollama",
+                "capabilities": ["summarize", "structured_json", "code_complex"],
+                "runtime_config": {"base_url": "http://127.0.0.1:11434"},
+                "metadata": {"deployment_class": "local", "orchestration_role": "drone"},
+                "enabled": True,
+            }
+        )
+        registry.register_manifest(
+            {
+                "provider_name": "local-ready",
+                "model_name": "qwen2.5:14b-ready",
+                "source_type": "http",
+                "adapter_type": "local_qwen_provider",
+                "license_name": "Apache-2.0",
+                "license_reference": "https://www.apache.org/licenses/LICENSE-2.0",
+                "weight_location": "user-supplied",
+                "weights_bundled": False,
+                "redistribution_allowed": True,
+                "runtime_dependency": "ollama",
+                "capabilities": ["summarize", "structured_json", "code_complex"],
+                "runtime_config": {"base_url": "http://127.0.0.1:11435"},
+                "metadata": {"deployment_class": "local", "orchestration_role": "drone"},
+                "enabled": True,
+            }
+        )
+        pipeline = ModelTeacherPipeline(registry)
+
+        def build_adapter(manifest):
+            adapter = mock.Mock()
+            if manifest.provider_name == "local-dead":
+                adapter.health_check.return_value = {"ok": False, "error": "connection refused"}
+            else:
+                adapter.health_check.return_value = {"ok": True, "provider_id": manifest.provider_id}
+                adapter.invoke.return_value = mock.Mock(output_text="ready lane answer", confidence=0.8)
+                adapter.get_license_metadata.return_value = {
+                    "provider_name": manifest.provider_name,
+                    "model_name": manifest.model_name,
+                    "license_name": manifest.license_name,
+                    "license_reference": manifest.resolved_license_reference,
+                }
+            return adapter
+
+        with mock.patch.object(registry, "build_adapter", side_effect=build_adapter):
+            candidate = pipeline.run(
+                task_kind="action_plan",
+                prompt="patch the repo",
+                output_mode="action_plan",
+                provider_role="drone",
+                swarm_size=2,
+            )
+
+        assert candidate is not None
+        self.assertEqual(candidate.provider_name, "local-ready")
+        self.assertIn("failed_attempts", candidate.provenance)
+        self.assertEqual(candidate.provenance["failed_attempts"][0]["status"], "health_check_failed")
+        self.assertEqual(get_provider_health("local-dead:qwen2.5:14b-dead").consecutive_failures, 1)
+        self.assertEqual(get_provider_health("local-ready:qwen2.5:14b-ready").consecutive_failures, 0)
 
 
 if __name__ == "__main__":
