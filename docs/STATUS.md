@@ -258,12 +258,14 @@ The current `main` checkpoint materially improved one hundred and twenty-two are
    Bounded local repair no longer dead-ends after the first bad guess when the verifier already proved the patch was wrong and the workspace has been restored. `core/execution/planner.py` now inspects failed `orchestration.execute_envelope` results, extracts the nested failed validation observation only when the tracked rollback succeeded, and resumes the same bounded inspect/search diagnosis lane from that failure context instead of stopping after one red repair envelope.
 126. **Second-attempt repair baseline**
    A failed bounded repair envelope no longer consumes the only repair shot when the next diagnosis makes the real fix explicit. `core/execution/planner.py` now preserves nested failed validation context from a rolled-back envelope through later read/search steps, treats that validation command as already attempted so diagnosis keeps moving instead of rerunning pytest too early, and allows one bounded second repair envelope when the post-rollback evidence is still explicit enough for the same fail-closed queen/coder/verifier lane.
+127. **Fresh-first DHT lookup baseline**
+   DHT lookup candidate selection no longer treats stale peers as equally valid just because they are XOR-close. `network/dht.py` now ranks fresh peers ahead of stale ones for `find_lookup_candidates()` while still keeping stale peers as fallback when no fresher route exists, which makes the routing table more honest under churn without pretending the broader endpoint-provenance problem is solved.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1490 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1492 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
