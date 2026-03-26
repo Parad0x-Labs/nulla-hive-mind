@@ -58,6 +58,7 @@ class VerifiedPeerEndpoint:
     proof_message_id: str = ""
     proof_message_type: str = ""
     proof_hash: str = ""
+    proof_timestamp: str = ""
     last_delivery_attempt_at: str = ""
     last_delivery_success_at: str = ""
     last_delivery_failure_at: str = ""
@@ -86,6 +87,17 @@ def _parse_dt(value: str | None) -> datetime | None:
         return None
 
 
+def _is_recent(dt: datetime | None, *, window: timedelta) -> bool:
+    if dt is None:
+        return False
+    return dt >= (datetime.now(timezone.utc) - window)
+
+
+_RECENT_DELIVERY_SUCCESS_WINDOW = timedelta(hours=6)
+_RECENT_SIGNED_OBSERVED_WINDOW = timedelta(hours=2)
+_RECENT_SIGNED_DECLARATION_WINDOW = timedelta(hours=24)
+
+
 def _endpoint_source_priority(value: str) -> int:
     normalized = str(value or "").strip().lower()
     return _ENDPOINT_SOURCE_PRIORITIES.get(normalized, 0)
@@ -98,11 +110,19 @@ def _is_verified_endpoint_source(value: str) -> bool:
 def _liveness_tier(endpoint: VerifiedPeerEndpoint) -> int:
     verification_kind = str(endpoint.verification_kind or "").strip().lower()
     source = str(endpoint.source or "").strip().lower()
-    if endpoint.last_delivery_success_at:
+    proof_dt = _parse_dt(endpoint.proof_timestamp) or _parse_dt(endpoint.last_verified_at) or _parse_dt(endpoint.last_seen_at)
+    success_dt = _parse_dt(endpoint.last_delivery_success_at)
+    if _is_recent(success_dt, window=_RECENT_DELIVERY_SUCCESS_WINDOW):
         return 4
-    if verification_kind == "protocol_signature" and source == "observed":
+    if verification_kind == "protocol_signature" and source == "observed" and _is_recent(
+        proof_dt,
+        window=_RECENT_SIGNED_OBSERVED_WINDOW,
+    ):
         return 3
-    if verification_kind in {"signed_api_write", "bootstrap_snapshot"}:
+    if verification_kind in {"signed_api_write", "bootstrap_snapshot"} and _is_recent(
+        proof_dt,
+        window=_RECENT_SIGNED_DECLARATION_WINDOW,
+    ):
         return 2
     if source == "self":
         return 1
@@ -128,9 +148,15 @@ def _verified_endpoint_sort_key(endpoint: VerifiedPeerEndpoint) -> tuple[int, fl
 
 
 def _delivery_liveness_priority(endpoint: VerifiedPeerEndpoint) -> int:
-    if endpoint.last_delivery_success_at:
+    proof_dt = _parse_dt(endpoint.proof_timestamp) or _parse_dt(endpoint.last_verified_at) or _parse_dt(endpoint.last_seen_at)
+    success_dt = _parse_dt(endpoint.last_delivery_success_at)
+    if _is_recent(success_dt, window=_RECENT_DELIVERY_SUCCESS_WINDOW):
         return 3
-    if endpoint.source == "observed" and endpoint.verification_kind == "protocol_signature":
+    if (
+        endpoint.source == "observed"
+        and endpoint.verification_kind == "protocol_signature"
+        and _is_recent(proof_dt, window=_RECENT_SIGNED_OBSERVED_WINDOW)
+    ):
         return 2
     if endpoint.source == "self":
         return 1
@@ -176,6 +202,7 @@ def _verified_endpoint_from_row(row: Any) -> VerifiedPeerEndpoint:
         proof_message_id=str(_row_value(row, "proof_message_id", "")),
         proof_message_type=str(_row_value(row, "proof_message_type", "")),
         proof_hash=str(_row_value(row, "proof_hash", "")),
+        proof_timestamp=str(_row_value(row, "proof_timestamp", "")),
         last_delivery_attempt_at=str(_row_value(row, "last_delivery_attempt_at", "")),
         last_delivery_success_at=str(_row_value(row, "last_delivery_success_at", "")),
         last_delivery_failure_at=str(_row_value(row, "last_delivery_failure_at", "")),
@@ -197,6 +224,7 @@ def _observation_endpoint_from_row(row: Any) -> VerifiedPeerEndpoint:
         proof_message_id=str(_row_value(row, "proof_message_id", "")),
         proof_message_type=str(_row_value(row, "proof_message_type", "")),
         proof_hash=str(_row_value(row, "proof_hash", "")),
+        proof_timestamp=str(_row_value(row, "proof_timestamp", "")),
         last_delivery_attempt_at="",
         last_delivery_success_at="",
         last_delivery_failure_at="",
@@ -208,7 +236,7 @@ def _load_verified_endpoint_row(conn: Any, *, peer_id: str, host: str, port: int
     row = conn.execute(
         """
         SELECT peer_id, host, port, source, last_seen_at, last_verified_at,
-               verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash,
+               verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash, proof_timestamp,
                last_delivery_attempt_at, last_delivery_success_at, last_delivery_failure_at,
                consecutive_delivery_failures
         FROM peer_endpoints
@@ -237,18 +265,23 @@ def _merge_verified_endpoint(
     if existing is None:
         return incoming
 
-    selected_source = existing.source
-    if _endpoint_source_priority(incoming.source) >= _endpoint_source_priority(existing.source):
-        selected_source = incoming.source
-
-    selected_last_verified_at = _max_timestamp(existing.last_verified_at, incoming.last_verified_at)
-    selected_proof_count = max(int(existing.proof_count or 0), int(incoming.proof_count or 0))
-    incoming_reference_dt = _parse_dt(incoming.last_verified_at or incoming.last_seen_at or "")
-    existing_reference_dt = _parse_dt(existing.last_verified_at or existing.last_seen_at or "")
+    incoming_reference_dt = _parse_dt(incoming.proof_timestamp or incoming.last_verified_at or incoming.last_seen_at or "")
+    existing_reference_dt = _parse_dt(existing.proof_timestamp or existing.last_verified_at or existing.last_seen_at or "")
     incoming_more_proven = (
         int(incoming.proof_count or 0) > int(existing.proof_count or 0)
         or (incoming_reference_dt is not None and (existing_reference_dt is None or incoming_reference_dt >= existing_reference_dt))
     )
+    selected_source = existing.source
+    if incoming_more_proven and incoming.verification_kind == "protocol_signature" and incoming.source == "observed":
+        selected_source = incoming.source
+    elif (not incoming_more_proven) and existing.verification_kind == "protocol_signature" and existing.source == "observed":
+        selected_source = existing.source
+    elif _endpoint_source_priority(incoming.source) >= _endpoint_source_priority(existing.source):
+        selected_source = incoming.source
+
+    selected_last_verified_at = _max_timestamp(existing.last_verified_at, incoming.last_verified_at)
+    selected_proof_timestamp = _max_timestamp(existing.proof_timestamp, incoming.proof_timestamp)
+    selected_proof_count = max(int(existing.proof_count or 0), int(incoming.proof_count or 0))
 
     selected_verification_kind = existing.verification_kind
     selected_proof_message_id = existing.proof_message_id
@@ -276,6 +309,7 @@ def _merge_verified_endpoint(
         proof_message_id=selected_proof_message_id,
         proof_message_type=selected_proof_message_type,
         proof_hash=selected_proof_hash,
+        proof_timestamp=selected_proof_timestamp,
         last_delivery_attempt_at=_max_timestamp(existing.last_delivery_attempt_at, incoming.last_delivery_attempt_at),
         last_delivery_success_at=_max_timestamp(existing.last_delivery_success_at, incoming.last_delivery_success_at),
         last_delivery_failure_at=_max_timestamp(existing.last_delivery_failure_at, incoming.last_delivery_failure_at),
@@ -298,10 +332,10 @@ def _upsert_verified_endpoint_row(conn: Any, endpoint: VerifiedPeerEndpoint) -> 
         """
         INSERT OR REPLACE INTO peer_endpoints (
             peer_id, host, port, source, last_seen_at, last_verified_at,
-            verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash,
+            verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash, proof_timestamp,
             last_delivery_attempt_at, last_delivery_success_at, last_delivery_failure_at,
             consecutive_delivery_failures, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             merged.peer_id,
@@ -315,6 +349,7 @@ def _upsert_verified_endpoint_row(conn: Any, endpoint: VerifiedPeerEndpoint) -> 
             merged.proof_message_id or "",
             merged.proof_message_type or "",
             merged.proof_hash or "",
+            merged.proof_timestamp or "",
             merged.last_delivery_attempt_at or "",
             merged.last_delivery_success_at or "",
             merged.last_delivery_failure_at or "",
@@ -383,7 +418,7 @@ def _upsert_verified_endpoint_proof(
     row = conn.execute(
         """
         SELECT peer_id, host, port, source, verification_kind,
-               proof_message_id, proof_message_type, proof_hash,
+               proof_message_id, proof_message_type, proof_hash, proof_timestamp,
                last_verified_at, proof_count
         FROM peer_endpoint_observations
         WHERE peer_id = ? AND host = ? AND port = ? AND source = ?
@@ -864,7 +899,7 @@ def signed_observed_endpoints_for_peer(peer_id: str, *, limit: int = 8) -> list[
         rows = conn.execute(
             """
             SELECT peer_id, host, port, source, verification_kind,
-                   proof_message_id, proof_message_type, proof_hash,
+                   proof_message_id, proof_message_type, proof_hash, proof_timestamp,
                    last_verified_at, proof_count
             FROM peer_endpoint_observations
             WHERE peer_id = ?
@@ -889,7 +924,7 @@ def _verified_peer_endpoint_rows(
         rows = conn.execute(
             """
             SELECT peer_id, host, port, source, last_seen_at, last_verified_at,
-                   verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash,
+                   verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash, proof_timestamp,
                    last_delivery_attempt_at, last_delivery_success_at, last_delivery_failure_at,
                    consecutive_delivery_failures
             FROM peer_endpoints
@@ -1112,7 +1147,7 @@ def recent_peer_verified_endpoints(
         rows = conn.execute(
             """
             SELECT peer_id, host, port, source, last_seen_at, last_verified_at,
-                   verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash,
+                   verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash, proof_timestamp,
                    last_delivery_attempt_at, last_delivery_success_at, last_delivery_failure_at,
                    consecutive_delivery_failures
             FROM peer_endpoints

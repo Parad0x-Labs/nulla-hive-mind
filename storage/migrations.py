@@ -711,6 +711,7 @@ CREATE TABLE IF NOT EXISTS peer_endpoints (
     proof_message_id TEXT NOT NULL DEFAULT '',
     proof_message_type TEXT NOT NULL DEFAULT '',
     proof_hash TEXT NOT NULL DEFAULT '',
+    proof_timestamp TEXT NOT NULL DEFAULT '',
     last_delivery_attempt_at TEXT NOT NULL DEFAULT '',
     last_delivery_success_at TEXT NOT NULL DEFAULT '',
     last_delivery_failure_at TEXT NOT NULL DEFAULT '',
@@ -1281,11 +1282,30 @@ def run_migrations(db_path=None) -> None:
         _add_column_if_missing(conn, "peer_endpoints", "proof_message_id", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "peer_endpoints", "proof_message_type", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "peer_endpoints", "proof_hash", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "proof_timestamp", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "peer_endpoints", "last_delivery_attempt_at", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "peer_endpoints", "last_delivery_success_at", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "peer_endpoints", "last_delivery_failure_at", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "peer_endpoints", "consecutive_delivery_failures", "INTEGER NOT NULL DEFAULT 0")
         _rebuild_peer_endpoints_if_needed(conn)
+        conn.execute(
+            """
+            UPDATE peer_endpoints
+            SET proof_timestamp = COALESCE(
+                NULLIF((
+                    SELECT MAX(COALESCE(NULLIF(obs.proof_timestamp, ''), NULLIF(obs.last_verified_at, '')))
+                    FROM peer_endpoint_observations AS obs
+                    WHERE obs.peer_id = peer_endpoints.peer_id
+                      AND obs.host = peer_endpoints.host
+                      AND obs.port = peer_endpoints.port
+                ), ''),
+                NULLIF(last_verified_at, ''),
+                NULLIF(last_seen_at, ''),
+                ''
+            )
+            WHERE COALESCE(proof_timestamp, '') = ''
+            """
+        )
         _add_column_if_missing(conn, "peer_endpoint_candidates", "last_probe_attempt_at", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "peer_endpoint_candidates", "last_probe_delivery_ok", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(conn, "peer_endpoint_candidates", "consecutive_probe_failures", "INTEGER NOT NULL DEFAULT 0")
@@ -1506,6 +1526,7 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
             proof_message_id TEXT NOT NULL DEFAULT '',
             proof_message_type TEXT NOT NULL DEFAULT '',
             proof_hash TEXT NOT NULL DEFAULT '',
+            proof_timestamp TEXT NOT NULL DEFAULT '',
             last_delivery_attempt_at TEXT NOT NULL DEFAULT '',
             last_delivery_success_at TEXT NOT NULL DEFAULT '',
             last_delivery_failure_at TEXT NOT NULL DEFAULT '',
@@ -1519,7 +1540,7 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
         """
         INSERT INTO peer_endpoints (
             peer_id, host, port, source, last_seen_at, last_verified_at,
-            verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash,
+            verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash, proof_timestamp,
             last_delivery_attempt_at, last_delivery_success_at, last_delivery_failure_at,
             consecutive_delivery_failures, updated_at
         )
@@ -1538,6 +1559,7 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
             '',
             '',
             '',
+            '',
             0,
             updated_at
         FROM peer_endpoints_legacy
@@ -1547,7 +1569,7 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
         """
         SELECT
             peer_id, host, port, source, verification_kind,
-            proof_message_id, proof_message_type, proof_hash,
+            proof_message_id, proof_message_type, proof_hash, proof_timestamp,
             last_verified_at, proof_count, updated_at
         FROM peer_endpoint_observations AS obs
         """
@@ -1556,7 +1578,7 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
         existing = conn.execute(
             """
             SELECT source, last_seen_at, last_verified_at, verification_kind,
-                   proof_count, proof_message_id, proof_message_type, proof_hash, updated_at
+                   proof_count, proof_message_id, proof_message_type, proof_hash, proof_timestamp, updated_at
             FROM peer_endpoints
             WHERE peer_id = ? AND host = ? AND port = ?
             LIMIT 1
@@ -1568,10 +1590,10 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
                 """
                 INSERT INTO peer_endpoints (
                     peer_id, host, port, source, last_seen_at, last_verified_at,
-                    verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash,
+                    verification_kind, proof_count, proof_message_id, proof_message_type, proof_hash, proof_timestamp,
                     last_delivery_attempt_at, last_delivery_success_at, last_delivery_failure_at,
                     consecutive_delivery_failures, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["peer_id"],
@@ -1585,6 +1607,7 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
                     row["proof_message_id"],
                     row["proof_message_type"],
                     row["proof_hash"],
+                    str(row["proof_timestamp"] or row["last_verified_at"] or ""),
                     "",
                     "",
                     "",
@@ -1604,6 +1627,7 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
         selected_proof_message_id = str(existing["proof_message_id"] or "")
         selected_proof_message_type = str(existing["proof_message_type"] or "")
         selected_proof_hash = str(existing["proof_hash"] or "")
+        selected_proof_timestamp = _max_timestamp(str(existing["proof_timestamp"] or ""), str(row["proof_timestamp"] or row["last_verified_at"] or ""))
         if int(row["proof_count"] or 0) >= int(existing["proof_count"] or 0):
             selected_verification_kind = str(row["verification_kind"] or "") or selected_verification_kind
             selected_proof_message_id = str(row["proof_message_id"] or "") or selected_proof_message_id
@@ -1621,6 +1645,7 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
                 proof_message_id = ?,
                 proof_message_type = ?,
                 proof_hash = ?,
+                proof_timestamp = ?,
                 last_delivery_attempt_at = COALESCE(last_delivery_attempt_at, ''),
                 last_delivery_success_at = COALESCE(last_delivery_success_at, ''),
                 last_delivery_failure_at = COALESCE(last_delivery_failure_at, ''),
@@ -1637,6 +1662,7 @@ def _rebuild_peer_endpoints_if_needed(conn) -> None:
                 selected_proof_message_id,
                 selected_proof_message_type,
                 selected_proof_hash,
+                selected_proof_timestamp,
                 _max_timestamp(str(existing["updated_at"] or ""), str(row["updated_at"] or "")),
                 row["peer_id"],
                 row["host"],
