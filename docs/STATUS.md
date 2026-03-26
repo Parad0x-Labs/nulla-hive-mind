@@ -4,7 +4,7 @@ Current status matrix. Updated 2026-03-26.
 
 ## Latest Stabilization Checkpoint
 
-The current `main` checkpoint materially improved one hundred and forty-one areas:
+The current `main` checkpoint materially improved one hundred and forty-two areas:
 
 1. **Provider routing and model orchestration**
    NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
@@ -288,12 +288,14 @@ The current `main` checkpoint materially improved one hundred and forty-one area
    DHT discovery no longer depends only on already-verified endpoints while referral candidates sit idle, and helper freshness no longer collapses to a flat fallback score. `core/discovery_index.py` now parses capability timestamps correctly and exposes recent candidate endpoints without promoting them into live truth, while `core/maintenance.py` now probes a bounded set of candidate endpoints only when verified coverage is sparse. Those candidate endpoints still remain candidate-only until a stronger observed/bootstrap/self signal arrives.
 141. **Task-class-scoped remote-shard reuse baseline**
    Hive reuse proof no longer leaks across unrelated task classes. `storage/shard_reuse_outcomes.py` can now summarize reuse outcomes for a specific task class, `core/shard_matcher.py` now attaches only same-class reuse proof to cached `peer_received` candidates during ranking, and `core/tiered_context_loader.py` now phrases that evidence as “for this task class” instead of globally overstating shard value.
+142. **Candidate-probe memory baseline**
+   DHT discovery no longer forgets every failed candidate probe between maintenance ticks. `core/discovery_index.py` now records candidate probe attempts, delivery outcomes, and consecutive probe failures, while `core/maintenance.py` now honors bounded cooldown and failure limits before re-probing the same candidate endpoint. That still is not public-internet liveness proof, but it stops pretending that endlessly re-pinging dead candidates is real hardening.
 
 Current test gate on this checkpoint:
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1533 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Full suite result | `1536 passed, 13 skipped, 12 xfailed, 16 xpassed` |
 | Runtime posture | Alpha |
 | Beta verdict | Not ready |
 
@@ -326,9 +328,9 @@ Current test gate on this checkpoint:
 | **Contribution scoring** | **Works** | Glory scores, local credits, receipts, evidence-based grading, and partial-result paths are present. Credits here are local work/participation accounting, not blockchain tokens. |
 | **Knowledge sharing (shards)** | **Works** | Create, scope, promote, replicate knowledge across mesh. Remote fetches now also record explicit receipts, cached remote-shard reuse surfaces citation metadata, grounded turns persist downstream reuse outcomes with selected-vs-answer-backed attribution, selected shards now need counterfactual loss proof before they count as strongly answer-backed, future cached-remote retrieval can prefer shards that have actually improved clean final answers before instead of replaying static trust/quality or weaker citation history only, and that proof is now scoped to the current task class instead of leaking across unrelated Hive work. |
 | **One-click installer** | **Works** | macOS, Linux, Windows (PowerShell). Auto hardware detection, explicit install profiles, single-volume free-space checks, built-wheel smoke coverage, and aligned `/healthz` startup checks. Doctor, receipt, and both installer launchers now derive profile truth from the same runtime provider snapshot seam, expose machine-readable `provider_capability_truth`, carry selected-lane health state, route around blocked local alternatives when a healthier local lane exists, and stop calling degraded required lanes “ready” just because the API key is present. |
-| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1533 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
+| **CI pipeline** | **Enforced** | GitHub Actions runs lint, matrix tests, build, and the fast LLM acceptance gate on every push. Local full gate currently `1536 passed, 13 skipped, 12 xfailed, 16 xpassed`; check Actions for the latest branch conclusion. |
 | **WAN transport** | **Partial** | Relay/STUN probes exist, NAT-mapped nodes now advertise `hole_punch` instead of pretending they are direct, and private-LAN nodes now stay `lan_only` unless a real relay is configured. This is more honest, but it is still not proven at scale over internet. |
-| **DHT routing** | **Partial** | Bucketed routing now has iterative lookup-frontier helpers that can exclude already-contacted peers, deterministic refresh targets for stale non-empty buckets, a bounded replacement-cache path so fresh full buckets queue challengers instead of evicting live incumbents immediately, endpoint-provenance guardrails so referral-only `NODE_FOUND` / `BLOCK_FOUND` peers do not overwrite observed endpoint truth or refresh observed-peer liveness, and bounded maintenance-time candidate-endpoint probing when verified discovery coverage is sparse. Those candidate probes still do not become authoritative endpoint truth for free. It is still not hardened as a public multi-hop routing layer. |
+| **DHT routing** | **Partial** | Bucketed routing now has iterative lookup-frontier helpers that can exclude already-contacted peers, deterministic refresh targets for stale non-empty buckets, a bounded replacement-cache path so fresh full buckets queue challengers instead of evicting live incumbents immediately, endpoint-provenance guardrails so referral-only `NODE_FOUND` / `BLOCK_FOUND` peers do not overwrite observed endpoint truth or refresh observed-peer liveness, bounded maintenance-time candidate-endpoint probing when verified discovery coverage is sparse, and candidate-probe cooldown/failure memory so maintenance stops hammering the same dead referral endpoints every tick. Those candidate probes still do not become authoritative endpoint truth for free. It is still not hardened as a public multi-hop routing layer. |
 | **Meet cluster replication** | **Partial** | Pull-based sync works. Global convergence not proven across regions. |
 | **Channel gateway** | **Partial** | Platform-neutral gateway exists. Live surface wiring pending. |
 | **OpenClaw integration** | **Partial** | Agent registers and responds. Live-info routing and Hive create/confirm flow are better, but chat quality and product polish are still uneven. |
@@ -362,11 +364,11 @@ Credits in this repo are local proof-of-work / proof-of-participation accounting
 
 | Metric | Value |
 |--------|-------|
-| Full suite result | `1531 passed, 13 skipped, 12 xfailed, 16 xpassed` |
-| Passing | 1507 |
+| Full suite result | `1536 passed, 13 skipped, 12 xfailed, 16 xpassed` |
+| Passing | 1536 |
 | Skipped | 13 |
-| Expected failures (xfail) | 13 |
-| Unexpected passes (xpass) | 15 |
+| Expected failures (xfail) | 12 |
+| Unexpected passes (xpass) | 16 |
 | Test files | 235 |
 
 Run `python3 ops/pytest_shards.py --workers 6 --label <label> --pytest-arg=--tb=short` to reproduce the current full local gate.
