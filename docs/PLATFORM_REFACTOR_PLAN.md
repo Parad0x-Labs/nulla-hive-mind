@@ -763,6 +763,11 @@ pytest -q \
   tests/test_brain_hive_watch_server.py
 ```
 
+## Current Beta Execution Frontier
+
+- Bounded local repair can now keep diagnosing after a failed repair envelope, but only when the nested verifier failure is explicit and the tracked rollback succeeded. That is deliberate; anything broader would turn into guessy retry spam.
+- The next real gaps are still multi-hop repo debugging, deeper queen/coder/verifier retry-and-merge behavior, provider rollout beyond the current contract truth, stronger measured Hive-reuse impact on completion quality, and WAN/DHT hardening.
+
 ## Shared Refactor Rules
 
 - Do not combine two blast-radius modules in one PR.
