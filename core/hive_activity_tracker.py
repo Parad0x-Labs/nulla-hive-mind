@@ -78,7 +78,7 @@ _AFFIRMATIVE_HIVE_FOLLOWUPS = {
 class HiveActivityTrackerConfig:
     enabled: bool = True
     watcher_api_url: str | None = None
-    timeout_seconds: int = 4
+    timeout_seconds: int = 8
     tls_ca_file: str | None = None
     tls_insecure_skip_verify: bool = False
 
@@ -537,7 +537,7 @@ def load_hive_activity_tracker_config() -> HiveActivityTrackerConfig:
     return HiveActivityTrackerConfig(
         enabled=enabled_raw not in {"0", "false", "no", "off"} and bool(api_url),
         watcher_api_url=api_url,
-        timeout_seconds=max(2, int(float(os.environ.get("NULLA_HIVE_WATCH_TIMEOUT_SECONDS") or 4))),
+        timeout_seconds=max(2, int(float(os.environ.get("NULLA_HIVE_WATCH_TIMEOUT_SECONDS") or 8))),
         tls_ca_file=tls_ca_file,
         tls_insecure_skip_verify=tls_insecure_skip_verify,
     )

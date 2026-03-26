@@ -69,7 +69,7 @@ bash Install_And_Run_NULLA.sh
 
 What the installer does:
 
-1. creates a Python environment and installs dependencies
+1. finds a supported Python (`3.10+`) instead of blindly trusting an old system `python3`, then creates the environment and installs dependencies
 2. probes hardware and selects a local Ollama model
 3. installs Ollama if needed
 4. registers NULLA as an OpenClaw agent
@@ -84,6 +84,7 @@ Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 - Local-first runtime with Ollama-backed execution
 - Persistent memory and context carryover
 - Tool use, bounded research, and Hive task flow
+- Safe read-only local directory inspection for Desktop / Downloads / Documents in the supported lane
 - OpenClaw registration and local API lane
 - Public proof, tasks, operator pages, worklog, and coordination surfaces
 - Cumulative regression gate in local test packs and GitHub Actions

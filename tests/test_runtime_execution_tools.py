@@ -98,6 +98,45 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             self.assertEqual(searched.details["observation"]["matches"][0]["path"], "docs/plan.md")
             self.assertEqual(searched.details["observation"]["matches"][0]["line"], 1)
 
+    def test_machine_list_directory_lists_safe_desktop_folders(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)):
+            home = Path(tmpdir)
+            desktop = home / "Desktop"
+            desktop.mkdir(parents=True, exist_ok=True)
+            (desktop / "Projects").mkdir()
+            (desktop / "Ideas").mkdir()
+            (desktop / "todo.txt").write_text("one\n", encoding="utf-8")
+            (desktop / ".hidden").mkdir()
+
+            listed = execute_runtime_tool(
+                "machine.list_directory",
+                {"path": "~/Desktop", "directories_only": True, "limit": 20},
+                source_context={"workspace": tmpdir},
+            )
+            assert listed is not None
+            self.assertTrue(listed.ok)
+            self.assertIn("Projects/", listed.response_text)
+            self.assertIn("Ideas/", listed.response_text)
+            self.assertNotIn("todo.txt", listed.response_text)
+            self.assertNotIn(".hidden", listed.response_text)
+
+            hints = extract_observation_followup_hints(listed.details["observation"])
+            self.assertEqual(hints["path"], "~/Desktop")
+            self.assertTrue(hints["directories_only"])
+            self.assertEqual(hints["entry_count"], 2)
+
+    def test_machine_list_directory_blocks_paths_outside_safe_allowlist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)):
+            result = execute_runtime_tool(
+                "machine.list_directory",
+                {"path": "~/Secrets"},
+                source_context={"workspace": tmpdir},
+            )
+            assert result is not None
+            self.assertFalse(result.ok)
+            self.assertEqual(result.status, "not_allowed")
+            self.assertIn("safe local directories", result.response_text.lower())
+
     def test_workspace_ensure_directory_creates_requested_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             created = execute_runtime_tool(

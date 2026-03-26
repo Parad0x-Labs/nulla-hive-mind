@@ -343,6 +343,20 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(first.next_payload["intent"], "workspace.ensure_directory")
         self.assertEqual(first.next_payload["arguments"]["path"], "src/api")
 
+    def test_workflow_planner_routes_safe_desktop_folder_listing_to_machine_read(self) -> None:
+        first = plan_tool_workflow(
+            user_text="tell me what are the folders on my desktop",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-tools"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_safe_machine_directory_list")
+        self.assertEqual(first.next_payload["intent"], "machine.list_directory")
+        self.assertEqual(first.next_payload["arguments"]["path"], "~/Desktop")
+        self.assertTrue(first.next_payload["arguments"]["directories_only"])
+
     def test_workflow_planner_routes_explicit_file_create_to_workspace_write(self) -> None:
         first = plan_tool_workflow(
             user_text="Create a file named nulla_test_01.txt in the current workspace with exactly this content: ALPHA-LOCAL-FILE-01",
@@ -589,6 +603,36 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(decision.reason, "planned_workspace_list_after_write")
         self.assertEqual(decision.next_payload["intent"], "workspace.list_files")
         self.assertEqual(decision.next_payload["arguments"]["path"], "nulla_chain_test")
+
+    def test_workflow_planner_stops_after_safe_machine_directory_list(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="tell me what are the folders on my desktop",
+            task_class="unknown",
+            executed_steps=[
+                {
+                    "tool_name": "machine.list_directory",
+                    "arguments": {"path": "~/Desktop", "directories_only": True},
+                    "observation": {
+                        "intent": "machine.list_directory",
+                        "tool_surface": "machine",
+                        "ok": True,
+                        "status": "executed",
+                        "path": "~/Desktop",
+                        "count": 2,
+                        "directories_only": True,
+                        "entries": [
+                            {"name": "Projects", "path": "~/Desktop/Projects", "type": "directory"},
+                            {"name": "Ideas", "path": "~/Desktop/Ideas", "type": "directory"},
+                        ],
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-tools"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertTrue(decision.stop_after)
+        self.assertEqual(decision.reason, "machine_stop_after_list")
 
     def test_workflow_planner_treats_explicit_social_lookup_as_research(self) -> None:
         first = plan_tool_workflow(

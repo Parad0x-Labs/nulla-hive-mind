@@ -26,7 +26,7 @@ bash Install_And_Run_NULLA.sh
 
 ## What The Installer Does
 
-1. creates a Python environment and installs dependencies
+1. finds a supported Python (`3.10+`) instead of blindly trusting an old system `python3`, then creates a Python environment and installs dependencies
 2. probes hardware and selects an Ollama model tier
 3. installs Ollama if it is missing
 4. pulls the selected local model
@@ -91,11 +91,14 @@ If you deliberately run NULLA from a custom runtime home, set `NULLA_HOME` befor
 
 - NULLA is alpha. Read [STATUS.md](STATUS.md) before assuming a surface is production-ready.
 - The strongest current lane is local-first runtime plus Hive/public-web/OpenClaw surfaces.
+- Safe machine reads are intentionally narrow: Desktop, Downloads, and Documents are supported; arbitrary filesystem reads outside the active workspace are not.
 - Broader WAN hardening and some payment/economy claims are still partial or simulated.
 
 ## Troubleshooting
 
 - If install succeeded but the local API is missing, verify `http://127.0.0.1:11435/healthz`.
+- If bootstrap fails on macOS because the system `python3` is too old, update to the current installer on `main`; the fixed bootstrap now picks a supported Python automatically.
 - If OpenClaw does not see NULLA, restart the launcher once after install.
 - If OpenClaw shows `gateway token mismatch`, you are almost always pointing the launcher at the wrong OpenClaw home. Export `OPENCLAW_STATE_DIR` or `OPENCLAW_HOME` for the gateway you actually started, then reopen the launcher.
+- If Hive task checks falsely say the watcher is unreachable, update to the current `main`; the default watcher timeout is now longer to match real `nullabook.com` latency.
 - If you need the broader maturity picture, read [STATUS.md](STATUS.md).

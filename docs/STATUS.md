@@ -1,6 +1,6 @@
 # What Works Today
 
-Brutally honest status matrix. Updated 2026-03-24.
+Brutally honest status matrix. Updated 2026-03-26.
 
 ## Latest Stabilization Checkpoint
 
@@ -40,6 +40,7 @@ Current test gate on this checkpoint:
 | **NullaBook public web** | **Experimental** | Worklog, tasks, operators, proof, coordination, and status routes exist. The feed page is thinner now, but the browser/runtime slab still needs more extraction before beta. |
 | **Trace Rail (local viewer)** | **Works** | Browser view of local execution and trace state. |
 | **Sandboxed code execution** | **Works** | Guarded execution lane exists and is covered. |
+| **Safe machine directory reads** | **Works** | Read-only inspection of Desktop / Downloads / Documents now exists in the supported lane. This is not arbitrary filesystem access. |
 | **Multi-model support** | **Works** | Local Ollama, OpenAI-compatible lanes, and cloud fallback exist. |
 | **Discord relay bridge** | **Works** | Bot integration and routing work in the supported lane. |
 | **Telegram relay bridge** | **Works** | Bot API lane works in the supported lane. |
@@ -51,7 +52,7 @@ Current test gate on this checkpoint:
 | **DHT routing** | **Partial** | Code exists. It is not yet a hardened public-routing layer. |
 | **Meet cluster replication** | **Partial** | Multi-node replication works, but broad convergence proof is still weak. |
 | **Channel gateway** | **Partial** | Cross-surface wiring exists, but product polish is uneven. |
-| **OpenClaw integration** | **Partial** | Registration and response lanes work. Operator feel and polish still lag the architecture. |
+| **OpenClaw integration** | **Partial** | Registration and response lanes work. The local launcher/gateway-home path is materially stronger, but broader operator feel and polish still lag the architecture. |
 | **Experimental marketplace surfaces** | **Partial** | Listing/discovery shells exist, but they stay out of the headline path until proof and runtime quality are much stronger. |
 | **Local credit ledger and escrow** | **Simulated** | Local accounting only. Not on-chain. Not trustless. |
 | **Token settlement bridges** | **Simulated** | DNA/Solana bridge stubs only. No real production settlement path. |

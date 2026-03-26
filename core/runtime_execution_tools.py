@@ -52,6 +52,7 @@ _EXECUTION_REQUEST_MARKERS = (
     "submit it",
 )
 _FILE_LINE_RE = re.compile(r"(?P<path>[A-Za-z0-9_./-]+\.[A-Za-z0-9_+-]+):(?P<line>\d+)")
+_SAFE_MACHINE_DIRECTORY_NAMES = ("Desktop", "Downloads", "Documents")
 
 
 @dataclass
@@ -181,6 +182,16 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
             "primary_line": int(primary.get("line") or 0) if str(primary.get("line") or "").strip() else 0,
             "primary_snippet": str(primary.get("snippet") or "").strip(),
         }
+    if intent == "machine.list_directory":
+        entries = [dict(item) for item in list(payload.get("entries") or []) if isinstance(item, dict)]
+        return {
+            "intent": intent,
+            "path": str(payload.get("path") or "").strip(),
+            "directories_only": bool(payload.get("directories_only", False)),
+            "entry_count": int(payload.get("count") or len(entries)),
+            "entries": entries,
+            "paths": [str(item.get("path") or "").strip() for item in entries if str(item.get("path") or "").strip()],
+        }
     if intent == "workspace.read_file":
         lines = [dict(item) for item in list(payload.get("lines") or []) if isinstance(item, dict)]
         return {
@@ -299,6 +310,8 @@ def execute_runtime_tool(
     try:
         if intent == "workspace.list_files":
             return _list_files(arguments, workspace_root=workspace_root)
+        if intent == "machine.list_directory":
+            return _list_machine_directory(arguments)
         if intent == "workspace.search_text":
             return _search_text(arguments, workspace_root=workspace_root)
         if intent == "workspace.read_file":
@@ -372,6 +385,51 @@ def _truncate(text: str, *, limit: int = 1800) -> str:
     if len(value) <= limit:
         return value
     return value[:limit].rstrip() + "\n...[truncated]"
+
+
+def _home_relative_label(path: Path) -> str:
+    home = Path.home().resolve()
+    try:
+        relative = path.resolve().relative_to(home)
+        return "~" if str(relative) in {"", "."} else f"~/{relative}"
+    except Exception:
+        return str(path)
+
+
+def _safe_machine_roots() -> tuple[Path, ...]:
+    home = Path.home().resolve()
+    return tuple((home / name).resolve() for name in _SAFE_MACHINE_DIRECTORY_NAMES)
+
+
+def _resolve_machine_directory(raw_path: str | None) -> Path:
+    raw = str(raw_path or "").strip()
+    if not raw:
+        return _safe_machine_roots()[0]
+    lowered = raw.lower().strip()
+    alias_map = {
+        "desktop": "Desktop",
+        "my desktop": "Desktop",
+        "~/desktop": "Desktop",
+        "downloads": "Downloads",
+        "my downloads": "Downloads",
+        "~/downloads": "Downloads",
+        "documents": "Documents",
+        "my documents": "Documents",
+        "~/documents": "Documents",
+        "docs": "Documents",
+    }
+    if lowered in alias_map:
+        return (Path.home() / alias_map[lowered]).resolve()
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = (Path.home() / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+    for root in _safe_machine_roots():
+        if candidate == root or root in candidate.parents:
+            return candidate
+    allowed = ", ".join(_home_relative_label(root) for root in _safe_machine_roots())
+    raise ValueError(f"I can only inspect safe local directories in this lane: {allowed}.")
 
 
 def _iter_workspace_files(
@@ -454,6 +512,112 @@ def _list_files(arguments: dict[str, Any], *, workspace_root: Path) -> RuntimeEx
                 path=_relative_path(target, workspace_root=workspace_root),
                 count=len(relative_rows),
                 paths=relative_rows,
+            ),
+        },
+    )
+
+
+def _list_machine_directory(arguments: dict[str, Any]) -> RuntimeExecutionResult:
+    try:
+        target = _resolve_machine_directory(arguments.get("path"))
+    except ValueError as exc:
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="not_allowed",
+            response_text=str(exc),
+            details={
+                "observation": _tool_observation(
+                    intent="machine.list_directory",
+                    tool_surface="machine",
+                    ok=False,
+                    status="not_allowed",
+                    allowed_roots=[_home_relative_label(root) for root in _safe_machine_roots()],
+                ),
+            },
+        )
+    if not target.exists() or not target.is_dir():
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="not_found",
+            response_text=f"Local directory `{_home_relative_label(target)}` does not exist.",
+            details={
+                "path": _home_relative_label(target),
+                "observation": _tool_observation(
+                    intent="machine.list_directory",
+                    tool_surface="machine",
+                    ok=False,
+                    status="not_found",
+                    path=_home_relative_label(target),
+                ),
+            },
+        )
+    directories_only = bool(arguments.get("directories_only", False))
+    limit = max(1, min(int(arguments.get("limit") or 50), 200))
+    entries: list[dict[str, Any]] = []
+    for child in sorted(target.iterdir(), key=lambda item: item.name.lower()):
+        if len(entries) >= limit:
+            break
+        if child.name.startswith("."):
+            continue
+        if directories_only and not child.is_dir():
+            continue
+        entries.append(
+            {
+                "name": child.name,
+                "path": _home_relative_label(child),
+                "type": "directory" if child.is_dir() else "file",
+            }
+        )
+    if not entries:
+        noun = "folders" if directories_only else "entries"
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=True,
+            status="no_results",
+            response_text=f"No visible {noun} matched in `{_home_relative_label(target)}`.",
+            details={
+                "path": _home_relative_label(target),
+                "count": 0,
+                "entries": [],
+                "directories_only": directories_only,
+                "observation": _tool_observation(
+                    intent="machine.list_directory",
+                    tool_surface="machine",
+                    ok=True,
+                    status="no_results",
+                    path=_home_relative_label(target),
+                    count=0,
+                    directories_only=directories_only,
+                    entries=[],
+                ),
+            },
+        )
+    label = "Visible folders" if directories_only else "Visible entries"
+    lines = [f"{label} under `{_home_relative_label(target)}`:"]
+    for entry in entries:
+        suffix = "/" if entry["type"] == "directory" else ""
+        lines.append(f"- {entry['name']}{suffix}")
+    return RuntimeExecutionResult(
+        handled=True,
+        ok=True,
+        status="executed",
+        response_text="\n".join(lines),
+        details={
+            "path": _home_relative_label(target),
+            "count": len(entries),
+            "entries": entries,
+            "directories_only": directories_only,
+            "observation": _tool_observation(
+                intent="machine.list_directory",
+                tool_surface="machine",
+                ok=True,
+                status="executed",
+                path=_home_relative_label(target),
+                count=len(entries),
+                directories_only=directories_only,
+                entries=entries,
             ),
         },
     )

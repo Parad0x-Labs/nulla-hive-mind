@@ -249,6 +249,40 @@ def _extract_workspace_bootstrap_path(text: str) -> str:
     return ""
 
 
+def _extract_safe_machine_directory_listing(text: str) -> dict[str, Any] | None:
+    lowered = " ".join(str(text or "").strip().lower().split())
+    if not lowered:
+        return None
+    if any(marker in lowered for marker in ("create ", "make ", "mkdir", "write ", "edit ", "change ", "delete ")):
+        return None
+    wants_listing = any(
+        marker in lowered
+        for marker in (
+            "list ",
+            "show ",
+            "what are ",
+            "what's on",
+            "what is on",
+            "contents of",
+            "what do we have on",
+            "tell me what",
+        )
+    )
+    if not wants_listing:
+        return None
+    path = ""
+    if "desktop" in lowered:
+        path = "~/Desktop"
+    elif "downloads" in lowered:
+        path = "~/Downloads"
+    elif "documents" in lowered or "docs" in lowered:
+        path = "~/Documents"
+    if not path:
+        return None
+    directories_only = any(token in lowered for token in (" folder", " folders", " directory", " directories"))
+    return {"path": path, "directories_only": directories_only, "limit": 200}
+
+
 def _looks_like_workspace_bootstrap_request(text: str) -> bool:
     lowered = " ".join(str(text or "").strip().lower().split())
     if not lowered:
@@ -625,6 +659,7 @@ def plan_tool_workflow(
     public_entity_lookup = looks_like_public_entity_lookup_request(research_text)
     explicit_lookup = looks_like_explicit_lookup_request(research_text) or public_entity_lookup
     tool_inventory_request = _looks_like_tool_inventory_request(text)
+    machine_directory_list = _extract_safe_machine_directory_listing(text)
     workspace_bootstrap_path = _extract_workspace_bootstrap_path(text)
     workspace_bootstrap_request = _looks_like_workspace_bootstrap_request(text)
     workspace_file_plan = _extract_workspace_file_plan(text, source_context=source_context)
@@ -698,6 +733,12 @@ def plan_tool_workflow(
                 handled=True,
                 reason="planned_operator_tool_inventory",
                 next_payload={"intent": "operator.list_tools", "arguments": {}},
+            )
+        if machine_directory_list:
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason="planned_safe_machine_directory_list",
+                next_payload={"intent": "machine.list_directory", "arguments": machine_directory_list},
             )
         if workspace_file_plan is not None:
             pending_writes = _pending_workspace_writes(workspace_file_plan, steps)
@@ -952,6 +993,9 @@ def plan_tool_workflow(
 
     if last_intent == "workspace.list_files":
         return WorkflowPlannerDecision(handled=True, reason="workspace_stop_after_list", stop_after=True)
+
+    if last_intent == "machine.list_directory":
+        return WorkflowPlannerDecision(handled=True, reason="machine_stop_after_list", stop_after=True)
 
     if last_intent == "workspace.replace_in_file":
         retry_command = _last_command_from_steps(steps) or explicit_command

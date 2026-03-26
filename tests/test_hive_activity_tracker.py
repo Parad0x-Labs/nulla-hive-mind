@@ -7,6 +7,7 @@ from apps.nulla_agent import NullaAgent
 from core.hive_activity_tracker import (
     HiveActivityTracker,
     HiveActivityTrackerConfig,
+    load_hive_activity_tracker_config,
     prune_stale_hive_interaction_state,
     session_hive_state,
     snooze_hive_prompts,
@@ -674,3 +675,16 @@ def test_help_chat_response_does_not_append_hive_footer() -> None:
             source_context={"surface": "openclaw", "platform": "openclaw"},
         )
     assert "Hive:\nResearch follow-up: 1 new local research result landed." not in result["response"]
+
+
+def test_load_hive_activity_tracker_config_defaults_to_eight_second_timeout() -> None:
+    with mock.patch.dict("os.environ", {}, clear=True), mock.patch(
+        "core.hive_activity_tracker._load_watcher_url_from_manifest",
+        return_value="https://watch.example.test/dashboard",
+    ), mock.patch(
+        "core.hive_activity_tracker._load_agent_bootstrap_tls",
+        return_value={},
+    ):
+        config = load_hive_activity_tracker_config()
+
+    assert config.timeout_seconds == 8
