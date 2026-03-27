@@ -5,8 +5,9 @@ import os
 import platform
 import re
 import shutil
+import subprocess
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,8 @@ _MODEL_SIZE_GB = {
 _INSTALL_PROFILE_RECORD_RELATIVE_PATH = Path("config") / "install-profile.json"
 _KIMI_API_KEY_ENV_KEYS = ("KIMI_API_KEY", "MOONSHOT_API_KEY", "NULLA_KIMI_API_KEY")
 _KIMI_API_KEY_REASON = "KIMI_API_KEY or MOONSHOT_API_KEY"
+_OLLAMA_HELPER_MODEL = "qwen2.5:7b"
+_INSTALLED_OLLAMA_MODELS_ENV_KEY = "NULLA_INSTALLED_OLLAMA_MODELS"
 
 
 @dataclass(frozen=True)
@@ -149,74 +152,75 @@ def build_install_profile_truth(
         requested = _installed_profile_id(runtime_home)
         if requested:
             requested_source = "installed_record"
-    profile_id, selection_source, selection_reasons = _resolve_profile_id(
-        requested=requested,
-        requested_source=requested_source,
-        probe=active_probe,
-        tier=active_tier,
-        env=env_map,
-    )
     model_tag = str(selected_model or active_tier.ollama_tag or "").strip() or "qwen2.5:7b"
-    estimates = _profile_estimates(profile_id=profile_id, model_tag=model_tag, tier=active_tier)
-    provider_mix, provider_reasons = _provider_mix(
-        profile_id=profile_id,
-        model_tag=model_tag,
+    installed_ollama_models = _installed_ollama_model_tags(
         provider_capability_truth=provider_capability_truth,
         env=env_map,
     )
-    volume_checks = _volume_checks(
-        runtime_home=runtime_home,
-        env=env_map,
-        runtime_required_gb=estimates["runtime_required_gb"],
-        ollama_required_gb=estimates["model_required_gb"],
-    )
-    single_volume_ready = all(item.ok for item in volume_checks)
-    reasons = list(selection_reasons)
-    reasons.extend(provider_reasons)
-    required_provider_mix = tuple(item for item in provider_mix if item.required)
-    blocked_provider_mix = tuple(
-        item for item in required_provider_mix if item.availability_state in {"blocked", "unregistered"}
-    )
-    degraded_provider_mix = tuple(item for item in required_provider_mix if item.availability_state == "degraded")
-    if not single_volume_ready:
-        reasons.append(
-            "No single target volume currently has enough free space for the selected runtime + model footprint."
+    auto_reasons: list[str] = []
+    if requested == "auto-recommended":
+        auto_reasons.append("Install profile requested auto-recommended; applying hardware/provider auto selection.")
+        requested = ""
+    elif requested and requested not in _PROFILE_IDS:
+        auto_reasons.append(f"Unknown install profile `{requested}`. Falling back to auto-recommended.")
+        requested = ""
+
+    if requested:
+        if requested_source == "installed_record":
+            selection_source = "installed_default"
+            selection_reasons = [f"Install profile came from the installed runtime profile `{requested}`."]
+        else:
+            selection_source = "env_override"
+            selection_reasons = [f"Install profile came from NULLA_INSTALL_PROFILE={requested}."]
+        return _compose_install_profile_truth(
+            profile_id=requested,
+            selection_source=selection_source,
+            selection_reasons=selection_reasons,
+            model_tag=model_tag,
+            tier=active_tier,
+            provider_capability_truth=provider_capability_truth,
+            runtime_home=runtime_home,
+            env=env_map,
+            installed_ollama_models=installed_ollama_models,
         )
-    if blocked_provider_mix:
-        for item in blocked_provider_mix:
-            reasons.append(
-                f"Required provider lane `{item.provider_id}` is {item.availability_state} and cannot be treated as beta-ready."
+
+    candidates = _auto_profile_candidates(probe=active_probe, tier=active_tier, env=env_map)
+    evaluated: list[InstallProfileTruth] = []
+    for candidate in candidates:
+        evaluated.append(
+            _compose_install_profile_truth(
+                profile_id=candidate,
+                selection_source="auto",
+                selection_reasons=[*auto_reasons, _auto_selection_reason(candidate)],
+                model_tag=model_tag,
+                tier=active_tier,
+                provider_capability_truth=provider_capability_truth,
+                runtime_home=runtime_home,
+                env=env_map,
+                installed_ollama_models=installed_ollama_models,
             )
-    if degraded_provider_mix:
-        for item in degraded_provider_mix:
-            reasons.append(
-                f"Required provider lane `{item.provider_id}` is degraded and may still work, but the profile is not fully healthy."
+        )
+
+    chosen = next((profile for profile in evaluated if profile.ready and not profile.degraded), None)
+    if chosen is None:
+        chosen = next((profile for profile in evaluated if profile.ready), evaluated[0])
+    chosen_index = evaluated.index(chosen)
+    if chosen_index == 0:
+        return chosen
+
+    fallback_reasons = [
+        f"Auto-fell back from `{previous.profile_id}` because {_primary_profile_blocker(previous)}."
+        for previous in evaluated[:chosen_index]
+    ]
+    return replace(
+        chosen,
+        reasons=tuple(
+            dict.fromkeys(
+                reason.strip()
+                for reason in [*chosen.reasons, *fallback_reasons]
+                if reason and reason.strip()
             )
-    ready = (
-        single_volume_ready
-        and all(item.configured for item in required_provider_mix)
-        and not blocked_provider_mix
-    )
-    degraded = bool(degraded_provider_mix)
-    if not ready and all(item.configured for item in required_provider_mix) and single_volume_ready and not blocked_provider_mix:
-        reasons.append("Profile is selected but not fully ready.")
-    return InstallProfileTruth(
-        profile_id=profile_id,
-        label=_profile_label(profile_id),
-        summary=_profile_summary(profile_id),
-        selection_source=selection_source,
-        selected_model=model_tag,
-        provider_mix=provider_mix,
-        estimated_download_gb=estimates["estimated_download_gb"],
-        estimated_disk_footprint_gb=estimates["estimated_disk_footprint_gb"],
-        minimum_free_space_gb=estimates["minimum_free_space_gb"],
-        ram_expectation_gb=estimates["ram_expectation_gb"],
-        vram_expectation_gb=estimates["vram_expectation_gb"],
-        ready=ready,
-        degraded=degraded,
-        single_volume_ready=single_volume_ready,
-        reasons=tuple(dict.fromkeys(reason.strip() for reason in reasons if reason.strip())),
-        volume_checks=volume_checks,
+        ),
     )
 
 
@@ -297,62 +301,175 @@ def _installed_profile_id(runtime_home: str | Path | None) -> str:
     return ""
 
 
-def _resolve_profile_id(
+def _compose_install_profile_truth(
     *,
-    requested: str,
-    requested_source: str,
+    profile_id: str,
+    selection_source: str,
+    selection_reasons: list[str],
+    model_tag: str,
+    tier: QwenTier,
+    provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
+    runtime_home: str | Path | None,
+    env: Mapping[str, str],
+    installed_ollama_models: set[str],
+) -> InstallProfileTruth:
+    estimates = _profile_estimates(
+        profile_id=profile_id,
+        model_tag=model_tag,
+        tier=tier,
+        installed_ollama_models=installed_ollama_models,
+    )
+    provider_mix, provider_reasons = _provider_mix(
+        profile_id=profile_id,
+        model_tag=model_tag,
+        provider_capability_truth=provider_capability_truth,
+        env=env,
+    )
+    volume_checks = _volume_checks(
+        runtime_home=runtime_home,
+        env=env,
+        runtime_required_gb=estimates["runtime_required_gb"],
+        ollama_required_gb=estimates["model_required_gb"],
+    )
+    single_volume_ready = all(item.ok for item in volume_checks)
+    reasons = list(selection_reasons)
+    reasons.extend(provider_reasons)
+    required_provider_mix = tuple(item for item in provider_mix if item.required)
+    blocked_provider_mix = tuple(
+        item for item in required_provider_mix if item.availability_state in {"blocked", "unregistered"}
+    )
+    degraded_provider_mix = tuple(item for item in required_provider_mix if item.availability_state == "degraded")
+    if not single_volume_ready:
+        reasons.append(
+            "No single target volume currently has enough free space for the selected runtime + model footprint."
+        )
+    if blocked_provider_mix:
+        for item in blocked_provider_mix:
+            reasons.append(
+                f"Required provider lane `{item.provider_id}` is {item.availability_state} and cannot be treated as beta-ready."
+            )
+    if degraded_provider_mix:
+        for item in degraded_provider_mix:
+            reasons.append(
+                f"Required provider lane `{item.provider_id}` is degraded and may still work, but the profile is not fully healthy."
+            )
+    ready = (
+        single_volume_ready
+        and all(item.configured for item in required_provider_mix)
+        and not blocked_provider_mix
+    )
+    degraded = bool(degraded_provider_mix)
+    if not ready and all(item.configured for item in required_provider_mix) and single_volume_ready and not blocked_provider_mix:
+        reasons.append("Profile is selected but not fully ready.")
+    return InstallProfileTruth(
+        profile_id=profile_id,
+        label=_profile_label(profile_id),
+        summary=_profile_summary(profile_id),
+        selection_source=selection_source,
+        selected_model=model_tag,
+        provider_mix=provider_mix,
+        estimated_download_gb=estimates["estimated_download_gb"],
+        estimated_disk_footprint_gb=estimates["estimated_disk_footprint_gb"],
+        minimum_free_space_gb=estimates["minimum_free_space_gb"],
+        ram_expectation_gb=estimates["ram_expectation_gb"],
+        vram_expectation_gb=estimates["vram_expectation_gb"],
+        ready=ready,
+        degraded=degraded,
+        single_volume_ready=single_volume_ready,
+        reasons=tuple(dict.fromkeys(reason.strip() for reason in reasons if reason.strip())),
+        volume_checks=volume_checks,
+    )
+
+
+def _auto_profile_candidates(
+    *,
     probe: MachineProbe,
     tier: QwenTier,
     env: Mapping[str, str],
-) -> tuple[str, str, list[str]]:
-    reasons: list[str] = []
-    if requested == "auto-recommended":
-        reasons.append("Install profile requested auto-recommended; applying hardware/provider auto selection.")
-        requested = ""
-    if requested:
-        if requested in _PROFILE_IDS:
-            if requested_source == "installed_record":
-                reasons.append(f"Install profile came from the installed runtime profile `{requested}`.")
-                return requested, "installed_default", reasons
-            reasons.append(f"Install profile came from NULLA_INSTALL_PROFILE={requested}.")
-            return requested, "env_override", reasons
-        reasons.append(f"Unknown install profile `{requested}`. Falling back to auto-recommended.")
-
-    if _has_any_env(env, *_KIMI_API_KEY_ENV_KEYS) and tier.tier_name in {"nano", "lite", "base"}:
-        reasons.append("Auto-selected hybrid-kimi because local tier is limited and Kimi is configured.")
-        return "hybrid-kimi", "auto", reasons
+) -> tuple[str, ...]:
+    candidates: list[str] = []
+    kimi_configured = _has_any_env(env, *_KIMI_API_KEY_ENV_KEYS)
     if tier.tier_name in {"mid", "heavy", "titan"}:
-        reasons.append("Auto-selected local-max because this machine can hold a stronger fully local lane.")
-        return "local-max", "auto", reasons
-    reasons.append("Auto-selected local-only to keep the default runtime local-first and dependency-light.")
-    return "local-only", "auto", reasons
+        candidates.append("local-max")
+        if kimi_configured:
+            candidates.append("hybrid-kimi")
+        candidates.append("local-only")
+        return tuple(dict.fromkeys(candidates))
+    if kimi_configured and tier.tier_name in {"nano", "lite", "base"}:
+        candidates.extend(("hybrid-kimi", "local-only"))
+        return tuple(dict.fromkeys(candidates))
+    candidates.append("local-only")
+    return tuple(dict.fromkeys(candidates))
 
 
-def _profile_estimates(*, profile_id: str, model_tag: str, tier: QwenTier) -> dict[str, float]:
-    primary_model_gb = _estimate_model_storage_gb(model_tag)
-    extra_local_model_gb = 0.0
+def _auto_selection_reason(profile_id: str) -> str:
+    if profile_id == "hybrid-kimi":
+        return "Auto-selected hybrid-kimi because local tier is limited and Kimi is configured."
+    if profile_id == "local-max":
+        return "Auto-selected local-max because this machine can hold a stronger fully local lane."
+    return "Auto-selected local-only to keep the default runtime local-first and dependency-light."
+
+
+def _primary_profile_blocker(profile: InstallProfileTruth) -> str:
+    ignored_prefixes = (
+        "Install profile requested auto-recommended",
+        "Unknown install profile",
+        "Auto-selected ",
+        "Install profile came from ",
+        "Auto-fell back from ",
+    )
+    for reason in profile.reasons:
+        if reason.startswith(ignored_prefixes):
+            continue
+        return reason
+    if profile.degraded:
+        return "it was degraded"
+    if not profile.ready:
+        return "it was not ready on this machine/runtime"
+    return "a safer install profile was chosen"
+
+
+def _profile_estimates(
+    *,
+    profile_id: str,
+    model_tag: str,
+    tier: QwenTier,
+    installed_ollama_models: set[str],
+) -> dict[str, float]:
+    required_local_models = _required_ollama_models(profile_id=profile_id, model_tag=model_tag)
+    missing_local_models = tuple(
+        model_name for model_name in required_local_models if model_name.lower() not in installed_ollama_models
+    )
+    missing_model_gb = sum(_estimate_model_storage_gb(model_name) for model_name in missing_local_models)
     runtime_required_gb = 2.5
-    remote_overhead_gb = 0.0
 
     if profile_id in {"local-max", "full-orchestrated"}:
-        extra_local_model_gb += 3.5
         runtime_required_gb += 1.0
     if profile_id in {"hybrid-kimi", "hybrid-fallback", "full-orchestrated"}:
-        remote_overhead_gb += 0.5
+        runtime_required_gb += 0.5
 
-    estimated_download_gb = round(primary_model_gb + extra_local_model_gb + remote_overhead_gb, 1)
-    estimated_disk_footprint_gb = round(estimated_download_gb + runtime_required_gb + 1.5, 1)
-    model_required_gb = round(primary_model_gb + extra_local_model_gb + 1.5, 1)
+    model_buffer_gb = 1.5 if missing_local_models else 0.0
+    estimated_download_gb = round(missing_model_gb, 1)
+    model_required_gb = round(missing_model_gb + model_buffer_gb, 1)
     minimum_free_space_gb = round(runtime_required_gb + model_required_gb, 1)
     return {
         "estimated_download_gb": estimated_download_gb,
-        "estimated_disk_footprint_gb": estimated_disk_footprint_gb,
+        "estimated_disk_footprint_gb": minimum_free_space_gb,
         "minimum_free_space_gb": minimum_free_space_gb,
         "runtime_required_gb": round(runtime_required_gb, 1),
         "model_required_gb": model_required_gb,
         "ram_expectation_gb": float(max(tier.min_ram_gb, 6.0)),
         "vram_expectation_gb": float(max(tier.min_vram_gb, 0.0)),
     }
+
+
+def _required_ollama_models(*, profile_id: str, model_tag: str) -> tuple[str, ...]:
+    required_models = [str(model_tag or "").strip() or "qwen2.5:7b"]
+    if profile_id in {"local-max", "full-orchestrated"}:
+        helper_model = _OLLAMA_HELPER_MODEL
+        if helper_model not in required_models:
+            required_models.append(helper_model)
+    return tuple(required_models)
 
 
 def _provider_mix(
@@ -672,6 +789,57 @@ def _estimate_model_storage_gb(model_tag: str) -> float:
 
 def _has_any_env(env: Mapping[str, str], *keys: str) -> bool:
     return any(str(env.get(key) or "").strip() for key in keys)
+
+
+def _installed_ollama_model_tags(
+    *,
+    provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
+    env: Mapping[str, str],
+) -> set[str]:
+    tags: set[str] = set()
+    override_present = _INSTALLED_OLLAMA_MODELS_ENV_KEY in env
+    raw_override = str(env.get(_INSTALLED_OLLAMA_MODELS_ENV_KEY) or "").strip()
+    if override_present:
+        if raw_override.startswith("["):
+            try:
+                payload = json.loads(raw_override)
+            except Exception:
+                payload = []
+            if isinstance(payload, list):
+                tags.update(str(item).strip().lower() for item in payload if str(item).strip())
+        elif raw_override:
+            tags.update(part.strip().lower() for part in raw_override.split(",") if part.strip())
+    for item in provider_capability_truth:
+        provider_id = str(item.provider_id or "").strip()
+        if provider_id.lower().startswith("ollama-local:"):
+            tags.add(provider_id.split(":", 1)[1].strip().lower())
+            model_id = str(item.model_id or "").strip()
+            if model_id:
+                tags.add(model_id.lower())
+    if override_present:
+        return tags
+    binary = shutil.which("ollama")
+    if not binary:
+        return tags
+    try:
+        completed = subprocess.run(
+            [binary, "list"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except Exception:
+        return tags
+    lines = [line.rstrip() for line in str(completed.stdout or "").splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return tags
+    for raw_line in lines[1:]:
+        parts = [part.strip() for part in re.split(r"\s{2,}", raw_line.strip()) if part.strip()]
+        if not parts:
+            continue
+        tags.add(parts[0].lower())
+    return tags
 
 
 __all__ = [
