@@ -73,6 +73,7 @@ ops/*
 !ops/llm_eval.py
 !ops/ensure_public_hive_auth.py
 !ops/pytest_shards.py
+!ops/greenloop_concurrency.py
 tests/test_overnight_reports.py
 tests/test_repo_hygiene_check.py
 tests/test_channel_gateway.py
