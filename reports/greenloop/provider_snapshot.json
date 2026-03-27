@@ -1,0 +1,199 @@
+{
+  "generated_at": "2026-03-27T04:06:41Z",
+  "machine": {
+    "os": "macOS-26.3-arm64-arm-64bit",
+    "python_version": "3.11.15",
+    "cpu": "Apple M4",
+    "cpu_cores": 10,
+    "ram_gb": 24.0,
+    "gpu": "Apple M4",
+    "vram_gb": 24.0,
+    "storage_free_gb": 63.1,
+    "policy_flags": {
+      "skip_live_runtime": false
+    },
+    "env_vars_affecting_runtime": {}
+  },
+  "provider_inventory": [
+    {
+      "provider_id": "ollama-local:qwen2.5:14b",
+      "model_id": "qwen2.5:14b",
+      "role_fit": "local",
+      "locality": "local",
+      "availability_state": "ready",
+      "queue_depth": 0,
+      "max_safe_concurrency": 1,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "accelerator=mps"
+      ]
+    },
+    {
+      "provider_id": "ollama-local:qwen2.5:7b",
+      "model_id": "qwen2.5:7b",
+      "role_fit": "local",
+      "locality": "local",
+      "availability_state": "ready",
+      "queue_depth": 0,
+      "max_safe_concurrency": 1,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "accelerator=mps"
+      ]
+    },
+    {
+      "provider_id": "remote:kimi",
+      "model_id": "",
+      "role_fit": "remote_optional",
+      "locality": "remote",
+      "availability_state": "not_implemented",
+      "queue_depth": 0,
+      "max_safe_concurrency": 0,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "Kimi is not configured on this machine, and the installer/runtime profile is not wired yet."
+      ]
+    },
+    {
+      "provider_id": "remote:tether",
+      "model_id": "",
+      "role_fit": "remote_optional",
+      "locality": "remote",
+      "availability_state": "not_implemented",
+      "queue_depth": 0,
+      "max_safe_concurrency": 0,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "Tether does not have a real first-class installer/runtime lane in this repo yet."
+      ]
+    },
+    {
+      "provider_id": "remote:qvac",
+      "model_id": "",
+      "role_fit": "remote_optional",
+      "locality": "remote",
+      "availability_state": "not_implemented",
+      "queue_depth": 0,
+      "max_safe_concurrency": 0,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "QVAC does not have a real first-class installer/runtime lane in this repo yet."
+      ]
+    }
+  ],
+  "probe_report": {
+    "schema": "nulla.provider_probe.v1",
+    "machine": {
+      "cpu_cores": 10,
+      "ram_gb": 24.0,
+      "gpu": "Apple Silicon",
+      "vram_gb": 24.0,
+      "accelerator": "mps",
+      "selected_tier": "mid",
+      "ollama_model": "qwen2.5:14b",
+      "param_billions": 14.0
+    },
+    "ollama": {
+      "binary_present": true,
+      "binary_path": "/usr/local/bin/ollama",
+      "installed_models": [
+        {
+          "name": "qwen2.5:14b",
+          "id": "7cdf5a0187d5",
+          "size": "9.0 GB",
+          "modified": "9 hours ago"
+        },
+        {
+          "name": "qwen2.5:7b",
+          "id": "845dbda0ea48",
+          "size": "4.7 GB",
+          "modified": "3 weeks ago"
+        }
+      ]
+    },
+    "remote_env": {
+      "kimi": {
+        "api_key_present": false,
+        "base_url_present": false,
+        "model_present": false,
+        "configured": false
+      },
+      "generic_remote": {
+        "api_key_present": false,
+        "base_url_present": false,
+        "model_present": false,
+        "configured": false
+      },
+      "tether": {
+        "api_key_present": false,
+        "base_url_present": false,
+        "model_present": false,
+        "configured": false
+      },
+      "qvac": {
+        "api_key_present": false,
+        "base_url_present": false,
+        "model_present": false,
+        "configured": false
+      }
+    },
+    "local_multi_llm_fit": "pressure_sensitive",
+    "recommended_stack_id": "local_dual_ollama",
+    "stacks": [
+      {
+        "stack_id": "local_only",
+        "status": "ready",
+        "recommended": false,
+        "reason": "Local Ollama lane is ready.",
+        "primary_model": "qwen2.5:14b",
+        "helper_model": ""
+      },
+      {
+        "stack_id": "local_dual_ollama",
+        "status": "ready",
+        "recommended": true,
+        "reason": "This machine can run a primary local model plus a lighter local helper lane, but 24 GiB unified memory is still pressure-sensitive under concurrency.",
+        "primary_model": "qwen2.5:14b",
+        "helper_model": "qwen2.5:7b"
+      },
+      {
+        "stack_id": "local_plus_kimi",
+        "status": "not_implemented",
+        "recommended": false,
+        "reason": "Kimi is not configured on this machine, and the installer/runtime profile is not wired yet.",
+        "primary_model": "qwen2.5:14b",
+        "helper_model": "qwen2.5:7b"
+      },
+      {
+        "stack_id": "local_plus_tether",
+        "status": "not_implemented",
+        "recommended": false,
+        "reason": "Tether does not have a real first-class installer/runtime lane in this repo yet.",
+        "primary_model": "qwen2.5:14b",
+        "helper_model": ""
+      },
+      {
+        "stack_id": "local_plus_qvac",
+        "status": "not_implemented",
+        "recommended": false,
+        "reason": "QVAC does not have a real first-class installer/runtime lane in this repo yet.",
+        "primary_model": "qwen2.5:14b",
+        "helper_model": ""
+      }
+    ]
+  },
+  "ollama_verification": {
+    "ollama_list_log": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/ollama_list.log",
+    "pinned_model_check_log": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/ollama_model_check.log",
+    "pinned_model_present": true
+  },
+  "health_snapshots": {
+    "greenloop_18080": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/healthz_18080.json",
+    "live_11435": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/healthz_11435.json"
+  }
+}

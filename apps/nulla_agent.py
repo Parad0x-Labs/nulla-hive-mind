@@ -5012,6 +5012,29 @@ class NullaAgent:
         session_id: str,
         source_context: dict[str, object] | None,
     ) -> dict[str, Any] | None:
+        lowered = " ".join(str(user_input or "").strip().lower().split())
+        if not lowered:
+            return None
+        padded = f" {lowered} "
+        if not (
+            any(marker in lowered for marker in ("desktop", "downloads", "documents", "docs"))
+            or any(
+                marker in lowered
+                for marker in (
+                    "machine specs",
+                    "machine spec",
+                    "our machine",
+                    "this machine",
+                    "what machine",
+                    "what is machine",
+                    "system specs",
+                    "hardware specs",
+                    "running on",
+                )
+            )
+            or any(marker in padded for marker in (" cpu ", " ram ", " memory ", " gpu ", " vram ", " chip ", " cores "))
+        ):
+            return None
         decision = plan_tool_workflow(
             user_text=user_input,
             task_class=task_class,
@@ -8710,6 +8733,26 @@ class NullaAgent:
             auto_start_research=auto_start_research,
         )
 
+        def _retry_admission_blocked_create() -> tuple[dict[str, Any] | None, str, str, str]:
+            retry_title, retry_summary, _ = self._shape_public_hive_admission_safe_copy(
+                title=title,
+                summary=summary,
+                force=True,
+            )
+            if retry_title == title and retry_summary == summary:
+                return None, title, summary, ""
+            retry_result = self.public_hive_bridge.create_public_topic(
+                title=retry_title,
+                summary=retry_summary,
+                topic_tags=topic_tags,
+                linked_task_id=linked_task_id,
+                idempotency_key=f"{linked_task_id}:hive_create",
+            )
+            if retry_result.get("ok") and str(retry_result.get("topic_id") or "").strip():
+                return retry_result, retry_title, retry_summary, ""
+            retry_status = str(retry_result.get("status") or "admission_blocked").strip() or "admission_blocked"
+            return retry_result, title, summary, retry_status
+
         try:
             result = self.public_hive_bridge.create_public_topic(
                 title=title,
@@ -8721,51 +8764,37 @@ class NullaAgent:
         except Exception as exc:
             error_text = str(exc or "").strip()
             lowered_error = error_text.lower()
-            if "user command instead of agent analysis" in lowered_error:
-                retry_title, retry_summary, _ = self._shape_public_hive_admission_safe_copy(
-                    title=title,
-                    summary=summary,
-                    force=True,
-                )
-                if retry_title != title or retry_summary != summary:
-                    try:
-                        result = self.public_hive_bridge.create_public_topic(
-                            title=retry_title,
-                            summary=retry_summary,
-                            topic_tags=topic_tags,
-                            linked_task_id=linked_task_id,
-                            idempotency_key=f"{linked_task_id}:hive_create",
-                        )
-                    except Exception as retry_exc:
-                        error_text = str(retry_exc or error_text).strip()
-                        lowered_error = error_text.lower()
-                    else:
-                        if result.get("ok") and str(result.get("topic_id") or "").strip():
-                            title = retry_title
-                            summary = retry_summary
-                            error_text = ""
-                        else:
-                            status = str(result.get("status") or "admission_blocked").strip() or "admission_blocked"
-                            return self._action_fast_path_result(
-                                task_id=task.task_id,
-                                session_id=session_id,
-                                user_input=user_input,
-                                response=self._hive_topic_create_failure_text(status),
-                                confidence=0.46,
-                                source_context=source_context,
-                                reason=f"hive_topic_create_{status}",
-                                success=False,
-                                details={"status": status, **dict(result)},
-                                mode_override="tool_failed",
-                                task_outcome="failed",
-                                workflow_summary=self._action_workflow_summary(
-                                    operator_kind="hive.create_topic",
-                                    dispatch_status=status,
-                                    details={"action_id": ""},
-                                ),
-                            )
-                else:
+            if "brain hive admission blocked" in lowered_error:
+                try:
+                    retried_result, retried_title, retried_summary, retry_status = _retry_admission_blocked_create()
+                except Exception as retry_exc:
+                    error_text = str(retry_exc or error_text).strip()
                     lowered_error = error_text.lower()
+                else:
+                    if retried_result is not None and retried_result.get("ok") and str(retried_result.get("topic_id") or "").strip():
+                        result = retried_result
+                        title = retried_title
+                        summary = retried_summary
+                        error_text = ""
+                    elif retry_status:
+                        return self._action_fast_path_result(
+                            task_id=task.task_id,
+                            session_id=session_id,
+                            user_input=user_input,
+                            response=self._hive_topic_create_failure_text(retry_status),
+                            confidence=0.46,
+                            source_context=source_context,
+                            reason=f"hive_topic_create_{retry_status}",
+                            success=False,
+                            details={"status": retry_status, "error": error_text},
+                            mode_override="tool_failed",
+                            task_outcome="failed",
+                            workflow_summary=self._action_workflow_summary(
+                                operator_kind="hive.create_topic",
+                                dispatch_status=retry_status,
+                                details={"action_id": ""},
+                            ),
+                        )
             if not error_text:
                 topic_id = str(result.get("topic_id") or "").strip()
                 if not result.get("ok") or not topic_id:
@@ -8812,6 +8841,60 @@ class NullaAgent:
                     workflow_summary=self._action_workflow_summary(
                         operator_kind="hive.create_topic",
                         dispatch_status=status,
+                        details={"action_id": ""},
+                    ),
+                )
+        if str(result.get("status") or "").strip().lower() == "admission_blocked":
+            try:
+                retried_result, retried_title, retried_summary, retry_status = _retry_admission_blocked_create()
+            except Exception as retry_exc:
+                error_text = str(retry_exc or "").strip()
+                lowered_error = error_text.lower()
+                status = (
+                    "invalid_auth"
+                    if "unauthorized" in lowered_error
+                    else "admission_blocked"
+                    if "brain hive admission blocked" in lowered_error
+                    else "topic_failed"
+                )
+                return self._action_fast_path_result(
+                    task_id=task.task_id,
+                    session_id=session_id,
+                    user_input=user_input,
+                    response=self._hive_topic_create_failure_text(status),
+                    confidence=0.46,
+                    source_context=source_context,
+                    reason=f"hive_topic_create_{status}",
+                    success=False,
+                    details={"status": status, "error": error_text},
+                    mode_override="tool_failed",
+                    task_outcome="failed",
+                    workflow_summary=self._action_workflow_summary(
+                        operator_kind="hive.create_topic",
+                        dispatch_status=status,
+                        details={"action_id": ""},
+                    ),
+                )
+            if retried_result is not None and retried_result.get("ok") and str(retried_result.get("topic_id") or "").strip():
+                result = retried_result
+                title = retried_title
+                summary = retried_summary
+            elif retry_status:
+                return self._action_fast_path_result(
+                    task_id=task.task_id,
+                    session_id=session_id,
+                    user_input=user_input,
+                    response=self._hive_topic_create_failure_text(retry_status),
+                    confidence=0.46,
+                    source_context=source_context,
+                    reason=f"hive_topic_create_{retry_status}",
+                    success=False,
+                    details={"status": retry_status, **dict(retried_result or {})},
+                    mode_override="tool_failed",
+                    task_outcome="failed",
+                    workflow_summary=self._action_workflow_summary(
+                        operator_kind="hive.create_topic",
+                        dispatch_status=retry_status,
                         details={"action_id": ""},
                     ),
                 )

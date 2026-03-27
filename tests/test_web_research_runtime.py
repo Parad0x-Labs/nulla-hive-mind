@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import json
+import threading
 import unittest
 from unittest import mock
 
 from core.live_quote_contract import format_quote_timestamp
-from tools.web.web_research import PageEvidence, WebHit, _looks_like_news_query, _looks_like_price_query, web_research
+from tools.web.web_research import (
+    PageEvidence,
+    WebHit,
+    _looks_like_news_query,
+    _looks_like_price_query,
+    lookup_live_quote,
+    web_research,
+)
 
 
 class WebResearchRuntimeTests(unittest.TestCase):
@@ -60,6 +68,49 @@ class WebResearchRuntimeTests(unittest.TestCase):
     def test_crypto_price_query_uses_word_boundaries(self) -> None:
         self.assertEqual(_looks_like_price_query("ETH price now?"), "ethereum")
         self.assertEqual(_looks_like_price_query("what is Seth price?"), "")
+
+    def test_lookup_live_quote_coalesces_identical_crypto_requests(self) -> None:
+        gate = threading.Event()
+        call_count = 0
+        call_lock = threading.Lock()
+
+        def _fake_crypto_price_fallback(query: str, coin_id: str, *, timeout_s: float):
+            nonlocal call_count
+            with call_lock:
+                call_count += 1
+            gate.wait(timeout=1.0)
+            self.assertEqual(coin_id, "bitcoin")
+            return (
+                "coingecko_api",
+                [
+                    WebHit(
+                        title="Bitcoin quote",
+                        url="https://www.coingecko.com/en/coins/bitcoin",
+                        snippet=(
+                            "Bitcoin (BITCOIN) is trading at $64,321.00 USD "
+                            "as of 2026-03-27 12:00 UTC. Source: CoinGecko."
+                        ),
+                        engine="coingecko_api",
+                    )
+                ],
+                [],
+                ["live_price_fallback:coingecko_api:bitcoin"],
+            )
+
+        with mock.patch("tools.web.web_research._crypto_price_fallback", side_effect=_fake_crypto_price_fallback):
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _call_lookup():
+                return lookup_live_quote("Look up BTC in USD and answer plus where you got it.")
+
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                futures = [pool.submit(_call_lookup) for _ in range(4)]
+                gate.set()
+                results = [future.result(timeout=2.0) for future in futures]
+
+        self.assertEqual(call_count, 1)
+        self.assertTrue(all(result is not None for result in results))
+        self.assertTrue(all(result.asset_key == "bitcoin" for result in results if result is not None))
 
     def test_browser_disabled_keeps_http_text_without_claiming_browser_use(self) -> None:
         with mock.patch(

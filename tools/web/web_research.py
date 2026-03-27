@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -222,6 +223,53 @@ _PRICE_KEYWORDS = (
     "how much", "trading at", "market cap", "quote",
 )
 
+_LIVE_QUOTE_CACHE_TTL_S = 15.0
+_LIVE_QUOTE_CACHE_MAX = 32
+_live_quote_cache_lock = threading.Lock()
+_live_quote_cache: dict[str, tuple[float, LiveQuoteResult]] = {}
+_live_quote_inflight: dict[str, threading.Event] = {}
+
+
+def _purge_expired_live_quote_cache(now: float) -> None:
+    expired_keys = [key for key, (expires_at, _result) in _live_quote_cache.items() if expires_at <= now]
+    for key in expired_keys:
+        _live_quote_cache.pop(key, None)
+
+
+def _live_quote_cache_key(query: str) -> str:
+    coin_id = _looks_like_price_query(query)
+    if coin_id:
+        return f"crypto:{coin_id}"
+    market_target = _looks_like_market_quote_query(query)
+    if market_target is not None:
+        return f"market:{market_target.asset_key}"
+    return ""
+
+
+def _cached_live_quote(key: str) -> LiveQuoteResult | None:
+    if not key:
+        return None
+    now = time.monotonic()
+    with _live_quote_cache_lock:
+        _purge_expired_live_quote_cache(now)
+        cached = _live_quote_cache.get(key)
+        if cached is None:
+            return None
+        _expires_at, result = cached
+        return result
+
+
+def _store_live_quote_cache(key: str, result: LiveQuoteResult) -> None:
+    if not key:
+        return
+    now = time.monotonic()
+    with _live_quote_cache_lock:
+        _purge_expired_live_quote_cache(now)
+        _live_quote_cache[key] = (now + _LIVE_QUOTE_CACHE_TTL_S, result)
+        if len(_live_quote_cache) > _LIVE_QUOTE_CACHE_MAX:
+            oldest_key = min(_live_quote_cache.items(), key=lambda item: item[1][0])[0]
+            _live_quote_cache.pop(oldest_key, None)
+
 
 @dataclass(frozen=True)
 class MarketQuoteTarget:
@@ -266,8 +314,12 @@ _MARKET_QUOTE_TARGETS: tuple[MarketQuoteTarget, ...] = (
 
 def _looks_like_price_query(query: str) -> str:
     """Return CoinGecko coin ID if query asks for a crypto price, else ''."""
-    lowered = str(query or "").lower()
-    if not any(kw in lowered for kw in _PRICE_KEYWORDS):
+    lowered = " ".join(str(query or "").lower().split())
+    has_price_keyword = any(kw in lowered for kw in _PRICE_KEYWORDS)
+    if not has_price_keyword:
+        pair_match = re.search(r"\b(?P<asset>[a-z0-9][a-z0-9\-]{1,15})\s*(?:/|in|vs)\s*(?P<quote>usd|eur|gbp|jpy|btc|eth)\b", lowered)
+        if pair_match:
+            return _CRYPTO_ALIASES.get(str(pair_match.group("asset") or "").strip(), "")
         return ""
     for alias, cg_id in _CRYPTO_ALIASES.items():
         if re.search(rf"\b{re.escape(alias)}\b", lowered):
@@ -342,7 +394,7 @@ def _crypto_price_fallback(
     return ("coingecko_api", [hit], [page], [f"live_price_fallback:coingecko_api:{coin_id}"])
 
 
-def lookup_live_quote(query: str, *, timeout_s: float = 8.0) -> LiveQuoteResult | None:
+def _lookup_live_quote_uncached(query: str, *, timeout_s: float = 8.0) -> LiveQuoteResult | None:
     coin_id = _looks_like_price_query(query)
     if coin_id:
         try:
@@ -383,6 +435,49 @@ def lookup_live_quote(query: str, *, timeout_s: float = 8.0) -> LiveQuoteResult 
         kind="market",
         unit_label=target.unit_label,
     )
+
+
+def lookup_live_quote(query: str, *, timeout_s: float = 8.0) -> LiveQuoteResult | None:
+    cache_key = _live_quote_cache_key(query)
+    cached = _cached_live_quote(cache_key)
+    if cached is not None:
+        return cached
+
+    owner = False
+    wait_event: threading.Event | None = None
+    if cache_key:
+        now = time.monotonic()
+        with _live_quote_cache_lock:
+            _purge_expired_live_quote_cache(now)
+            cached = _live_quote_cache.get(cache_key)
+            if cached is not None:
+                return cached[1]
+            wait_event = _live_quote_inflight.get(cache_key)
+            if wait_event is None:
+                wait_event = threading.Event()
+                _live_quote_inflight[cache_key] = wait_event
+                owner = True
+
+    if cache_key and not owner and wait_event is not None:
+        wait_event.wait(timeout=min(max(timeout_s, 3.0) + 1.0, 15.0))
+        cached = _cached_live_quote(cache_key)
+        if cached is not None:
+            return cached
+
+    if not cache_key or owner:
+        try:
+            result = _lookup_live_quote_uncached(query, timeout_s=timeout_s)
+            if cache_key and result is not None:
+                _store_live_quote_cache(cache_key, result)
+            return result
+        finally:
+            if cache_key:
+                with _live_quote_cache_lock:
+                    pending = _live_quote_inflight.pop(cache_key, None)
+                if pending is not None:
+                    pending.set()
+
+    return _lookup_live_quote_uncached(query, timeout_s=timeout_s)
 
 
 def _live_quote_from_summary(

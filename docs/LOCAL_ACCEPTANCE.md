@@ -2,6 +2,11 @@
 
 This is the locked local acceptance bar for NULLA on `qwen2.5:7b`.
 
+It is one mandatory gate inside the wider 2026-03-27 greenloop proof bundle. That wider bundle also covers fresh install parity, build, shard test execution, live `llm_eval`, and mixed-workload concurrency:
+
+- [`reports/greenloop/summary.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/summary.md)
+- [`reports/greenloop/final_signoff.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/final_signoff.md)
+
 Canonical profile:
 - [`config/acceptance/local_qwen25_7b_profile.json`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/config/acceptance/local_qwen25_7b_profile.json)
 

@@ -174,7 +174,7 @@ def test_run_full_acceptance_restores_online_runtime(monkeypatch, tmp_path: Path
     assert not (runtime_home / "config" / "default_policy.yaml").exists()
     assert calls.count("report") == 1
     assert calls.count("start:9141b55:qwen2.5:7b") == 2
-    assert calls.count("start:3b0dba4e9786:qwen2.5:14b") == 1
+    assert calls.count("start:9141b55:qwen2.5:14b") == 1
     assert start_calls[-1]["runtime_home"] == previous_runtime.runtime_home
     assert start_calls[-1]["workspace_root"] == previous_runtime.workspace_root
 
@@ -226,3 +226,32 @@ def test_run_full_acceptance_without_existing_runtime_leaves_runtime_stopped(mon
     assert not (runtime_home / "config" / "default_policy.yaml").exists()
     assert calls.count("report") == 1
     assert calls.count("start:9141b55:qwen2.5:7b") == 2
+
+
+def test_restore_runtime_keeps_matching_commit_hint(monkeypatch, tmp_path: Path) -> None:
+    calls: list[str] = []
+    start_script = tmp_path / "Start_NULLA.sh"
+    start_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    previous_runtime = acceptance.RuntimeSnapshot(
+        runtime_home=tmp_path / "live_runtime_home",
+        workspace_root=tmp_path / "live_workspace",
+        model="qwen2.5:14b",
+        expected_commit="9141b55abcde",
+    )
+
+    monkeypatch.setattr(
+        acceptance,
+        "_start_runtime",
+        lambda **kwargs: calls.append(f"start:{kwargs['expected_commit']}:{kwargs['model']}") or object(),
+    )
+
+    acceptance._restore_runtime(
+        repo_root=tmp_path,
+        base_url="http://127.0.0.1:11435",
+        run_root=tmp_path,
+        start_script=start_script,
+        snapshot=previous_runtime,
+        current_repo_commit="9141b55",
+    )
+
+    assert calls == ["start:9141b55abcde:qwen2.5:14b"]

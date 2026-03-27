@@ -1,0 +1,16 @@
+group,case_id,latency_seconds
+live_acceptance,P0.1a_boot_hello,8.033
+live_acceptance,P0.1b_capabilities,0.027
+live_acceptance,P0.2_local_file_create,1.203
+live_acceptance,P0.3_append,0.408
+live_acceptance,P0.3b_readback,0.403
+live_acceptance,P0.5_tool_chain,0.563
+live_acceptance,P0.6_logic,0.022
+live_acceptance,P0.4_live_lookup,0.296
+live_acceptance,P1.3_instruction_fidelity,0.577
+live_acceptance,P1.4_recovery,0.456
+live_acceptance,P1.1_consistency_1,0.397
+live_acceptance,P1.1_consistency_2,0.271
+live_acceptance,P1.1_consistency_3,0.269
+live_acceptance,P0.7_honesty_online,0.024
+live_acceptance,offline_honesty,0.028

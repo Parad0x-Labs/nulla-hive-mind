@@ -41,7 +41,20 @@ models = [
     "datasets>=3.2",
     "huggingface_hub>=0.28",
 ]
+runtime = [
+    "sentence-transformers>=2.2",
+    "openai>=1.0",
+    "anthropic>=0.18",
+    "torch>=2.5",
+    "transformers>=4.48",
+    "peft>=0.14",
+    "accelerate>=1.2",
+    "datasets>=3.2",
+    "huggingface_hub>=0.28",
+    "playwright>=1.52",
+]
 dev = [
+    "build>=1.2",
     "pytest>=7.0",
     "ruff>=0.3",
     "mypy>=1.8",
@@ -57,11 +70,12 @@ Repository = "https://github.com/Parad0x-Labs/nulla-hive-mind"
 nulla-agent = "apps.nulla_agent:main"
 nulla-api = "apps.nulla_api_server:main"
 nulla-daemon = "apps.nulla_daemon:main"
+nulla-watch = "ops.run_brain_hive_watch_from_config:main"
 nulla-meet = "apps.meet_and_greet_server:main"
 nulla-benchmark = "ops.benchmark_nulla:main"
 
 [tool.setuptools.packages.find]
-include = ["core*", "network*", "storage*", "sandbox*", "apps*", "ops*", "retrieval*", "channels*"]
+include = ["adapters*", "apps*", "channels*", "core*", "network*", "ops*", "relay*", "retrieval*", "sandbox*", "storage*", "tools*"]
 
 [tool.ruff]
 target-version = "py310"

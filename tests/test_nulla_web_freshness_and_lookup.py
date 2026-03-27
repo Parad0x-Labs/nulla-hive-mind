@@ -4,6 +4,7 @@ from unittest import mock
 
 from core.curiosity_roamer import CuriosityResult
 from core.memory_first_router import ModelExecutionDecision
+from tools.web.web_research import _looks_like_price_query
 
 FORBIDDEN_CHAT_WRAPPERS = (
     "workflow:",
@@ -25,6 +26,10 @@ def test_wants_fresh_info_detects_live_queries_and_ignores_builder_language(make
     assert agent._live_info_mode("What's the latest on Iran war?", interpretation=mock.Mock(topic_hints=[])) == "news"
     assert agent._live_info_mode("What happened five minutes ago in global markets?", interpretation=mock.Mock(topic_hints=[])) == "fresh_lookup"
     assert agent._live_info_mode("build a telegram bot from docs and github", interpretation=mock.Mock(topic_hints=["telegram", "github"])) == ""
+
+
+def test_crypto_price_detector_accepts_pair_phrasing_without_explicit_price_word() -> None:
+    assert _looks_like_price_query("Look up BTC in USD and answer plus where you got it.") == "bitcoin"
 
 
 def test_latest_telegram_updates_trigger_planned_web_lookup(make_agent, context_result_factory):

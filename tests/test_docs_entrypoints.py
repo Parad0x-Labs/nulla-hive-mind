@@ -28,6 +28,7 @@ def test_docs_home_only_points_to_curated_entry_docs() -> None:
     assert "SYSTEM_SPINE.md" in docs_home
     assert "CONTROL_PLANE.md" in docs_home
     assert "LOCAL_ACCEPTANCE.md" in docs_home
+    assert "INSTALL_PROVIDER_EXECUTION_PLAN.md" in docs_home
     assert "PLATFORM_REFACTOR_PLAN.md" in docs_home
     assert "PROOF_PATH.md" in docs_home
     assert "TRUST.md" in docs_home
@@ -45,6 +46,7 @@ def test_docs_root_is_curated_after_archive_sweep() -> None:
         "CUMULATIVE_STABILIZATION.md",
         "CONTROL_PLANE.md",
         "INSTALL.md",
+        "INSTALL_PROVIDER_EXECUTION_PLAN.md",
         "LICENSING_MATRIX.md",
         "LOCAL_ACCEPTANCE.md",
         "MEET_AND_GREET_API_CONTRACT.md",

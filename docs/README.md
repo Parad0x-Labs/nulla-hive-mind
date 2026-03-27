@@ -40,12 +40,18 @@ NULLA is a local-first AI agent runtime. It starts on your machine, uses memory 
 ## Operations And Proof
 
 - [LOCAL_ACCEPTANCE.md](LOCAL_ACCEPTANCE.md)
+- [INSTALL_PROVIDER_EXECUTION_PLAN.md](INSTALL_PROVIDER_EXECUTION_PLAN.md)
 - [PUBLIC_LAUNCH_READINESS.md](PUBLIC_LAUNCH_READINESS.md)
 - [OVERNIGHT_SOAK_RUNBOOK.md](OVERNIGHT_SOAK_RUNBOOK.md)
 - [CUMULATIVE_STABILIZATION.md](CUMULATIVE_STABILIZATION.md)
 - [PROOF_PATH.md](PROOF_PATH.md)
 - [PROOF_PASS_REPORT.md](PROOF_PASS_REPORT.md)
 - [TDL.md](TDL.md)
+- latest greenloop artifact bundle:
+  - `reports/greenloop/summary.md`
+  - `reports/greenloop/final_signoff.md`
+  - `reports/greenloop/failure_ledger.md`
+  - `reports/greenloop/fix_ledger.md`
 
 ## Licensing
 

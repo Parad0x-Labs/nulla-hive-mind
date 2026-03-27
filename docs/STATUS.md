@@ -1,8 +1,62 @@
 # What Works Today
 
-Brutally honest status matrix. Updated 2026-03-26.
+Brutally honest status matrix. Updated 2026-03-27.
 
 ## Latest Stabilization Checkpoint
+
+### Canonical Greenloop Checkpoint (2026-03-27)
+
+The current branch-level greenloop closed four real failures and replayed the whole proof pack cumulatively instead of pretending isolated unit greens mattered:
+
+1. **Fresh install packaging parity**
+   Fresh editable installs now expose the real `relay` runtime roots instead of only source-tree mode working.
+2. **Direct `llm_eval` execution**
+   `python ops/llm_eval.py ...` now works as a direct script path instead of failing before the eval lanes even start.
+3. **Concurrent BTC lookup stability**
+   Mixed workload concurrency no longer collapses identical live BTC lookups into unresolved-quote filler under parallel load.
+4. **Machine-read routing discipline**
+   Ordinary fresh-info and adaptive-research prompts no longer get hijacked into the machine-read planner.
+
+Current measured proof on this checkpoint:
+
+| Metric | Value |
+|--------|-------|
+| Clean install `.[dev]` | `PASS` |
+| Clean install `.[runtime,dev]` | `PASS` |
+| `ruff check .` | `PASS` |
+| `python ops/pytest_shards.py --workers 6 --pytest-arg=--tb=short` | `PASS` |
+| `python -m build` | `PASS` |
+| `python ops/llm_eval.py --skip-live-runtime ...` | `PASS` |
+| `python ops/llm_eval.py --output-root ... --live-run-root ...` | `PASS` |
+| Mixed-workload concurrency lane | `PASS` |
+| Greenloop signoff | `go_with_risk` |
+| Signoff risk level | `medium` |
+
+Key metrics from the current greenloop bundle:
+
+| Metric | Value |
+|--------|-------|
+| Live acceptance simple prompt median | `0.028s` |
+| Live acceptance file task median | `0.405s` |
+| Live acceptance live lookup median | `0.16s` |
+| Live acceptance chained task median | `0.563s` |
+| Concurrency success at workers `1/2/4` | `1.0 / 1.0 / 1.0` |
+| Concurrency p95 at workers `4` | `8659.9 ms` |
+| Unsupported-claim rate in this proof pack | `0.0` |
+
+Primary proof artifacts:
+
+- [`reports/greenloop/summary.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/summary.md)
+- [`reports/greenloop/final_signoff.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/final_signoff.md)
+- [`reports/greenloop/failure_ledger.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/failure_ledger.md)
+- [`reports/greenloop/fix_ledger.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/fix_ledger.md)
+- [`reports/greenloop/provider_snapshot.json`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/provider_snapshot.json)
+
+Why this is still not a plain `go`:
+
+- some first-red artifacts from this cycle had to be reconstructed after reruns instead of being preserved on the first failure
+- Kimi is still not a first-class installer/runtime profile
+- Tether and QVAC are still not first-class supported stacks
 
 ### Installer / Runtime Truth Checkpoint (2026-03-26)
 

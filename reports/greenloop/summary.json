@@ -1,0 +1,381 @@
+{
+  "metadata": {
+    "repo_url": "https://github.com/Parad0x-Labs/nulla-hive-mind",
+    "branch": "codex/modularity-backbone-checkpoint-1",
+    "commit_sha": "3a57ae68a5e0f00aba3b0ecaeaf373231577fc53",
+    "run_id": "greenloop-20260327T003718Z",
+    "started_at": "2026-03-27T00:18:53Z",
+    "finished_at": "2026-03-27T04:06:41Z",
+    "runner_type": "workstation",
+    "dirty_state": true,
+    "change_summary": "Beta2_Website/mock_data.py                   |   24 +\n Beta2_Website/server.py                      |  212 +++-\n apps/nulla_agent.py                          |  171 +++-\n apps/nulla_api_server.py                     |    6 +-\n apps/nulla_daemon.py                         |    3 +-\n core/nullabook_feed_page.py                  | 1353 +-------------------------\n core/public_hive_bridge.py                   |   47 +\n core/runtime_task_rail.py                    | 1327 +------------------------\n docs/README.md                               |    1 +\n installer/install_nulla.sh                   |   49 +-\n network/transport.py                         |   40 +-\n ops/run_local_acceptance.py                  |   38 +-\n pyproject.toml                               |   16 +-\n tests/test_docs_entrypoints.py               |    2 +\n tests/test_entrypoints.py                    |   15 +\n tests/test_install_script_contract.py        |    4 +-\n tests/test_nulla_web_freshness_and_lookup.py |    5 +\n tests/test_nullabook_feed_page.py            |   55 ++\n tests/test_openclaw_launcher_contract.py     |    9 +\n tests/test_openclaw_tooling_context.py       |   39 +\n tests/test_public_hive_bridge.py             |    9 +\n tests/test_run_local_acceptance.py           |   31 +-\n tests/test_transport_large_payload.py        |   28 +\n tests/test_web_research_runtime.py           |   53 +-\n tools/web/web_research.py                    |  101 +-\n 25 files changed, 899 insertions(+), 2739 deletions(-)"
+  },
+  "environment": {
+    "os": "macOS-26.3-arm64-arm-64bit",
+    "python_version": "3.11.15",
+    "cpu": "Apple M4",
+    "cpu_cores": 10,
+    "ram_gb": 24.0,
+    "gpu": "Apple M4",
+    "vram_gb": 24.0,
+    "storage_free_gb": 63.1,
+    "policy_flags": {
+      "skip_live_runtime": false
+    },
+    "env_vars_affecting_runtime": {}
+  },
+  "provider_inventory": [
+    {
+      "provider_id": "ollama-local:qwen2.5:14b",
+      "model_id": "qwen2.5:14b",
+      "role_fit": "local",
+      "locality": "local",
+      "availability_state": "ready",
+      "queue_depth": 0,
+      "max_safe_concurrency": 1,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "accelerator=mps"
+      ]
+    },
+    {
+      "provider_id": "ollama-local:qwen2.5:7b",
+      "model_id": "qwen2.5:7b",
+      "role_fit": "local",
+      "locality": "local",
+      "availability_state": "ready",
+      "queue_depth": 0,
+      "max_safe_concurrency": 1,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "accelerator=mps"
+      ]
+    },
+    {
+      "provider_id": "remote:kimi",
+      "model_id": "",
+      "role_fit": "remote_optional",
+      "locality": "remote",
+      "availability_state": "not_implemented",
+      "queue_depth": 0,
+      "max_safe_concurrency": 0,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "Kimi is not configured on this machine, and the installer/runtime profile is not wired yet."
+      ]
+    },
+    {
+      "provider_id": "remote:tether",
+      "model_id": "",
+      "role_fit": "remote_optional",
+      "locality": "remote",
+      "availability_state": "not_implemented",
+      "queue_depth": 0,
+      "max_safe_concurrency": 0,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "Tether does not have a real first-class installer/runtime lane in this repo yet."
+      ]
+    },
+    {
+      "provider_id": "remote:qvac",
+      "model_id": "",
+      "role_fit": "remote_optional",
+      "locality": "remote",
+      "availability_state": "not_implemented",
+      "queue_depth": 0,
+      "max_safe_concurrency": 0,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "QVAC does not have a real first-class installer/runtime lane in this repo yet."
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "gate_id": "clean_install_dev",
+      "command": "supported Python clean venv plus pip install -e '.[dev]' plus import and entrypoint smoke",
+      "status": "passed",
+      "started_at": "2026-03-27T00:44:00Z",
+      "finished_at": "2026-03-27T00:44:00Z",
+      "log_path": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/clean_install_dev.log",
+      "notes": "Used Python 3.11 because the machine default python3=3.9.6 is outside the declared project requirement."
+    },
+    {
+      "gate_id": "clean_install_runtime_dev",
+      "command": "supported Python clean venv plus pip install -e '.[runtime,dev]' plus import and entrypoint smoke",
+      "status": "passed",
+      "started_at": "2026-03-27T00:44:38Z",
+      "finished_at": "2026-03-27T00:44:38Z",
+      "log_path": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/clean_install_runtime_dev.log",
+      "notes": "Verified playwright import and entrypoints in the runtime extra profile."
+    },
+    {
+      "gate_id": "ruff_check",
+      "command": "./.venv-greenloop/bin/ruff check .",
+      "status": "passed",
+      "started_at": "2026-03-27T00:42:06Z",
+      "finished_at": "2026-03-27T00:42:06Z",
+      "log_path": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/ruff_check.log",
+      "notes": "Full repo lint gate on the current tree."
+    },
+    {
+      "gate_id": "pytest_shards",
+      "command": "./.venv-greenloop/bin/python ops/pytest_shards.py --workers 6 --pytest-arg=--tb=short",
+      "status": "passed",
+      "started_at": "2026-03-27T00:43:32Z",
+      "finished_at": "2026-03-27T00:43:32Z",
+      "log_path": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/pytest_shards.log",
+      "notes": "Full shard pack green on the current tree."
+    },
+    {
+      "gate_id": "build_smoke",
+      "command": "./.venv-greenloop/bin/python -m build",
+      "status": "passed",
+      "started_at": "2026-03-27T00:42:09Z",
+      "finished_at": "2026-03-27T00:42:09Z",
+      "log_path": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/build.log",
+      "notes": "sdist and wheel build succeeded; setuptools still emits the existing project.license deprecation warning."
+    },
+    {
+      "gate_id": "web_regression_pack",
+      "command": "./.venv-greenloop/bin/python -m pytest tests/test_web_research_runtime.py tests/test_nulla_web_freshness_and_lookup.py tests/test_alpha_hardening_pass1_gauntlet.py --tb=short",
+      "status": "passed",
+      "started_at": "2026-03-27T04:06:41Z",
+      "finished_at": "2026-03-27T04:06:41Z",
+      "log_path": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/web_regression.log",
+      "notes": "Focused rerun after the quote-coalescing and machine-read pre-gate fixes."
+    },
+    {
+      "gate_id": "llm_eval_fast_lane",
+      "command": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/.venv-greenloop/bin/python -m pytest -q tests/test_alpha_hardening_pass1_gauntlet.py",
+      "status": "passed",
+      "started_at": "2026-03-27T00:34:11Z",
+      "finished_at": "2026-03-27T00:36:53Z",
+      "log_path": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/llm_eval/latest/fast_lane.log",
+      "notes": "Thin wrapper over the existing gauntlet test. No new scoring logic added."
+    },
+    {
+      "gate_id": "llm_eval_live_lane",
+      "command": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/.venv-greenloop/bin/python /Users/sauliuskruopis/Desktop/Decentralized_NULLA/ops/run_local_acceptance.py full --base-url http://127.0.0.1:11435 --run-root /Users/sauliuskruopis/Desktop/Decentralized_NULLA/artifacts/acceptance_runs/llm_eval_live --profile /Users/sauliuskruopis/Desktop/Decentralized_NULLA/config/acceptance/local_qwen25_7b_profile.json",
+      "status": "passed",
+      "started_at": "2026-03-27T00:34:11Z",
+      "finished_at": "2026-03-27T00:37:18Z",
+      "log_path": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/llm_eval/latest/live_lane.log",
+      "notes": "Thin wrapper over ops/run_local_acceptance.py full."
+    },
+    {
+      "gate_id": "concurrency_lane",
+      "command": "python -m apps.nulla_api_server --bind 127.0.0.1 --port 18080 plus mixed workload concurrency probe at workers 1/2/4",
+      "status": "passed",
+      "started_at": "2026-03-27T00:18:53Z",
+      "finished_at": "2026-03-27T00:18:53Z",
+      "log_path": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/concurrency_probe.json",
+      "notes": "workers=1 success=1.0 p50=4915.32ms; workers=2 success=1.0 p50=5219.84ms; workers=4 success=1.0 p50=5746.12ms."
+    }
+  ],
+  "failure_ledger": [
+    {
+      "failure_id": "packaging-relay-surface",
+      "category": "packaging",
+      "test_or_benchmark_id": "clean_editable_install_import_smoke",
+      "reproduction_command": "python -m venv <tmp> && <tmp>/bin/pip install -e '.[dev]' && <tmp>/bin/python -c \"import relay, relay.bridge_workers\"",
+      "symptom": "Fresh editable installs did not expose the relay runtime roots cleanly.",
+      "root_cause": "relay package markers were missing and setuptools discovery did not include relay*.",
+      "status": "fixed",
+      "first_seen_at": "2026-03-27T00:18:53Z",
+      "resolved_at": "2026-03-27T04:06:41Z",
+      "evidence_before": [
+        "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/red_state_reconstruction.md"
+      ],
+      "evidence_after": [
+        "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/clean_install_dev.log",
+        "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/clean_install_runtime_dev.log",
+        "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/build.log"
+      ],
+      "remaining_risk": "Low. New top-level packages still need packaging contract coverage to stay honest."
+    },
+    {
+      "failure_id": "llm-eval-direct-exec-import",
+      "category": "tooling",
+      "test_or_benchmark_id": "ops/llm_eval.py direct execution",
+      "reproduction_command": "./.venv-greenloop/bin/python ops/llm_eval.py --skip-live-runtime --output-root reports/llm_eval/latest --baseline-root reports/llm_eval/baselines",
+      "symptom": "Direct script execution failed before the wrapped proof lanes started.",
+      "root_cause": "ops/llm_eval.py imported local modules before putting the repo root on sys.path.",
+      "status": "fixed",
+      "first_seen_at": "2026-03-27T00:18:53Z",
+      "resolved_at": "2026-03-27T04:06:41Z",
+      "evidence_before": [
+        "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/red_state_reconstruction.md"
+      ],
+      "evidence_after": [
+        "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/llm_eval/latest/summary.json",
+        "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/llm_eval/latest/summary.md"
+      ],
+      "remaining_risk": "Low. The wrapper is still thin and depends on run_local_acceptance semantics staying stable."
+    },
+    {
+      "failure_id": "fresh-btc-concurrency-flake",
+      "category": "live_lookup_concurrency",
+      "test_or_benchmark_id": "greenloop_concurrency_lookup",
+      "reproduction_command": "python -m apps.nulla_api_server --bind 127.0.0.1 --port 18080 plus mixed workload concurrency probe at workers 1/2/4",
+      "symptom": "Concurrent BTC fresh lookups degraded to unresolved-quote filler at workers 2 and 4.",
+      "root_cause": "Identical live quote requests were not coalesced, so the upstream crypto quote path flaked under concurrency.",
+      "status": "fixed",
+      "first_seen_at": "2026-03-27T00:18:53Z",
+      "resolved_at": "2026-03-27T04:06:41Z",
+      "evidence_before": [
+        "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/red_state_reconstruction.md"
+      ],
+      "evidence_after": [
+        "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/concurrency.csv",
+        "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/concurrency_probe.json"
+      ],
+      "remaining_risk": "Low to medium. This removed the observed stampede failure, but the lane still depends on external quote-source availability."
+    },
+    {
+      "failure_id": "machine-read-planner-hijack",
+      "category": "routing",
+      "test_or_benchmark_id": "freshness_and_adaptive_research_regression_pack",
+      "reproduction_command": "./.venv-greenloop/bin/python -m pytest tests/test_web_research_runtime.py tests/test_nulla_web_freshness_and_lookup.py tests/test_alpha_hardening_pass1_gauntlet.py --tb=short",
+      "symptom": "Ordinary live-info and adaptive-research prompts were entering the machine-read planner instead of the fresh-info and web path.",
+      "root_cause": "apps.nulla_agent invoked the machine-read planner before a prompt-level pre-gate filtered unrelated requests.",
+      "status": "fixed",
+      "first_seen_at": "2026-03-27T00:18:53Z",
+      "resolved_at": "2026-03-27T04:06:41Z",
+      "evidence_before": [
+        "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/red_state_reconstruction.md"
+      ],
+      "evidence_after": [
+        "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/web_regression.log"
+      ],
+      "remaining_risk": "Low. The pre-gate is intentionally cheap, so future machine-read expansion still needs regression tests for boundary prompts."
+    }
+  ],
+  "fix_ledger": [
+    {
+      "fix_id": "fix-packaging-relay-surface",
+      "summary": "Added relay package markers and expanded packaging contract coverage so fresh editable installs and built artifacts expose the same relay roots.",
+      "files_changed": [
+        "pyproject.toml",
+        "relay/__init__.py",
+        "relay/bridge_workers/__init__.py",
+        "tests/test_packaging_contract.py"
+      ],
+      "tests_added_or_updated": [
+        "tests/test_packaging_contract.py"
+      ],
+      "safety_notes": "This only widened package discovery to the real runtime roots already used by source mode.",
+      "linked_failure_ids": [
+        "packaging-relay-surface"
+      ]
+    },
+    {
+      "fix_id": "fix-llm-eval-direct-exec-import",
+      "summary": "Made ops/llm_eval.py robust to direct script execution by inserting the repo root into sys.path before local imports.",
+      "files_changed": [
+        "ops/llm_eval.py"
+      ],
+      "tests_added_or_updated": [],
+      "safety_notes": "The import path change is local to the CLI wrapper and does not affect runtime routing logic.",
+      "linked_failure_ids": [
+        "llm-eval-direct-exec-import"
+      ]
+    },
+    {
+      "fix_id": "fix-crypto-quote-concurrency",
+      "summary": "Added short-TTL cached and in-flight coalescing for identical live quote requests so concurrent BTC lookups share one upstream fetch.",
+      "files_changed": [
+        "tools/web/web_research.py",
+        "tests/test_web_research_runtime.py",
+        "tests/test_nulla_web_freshness_and_lookup.py"
+      ],
+      "tests_added_or_updated": [
+        "tests/test_web_research_runtime.py",
+        "tests/test_nulla_web_freshness_and_lookup.py"
+      ],
+      "safety_notes": "The cache key is scoped to the resolved live-quote target and only caches successful quote objects for a short TTL.",
+      "linked_failure_ids": [
+        "fresh-btc-concurrency-flake"
+      ]
+    },
+    {
+      "fix_id": "fix-machine-read-pre-gate",
+      "summary": "Added a cheap prompt pre-gate so the machine-read planner only runs for real machine-spec and safe-directory prompts.",
+      "files_changed": [
+        "apps/nulla_agent.py",
+        "tests/test_nulla_web_freshness_and_lookup.py"
+      ],
+      "tests_added_or_updated": [
+        "tests/test_nulla_web_freshness_and_lookup.py"
+      ],
+      "safety_notes": "The pre-gate narrows planner activation and reduces routing blast radius without loosening any write policy.",
+      "linked_failure_ids": [
+        "machine-read-planner-hijack"
+      ]
+    }
+  ],
+  "metrics": {
+    "latency": {
+      "p50_ms": 5179.04,
+      "p95_ms": 8144.04,
+      "p99_ms": 10084.27,
+      "throughput_per_minute": 944.99
+    },
+    "concurrency": {
+      "workers_1_success_rate": 1.0,
+      "workers_2_success_rate": 1.0,
+      "workers_4_success_rate": 1.0,
+      "scaling_efficiency_1_to_2": 1.5488,
+      "scaling_efficiency_1_to_4": 0.5375
+    },
+    "hallucination_and_honesty": {
+      "unsupported_claim_rate": 0.0,
+      "stale_current_answer_rate": 0.0,
+      "insufficient_evidence_correct_rate": 1.0,
+      "provenance_completeness_rate": 1.0
+    }
+  },
+  "artifacts": {
+    "summary_md": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/summary.md",
+    "summary_json": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/summary.json",
+    "latency_csv": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/latency.csv",
+    "concurrency_csv": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/concurrency.csv",
+    "provider_snapshot_json": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/provider_snapshot.json",
+    "failure_ledger_md": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/failure_ledger.md",
+    "fix_ledger_md": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/fix_ledger.md",
+    "logs": [
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/ollama_list.log",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/ollama_model_check.log",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/healthz_18080.json",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/healthz_11435.json",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/runtime_18080.log",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/ruff_check.log",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/build.log",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/pytest_shards.log",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/clean_install_dev.log",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/clean_install_runtime_dev.log",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/web_regression.log",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/greenloop/logs/red_state_reconstruction.md",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/llm_eval/latest/fast_lane.log",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/llm_eval/latest/live_lane.log",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/llm_eval/latest/failures.md",
+      "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/llm_eval/latest/regression_48h.md"
+    ]
+  },
+  "signoff": {
+    "verdict": "go_with_risk",
+    "risk_level": "medium",
+    "required_followups": [
+      "Make Kimi a first-class installer runtime profile instead of a probe-only suggestion.",
+      "Add real first-class Tether and QVAC lanes or remove them from recommendation surfaces.",
+      "Stop overwriting first-red artifacts during reruns so the next green-loop keeps perfect before and after proof."
+    ],
+    "notes": "All canonical top-level gates are green on the current tree. Core risk is no longer the local runtime or fresh lookup lane; it is report-discipline debt from overwritten first-red artifacts and the still-unfinished remote-provider product lanes."
+  }
+}

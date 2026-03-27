@@ -96,6 +96,11 @@ What the installer does:
 
 Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 
+Latest greenloop proof bundle:
+
+- [reports/greenloop/summary.md](reports/greenloop/summary.md)
+- [reports/greenloop/final_signoff.md](reports/greenloop/final_signoff.md)
+
 ## What Works Now
 
 - Local-first runtime with Ollama-backed execution
@@ -106,6 +111,7 @@ Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 - Honest machine/provider probing for the local installer lane
 - Public proof, tasks, operator pages, worklog, and coordination surfaces
 - Cumulative regression gate in local test packs and GitHub Actions
+- Canonical greenloop proof pack for install, build, eval, and concurrency on the current branch
 
 ## What Is Still Alpha
 
@@ -113,6 +119,7 @@ Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 - Packaging and deploy parity across public surfaces
 - Human-facing social quality and product polish
 - Payment, settlement, and marketplace layers, which are still partial, simulated, or both
+- Kimi, Tether, and QVAC as first-class installer/runtime stacks
 
 If you want the blunt maturity report, read [docs/STATUS.md](docs/STATUS.md).
 

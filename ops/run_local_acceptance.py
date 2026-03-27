@@ -67,7 +67,10 @@ def _read_json(url: str, *, data: dict[str, Any] | None = None, timeout: float =
     payload = None if data is None else json.dumps(data).encode("utf-8")
     req = request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     with request.urlopen(req, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+        parsed = json.loads(response.read().decode("utf-8"))
+    if not isinstance(parsed, dict):
+        raise ValueError(f"Expected JSON object from {url}, got {type(parsed).__name__}")
+    return parsed
 
 
 def _machine_info() -> dict[str, Any]:
@@ -467,7 +470,7 @@ def build_acceptance_summary(
     ]
     chain_latencies = [results["P0.5_tool_chain"]["latency_seconds"]]
 
-    threshold_checks = {
+    threshold_checks: dict[str, dict[str, object]] = {
         "cold_start_max_seconds": {
             "limit": profile.cold_start_max_seconds,
             "actual": float(results["P0.1a_boot_hello"]["latency_seconds"]),
@@ -504,7 +507,7 @@ def build_acceptance_summary(
     overall_green = overall_green and bool(results["P1.3_instruction_fidelity"]["pass"])
     overall_green = overall_green and bool(results["P1.4_recovery"]["pass"])
     overall_green = overall_green and bool(offline_payload["result"]["pass"])
-    overall_green = overall_green and all(bool(item["pass"]) for item in threshold_checks.values())
+    overall_green = overall_green and all(bool(item.get("pass")) for item in threshold_checks.values())
     if manual_btc_check is not None:
         overall_green = overall_green and bool(manual_btc_check.get("pass"))
 
@@ -608,7 +611,13 @@ def _stop_runtime(base_url: str) -> None:
             time.sleep(0.5)
 
 
-def _wait_for_runtime(base_url: str, *, expected_commit: str, expected_model: str, timeout: float = 120.0) -> dict[str, Any]:
+def _wait_for_runtime(
+    base_url: str,
+    *,
+    expected_commit: str | None,
+    expected_model: str,
+    timeout: float = 120.0,
+) -> dict[str, Any]:
     deadline = time.time() + timeout
     last_health: dict[str, Any] | None = None
     while time.time() < deadline:
@@ -617,7 +626,8 @@ def _wait_for_runtime(base_url: str, *, expected_commit: str, expected_model: st
             runtime = dict(health.get("runtime") or {})
             commit = str(runtime.get("commit") or "")
             model_tag = str(runtime.get("model_tag") or "")
-            if commit.startswith(expected_commit) and model_tag == expected_model:
+            commit_ok = True if not str(expected_commit or "").strip() else commit.startswith(str(expected_commit))
+            if commit_ok and model_tag == expected_model:
                 return health
             last_health = health
         time.sleep(1.0)
@@ -633,7 +643,7 @@ def _start_runtime(
     workspace_root: Path,
     model: str,
     start_script: Path,
-    expected_commit: str,
+    expected_commit: str | None,
 ) -> subprocess.Popen[Any]:
     runtime_home.mkdir(parents=True, exist_ok=True)
     workspace_root.mkdir(parents=True, exist_ok=True)
@@ -663,9 +673,22 @@ def _restore_runtime(
     run_root: Path,
     start_script: Path,
     snapshot: RuntimeSnapshot | None,
+    current_repo_commit: str,
 ) -> subprocess.Popen[Any] | None:
     if snapshot is None:
         return None
+    restore_commit = snapshot.expected_commit
+    if restore_commit and current_repo_commit:
+        same_build = restore_commit.startswith(current_repo_commit) or current_repo_commit.startswith(restore_commit)
+        if not same_build:
+            restore_commit = current_repo_commit
+            log_path = run_root / "evidence" / "runtime_launcher.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    "Restore fallback: previous live runtime commit "
+                    f"{snapshot.expected_commit} is outside the repo under test; restoring current repo commit {current_repo_commit} instead.\n"
+                )
     return _start_runtime(
         repo_root=repo_root,
         base_url=base_url,
@@ -674,7 +697,7 @@ def _restore_runtime(
         workspace_root=snapshot.workspace_root,
         model=snapshot.model,
         start_script=start_script,
-        expected_commit=snapshot.expected_commit,
+        expected_commit=restore_commit,
     )
 
 
@@ -736,6 +759,7 @@ def run_full_acceptance(
             run_root=run_root,
             start_script=start_script,
             snapshot=previous_runtime,
+            current_repo_commit=expected_commit,
         )
     render_report(
         repo_root=repo_root,

@@ -1,0 +1,153 @@
+{
+  "metadata": {
+    "repo_url": "https://github.com/Parad0x-Labs/nulla-hive-mind",
+    "branch": "codex/modularity-backbone-checkpoint-1",
+    "commit_sha": "3a57ae68a5e0f00aba3b0ecaeaf373231577fc53",
+    "run_id": "llm-eval-20260327T003411Z",
+    "started_at": "2026-03-27T00:34:11Z",
+    "finished_at": "2026-03-27T00:37:18Z",
+    "runner_type": "workstation",
+    "dirty_state": true,
+    "change_summary": "Beta2_Website/mock_data.py                   |   24 +\n Beta2_Website/server.py                      |  212 +++-\n apps/nulla_agent.py                          |  171 +++-\n apps/nulla_api_server.py                     |    6 +-\n apps/nulla_daemon.py                         |    3 +-\n core/nullabook_feed_page.py                  | 1353 +-------------------------\n core/public_hive_bridge.py                   |   47 +\n core/runtime_task_rail.py                    | 1327 +------------------------\n docs/README.md                               |    1 +\n installer/install_nulla.sh                   |   49 +-\n network/transport.py                         |   40 +-\n ops/run_local_acceptance.py                  |   38 +-\n pyproject.toml                               |   16 +-\n tests/test_docs_entrypoints.py               |    2 +\n tests/test_entrypoints.py                    |   15 +\n tests/test_install_script_contract.py        |    4 +-\n tests/test_nulla_web_freshness_and_lookup.py |    5 +\n tests/test_nullabook_feed_page.py            |   55 ++\n tests/test_openclaw_launcher_contract.py     |    9 +\n tests/test_openclaw_tooling_context.py       |   39 +\n tests/test_public_hive_bridge.py             |    9 +\n tests/test_run_local_acceptance.py           |   31 +-\n tests/test_transport_large_payload.py        |   28 +\n tests/test_web_research_runtime.py           |   53 +-\n tools/web/web_research.py                    |  101 +-\n 25 files changed, 899 insertions(+), 2739 deletions(-)"
+  },
+  "environment": {
+    "os": "macOS-26.3-arm64-arm-64bit",
+    "python_version": "3.11.15",
+    "cpu": "Apple M4",
+    "cpu_cores": 10,
+    "ram_gb": 24.0,
+    "gpu": "Apple M4",
+    "vram_gb": 24.0,
+    "storage_free_gb": 63.1,
+    "policy_flags": {
+      "skip_live_runtime": false
+    },
+    "env_vars_affecting_runtime": {}
+  },
+  "provider_inventory": [
+    {
+      "provider_id": "ollama-local:qwen2.5:14b",
+      "model_id": "qwen2.5:14b",
+      "role_fit": "local",
+      "locality": "local",
+      "availability_state": "ready",
+      "queue_depth": 0,
+      "max_safe_concurrency": 1,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "accelerator=mps"
+      ]
+    },
+    {
+      "provider_id": "ollama-local:qwen2.5:7b",
+      "model_id": "qwen2.5:7b",
+      "role_fit": "local",
+      "locality": "local",
+      "availability_state": "ready",
+      "queue_depth": 0,
+      "max_safe_concurrency": 1,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "accelerator=mps"
+      ]
+    },
+    {
+      "provider_id": "remote:kimi",
+      "model_id": "",
+      "role_fit": "remote_optional",
+      "locality": "remote",
+      "availability_state": "not_implemented",
+      "queue_depth": 0,
+      "max_safe_concurrency": 0,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "Kimi is not configured on this machine, and the installer/runtime profile is not wired yet."
+      ]
+    },
+    {
+      "provider_id": "remote:tether",
+      "model_id": "",
+      "role_fit": "remote_optional",
+      "locality": "remote",
+      "availability_state": "not_implemented",
+      "queue_depth": 0,
+      "max_safe_concurrency": 0,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "Tether does not have a real first-class installer/runtime lane in this repo yet."
+      ]
+    },
+    {
+      "provider_id": "remote:qvac",
+      "model_id": "",
+      "role_fit": "remote_optional",
+      "locality": "remote",
+      "availability_state": "not_implemented",
+      "queue_depth": 0,
+      "max_safe_concurrency": 0,
+      "structured_output_support": false,
+      "context_window": 0,
+      "notes": [
+        "QVAC does not have a real first-class installer/runtime lane in this repo yet."
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "gate_id": "llm_eval_fast_lane",
+      "command": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/.venv-greenloop/bin/python -m pytest -q tests/test_alpha_hardening_pass1_gauntlet.py",
+      "status": "passed",
+      "started_at": "2026-03-27T00:34:11Z",
+      "finished_at": "2026-03-27T00:36:53Z",
+      "log_path": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/llm_eval/latest/fast_lane.log",
+      "notes": "Thin wrapper over the existing gauntlet test. No new scoring logic added."
+    },
+    {
+      "gate_id": "llm_eval_live_lane",
+      "command": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/.venv-greenloop/bin/python /Users/sauliuskruopis/Desktop/Decentralized_NULLA/ops/run_local_acceptance.py full --base-url http://127.0.0.1:11435 --run-root /Users/sauliuskruopis/Desktop/Decentralized_NULLA/artifacts/acceptance_runs/llm_eval_live --profile /Users/sauliuskruopis/Desktop/Decentralized_NULLA/config/acceptance/local_qwen25_7b_profile.json",
+      "status": "passed",
+      "started_at": "2026-03-27T00:34:11Z",
+      "finished_at": "2026-03-27T00:37:18Z",
+      "log_path": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/llm_eval/latest/live_lane.log",
+      "notes": "Thin wrapper over ops/run_local_acceptance.py full."
+    }
+  ],
+  "failure_ledger": [],
+  "fix_ledger": [],
+  "metrics": {
+    "scenario_groups": {
+      "fast_lane": {
+        "passed": true
+      },
+      "live_acceptance": {
+        "passed": true
+      }
+    },
+    "latency_summary": {
+      "simple_prompt_median_s": 0.028,
+      "file_task_median_s": 0.405,
+      "live_lookup_median_s": 0.16,
+      "chained_task_median_s": 0.563
+    }
+  },
+  "artifacts": {
+    "fast_lane_log": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/llm_eval/latest/fast_lane.log",
+    "live_lane_log": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/llm_eval/latest/live_lane.log",
+    "live_acceptance_report": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/artifacts/acceptance_runs/llm_eval_live/evidence/NULLA_LOCAL_ACCEPTANCE_REPORT.md",
+    "baseline_summary": "/Users/sauliuskruopis/Desktop/Decentralized_NULLA/reports/llm_eval/baselines/llm-eval-20260327T001948Z/summary.json"
+  },
+  "signoff": {
+    "verdict": "green",
+    "risk_level": "low",
+    "next_actions": [],
+    "notes": [
+      "Fast lane is a thin wrapper over the existing gauntlet test target.",
+      "Live lane is a thin wrapper over ops/run_local_acceptance.py full.",
+      "No new prompt corpora or scoring logic were added here."
+    ]
+  }
+}
