@@ -1,0 +1,4 @@
+concurrency,total_requests,successes,success_rate,throughput_rps,wall_seconds,p50_seconds,p95_seconds,p99_seconds,max_seconds,mean_seconds
+1,4,4,1.0,0.26,15.408,3.933,4.091,4.105,4.109,3.844
+2,8,8,1.0,0.242,33.1,6.046,8.432,8.468,8.477,6.172
+4,16,16,1.0,0.229,69.961,10.994,17.551,17.784,17.842,10.906

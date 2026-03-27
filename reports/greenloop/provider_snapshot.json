@@ -1,0 +1,86 @@
+{
+  "schema": "nulla.provider_probe.v1",
+  "machine": {
+    "cpu_cores": 10,
+    "ram_gb": 24.0,
+    "gpu": "Apple Silicon (MPS)",
+    "vram_gb": 24.0,
+    "accelerator": "mps",
+    "selected_tier": "mid",
+    "ollama_model": "qwen2.5:14b",
+    "param_billions": 14.0
+  },
+  "ollama": {
+    "binary_present": true,
+    "binary_path": "/usr/local/bin/ollama",
+    "installed_models": [
+      {
+        "name": "qwen2.5:14b",
+        "id": "7cdf5a0187d5",
+        "size": "9.0 GB",
+        "modified": "12 hours ago"
+      },
+      {
+        "name": "qwen2.5:7b",
+        "id": "845dbda0ea48",
+        "size": "4.7 GB",
+        "modified": "3 weeks ago"
+      }
+    ]
+  },
+  "remote_env": {
+    "kimi": {
+      "api_key_present": false,
+      "base_url_present": false,
+      "model_present": false,
+      "configured": false
+    },
+    "generic_remote": {
+      "api_key_present": false,
+      "base_url_present": false,
+      "model_present": false,
+      "configured": false
+    },
+    "tether": {
+      "api_key_present": false,
+      "base_url_present": false,
+      "model_present": false,
+      "configured": false
+    },
+    "qvac": {
+      "api_key_present": false,
+      "base_url_present": false,
+      "model_present": false,
+      "configured": false
+    }
+  },
+  "local_multi_llm_fit": "pressure_sensitive",
+  "recommended_stack_id": "local_dual_ollama",
+  "stacks": [
+    {
+      "stack_id": "local_only",
+      "status": "ready",
+      "recommended": false,
+      "reason": "Local Ollama lane is ready.",
+      "primary_model": "qwen2.5:14b",
+      "helper_model": ""
+    },
+    {
+      "stack_id": "local_dual_ollama",
+      "status": "ready",
+      "recommended": true,
+      "reason": "This machine can run a primary local model plus a lighter local helper lane, but 24 GiB unified memory is still pressure-sensitive under concurrency.",
+      "primary_model": "qwen2.5:14b",
+      "helper_model": "qwen2.5:7b"
+    },
+    {
+      "stack_id": "local_plus_kimi",
+      "status": "needs_config",
+      "recommended": false,
+      "reason": "Kimi becomes a real remote queen lane when KIMI_API_KEY is configured.",
+      "primary_model": "qwen2.5:14b",
+      "helper_model": "qwen2.5:7b",
+      "provider_id": ""
+    }
+  ]
+}

@@ -1,6 +1,37 @@
 # What Works Today
 
-Current status matrix. Updated 2026-03-26.
+Current status matrix. Updated 2026-03-27.
+
+## 2026-03-27 Greenloop Closure
+
+Current head: `15948c7`.
+
+This checkpoint reran the proof path on the landed install/provider slice and closed the missing concurrency lane:
+
+- fresh `.[dev]` and `.[runtime,dev]` installs passed
+- `ruff`, `compileall`, full `pytest_shards`, and `python -m build` passed
+- fast and live `llm_eval` both passed on the current head
+- the repo now has a canonical `ops/greenloop_concurrency.py` probe, and the measured `1/2/4` worker run stayed at `1.0` success rate
+
+What changed in this closure:
+
+- hybrid-Kimi install selection now fails closed when the lane is unconfigured
+- the Windows installer now forwards the requested install profile into the profile validator path
+- the default provider probe no longer surfaces unsupported Tether/QVAC ideas as normal install lanes
+- `llm_eval` and local acceptance now preserve the previous blocked/non-green bundle before overwriting it
+
+What was kept out of `main` on purpose:
+
+- `Beta2_Website/*`
+- the `core/public_hive/*` / `hive/` split
+- the `core/runtime_task_rail*` split
+- local screenshots, temp reports, and private acceptance-runtime artifacts
+
+Proof bundle:
+
+- [`reports/greenloop/summary.md`](../reports/greenloop/summary.md)
+- [`reports/greenloop/summary.json`](../reports/greenloop/summary.json)
+- [`reports/greenloop/final_signoff.md`](../reports/greenloop/final_signoff.md)
 
 ## Latest Stabilization Checkpoint
 

@@ -66,3 +66,29 @@ What only the live gate proves:
 - real local runtime boot on the current commit
 - real latency numbers for the locked local profile
 - live lookup/manual verification and offline honesty on the same runtime
+
+## Latest Measured Checkpoint
+
+Greenloop rerun on `15948c7`:
+
+- cold start: `6.592s`
+- simple prompt median: `3.309s`
+- file task median: `0.461s`
+- live lookup median: `0.173s`
+- chained task median: `0.635s`
+
+Measured concurrency on the same local `qwen2.5:7b` lane:
+
+- worker `1`: success `1.0`, throughput `0.26 req/s`
+- worker `2`: success `1.0`, throughput `0.242 req/s`
+- worker `4`: success `1.0`, throughput `0.229 req/s`
+
+Artifacts:
+
+- [`docs/LLM_ACCEPTANCE_REPORT.md`](./LLM_ACCEPTANCE_REPORT.md)
+- [`reports/greenloop/summary.md`](../reports/greenloop/summary.md)
+- [`reports/greenloop/concurrency.csv`](../reports/greenloop/concurrency.csv)
+
+Note:
+
+- The live acceptance report still stamps the build as `dirty` because `llm_eval` rewrites [`docs/LLM_ACCEPTANCE_REPORT.md`](./LLM_ACCEPTANCE_REPORT.md) during the run. The clean proof checkout had no unrelated code changes before launch.
