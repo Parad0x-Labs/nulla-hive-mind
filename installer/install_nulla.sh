@@ -451,7 +451,8 @@ PROJECT_ROOT="${SCRIPT_DIR}"
 VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
 LAUNCHER_HEAD
   cat >>"${target_path}" <<EOF
-export NULLA_HOME="${runtime_home}"
+export PYTHONPATH="\${PROJECT_ROOT}"
+export NULLA_HOME="\${NULLA_HOME:-${runtime_home}}"
 $(web_runtime_exports)
 echo "Starting NULLA (API + mesh daemon)..."
 echo "OpenClaw connects to http://127.0.0.1:11435"
@@ -472,7 +473,8 @@ PROJECT_ROOT="${SCRIPT_DIR}"
 VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
 LAUNCHER_HEAD
   cat >>"${target_path}" <<EOF
-export NULLA_HOME="${runtime_home}"
+export PYTHONPATH="\${PROJECT_ROOT}"
+export NULLA_HOME="\${NULLA_HOME:-${runtime_home}}"
 $(web_runtime_exports)
 exec "\${VENV_PY}" -m apps.nulla_chat --platform openclaw --device openclaw
 EOF
@@ -494,8 +496,12 @@ VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
 LAUNCHER_HEAD
   cat >>"${target_path}" <<EOF
 MODEL_TAG="${model_tag}"
-export NULLA_HOME="${runtime_home}"
+export PYTHONPATH="\${PROJECT_ROOT}"
+export NULLA_HOME="\${NULLA_HOME:-${runtime_home}}"
 export NULLA_OLLAMA_MODEL="\${NULLA_OLLAMA_MODEL:-\${MODEL_TAG}}"
+export NULLA_OPENCLAW_API_PORT="\${NULLA_OPENCLAW_API_PORT:-11435}"
+export NULLA_OPENCLAW_API_URL="\${NULLA_OPENCLAW_API_URL:-http://127.0.0.1:\${NULLA_OPENCLAW_API_PORT}}"
+export NULLA_OPENCLAW_GATEWAY_PORT="\${NULLA_OPENCLAW_GATEWAY_PORT:-18789}"
 $(web_runtime_exports)
 EOF
   if [[ -n "${openclaw_home}" ]]; then
@@ -504,21 +510,39 @@ export OPENCLAW_HOME="${openclaw_home}"
 export OPENCLAW_STATE_DIR="\${OPENCLAW_STATE_DIR:-${openclaw_home}}"
 EOF
   fi
-  cat >>"${target_path}" <<EOF
+cat >>"${target_path}" <<EOF
 
-if ! curl -sf --max-time 2 http://127.0.0.1:11435/healthz >/dev/null 2>&1; then
-  nohup "\${VENV_PY}" -m apps.nulla_api_server >/tmp/nulla_api_server.log 2>&1 </dev/null &
+wait_for_http_ready() {
+  local url="\$1"
+  local max_attempts="\$2"
+  local pid="\${3:-}"
+  local consecutive_target="\${4:-2}"
+  local consecutive=0
+  for _ in \$(seq 1 "\${max_attempts}"); do
+    if [[ -n "\${pid}" ]] && ! kill -0 "\${pid}" >/dev/null 2>&1; then
+      return 1
+    fi
+    if curl -sf --max-time 2 "\${url}" >/dev/null 2>&1; then
+      consecutive=\$((consecutive + 1))
+      if [[ "\${consecutive}" -ge "\${consecutive_target}" ]]; then
+        return 0
+      fi
+    else
+      consecutive=0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+if ! wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 2 ""; then
+  nohup "\${VENV_PY}" -m apps.nulla_api_server --port "\${NULLA_OPENCLAW_API_PORT}" >/tmp/nulla_api_server.log 2>&1 </dev/null &
   api_pid=\$!
   disown "\${api_pid}" 2>/dev/null || true
-  for _ in \$(seq 1 30); do
-    sleep 1
-    if curl -sf --max-time 2 http://127.0.0.1:11435/healthz >/dev/null 2>&1; then
-      break
-    fi
-  done
+  wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 30 "\${api_pid}" 3
 fi
 
-if ! curl -sf --max-time 2 http://127.0.0.1:18789 >/dev/null 2>&1; then
+if ! curl -sf --max-time 2 "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" >/dev/null 2>&1; then
   if command -v openclaw >/dev/null 2>&1; then
     nohup openclaw gateway run --force >/tmp/nulla_openclaw.log 2>&1 </dev/null &
     openclaw_pid=\$!
@@ -528,29 +552,22 @@ if ! curl -sf --max-time 2 http://127.0.0.1:18789 >/dev/null 2>&1; then
     openclaw_pid=\$!
     disown "\${openclaw_pid}" 2>/dev/null || true
   fi
-  for _ in \$(seq 1 30); do
-    sleep 1
-    if curl -sf --max-time 2 http://127.0.0.1:18789 >/dev/null 2>&1; then
-      break
-    fi
-  done
+  wait_for_http_ready "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" 30 "\${openclaw_pid:-}" 2
 fi
 
-if ! curl -sf --max-time 2 http://127.0.0.1:18789 >/dev/null 2>&1 && command -v openclaw >/dev/null 2>&1; then
+if ! curl -sf --max-time 2 "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" >/dev/null 2>&1 && command -v openclaw >/dev/null 2>&1; then
   nohup openclaw gateway run --force >/tmp/nulla_openclaw.log 2>&1 </dev/null &
   openclaw_pid=\$!
   disown "\${openclaw_pid}" 2>/dev/null || true
-  for _ in \$(seq 1 30); do
-    sleep 1
-    if curl -sf --max-time 2 http://127.0.0.1:18789 >/dev/null 2>&1; then
-      break
-    fi
-  done
+  wait_for_http_ready "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" 30 "\${openclaw_pid}" 2
 fi
 
+wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 3 "" 2
+wait_for_http_ready "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" 3 "" 2
+
 GW_TOKEN="\$("\${VENV_PY}" -c "import os, sys; sys.path.insert(0, '\${PROJECT_ROOT}'); from core.openclaw_locator import discover_openclaw_paths, load_gateway_token; paths = discover_openclaw_paths(explicit_home=os.environ.get('OPENCLAW_HOME') or os.environ.get('OPENCLAW_STATE_DIR'), create_default=True); print(load_gateway_token(paths))" 2>/dev/null || true)"
-OPENCLAW_URL="http://127.0.0.1:18789"
-TRACE_URL="http://127.0.0.1:11435/trace"
+OPENCLAW_URL="http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}"
+TRACE_URL="\${NULLA_OPENCLAW_API_URL}/trace"
 if [[ -n "\${GW_TOKEN}" ]]; then
   OPENCLAW_URL="\${OPENCLAW_URL}/#token=\${GW_TOKEN}"
 fi

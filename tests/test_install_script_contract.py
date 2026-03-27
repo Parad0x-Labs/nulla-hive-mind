@@ -23,7 +23,12 @@ def test_install_script_rebuilds_unsupported_venv() -> None:
 def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     script = (PROJECT_ROOT / "installer" / "install_nulla.sh").read_text(encoding="utf-8")
 
-    assert 'curl -sf --max-time 2 http://127.0.0.1:11435/healthz' in script
+    assert 'wait_for_http_ready() {' in script
+    assert 'curl -sf --max-time 2 "\\${url}" >/dev/null 2>&1' in script
+    assert 'export PYTHONPATH="\\${PROJECT_ROOT}"' in script
+    assert 'export NULLA_HOME="\\${NULLA_HOME:-${runtime_home}}"' in script
+    assert 'export NULLA_OPENCLAW_API_URL="\\${NULLA_OPENCLAW_API_URL:-http://127.0.0.1:\\${NULLA_OPENCLAW_API_PORT}}"' in script
+    assert 'wait_for_http_ready "\\${NULLA_OPENCLAW_API_URL}/healthz" 30 "\\${api_pid}" 3' in script
     assert 'launch openclaw --yes --model "\\${MODEL_TAG}"' in script
     assert 'launch openclaw --yes --config --model "${model_tag}"' in script
     assert 'openclaw gateway run --force' in script
