@@ -198,7 +198,6 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         ensure_auth.assert_called_once_with(
             project_root=PROJECT_ROOT,
             target_path=auth_target,
-            config_home_dir=config_home,
         )
         self.assertEqual(runtime.public_hive_auth["status"], "missing_remote_config_path")
 

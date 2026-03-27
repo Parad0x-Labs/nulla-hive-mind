@@ -245,7 +245,6 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
     auth_result = ensure_public_hive_auth(
         project_root=project_root,
         target_path=auth_target_path,
-        config_home_dir=active_config_home_dir(),
     )
     auth_snapshot = public_hive_auth_snapshot(auth_result)
     if not auth_result.get("ok"):
