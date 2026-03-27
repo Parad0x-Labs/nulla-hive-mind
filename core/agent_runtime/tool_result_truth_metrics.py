@@ -14,6 +14,7 @@ class ToolResultTruthMetricsMixin:
     def _chat_truth_fast_path_backing_sources(self, reason: str) -> list[str]:
         mapping = {
             "live_info_fast_path": ["web_lookup"],
+            "machine_read_fast_path": ["machine_read"],
             "hive_activity_command": ["hive"],
             "hive_research_followup": ["hive"],
             "hive_status_followup": ["hive"],

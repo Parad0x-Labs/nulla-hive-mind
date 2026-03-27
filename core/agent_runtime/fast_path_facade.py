@@ -94,6 +94,23 @@ class FastPathFacadeMixin:
             source_surface=source_surface,
         )
 
+    def _looks_like_supported_machine_read_request(self, user_input: str) -> bool:
+        return agent_fast_paths.looks_like_supported_machine_read_request(user_input)
+
+    def _looks_like_safe_machine_write_request(self, user_input: str) -> bool:
+        return agent_fast_paths.looks_like_safe_machine_write_request(user_input)
+
+    def _safe_machine_write_targets_workspace(
+        self,
+        *,
+        user_input: str,
+        source_context: dict[str, object] | None,
+    ) -> bool:
+        return agent_fast_paths.safe_machine_write_targets_workspace(
+            user_input=user_input,
+            source_context=source_context,
+        )
+
     def _startup_sequence_fast_path(self, user_input: str) -> str | None:
         return agent_fast_paths.startup_sequence_fast_path(user_input)
 
@@ -168,6 +185,38 @@ class FastPathFacadeMixin:
             source_context=source_context,
             interpretation=interpretation,
             response_class=self.ResponseClass.UTILITY_ANSWER,
+        )
+
+    def _maybe_handle_safe_machine_write_guard(
+        self,
+        user_input: str,
+        *,
+        session_id: str,
+        source_surface: str,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, Any] | None:
+        return agent_fast_paths.maybe_handle_safe_machine_write_guard(
+            self,
+            user_input,
+            session_id=session_id,
+            source_surface=source_surface,
+            source_context=source_context,
+        )
+
+    def _maybe_handle_direct_machine_read_request(
+        self,
+        user_input: str,
+        *,
+        session_id: str,
+        source_surface: str,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, Any] | None:
+        return agent_fast_paths.maybe_handle_direct_machine_read_request(
+            self,
+            user_input,
+            session_id=session_id,
+            source_surface=source_surface,
+            source_context=source_context,
         )
 
     def _live_info_search_notes(
@@ -265,4 +314,3 @@ class FastPathFacadeMixin:
             query=query,
             mode=mode,
         )
-

@@ -16,6 +16,13 @@ from core.agent_runtime.fast_paths_companion import (
     render_companion_continuation_response,
     render_personalized_plan_response,
 )
+from core.agent_runtime.fast_paths_machine import (
+    looks_like_safe_machine_write_request,
+    looks_like_supported_machine_read_request,
+    maybe_handle_direct_machine_read_request,
+    maybe_handle_safe_machine_write_guard,
+    safe_machine_write_targets_workspace,
+)
 from core.agent_runtime.fast_paths_utility import (
     contextual_time_followup_timezone,
     credit_status_fast_path,
@@ -71,8 +78,12 @@ __all__ = [
     "looks_like_generic_workspace_bootstrap_request",
     "looks_like_malformed_time_followup",
     "looks_like_personalized_plan_request",
+    "looks_like_safe_machine_write_request",
+    "looks_like_supported_machine_read_request",
     "maybe_handle_companion_memory_fast_path",
+    "maybe_handle_direct_machine_read_request",
     "maybe_handle_live_info_fast_path",
+    "maybe_handle_safe_machine_write_guard",
     "normalize_live_info_query",
     "notes_include_grounded_price_signal",
     "recent_utility_context",
@@ -82,6 +93,7 @@ __all__ = [
     "render_personalized_plan_response",
     "render_weather_response",
     "requires_ultra_fresh_insufficient_evidence",
+    "safe_machine_write_targets_workspace",
     "smalltalk_fast_path",
     "startup_sequence_fast_path",
     "try_live_quote_note",

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import difflib
 import fnmatch
+import platform
 import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,7 @@ from core.execution.workspace_tools import (
     resolve_workspace_path as resolve_workspace_path_impl,
 )
 from core.execution_gate import ExecutionGate
+from core.hardware_tier import probe_machine, select_qwen_tier
 from core.learning import promote_verified_procedure
 from core.runtime_paths import resolve_workspace_root
 from core.runtime_tool_contracts import runtime_tool_contract_map, runtime_tool_contracts
@@ -77,6 +80,7 @@ _EXECUTION_REQUEST_MARKERS = (
     "submit it",
 )
 _FILE_LINE_RE = re.compile(r"(?P<path>[A-Za-z0-9_./-]+\.[A-Za-z0-9_+-]+):(?P<line>\d+)")
+_SAFE_MACHINE_DIRECTORY_NAMES = ("Desktop", "Downloads", "Documents")
 
 
 @dataclass
@@ -229,6 +233,29 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
     intent = str(payload.get("intent") or "").strip()
     if not intent:
         return {}
+    if intent == "machine.list_directory":
+        entries = [dict(item) for item in list(payload.get("entries") or []) if isinstance(item, dict)]
+        return {
+            "intent": intent,
+            "path": str(payload.get("path") or "").strip(),
+            "directories_only": bool(payload.get("directories_only", False)),
+            "entry_count": int(payload.get("count") or len(entries)),
+            "entries": entries,
+            "paths": [str(item.get("path") or "").strip() for item in entries if str(item.get("path") or "").strip()],
+        }
+    if intent == "machine.inspect_specs":
+        return {
+            "intent": intent,
+            "chip_name": str(payload.get("chip_name") or "").strip(),
+            "os_name": str(payload.get("os_name") or "").strip(),
+            "os_version": str(payload.get("os_version") or "").strip(),
+            "cpu_cores": int(payload.get("cpu_cores") or 0),
+            "ram_gb": float(payload.get("ram_gb") or 0.0),
+            "gpu_name": str(payload.get("gpu_name") or "").strip(),
+            "vram_gb": float(payload.get("vram_gb") or 0.0) if payload.get("vram_gb") is not None else None,
+            "accelerator": str(payload.get("accelerator") or "").strip(),
+            "recommended_model": str(payload.get("recommended_model") or "").strip(),
+        }
     if intent == "workspace.search_text":
         matches = [dict(item) for item in list(payload.get("matches") or []) if isinstance(item, dict)]
         primary = dict((matches[:1] or [{}])[0] or {})
@@ -406,6 +433,10 @@ def execute_runtime_tool(
     try:
         if intent == "workspace.list_files":
             return _list_files(arguments, workspace_root=workspace_root)
+        if intent == "machine.list_directory":
+            return _list_machine_directory(arguments)
+        if intent == "machine.inspect_specs":
+            return _inspect_machine_specs()
         if intent == "workspace.list_tree":
             return _list_tree(arguments, workspace_root=workspace_root)
         if intent == "workspace.search_text":
@@ -514,6 +545,51 @@ def _truncate(text: str, *, limit: int = 1800) -> str:
     return value[:limit].rstrip() + "\n...[truncated]"
 
 
+def _home_relative_label(path: Path) -> str:
+    home = Path.home().resolve()
+    try:
+        relative = path.resolve().relative_to(home)
+        return "~" if str(relative) in {"", "."} else f"~/{relative}"
+    except Exception:
+        return str(path)
+
+
+def _safe_machine_roots() -> tuple[Path, ...]:
+    home = Path.home().resolve()
+    return tuple((home / name).resolve() for name in _SAFE_MACHINE_DIRECTORY_NAMES)
+
+
+def _resolve_machine_directory(raw_path: str | None) -> Path:
+    raw = str(raw_path or "").strip()
+    if not raw:
+        return _safe_machine_roots()[0]
+    lowered = raw.lower().strip()
+    alias_map = {
+        "desktop": "Desktop",
+        "my desktop": "Desktop",
+        "~/desktop": "Desktop",
+        "downloads": "Downloads",
+        "my downloads": "Downloads",
+        "~/downloads": "Downloads",
+        "documents": "Documents",
+        "my documents": "Documents",
+        "~/documents": "Documents",
+        "docs": "Documents",
+    }
+    if lowered in alias_map:
+        return (Path.home() / alias_map[lowered]).resolve()
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = (Path.home() / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+    for root in _safe_machine_roots():
+        if candidate == root or root in candidate.parents:
+            return candidate
+    allowed = ", ".join(_home_relative_label(root) for root in _safe_machine_roots())
+    raise ValueError(f"I can only inspect safe local directories in this lane: {allowed}.")
+
+
 def _runtime_session_id(source_context: dict[str, Any] | None) -> str:
     return str((source_context or {}).get("session_id") or "").strip()
 
@@ -616,6 +692,204 @@ def _list_files(arguments: dict[str, Any], *, workspace_root: Path) -> RuntimeEx
                 count=len(relative_rows),
                 paths=relative_rows,
             ),
+        },
+    )
+
+
+def _list_machine_directory(arguments: dict[str, Any]) -> RuntimeExecutionResult:
+    try:
+        target = _resolve_machine_directory(arguments.get("path"))
+    except ValueError as exc:
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="not_allowed",
+            response_text=str(exc),
+            details={
+                "observation": _tool_observation(
+                    intent="machine.list_directory",
+                    tool_surface="machine",
+                    ok=False,
+                    status="not_allowed",
+                    allowed_roots=[_home_relative_label(root) for root in _safe_machine_roots()],
+                ),
+            },
+        )
+    if not target.exists() or not target.is_dir():
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="not_found",
+            response_text=f"Local directory `{_home_relative_label(target)}` does not exist.",
+            details={
+                "path": _home_relative_label(target),
+                "observation": _tool_observation(
+                    intent="machine.list_directory",
+                    tool_surface="machine",
+                    ok=False,
+                    status="not_found",
+                    path=_home_relative_label(target),
+                ),
+            },
+        )
+    directories_only = bool(arguments.get("directories_only", False))
+    limit = max(1, min(int(arguments.get("limit") or 50), 200))
+    entries: list[dict[str, Any]] = []
+    for child in sorted(target.iterdir(), key=lambda item: item.name.lower()):
+        if len(entries) >= limit:
+            break
+        if child.name.startswith("."):
+            continue
+        if directories_only and not child.is_dir():
+            continue
+        entries.append(
+            {
+                "name": child.name,
+                "path": _home_relative_label(child),
+                "type": "directory" if child.is_dir() else "file",
+            }
+        )
+    if not entries:
+        noun = "folders" if directories_only else "entries"
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=True,
+            status="no_results",
+            response_text=f"No visible {noun} matched in `{_home_relative_label(target)}`.",
+            details={
+                "path": _home_relative_label(target),
+                "count": 0,
+                "entries": [],
+                "directories_only": directories_only,
+                "observation": _tool_observation(
+                    intent="machine.list_directory",
+                    tool_surface="machine",
+                    ok=True,
+                    status="no_results",
+                    path=_home_relative_label(target),
+                    count=0,
+                    directories_only=directories_only,
+                    entries=[],
+                ),
+            },
+        )
+    label = "Visible folders" if directories_only else "Visible entries"
+    lines = [f"{label} under `{_home_relative_label(target)}`:"]
+    for entry in entries:
+        suffix = "/" if entry["type"] == "directory" else ""
+        lines.append(f"- {entry['name']}{suffix}")
+    return RuntimeExecutionResult(
+        handled=True,
+        ok=True,
+        status="executed",
+        response_text="\n".join(lines),
+        details={
+            "path": _home_relative_label(target),
+            "count": len(entries),
+            "entries": entries,
+            "directories_only": directories_only,
+            "observation": _tool_observation(
+                intent="machine.list_directory",
+                tool_surface="machine",
+                ok=True,
+                status="executed",
+                path=_home_relative_label(target),
+                count=len(entries),
+                directories_only=directories_only,
+                entries=entries,
+            ),
+        },
+    )
+
+
+def _machine_os_details() -> tuple[str, str]:
+    system = str(platform.system() or "").strip()
+    if system == "Darwin":
+        version = str(platform.mac_ver()[0] or "").strip() or str(platform.release() or "").strip()
+        return "macOS", version
+    if system == "Windows":
+        return "Windows", str(platform.version() or platform.release() or "").strip()
+    if system:
+        return system, str(platform.release() or "").strip()
+    return "Unknown", ""
+
+
+def _machine_chip_name() -> str:
+    system = str(platform.system() or "").strip().lower()
+    try:
+        if system == "darwin":
+            completed = subprocess.run(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            brand = str(completed.stdout or "").strip()
+            if brand:
+                return brand
+    except Exception:
+        pass
+    processor = str(platform.processor() or "").strip()
+    if processor:
+        return processor
+    machine = str(platform.machine() or "").strip()
+    if machine:
+        return machine
+    return "unknown"
+
+
+def _inspect_machine_specs() -> RuntimeExecutionResult:
+    probe = probe_machine()
+    selected_tier = select_qwen_tier(probe)
+    os_name, os_version = _machine_os_details()
+    chip_name = _machine_chip_name()
+    response_lines = [
+        "Machine specs for this host:",
+        f"- OS: {os_name}{f' {os_version}' if os_version else ''}",
+        f"- Chip: {chip_name}",
+        f"- CPU cores: {probe.cpu_cores}",
+        f"- RAM: {round(probe.ram_gb, 1)} GiB",
+        f"- Accelerator: {probe.accelerator or 'cpu'}",
+        f"- GPU: {probe.gpu_name or 'none'}",
+    ]
+    if probe.vram_gb is not None:
+        label = "Unified memory" if str(probe.accelerator or "").strip().lower() == "mps" else "VRAM"
+        response_lines.append(f"- {label}: {round(probe.vram_gb, 1)} GiB")
+    response_lines.append(f"- Recommended local model: {selected_tier.ollama_tag}")
+    observation = _tool_observation(
+        intent="machine.inspect_specs",
+        tool_surface="machine",
+        ok=True,
+        status="executed",
+        chip_name=chip_name,
+        os_name=os_name,
+        os_version=os_version,
+        cpu_cores=probe.cpu_cores,
+        ram_gb=round(probe.ram_gb, 1),
+        gpu_name=probe.gpu_name or "",
+        vram_gb=round(probe.vram_gb, 1) if probe.vram_gb is not None else None,
+        accelerator=probe.accelerator,
+        recommended_model=selected_tier.ollama_tag,
+        selected_tier=selected_tier.tier_name,
+    )
+    return RuntimeExecutionResult(
+        handled=True,
+        ok=True,
+        status="executed",
+        response_text="\n".join(response_lines),
+        details={
+            "chip_name": chip_name,
+            "os_name": os_name,
+            "os_version": os_version,
+            "cpu_cores": probe.cpu_cores,
+            "ram_gb": round(probe.ram_gb, 1),
+            "gpu_name": probe.gpu_name or "",
+            "vram_gb": round(probe.vram_gb, 1) if probe.vram_gb is not None else None,
+            "accelerator": probe.accelerator,
+            "recommended_model": selected_tier.ollama_tag,
+            "selected_tier": selected_tier.tier_name,
+            "observation": observation,
         },
     )
 

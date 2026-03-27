@@ -15,11 +15,14 @@ def fast_path_response_class(agent: Any, *, reason: str, response: str) -> Any:
         "memory_command",
         "user_preference_command",
         "live_info_fast_path",
+        "machine_read_fast_path",
         "capability_truth_query",
         "builder_capability_gap",
         "builder_controller_direct_response",
     }:
         return response_class.UTILITY_ANSWER
+    if reason == "machine_write_guard":
+        return response_class.TASK_FAILED_USER_SAFE
     if reason == "help_fast_path":
         return response_class.TASK_SELECTION_CLARIFICATION
     if reason == "evaluative_conversation_fast_path":

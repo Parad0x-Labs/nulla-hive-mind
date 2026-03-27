@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -343,6 +344,80 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(first.reason, "planned_workspace_directory_bootstrap")
         self.assertEqual(first.next_payload["intent"], "workspace.ensure_directory")
         self.assertEqual(first.next_payload["arguments"]["path"], "src/api")
+
+    def test_workflow_planner_routes_safe_desktop_folder_listing_to_machine_read(self) -> None:
+        first = plan_tool_workflow(
+            user_text="tell me what are the folders on my desktop",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-tools"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_safe_machine_directory_list")
+        self.assertEqual(first.next_payload["intent"], "machine.list_directory")
+        self.assertEqual(first.next_payload["arguments"]["path"], "~/Desktop")
+        self.assertTrue(first.next_payload["arguments"]["directories_only"])
+
+    def test_workflow_planner_routes_desktop_folders_and_files_to_machine_read_without_folder_only_mode(self) -> None:
+        first = plan_tool_workflow(
+            user_text="what are the folders and files on my desktop?",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-tools"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_safe_machine_directory_list")
+        self.assertEqual(first.next_payload["intent"], "machine.list_directory")
+        self.assertFalse(first.next_payload["arguments"]["directories_only"])
+
+    def test_workflow_planner_routes_machine_specs_request_to_grounded_machine_tool(self) -> None:
+        first = plan_tool_workflow(
+            user_text="what machine are you running on? tell me our machine specs",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_machine_specs_inspection")
+        self.assertEqual(first.next_payload["intent"], "machine.inspect_specs")
+
+    def test_workflow_planner_routes_imprecise_machine_specs_request_to_grounded_machine_tool(self) -> None:
+        first = plan_tool_workflow(
+            user_text="what is machine you are running on?",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_machine_specs_inspection")
+        self.assertEqual(first.next_payload["intent"], "machine.inspect_specs")
+
+    def test_workflow_planner_does_not_route_capability_question_to_machine_specs(self) -> None:
+        first = plan_tool_workflow(
+            user_text="what can you do right now on this machine?",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertFalse(first.handled)
+
+    def test_workflow_planner_allows_workspace_write_under_repo_desktop_path(self) -> None:
+        target = (Path.cwd() / "artifacts" / "planner-desktop-path").resolve()
+        first = plan_tool_workflow(
+            user_text=f"Create a file named nulla_test_01.txt in {target} with exactly this content: ALPHA-LOCAL-FILE-01",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": str(Path.cwd())},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(first.next_payload["arguments"]["path"], "nulla_test_01.txt")
 
     def test_workflow_planner_routes_explicit_file_create_to_workspace_write(self) -> None:
         first = plan_tool_workflow(
@@ -2436,6 +2511,36 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(decision.reason, "planned_entity_lookup_retry")
         self.assertEqual(decision.next_payload["intent"], "web.search")
         self.assertEqual(decision.next_payload["arguments"]["query"], "toly x solana")
+
+    def test_workflow_planner_stops_after_safe_machine_directory_list(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="tell me what are the folders on my desktop",
+            task_class="unknown",
+            executed_steps=[
+                {
+                    "tool_name": "machine.list_directory",
+                    "arguments": {"path": "~/Desktop", "directories_only": True},
+                    "observation": {
+                        "intent": "machine.list_directory",
+                        "tool_surface": "machine",
+                        "ok": True,
+                        "status": "executed",
+                        "path": "~/Desktop",
+                        "count": 2,
+                        "directories_only": True,
+                        "entries": [
+                            {"name": "Projects", "path": "~/Desktop/Projects", "type": "directory"},
+                            {"name": "Ideas", "path": "~/Desktop/Ideas", "type": "directory"},
+                        ],
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-tools"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertTrue(decision.stop_after)
+        self.assertEqual(decision.reason, "machine_stop_after_list")
 
     def test_workflow_planner_does_not_invent_nonexistent_email_tool(self) -> None:
         decision = plan_tool_workflow(

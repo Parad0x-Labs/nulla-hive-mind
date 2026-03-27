@@ -3071,6 +3071,119 @@ class OpenClawToolingContextTests(unittest.TestCase):
             f"Expected task titles referenced in response, got: {result['response'][:300]}"
         )
 
+    def test_openclaw_machine_specs_request_uses_direct_machine_read_fast_path(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with mock.patch(
+            "core.runtime_execution_tools.probe_machine",
+            return_value=SimpleNamespace(
+                cpu_cores=10,
+                ram_gb=24.0,
+                gpu_name="Apple Silicon",
+                vram_gb=24.0,
+                accelerator="mps",
+            ),
+        ), mock.patch(
+            "core.runtime_execution_tools.select_qwen_tier",
+            return_value=SimpleNamespace(tier_name="mid", ollama_tag="qwen2.5:14b"),
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_os_details",
+            return_value=("macOS", "15.4"),
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_chip_name",
+            return_value="Apple M4",
+        ):
+            result = agent.run_once(
+                "what machine are you running on? tell me our machine specs",
+                session_id_override="openclaw:machine-specs-fast-path",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("Apple M4", result["response"])
+        self.assertIn("24.0 GiB", result["response"])
+
+    def test_openclaw_capability_prompt_is_not_misclassified_as_machine_specs(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        self.assertFalse(agent._looks_like_supported_machine_read_request("what can you do right now on this machine?"))
+
+    def test_openclaw_machine_specs_fast_path_handles_imprecise_user_phrasing(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        with mock.patch(
+            "core.runtime_execution_tools.probe_machine",
+            return_value=SimpleNamespace(
+                cpu_cores=10,
+                ram_gb=24.0,
+                gpu_name="Apple Silicon",
+                vram_gb=24.0,
+                accelerator="mps",
+            ),
+        ), mock.patch(
+            "core.runtime_execution_tools.select_qwen_tier",
+            return_value=SimpleNamespace(tier_name="mid", ollama_tag="qwen2.5:14b"),
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_os_details",
+            return_value=("macOS", "15.4"),
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_chip_name",
+            return_value="Apple M4",
+        ):
+            result = agent.run_once(
+                "what is machine you are running on?",
+                session_id_override="openclaw:machine-specs-imprecise-fast-path",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("Apple M4", result["response"])
+        self.assertIn("24.0 GiB", result["response"])
+
+    def test_openclaw_non_workspace_machine_write_fails_closed(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        result = agent.run_once(
+            "create a folder named MarchTest on my desktop",
+            session_id_override="openclaw:machine-write-unsupported",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertIn("do not have a real non-workspace write lane", result["response"])
+
+    def test_openclaw_workspace_path_under_desktop_is_not_blocked_as_machine_write(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        workspace = str((Path.cwd() / "artifacts" / "workspace-safe-machine-guard").resolve())
+
+        self.assertIsNone(
+            agent._maybe_handle_safe_machine_write_guard(
+                f'Create a file named nulla_test_01.txt in {workspace} with exactly this content: ALPHA-LOCAL-FILE-01',
+                session_id="openclaw:workspace-path-safe-machine-guard",
+                source_surface="openclaw",
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": workspace},
+            )
+        )
+
+    def test_openclaw_desktop_listing_request_uses_direct_machine_read_fast_path(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)):
+            home = Path(tmpdir)
+            desktop = home / "Desktop"
+            desktop.mkdir(parents=True, exist_ok=True)
+            (desktop / "MarchTest").mkdir()
+            (desktop / "todo.txt").write_text("one\n", encoding="utf-8")
+            result = agent.run_once(
+                "what are the folders and files on my desktop?",
+                session_id_override="openclaw:desktop-list-fast-path",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("MarchTest/", result["response"])
+        self.assertIn("todo.txt", result["response"])
+
 
 if __name__ == "__main__":
     unittest.main()
