@@ -31,7 +31,7 @@ from core.onboarding import (
 from core.public_hive_bridge import ensure_public_hive_auth
 from core.release_channel import release_manifest_snapshot
 from core.runtime_bootstrap import bootstrap_runtime_mode
-from core.runtime_paths import resolve_workspace_root
+from core.runtime_paths import active_config_home_dir, resolve_workspace_root
 from core.runtime_provider_defaults import ensure_default_runtime_providers
 from core.runtime_task_events import (
     new_runtime_event_stream_id,
@@ -241,7 +241,12 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
     if ensure_starter_credits(peer_id):
         logger.info("Starter credits seeded for peer %s...", peer_id[:24])
 
-    auth_result = ensure_public_hive_auth(project_root=project_root)
+    auth_target_path = active_config_home_dir() / "agent-bootstrap.json"
+    auth_result = ensure_public_hive_auth(
+        project_root=project_root,
+        target_path=auth_target_path,
+        config_home_dir=active_config_home_dir(),
+    )
     auth_snapshot = public_hive_auth_snapshot(auth_result)
     if not auth_result.get("ok"):
         auth_status = str(auth_result.get("status") or "unknown").strip() or "unknown"

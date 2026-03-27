@@ -44,8 +44,8 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert 'Skipping Ollama OpenClaw auto-config for isolated home' in script
     assert 'disown "\\${api_pid}"' in script
     assert 'disown "\\${openclaw_pid}"' in script
-    assert 'open "${PROJECT_ROOT}/OpenClaw_NULLA.command"' in script
-    assert 'Handing off launch to Terminal.app...' in script
+    assert 'say "Verifying live launch through the shell launcher..."' in script
+    assert 'exec "${PROJECT_ROOT}/OpenClaw_NULLA.sh"' in script
 
 
 def test_install_wrappers_forward_install_profile_and_extra_args() -> None:

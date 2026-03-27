@@ -28,7 +28,7 @@ from apps.nulla_api_server import (
 )
 from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
 from core.runtime_task_events import emit_runtime_event
-from core.web.api.runtime import RuntimeServices, build_runtime_version_stamp
+from core.web.api.runtime import RuntimeServices, bootstrap_runtime_services, build_runtime_version_stamp
 from tests.asgi_harness import asgi_request
 
 
@@ -145,6 +145,62 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertEqual(stamp["branch"], "main")
         self.assertEqual(stamp["commit"], "1234567890ab")
         self.assertEqual(stamp["dirty"], False)
+
+    def test_bootstrap_runtime_services_hydrates_public_hive_auth_into_active_runtime_home(self) -> None:
+        runtime_home = Path("/tmp/nulla-runtime-home")
+        config_home = runtime_home / "config"
+        auth_target = config_home / "agent-bootstrap.json"
+        probe = mock.Mock(accelerator="cpu", gpu_name=None)
+        tier = mock.Mock(ollama_tag="qwen2.5:14b")
+        boot = mock.Mock(backend_selection=mock.Mock(backend_name="TorchMPSBackend", device="mps"))
+        agent = mock.Mock()
+        daemon = mock.Mock(config=mock.Mock(bind_port=49152))
+        compute_daemon = mock.Mock()
+        model_registry = mock.Mock()
+        model_registry.startup_warnings.return_value = []
+        persona = mock.Mock(persona_id="default")
+
+        with mock.patch("core.web.api.runtime.bootstrap_runtime_mode", return_value=boot), mock.patch(
+            "core.web.api.runtime.is_first_boot",
+            return_value=False,
+        ), mock.patch("core.web.api.runtime.get_local_peer_id", return_value="peer-123"), mock.patch(
+            "core.credit_ledger.ensure_starter_credits",
+            return_value=False,
+        ), mock.patch("core.web.api.runtime.active_config_home_dir", return_value=config_home), mock.patch(
+            "core.web.api.runtime.ensure_public_hive_auth",
+            return_value={"ok": False, "status": "missing_remote_config_path", "watch_host": "hive.example.test"},
+        ) as ensure_auth, mock.patch("core.web.api.runtime.probe_machine", return_value=probe), mock.patch(
+            "core.web.api.runtime.select_qwen_tier",
+            return_value=tier,
+        ), mock.patch("core.web.api.runtime.ensure_ollama_model"), mock.patch(
+            "core.web.api.runtime.build_runtime_version_stamp",
+            return_value={"started_at": "2026-03-27T00:00:00.000000Z", "build_id": "0.4.0+test"},
+        ), mock.patch(
+            "core.web.api.runtime.ComputeModeDaemon",
+            return_value=compute_daemon,
+        ), mock.patch("core.web.api.runtime.ModelRegistry", return_value=model_registry), mock.patch(
+            "core.web.api.runtime.ensure_default_provider",
+        ), mock.patch("core.web.api.runtime.load_active_persona", return_value=persona), mock.patch(
+            "core.web.api.runtime.get_agent_display_name",
+            return_value="NULLA",
+        ), mock.patch("core.web.api.runtime.ensure_openclaw_registration", return_value=True), mock.patch(
+            "core.web.api.runtime.NullaAgent",
+            return_value=agent,
+        ), mock.patch("core.web.api.runtime.resolve_local_worker_capacity", return_value=(3, 3)), mock.patch(
+            "core.web.api.runtime.NullaDaemon",
+            return_value=daemon,
+        ):
+            runtime = bootstrap_runtime_services(
+                project_root=PROJECT_ROOT,
+                workstation_version="test-workstation",
+            )
+
+        ensure_auth.assert_called_once_with(
+            project_root=PROJECT_ROOT,
+            target_path=auth_target,
+            config_home_dir=config_home,
+        )
+        self.assertEqual(runtime.public_hive_auth["status"], "missing_remote_config_path")
 
     def test_ensure_default_provider_registers_kimi_when_key_is_present(self) -> None:
         manifests = {}

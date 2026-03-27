@@ -1212,13 +1212,7 @@ main() {
   if [[ "${AUTO_START}" -eq 1 ]]; then
     say
     say "Launching NULLA now..."
-    if [[ "$(uname)" == "Darwin" && -f "${PROJECT_ROOT}/OpenClaw_NULLA.command" ]]; then
-      say "Handing off launch to Terminal.app..."
-      if open "${PROJECT_ROOT}/OpenClaw_NULLA.command"; then
-        exit 0
-      fi
-      say "WARNING: macOS handoff failed; falling back to shell launcher."
-    fi
+    say "Verifying live launch through the shell launcher..."
     exec "${PROJECT_ROOT}/OpenClaw_NULLA.sh"
   fi
 }
