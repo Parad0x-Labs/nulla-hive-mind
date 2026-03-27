@@ -25,13 +25,11 @@ def validate_install_profile(
         runtime_home=runtime_home,
         provider_capability_truth=snapshot.capability_truth,
     )
-    if profile.profile_id != "hybrid-kimi":
+    if profile.ready and not profile.degraded:
         return True, ""
-    if profile.ready:
-        return True, ""
-    reasons = "; ".join(profile.reasons) or "KIMI_API_KEY is missing or the Kimi lane is not healthy."
+    reasons = "; ".join(profile.reasons) or "selected install profile is not healthy on this machine."
     return False, (
-        "ERROR: hybrid-kimi needs KIMI_API_KEY and a healthy kimi-remote lane before install can continue.\n"
+        f"ERROR: install profile `{profile.profile_id}` is not ready for this machine/runtime.\n"
         f"{reasons}"
     )
 

@@ -33,8 +33,9 @@ class ResearchToolLoopFacadeMixin:
             return []
 
         task_class = str(classification.get("task_class", "unknown"))
+        wants_fresh_info = self._wants_fresh_info(query_text, interpretation=interpretation)
         wants_live_lookup = task_class in {"research", "system_design", "integration_orchestration"}
-        if not wants_live_lookup and not self._wants_fresh_info(query_text, interpretation=interpretation):
+        if not wants_fresh_info:
             return []
         try:
             if wants_live_lookup:

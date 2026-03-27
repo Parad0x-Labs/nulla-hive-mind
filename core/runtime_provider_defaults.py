@@ -5,6 +5,7 @@ from collections.abc import Mapping
 
 from core.hardware_tier import probe_machine, select_qwen_tier
 from core.model_registry import ModelRegistry
+from core.runtime_install_profiles import normalize_install_profile_id
 from storage.model_provider_manifest import ModelProviderManifest
 
 _DEFAULT_KIMI_BASE_URL = "https://api.moonshot.ai/v1"
@@ -27,21 +28,25 @@ def ensure_default_runtime_providers(
     *,
     model_tag: str | None = None,
     env: Mapping[str, str] | None = None,
+    install_profile: str | None = None,
 ) -> tuple[str, ...]:
     env_map = os.environ if env is None else env
     changed: list[str] = []
     local_model = str(model_tag or "").strip() or default_runtime_model_tag()
+    active_profile = normalize_install_profile_id(install_profile, allow_auto=False)
     if _ensure_local_ollama_provider(registry, model_tag=local_model):
         changed.append(f"ollama-local:{local_model}")
-    llamacpp_provider_id = _ensure_llamacpp_provider(registry, model_name=local_model, env=env_map)
-    if llamacpp_provider_id:
-        changed.append(llamacpp_provider_id)
-    vllm_provider_id = _ensure_vllm_provider(registry, model_name=local_model, env=env_map)
-    if vllm_provider_id:
-        changed.append(vllm_provider_id)
-    kimi_provider_id = _ensure_kimi_provider(registry, env=env_map)
-    if kimi_provider_id:
-        changed.append(kimi_provider_id)
+    if _profile_allows_aux_local_providers(active_profile):
+        llamacpp_provider_id = _ensure_llamacpp_provider(registry, model_name=local_model, env=env_map)
+        if llamacpp_provider_id:
+            changed.append(llamacpp_provider_id)
+        vllm_provider_id = _ensure_vllm_provider(registry, model_name=local_model, env=env_map)
+        if vllm_provider_id:
+            changed.append(vllm_provider_id)
+    if _profile_allows_kimi_provider(active_profile):
+        kimi_provider_id = _ensure_kimi_provider(registry, env=env_map)
+        if kimi_provider_id:
+            changed.append(kimi_provider_id)
     return tuple(changed)
 
 
@@ -315,6 +320,18 @@ def _env_int(env: Mapping[str, str], *names: str, default: int) -> int:
         except Exception:
             continue
     return max(1, int(default))
+
+
+def _profile_allows_aux_local_providers(profile_id: str) -> bool:
+    if not profile_id:
+        return True
+    return profile_id in {"local-max", "full-orchestrated"}
+
+
+def _profile_allows_kimi_provider(profile_id: str) -> bool:
+    if not profile_id:
+        return True
+    return profile_id in {"hybrid-kimi", "full-orchestrated"}
 
 
 __all__ = [

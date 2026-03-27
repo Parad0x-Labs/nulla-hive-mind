@@ -257,6 +257,39 @@ def test_evaluative_turn_does_not_hit_web_lookup(make_agent):
     planned_search.assert_not_called()
 
 
+def test_conceptual_system_design_turn_does_not_hit_web_lookup_without_freshness_markers(make_agent, context_result_factory):
+    agent = make_agent()
+    agent.context_loader.load = mock.Mock(return_value=context_result_factory())  # type: ignore[assignment]
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="provider",
+            task_hash="react-watcher",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text="Start with the file watcher, symlinks, and editor temp-file behavior.",
+            confidence=0.84,
+            trust_score=0.84,
+        )
+    )
+    agent.curiosity.maybe_roam = mock.Mock(  # type: ignore[assignment]
+        return_value=CuriosityResult(enabled=False, mode="off", reason="test")
+    )
+
+    with mock.patch("apps.nulla_agent.WebAdapter.search_query") as search_query, mock.patch(
+        "apps.nulla_agent.WebAdapter.planned_search_query"
+    ) as planned_search, mock.patch("apps.nulla_agent.orchestrate_parent_task", return_value=None), mock.patch(
+        "apps.nulla_agent.request_relevant_holders", return_value=[]
+    ), mock.patch("apps.nulla_agent.dispatch_query_shard", return_value=None):
+        result = agent.run_once(
+            "my react dev server keeps reloading on save; where would you look first?",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+    assert "file watcher" in result["response"].lower()
+    search_query.assert_not_called()
+    planned_search.assert_not_called()
+
+
 def test_weather_live_lookup_uses_structured_weather_wording(make_agent, context_result_factory):
     agent = make_agent()
     agent.context_loader.load = mock.Mock(return_value=context_result_factory())  # type: ignore[assignment]

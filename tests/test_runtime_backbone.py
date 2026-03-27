@@ -77,6 +77,40 @@ def test_build_provider_registry_snapshot_auto_registers_kimi_when_configured() 
     assert any(item.provider_id == "kimi-remote:kimi-latest" for item in snapshot.capability_truth)
 
 
+def test_build_provider_registry_snapshot_honors_local_only_install_profile_for_remote_gating() -> None:
+    manifests = {}
+
+    def _get_manifest(provider_name: str, model_name: str):
+        return manifests.get((provider_name, model_name))
+
+    def _register_manifest(manifest):
+        manifests[(manifest.provider_name, manifest.model_name)] = manifest
+        return manifest
+
+    def _list_manifests(*, enabled_only: bool = False, limit: int = 256):
+        return list(manifests.values())[:limit]
+
+    registry = mock.Mock()
+    registry.startup_warnings.return_value = []
+    registry.provider_audit_rows.return_value = []
+    registry.get_manifest.side_effect = _get_manifest
+    registry.register_manifest.side_effect = _register_manifest
+    registry.list_manifests.side_effect = _list_manifests
+
+    with mock.patch.dict(
+        os.environ,
+        {
+            "KIMI_API_KEY": "test-key",
+            "NULLA_INSTALL_PROFILE": "local-only",
+        },
+        clear=False,
+    ):
+        snapshot = build_provider_registry_snapshot(registry, honor_install_profile=True)
+
+    assert any(item.provider_id.startswith("ollama-local:") for item in snapshot.capability_truth)
+    assert not any(item.provider_id.startswith("kimi-remote:") for item in snapshot.capability_truth)
+
+
 def test_build_provider_registry_snapshot_accepts_moonshot_aliases_for_kimi() -> None:
     manifests = {}
 
@@ -266,7 +300,11 @@ def test_build_runtime_backbone_reuses_bootstrap_probe_and_provider_facades() ->
     probe_machine.assert_called_once_with()
     select_tier.assert_called_once_with(probe)
     tier_summary_fn.assert_called_once_with(probe)
-    provider_snapshot_fn.assert_called_once_with(None)
+    provider_snapshot_fn.assert_called_once_with(
+        None,
+        runtime_home=None,
+        honor_install_profile=True,
+    )
     install_profile_fn.assert_called_once()
     assert backbone.boot is fake_boot
     assert backbone.local_model_profile.probe is probe
@@ -291,14 +329,23 @@ def test_cmd_providers_renders_provider_snapshot_from_runtime_backbone_facade(ca
     )
     snapshot = ProviderRegistrySnapshot(warnings=tuple(), audit_rows=(row,), capability_truth=tuple())
 
+    fake_context = SimpleNamespace(paths=SimpleNamespace(runtime_home="/tmp/nulla-runtime"))
+
     with mock.patch("apps.nulla_cli._bootstrap_cli_storage") as bootstrap_storage, mock.patch(
+        "apps.nulla_cli.build_runtime_context",
+        return_value=fake_context,
+    ) as build_context, mock.patch(
         "apps.nulla_cli.build_provider_registry_snapshot",
         return_value=snapshot,
     ) as build_snapshot:
         assert cmd_providers(json_mode=False) == 0
 
     bootstrap_storage.assert_called_once_with()
-    build_snapshot.assert_called_once_with()
+    build_context.assert_called_once_with(mode="cli_storage")
+    build_snapshot.assert_called_once_with(
+        runtime_home="/tmp/nulla-runtime",
+        honor_install_profile=True,
+    )
     out = capsys.readouterr().out
     assert "NULLA model providers" in out
     assert "local-qwen-http:qwen2.5:14b" in out

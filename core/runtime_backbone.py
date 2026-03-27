@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -8,7 +9,7 @@ from core.hardware_tier import MachineProbe, QwenTier, probe_machine, select_qwe
 from core.model_registry import ModelRegistry, ProviderAuditRow
 from core.provider_routing import ProviderCapabilityTruth, provider_capability_truth_for_manifest
 from core.runtime_bootstrap import BootstrappedRuntime, bootstrap_runtime_mode
-from core.runtime_install_profiles import InstallProfileTruth, build_install_profile_truth
+from core.runtime_install_profiles import InstallProfileTruth, active_install_profile_id, build_install_profile_truth
 from core.runtime_provider_defaults import ensure_default_runtime_providers
 
 
@@ -36,9 +37,25 @@ class RuntimeBackbone:
 
 def build_provider_registry_snapshot(
     registry: ModelRegistry | None = None,
+    *,
+    runtime_home: str | None = None,
+    requested_profile: str | None = None,
+    honor_install_profile: bool = False,
+    env: dict[str, str] | None = None,
 ) -> ProviderRegistrySnapshot:
     active_registry = registry or ModelRegistry()
-    ensure_default_runtime_providers(active_registry)
+    env_map = os.environ if env is None else env
+    install_profile = ""
+    if honor_install_profile:
+        install_profile = (
+            str(requested_profile or "").strip()
+            or active_install_profile_id(runtime_home=runtime_home, env=env_map)
+        )
+    ensure_default_runtime_providers(
+        active_registry,
+        env=env_map,
+        install_profile=install_profile,
+    )
     manifests: tuple[Any, ...]
     try:
         manifests = tuple(active_registry.list_manifests(enabled_only=True))
@@ -81,7 +98,13 @@ def build_runtime_backbone(
         summary["backend_name"] = boot.backend_selection.backend_name
         summary["backend_device"] = boot.backend_selection.device
         summary["backend_reason"] = boot.backend_selection.reason
-    provider_snapshot = build_provider_registry_snapshot(registry)
+    provider_snapshot = build_provider_registry_snapshot(
+        registry,
+        runtime_home=str(getattr(getattr(boot, "context", None), "paths", None).runtime_home)
+        if getattr(getattr(boot, "context", None), "paths", None) is not None
+        else None,
+        honor_install_profile=True,
+    )
     install_profile = build_install_profile_truth(
         probe=probe,
         tier=tier,

@@ -38,6 +38,34 @@ bash bootstrap_nulla.sh --install-profile hybrid-kimi
 powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1 -InstallProfile hybrid-kimi
 ```
 
+Safe one-line profile shortcuts for macOS / Linux:
+
+```bash
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile local-only && rm -f "$tmp"
+```
+
+```bash
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile local-max && rm -f "$tmp"
+```
+
+```bash
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile hybrid-kimi && rm -f "$tmp"
+```
+
+After install, inspect or switch profiles without editing env vars:
+
+```bash
+cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile
+cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set local-only
+cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set hybrid-kimi
+```
+
+Recommended profile guidance:
+
+1. `local-only` for smaller machines or anyone who wants a strict no-remote default.
+2. `local-max` for stronger local boxes, roughly 24 GiB+ unified memory or 20+ GiB VRAM / 48 GiB RAM class hardware.
+3. `hybrid-kimi` for smaller local boxes that still want a stronger remote queen lane; requires `KIMI_API_KEY` or `MOONSHOT_API_KEY`.
+
 The probe reports:
 
 1. machine hardware summary
@@ -148,8 +176,8 @@ If you deliberately run NULLA from a custom runtime home, set `NULLA_HOME` befor
 
 - NULLA is alpha. Read [STATUS.md](STATUS.md) before assuming a surface is production-ready.
 - The strongest current lane is local-first runtime plus Hive/public-web/OpenClaw surfaces.
-- The strongest default install lane is still local Ollama.
-- A configured Kimi lane is now real through the shared OpenAI-compatible runtime bootstrap, but it is still optional rather than the default local-first path.
+- The strongest default install lane is still honest auto selection from current hardware and configured providers.
+- A configured Kimi lane is now a real first-class supported profile through the shared OpenAI-compatible runtime bootstrap, but it is still optional rather than the default local-first path.
 - Tether and QVAC are still not first-class supported stacks yet.
 - Safe machine reads are intentionally narrow: Desktop, Downloads, and Documents are supported; arbitrary filesystem reads outside the active workspace are not.
 - Broader WAN hardening and some payment/economy claims are still partial or simulated.

@@ -160,6 +160,7 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     bat_installer = (REPO_ROOT / "installer" / "install_nulla.bat").read_text(encoding="utf-8")
     sh_bootstrap = (REPO_ROOT / "installer" / "bootstrap_nulla.sh").read_text(encoding="utf-8")
     ps_bootstrap = (REPO_ROOT / "installer" / "bootstrap_nulla.ps1").read_text(encoding="utf-8")
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     install_doc = (REPO_ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
 
     assert "--install-profile <profile>" in sh_installer
@@ -167,3 +168,11 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     assert "--install-profile <id>" in sh_bootstrap
     assert '-InstallProfile hybrid-kimi' in install_doc
     assert '/INSTALLPROFILE=$InstallProfile' in ps_bootstrap
+    assert "install-profile --set local-only" in sh_installer
+    assert "install-profile --set hybrid-kimi" in sh_installer
+    assert "install-profile --set local-only" in readme
+    assert "install-profile --set hybrid-kimi" in readme
+    assert "install-profile --set local-only" in install_doc
+    assert "install-profile --set hybrid-kimi" in install_doc
+    assert "local_plus_kimi" in readme
+    assert "first-class installer/runtime lane yet" not in readme

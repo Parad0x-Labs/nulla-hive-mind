@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -112,7 +113,11 @@ def runtime_capability_snapshot(context: RuntimeContext | None = None) -> dict[s
     runtime = context or build_runtime_context(mode="runtime_capabilities")
     probe = probe_machine()
     tier = select_qwen_tier(probe)
-    provider_snapshot = build_provider_registry_snapshot()
+    provider_snapshot = build_provider_registry_snapshot(
+        runtime_home=str(runtime.paths.runtime_home),
+        requested_profile=str(os.environ.get("NULLA_INSTALL_PROFILE") or ""),
+        honor_install_profile=True,
+    )
     install_profile = build_install_profile_truth(
         probe=probe,
         tier=tier,

@@ -22,6 +22,7 @@ def test_validate_install_profile_blocks_unready_hybrid_kimi(monkeypatch) -> Non
 
     assert ok is False
     assert "KIMI_API_KEY" in message
+    assert "hybrid-kimi" in message
 
 
 def test_validate_install_profile_accepts_ready_hybrid_kimi(monkeypatch) -> None:
@@ -77,3 +78,22 @@ def test_validate_install_profile_accepts_ready_hybrid_kimi(monkeypatch) -> None
 
     assert ok is True
     assert message == ""
+
+
+def test_validate_install_profile_blocks_unready_full_orchestrated(monkeypatch) -> None:
+    monkeypatch.delenv("KIMI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        validator,
+        "build_provider_registry_snapshot",
+        lambda: SimpleNamespace(capability_truth=()),
+    )
+
+    ok, message = validator.validate_install_profile(
+        runtime_home="/tmp/nulla-runtime",
+        selected_model="qwen2.5:14b",
+        requested_profile="full-orchestrated",
+    )
+
+    assert ok is False
+    assert "full-orchestrated" in message
+    assert "not ready" in message

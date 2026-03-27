@@ -19,7 +19,11 @@ def _provider_snapshot_and_profile(
     model_tag: str,
     runtime_home: str | Path,
 ) -> tuple[list[dict[str, Any]], InstallProfileTruth]:
-    snapshot = build_provider_registry_snapshot()
+    snapshot = build_provider_registry_snapshot(
+        runtime_home=str(runtime_home),
+        requested_profile=os.environ.get("NULLA_INSTALL_PROFILE"),
+        honor_install_profile=True,
+    )
     install_profile = build_install_profile_truth(
         requested_profile=os.environ.get("NULLA_INSTALL_PROFILE"),
         selected_model=model_tag,

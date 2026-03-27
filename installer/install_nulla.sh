@@ -1208,6 +1208,7 @@ main() {
   say
   say "Visible agent name: ${agent_name}"
   say "Selected model: ${model_tag}"
+  say "Profile: ${install_profile} (${install_profile_summary})"
   say "Start:   ${PROJECT_ROOT}/OpenClaw_NULLA.sh"
   if [[ -n "${DESKTOP_SHORTCUT_PATH}" ]]; then
     say "Desktop: ${DESKTOP_SHORTCUT_PATH}"
@@ -1215,6 +1216,9 @@ main() {
   say "Chat:    ${PROJECT_ROOT}/Talk_To_NULLA.sh"
   say "Probe:   ${PROJECT_ROOT}/Probe_NULLA_Stack.sh"
   say "Credits: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli credits"
+  say "Profiles: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile"
+  say "Local only: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile --set local-only"
+  say "Hybrid Kimi: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile --set hybrid-kimi"
   say
   say "NULLA is now wired for OpenClaw-friendly launch,"
   say "with Ollama checked, hardware-tier model selection applied,"

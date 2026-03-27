@@ -31,6 +31,13 @@ from core.runtime_bootstrap import (
     bootstrap_storage_environment,
 )
 from core.runtime_context import build_runtime_context
+from core.runtime_install_profiles import (
+    INSTALL_PROFILE_CHOICES,
+    active_install_profile_id,
+    build_install_profile_truth,
+    installed_profile_id,
+    persist_install_profile_record,
+)
 from core.runtime_paths import data_path
 from core.trainable_base_manager import stage_trainable_base, trainable_base_status
 from network.signer import get_local_peer_id
@@ -158,7 +165,11 @@ def cmd_summary(json_mode: bool = False, limit: int = 5) -> int:
 
 def cmd_providers(json_mode: bool = False) -> int:
     _bootstrap_cli_storage()
-    snapshot = build_provider_registry_snapshot()
+    context = build_runtime_context(mode="cli_storage")
+    snapshot = build_provider_registry_snapshot(
+        runtime_home=str(context.paths.runtime_home),
+        honor_install_profile=True,
+    )
     rows = list(snapshot.audit_rows)
     if json_mode:
         import json
@@ -201,6 +212,108 @@ def cmd_providers(json_mode: bool = False) -> int:
             print(f"  Warnings:        {'; '.join(row.warnings)}")
         else:
             print("  Warnings:        none")
+    return 0
+
+
+def cmd_install_profile(*, set_profile: str = "", json_mode: bool = False) -> int:
+    _bootstrap_cli_storage()
+    context = build_runtime_context(mode="cli_install_profile")
+    runtime_home = str(context.paths.runtime_home)
+    requested_profile = str(set_profile or "").strip().lower()
+    stored_profile = installed_profile_id(runtime_home)
+    provider_snapshot = build_provider_registry_snapshot(
+        runtime_home=runtime_home,
+        requested_profile=requested_profile or None,
+        honor_install_profile=False,
+    )
+    active_profile = active_install_profile_id(runtime_home=runtime_home, allow_auto=True)
+
+    if requested_profile:
+        profile = build_install_profile_truth(
+            requested_profile=requested_profile,
+            runtime_home=runtime_home,
+            provider_capability_truth=provider_snapshot.capability_truth,
+        )
+        if not profile.ready:
+            message = "; ".join(profile.reasons) or "selected install profile is not ready on this machine"
+            if json_mode:
+                print(
+                    json.dumps(
+                        {
+                            "ok": False,
+                            "requested_profile": requested_profile,
+                            "resolved_profile": profile.to_dict(),
+                            "error": message,
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    )
+                )
+            else:
+                print(f"Install profile switch blocked: {requested_profile}")
+                print(message)
+            return 2
+        saved_profile = profile.profile_id
+        record_path = persist_install_profile_record(
+            runtime_home,
+            saved_profile,
+            selected_model=profile.selected_model,
+        )
+        if json_mode:
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "record_path": str(record_path),
+                        "requested_profile": requested_profile,
+                        "saved_profile": saved_profile,
+                        "resolved_profile": profile.to_dict(),
+                        "next_step": "Restart NULLA to apply the new provider mix.",
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(f"Install profile saved: {saved_profile}")
+            print(f"Resolved profile:     {profile.profile_id} ({profile.label})")
+            print(f"Summary:              {profile.summary}")
+            print(f"Record:               {record_path}")
+            print("Next step:            Restart NULLA to apply the new provider mix.")
+        return 0
+
+    profile = build_install_profile_truth(
+        requested_profile=active_profile or None,
+        runtime_home=runtime_home,
+        provider_capability_truth=provider_snapshot.capability_truth,
+    )
+    if json_mode:
+        print(
+            json.dumps(
+                {
+                    "runtime_home": runtime_home,
+                    "stored_profile_id": stored_profile or "",
+                    "requested_profile_id": active_profile or "",
+                    "available_profiles": list(INSTALL_PROFILE_CHOICES),
+                    "resolved_profile": profile.to_dict(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    print("NULLA install profile")
+    print("=====================")
+    print(f"Runtime home:    {runtime_home}")
+    print(f"Stored profile:  {stored_profile or 'none'}")
+    print(f"Resolved profile:{' ' if profile.profile_id else ''}{profile.profile_id} ({profile.label})")
+    print(f"Summary:         {profile.summary}")
+    print("Available:       " + ", ".join(INSTALL_PROFILE_CHOICES))
+    if profile.reasons:
+        print("Notes:")
+        for reason in profile.reasons:
+            print(f" - {reason}")
     return 0
 
 
@@ -840,6 +953,17 @@ def build_parser() -> argparse.ArgumentParser:
     summary.add_argument("--limit", type=int, default=5, help="Number of recent items to show per section.")
     providers = sub.add_parser("providers", help="Show registered external model providers and declared licenses.")
     providers.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
+    install_profile = sub.add_parser(
+        "install-profile",
+        help="Show or switch the active install/provider profile for this runtime home.",
+    )
+    install_profile.add_argument(
+        "--set",
+        choices=list(INSTALL_PROFILE_CHOICES),
+        default="",
+        help="Persist a new install profile and require a restart before it takes effect.",
+    )
+    install_profile.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     identities = sub.add_parser("identities", help="Show local identity lifecycle, revocations, and key history.")
     identities.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     release = sub.add_parser("release-status", help="Show the current release/update manifest and compatibility contract.")
@@ -993,6 +1117,8 @@ def main() -> int:
         return cmd_summary(json_mode=bool(args.json), limit=int(args.limit))
     if args.command == "providers":
         return cmd_providers(json_mode=bool(args.json))
+    if args.command == "install-profile":
+        return cmd_install_profile(set_profile=str(args.set or ""), json_mode=bool(args.json))
     if args.command == "identities":
         return cmd_identity_report(json_mode=bool(args.json))
     if args.command == "release-status":

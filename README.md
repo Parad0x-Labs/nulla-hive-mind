@@ -75,8 +75,36 @@ bash Probe_NULLA_Stack.sh
 Today that probe is honest about the current support boundary:
 
 - `local_only` and `local_dual_ollama` are real
-- Kimi can be configured later, but it is not a first-class installer/runtime lane yet
+- `local_plus_kimi` is real when `KIMI_API_KEY` or `MOONSHOT_API_KEY` is configured
 - Tether and QVAC are not first-class supported stacks yet
+
+Safe one-line profile shortcuts for macOS / Linux:
+
+```bash
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile local-only && rm -f "$tmp"
+```
+
+```bash
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile local-max && rm -f "$tmp"
+```
+
+```bash
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile hybrid-kimi && rm -f "$tmp"
+```
+
+Profile guidance:
+
+- `local-only`: safest default for smaller machines or anyone who wants no remote dependency.
+- `local-max`: for stronger local boxes, roughly 24 GiB+ unified memory or 20+ GiB VRAM / 48 GiB RAM class hardware.
+- `hybrid-kimi`: best for smaller local boxes that still want a stronger remote queen lane; requires `KIMI_API_KEY` or `MOONSHOT_API_KEY`.
+
+After install, switch profiles without editing env vars:
+
+```bash
+cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile
+cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set local-only
+cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set hybrid-kimi
+```
 
 Manual shortcut:
 
@@ -97,7 +125,7 @@ What the installer does:
 7. installs a machine/provider probe command so the user can see what stack the machine can actually support
 8. on macOS, hands off the final launch to `OpenClaw_NULLA.command` so the running services live under Terminal.app instead of dying with the installer shell
 
-If `KIMI_API_KEY` is configured, the same shared runtime bootstrap truth now also surfaces a real remote Kimi queen lane instead of leaving Kimi as routing-only theory. If `VLLM_BASE_URL` is configured, NULLA now also surfaces a real local `vllm-local` OpenAI-compatible lane. If `LLAMACPP_BASE_URL` is configured, NULLA now also surfaces a real local `llamacpp-local` OpenAI-compatible lane instead of treating local non-Ollama backends as doc debt.
+If `KIMI_API_KEY` or `MOONSHOT_API_KEY` is configured, the same shared runtime bootstrap truth now also surfaces a real remote Kimi queen lane instead of leaving Kimi as routing-only theory. If `VLLM_BASE_URL` is configured, NULLA now also surfaces a real local `vllm-local` OpenAI-compatible lane. If `LLAMACPP_BASE_URL` is configured, NULLA now also surfaces a real local `llamacpp-local` OpenAI-compatible lane instead of treating local non-Ollama backends as doc debt.
 
 Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 

@@ -13,14 +13,16 @@ from typing import Any
 from core.hardware_tier import MachineProbe, QwenTier, probe_machine, select_qwen_tier
 from core.provider_routing import ProviderCapabilityTruth
 
-_PROFILE_IDS = {
+INSTALL_PROFILE_CHOICES = (
     "auto-recommended",
     "local-only",
     "local-max",
     "hybrid-kimi",
     "hybrid-fallback",
     "full-orchestrated",
-}
+)
+
+_PROFILE_IDS = set(INSTALL_PROFILE_CHOICES)
 
 _MODEL_SIZE_GB = {
     "qwen2.5:0.5b": 1.0,
@@ -228,6 +230,52 @@ def default_ollama_models_path(env: Mapping[str, str] | None = None) -> Path:
     if system == "windows":
         return (home / ".ollama" / "models").resolve()
     return (home / ".ollama" / "models").resolve()
+
+
+def normalize_install_profile_id(profile_id: str | None, *, allow_auto: bool = True) -> str:
+    normalized = str(profile_id or "").strip().lower()
+    if not normalized:
+        return ""
+    if normalized not in _PROFILE_IDS:
+        return ""
+    if not allow_auto and normalized == "auto-recommended":
+        return ""
+    return normalized
+
+
+def installed_profile_id(runtime_home: str | Path | None) -> str:
+    return _installed_profile_id(runtime_home)
+
+
+def active_install_profile_id(
+    *,
+    runtime_home: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+    allow_auto: bool = False,
+) -> str:
+    env_map = os.environ if env is None else env
+    requested = normalize_install_profile_id(env_map.get("NULLA_INSTALL_PROFILE"), allow_auto=allow_auto)
+    if requested:
+        return requested
+    return normalize_install_profile_id(_installed_profile_id(runtime_home), allow_auto=allow_auto)
+
+
+def persist_install_profile_record(
+    runtime_home: str | Path,
+    profile_id: str,
+    *,
+    selected_model: str = "",
+) -> Path:
+    runtime_root = Path(runtime_home).expanduser().resolve()
+    target = runtime_root / _INSTALL_PROFILE_RECORD_RELATIVE_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema": "nulla.install_profile_record.v1",
+        "profile_id": str(profile_id or "").strip().lower(),
+        "selected_model": str(selected_model or "").strip(),
+    }
+    target.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return target
 
 
 def _installed_profile_id(runtime_home: str | Path | None) -> str:
@@ -627,9 +675,14 @@ def _has_any_env(env: Mapping[str, str], *keys: str) -> bool:
 
 
 __all__ = [
+    "INSTALL_PROFILE_CHOICES",
     "InstallProfileProvider",
     "InstallProfileTruth",
     "InstallProfileVolumeCheck",
+    "active_install_profile_id",
     "build_install_profile_truth",
     "default_ollama_models_path",
+    "installed_profile_id",
+    "normalize_install_profile_id",
+    "persist_install_profile_record",
 ]
