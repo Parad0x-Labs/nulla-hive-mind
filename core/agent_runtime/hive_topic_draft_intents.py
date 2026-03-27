@@ -35,14 +35,30 @@ def looks_like_hive_topic_create_request(agent: Any, lowered: str) -> bool:
         return False
     if agent._looks_like_hive_topic_drafting_request(text):
         return False
+    explicit_hive_publish_intent = any(
+        marker in text
+        for marker in (
+            "add this to the hive",
+            "add this to hive",
+            "add this to the hive mind",
+            "add this to the hive mind active tasks",
+            "add to the hive",
+            "add to hive",
+            "post this to the hive",
+            "send this to the hive",
+            "push this to the hive",
+            "put this on the hive",
+        )
+    )
     has_create = bool(
         re.search(r"\b(?:create|make|start)\b", text)
+        or explicit_hive_publish_intent
         or "new task" in text
         or "new topic" in text
         or "open a" in text
         or "open new" in text
     )
-    has_target = any(marker in text for marker in ("task", "topic", "thread"))
+    has_target = explicit_hive_publish_intent or any(marker in text for marker in ("task", "topic", "thread"))
     if not (has_create and has_target):
         return False
     if "hive" not in text and "topic" not in text and "create" not in text:

@@ -155,3 +155,25 @@ def test_maybe_handle_hive_create_confirmation_can_cancel_pending_preview() -> N
     assert result["response"] == "Got it -- Hive task discarded. What's next?"
     load_pending.assert_called_once()
     clear_pending.assert_called_once_with("sess-3")
+
+
+def test_maybe_handle_hive_create_confirmation_rejects_orphaned_variant_choice() -> None:
+    agent = _build_agent()
+    task = mock.Mock(task_id="task-123")
+
+    with mock.patch.object(
+        agent,
+        "_load_pending_hive_create",
+        return_value=None,
+    ) as load_pending:
+        result = hive_topic_pending.maybe_handle_hive_create_confirmation(
+            agent,
+            "send improved",
+            task=task,
+            session_id="sess-4",
+            source_context={"surface": "openclaw"},
+        )
+
+    assert result is not None
+    assert "There isn't a pending Hive draft to confirm" in result["response"]
+    load_pending.assert_called_once()

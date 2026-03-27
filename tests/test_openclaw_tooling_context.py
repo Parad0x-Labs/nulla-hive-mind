@@ -2127,6 +2127,44 @@ class OpenClawToolingContextTests(unittest.TestCase):
         self.assertIn("analysis", summary)
         self.assertIn("tradeoff", summary)
 
+    def test_openclaw_add_this_to_hive_prompt_reaches_preview_and_posts(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        request_text = (
+            "Add this to the Hive mind active tasks. "
+            "Exact title: Public install proof for local-first agent Hive participation. "
+            "Exact summary: Research how local-first agent installs should prove real Hive participation after bootstrap."
+        )
+
+        with mock.patch.object(agent.public_hive_bridge, "enabled", return_value=True), mock.patch.object(
+            agent.public_hive_bridge, "write_enabled", return_value=True
+        ), mock.patch.object(
+            agent.public_hive_bridge,
+            "create_public_topic",
+            return_value={"ok": True, "status": "created", "topic_id": "feedbeef-1212-3434-5656-787878787878"},
+        ) as create_public_topic, mock.patch.object(
+            agent.hive_activity_tracker,
+            "note_watched_topic",
+            return_value=None,
+        ):
+            preview = agent.run_once(
+                request_text,
+                session_id_override="openclaw:hive-add-this-preview",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+            confirm = agent.run_once(
+                "send improved",
+                session_id_override="openclaw:hive-add-this-preview",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("Ready to post this to the public Hive", preview["response"])
+        self.assertIn("Created Hive task", confirm["response"])
+        self.assertEqual(
+            create_public_topic.call_args.kwargs["title"],
+            "Public install proof for local-first agent Hive participation",
+        )
+
     def test_openclaw_hive_create_retries_command_like_admission_with_analysis_framing(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
         agent.start()
@@ -2198,6 +2236,19 @@ class OpenClawToolingContextTests(unittest.TestCase):
 
         self.assertIn("Using original draft.", confirm["response"])
         self.assertEqual(create_public_topic.call_args.kwargs["title"], "stand alone nulla brwoser version")
+
+    def test_openclaw_send_improved_without_pending_hive_preview_fails_closed(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        result = agent.run_once(
+            "send improved",
+            session_id_override="openclaw:hive-create-no-pending",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertIn("There isn't a pending Hive draft to confirm", result["response"])
+        self.assertNotIn("Task Added", result["response"])
 
     def test_openclaw_hive_create_yes_original_is_blocked_when_original_is_private(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")

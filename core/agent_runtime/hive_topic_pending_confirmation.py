@@ -45,6 +45,25 @@ def maybe_handle_hive_create_confirmation(
         allow_history_recovery=is_positive or is_negative or bool(variant_choice),
     )
     if pending is None:
+        if variant_choice:
+            return agent._action_fast_path_result(
+                task_id=task.task_id,
+                session_id=session_id,
+                user_input=user_input,
+                response="There isn't a pending Hive draft to confirm. Start with `create hive task: ...` first.",
+                confidence=0.94,
+                source_context=source_context,
+                reason="hive_topic_create_no_pending_confirmation",
+                success=False,
+                details={"status": "no_pending_confirmation"},
+                mode_override="tool_failed",
+                task_outcome="failed",
+                workflow_summary=agent._action_workflow_summary(
+                    operator_kind="hive.create_topic",
+                    dispatch_status="no_pending_confirmation",
+                    details={"action_id": ""},
+                ),
+            )
         return None
 
     if is_positive or bool(variant_choice):

@@ -74,6 +74,23 @@ def test_extract_hive_topic_create_draft_keeps_structured_fields() -> None:
     }
 
 
+def test_extract_hive_topic_create_draft_accepts_add_this_to_hive_prompt() -> None:
+    agent = _build_drafting_agent()
+
+    result = extract_hive_topic_create_draft(
+        agent,
+        "Add this to the Hive mind active tasks. Exact title: Public install proof for local-first agent Hive participation. "
+        "Exact summary: Research how local-first agent installs should prove real Hive participation after bootstrap.",
+    )
+
+    assert result == {
+        "title": "Public install proof for local-first agent Hive participation",
+        "summary": "Research how local-first agent installs should prove real Hive participation after bootstrap",
+        "topic_tags": ["general"],
+        "auto_start_research": False,
+    }
+
+
 def test_extract_original_hive_topic_create_draft_preserves_rawer_title() -> None:
     agent = _build_drafting_agent()
 
@@ -96,6 +113,13 @@ def test_hive_topic_drafting_helpers_keep_expected_detection_behavior() -> None:
     assert clean_hive_title("create hive task: tighten watcher ux") == "Tighten watcher ux"
     assert wants_hive_create_auto_start("create it and start researching") is True
     assert looks_like_hive_topic_create_request(agent, "create new hive task: fix proof receipts") is True
+    assert (
+        looks_like_hive_topic_create_request(
+            agent,
+            "add this to the hive mind active tasks. exact title: public install proof for local-first agent hive participation",
+        )
+        is True
+    )
     assert looks_like_hive_topic_create_request(agent, "show me the open hive tasks") is False
 
 
