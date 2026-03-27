@@ -470,6 +470,8 @@ def ensure_public_hive_auth(
     tls_insecure_skip_verify = bool(
         existing.get("tls_insecure_skip_verify")
         or bundled.get("tls_insecure_skip_verify")
+        or discovered.get("tls_insecure_skip_verify")
+        or sample.get("tls_insecure_skip_verify")
     )
     resolved_watch_host = (
         str(watch_host or "").strip()

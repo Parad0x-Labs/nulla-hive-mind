@@ -605,6 +605,7 @@ def test_ensure_public_hive_auth_hydrates_target_from_discovered_local_cluster_w
                         "https://157.245.211.185:8766",
                         "https://159.65.136.157:8766",
                     ],
+                    "tls_insecure_skip_verify": True,
                 }
             ),
             encoding="utf-8",
@@ -657,6 +658,7 @@ def test_ensure_public_hive_auth_hydrates_target_from_discovered_local_cluster_w
         "https://157.245.211.185:8766": "us-token",
         "https://159.65.136.157:8766": "apac-token",
     }
+    assert payload["tls_insecure_skip_verify"] is True
     find_ssh_key.assert_not_called()
     sync_ssh.assert_not_called()
 
