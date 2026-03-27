@@ -55,6 +55,7 @@ def test_openclaw_launcher_exports_project_root_and_health_waits(tmp_path: Path)
     script = _render_openclaw_launcher(tmp_path)
 
     assert 'cd "${PROJECT_ROOT}"' in script
+    assert 'nohup "${VENV_PY}" -m apps.nulla_api_server --port "${NULLA_OPENCLAW_API_PORT}"' in script
     assert 'wait_for_http_ready() {' in script
     assert 'export NULLA_OPENCLAW_API_URL="${NULLA_OPENCLAW_API_URL:-http://127.0.0.1:${NULLA_OPENCLAW_API_PORT}}"' in script
     assert 'wait_for_http_ready "${NULLA_OPENCLAW_API_URL}/healthz" 30 "${api_pid}" 3' in script

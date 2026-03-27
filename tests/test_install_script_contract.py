@@ -33,6 +33,7 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert 'cd "${PROJECT_ROOT}"' in script
     assert 'export NULLA_HOME="\\${NULLA_HOME:-${runtime_home}}"' in script
     assert 'export NULLA_OPENCLAW_API_URL="\\${NULLA_OPENCLAW_API_URL:-http://127.0.0.1:\\${NULLA_OPENCLAW_API_PORT}}"' in script
+    assert 'nohup "\\${VENV_PY}" -m apps.nulla_api_server --port "\\${NULLA_OPENCLAW_API_PORT}"' in script
     assert 'wait_for_http_ready "\\${NULLA_OPENCLAW_API_URL}/healthz" 30 "\\${api_pid}" 3' in script
     assert 'launch openclaw --yes --model "\\${MODEL_TAG}"' in script
     assert 'launch openclaw --yes --config --model "${model_tag}"' in script
@@ -56,6 +57,12 @@ def test_install_wrappers_forward_install_profile_and_extra_args() -> None:
     assert "%*" in install_bat
     assert "requested_profile=r'%NULLA_INSTALL_PROFILE%'" in install_bat_script
     assert '"%SCRIPT_DIR%validate_install_profile.py"' in install_bat_script
+
+
+def test_windows_launchers_use_module_entrypoint_for_api_server() -> None:
+    install_bat_script = (PROJECT_ROOT / "installer" / "install_nulla.bat").read_text(encoding="utf-8")
+
+    assert '"%VENV_DIR%\\Scripts\\python.exe" -m apps.nulla_api_server' in install_bat_script
 
 
 def test_install_script_surfaces_machine_probe_command() -> None:

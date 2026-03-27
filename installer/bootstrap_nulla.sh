@@ -187,20 +187,29 @@ launch_installer() {
 
   chmod +x "${launcher}" "${guided}" "${canonical}" 2>/dev/null || true
 
+  exec_with_profile_args() {
+    local target="$1"
+    shift || true
+    if [[ ${#profile_args[@]} -gt 0 ]]; then
+      exec "${target}" "$@" "${profile_args[@]}"
+    fi
+    exec "${target}" "$@"
+  }
+
   say "Running NULLA installer..."
   if [[ "${AUTO_START}" -eq 1 ]]; then
     if [[ -f "${launcher}" ]]; then
-      exec "${launcher}" "${profile_args[@]}"
+      exec_with_profile_args "${launcher}"
     fi
     if [[ -f "${canonical}" ]]; then
-      exec "${canonical}" --yes --start --openclaw default "${profile_args[@]}"
+      exec_with_profile_args "${canonical}" --yes --start --openclaw default
     fi
   fi
   if [[ -f "${guided}" ]]; then
-    exec "${guided}" --yes --openclaw default "${profile_args[@]}"
+    exec_with_profile_args "${guided}" --yes --openclaw default
   fi
   if [[ -f "${canonical}" ]]; then
-    exec "${canonical}" --yes --openclaw default "${profile_args[@]}"
+    exec_with_profile_args "${canonical}" --yes --openclaw default
   fi
   say "ERROR: Bootstrap download succeeded, but no usable installer entrypoint was found."
   exit 1
