@@ -171,6 +171,45 @@ class ProviderFailoverTests(unittest.TestCase):
         self.assertEqual(rank_candidates.call_args.kwargs["preferred_provider"], "cloud-fallback-http")
         self.assertEqual(rank_candidates.call_args.kwargs["preferred_model"], "cloud")
 
+    def test_requested_paid_cloud_model_enables_paid_fallback_for_chat_surface(self) -> None:
+        _local_manifest, cloud_manifest = self._register_providers()
+        task = create_task_record("reply with provider identity only")
+        classification = {"task_class": "chat_conversation"}
+        context_result = TieredContextResult(
+            bootstrap_items=[],
+            relevant_items=[],
+            cold_items=[],
+            local_candidates=[],
+            swarm_metadata=[],
+            report=mock.Mock(retrieval_confidence="low", swarm_metadata_consulted=False, cold_archive_opened=False),
+            retrieval_confidence_score=0.15,
+            cold_decision=mock.Mock(allow=False),
+        )
+        context_result.report.to_dict.return_value = {}
+        context_result.report.total_tokens_used.return_value = 0
+        context_result.assembled_context = lambda: "No strong local memory."
+
+        with mock.patch(
+            "core.memory_first_router.rank_provider_candidates",
+            return_value=[cloud_manifest],
+        ) as rank_candidates, mock.patch.object(
+            self.router,
+            "_invoke_manifest",
+            return_value=(None, None, "forced-stop"),
+        ):
+            result = self.router.resolve(
+                task=task,
+                classification=classification,
+                interpretation=self.interpretation,
+                context_result=context_result,
+                persona=self.persona,
+                source_context={"surface": "api", "requested_model": "cloud"},
+            )
+
+        self.assertEqual(result.source, "no_provider_available")
+        self.assertTrue(rank_candidates.call_args.kwargs["allow_paid_fallback"])
+        self.assertEqual(rank_candidates.call_args.kwargs["preferred_model"], "cloud")
+
     def test_circuit_breaker_trips_and_recovers_after_cooldown(self) -> None:
         state = record_provider_failure(
             "local-qwen-http:qwen-local",
