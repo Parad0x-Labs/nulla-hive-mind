@@ -100,7 +100,7 @@ def _ensure_local_ollama_provider(registry: ModelRegistry, *, model_tag: str) ->
                 "keep_alive": "15m",
                 "prompt": " ",
                 "raw": True,
-                "timeout_seconds": 20,
+                "timeout_seconds": 45,
             },
         },
         metadata={
