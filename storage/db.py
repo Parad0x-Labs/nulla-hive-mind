@@ -5,11 +5,11 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from core.runtime_paths import DATA_DIR
+from core.runtime_paths import active_data_dir
 
-# Keep the default path import-safe; directory creation happens when the path is
-# first resolved for a real connection rather than as a side effect of import.
-DEFAULT_DB_PATH = str((DATA_DIR / "nulla_web0_v2.db").resolve())
+# Keep the public default path constant import-safe. The real default connection
+# target is resolved via active runtime home unless an explicit override is set.
+DEFAULT_DB_PATH = str(((Path(__file__).resolve().parents[1] / ".nulla_local" / "data") / "nulla_web0_v2.db").resolve())
 _DEFAULT_DB_PATH_OVERRIDE: str | None = None
 
 _thread_local = threading.local()
@@ -19,6 +19,10 @@ def _resolve_db_path(db_path: str | Path) -> str:
     path = Path(db_path).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     return str(path)
+
+
+def _runtime_default_db_path() -> str:
+    return str((active_data_dir() / "nulla_web0_v2.db").resolve())
 
 
 def _make_connection(db_path: str | Path) -> sqlite3.Connection:
@@ -94,7 +98,7 @@ def configure_default_db_path(db_path: str | Path | None) -> None:
 
 
 def active_default_db_path() -> str:
-    return _DEFAULT_DB_PATH_OVERRIDE or _resolve_db_path(DEFAULT_DB_PATH)
+    return _DEFAULT_DB_PATH_OVERRIDE or _resolve_db_path(_runtime_default_db_path())
 
 
 def get_connection(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
@@ -106,9 +110,13 @@ def get_connection(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     """
     requested_resolved = _resolve_db_path(db_path)
     base_default_resolved = _resolve_db_path(DEFAULT_DB_PATH)
-    effective_db_path = active_default_db_path() if requested_resolved == base_default_resolved else requested_resolved
-    resolved = _resolve_db_path(effective_db_path)
     default_resolved = active_default_db_path()
+    effective_db_path = (
+        default_resolved
+        if requested_resolved in {base_default_resolved, default_resolved}
+        else requested_resolved
+    )
+    resolved = _resolve_db_path(effective_db_path)
 
     # Non-default path: always fresh (used for test isolation etc.)
     if resolved != default_resolved:
