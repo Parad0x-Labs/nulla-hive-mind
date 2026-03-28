@@ -65,6 +65,9 @@ runtime = [
     "zstandard>=0.22.0",
     "xxhash>=3.4.0",
 ]
+proof = [
+    "pytest>=7.0",
+]
 dev = [
     "pytest>=7.0",
     "ruff>=0.3",

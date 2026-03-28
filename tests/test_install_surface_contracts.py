@@ -73,8 +73,8 @@ def test_installers_use_module_entrypoints_and_runtime_extra_without_pythonpath_
     sh_installer = (REPO_ROOT / "installer" / "install_nulla.sh").read_text(encoding="utf-8")
     bat_installer = (REPO_ROOT / "installer" / "install_nulla.bat").read_text(encoding="utf-8")
 
-    assert 'pip install "${PROJECT_ROOT}[runtime]"' in sh_installer
-    assert 'pip install "%PROJECT_ROOT%[runtime]"' in bat_installer
+    assert 'pip install "${PROJECT_ROOT}[runtime,proof]"' in sh_installer
+    assert 'pip install "%PROJECT_ROOT%[runtime,proof]"' in bat_installer
     assert "-m storage.migrations" in sh_installer
     assert "-m storage.migrations" in bat_installer
     assert "-m ops.ensure_public_hive_auth" in sh_installer

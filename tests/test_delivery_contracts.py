@@ -87,3 +87,7 @@ def test_runtime_dependency_lists_cover_yaml_and_psutil() -> None:
     for marker in ("psutil>=5.9", "pyyaml>=6.0"):
         assert marker in requirements
         assert marker in runtime_requirements
+    assert 'proof = [' in pyproject
+    assert '"pytest>=7.0"' in pyproject
+    assert "pytest>=7.0" in requirements
+    assert "pytest>=7.0" in runtime_requirements

@@ -333,10 +333,10 @@ install_dependencies() {
     say "Using bundled wheelhouse from ${WHEELHOUSE_DIR}"
     if ! "${VENV_DIR}/bin/python" -m pip install --no-index --find-links "${WHEELHOUSE_DIR}" -r "${requirements_file}"; then
       say "WARNING: Bundled wheelhouse install failed. Falling back to online dependency install."
-      "${VENV_DIR}/bin/python" -m pip install "${PROJECT_ROOT}[runtime]"
+      "${VENV_DIR}/bin/python" -m pip install "${PROJECT_ROOT}[runtime,proof]"
     fi
   else
-    "${VENV_DIR}/bin/python" -m pip install "${PROJECT_ROOT}[runtime]"
+    "${VENV_DIR}/bin/python" -m pip install "${PROJECT_ROOT}[runtime,proof]"
   fi
 
   if dir_has_files "${WHEELHOUSE_DIR}"; then

@@ -162,10 +162,10 @@ if exist "%WHEELHOUSE_DIR%\*" (
   "%VENV_DIR%\Scripts\python.exe" -m pip install --no-index --find-links "%WHEELHOUSE_DIR%" -r "%REQUIREMENTS_FILE%"
   if %errorlevel% neq 0 (
     echo WARNING: Bundled wheelhouse install failed. Falling back to online install...
-    "%VENV_DIR%\Scripts\python.exe" -m pip install "%PROJECT_ROOT%[runtime]"
+    "%VENV_DIR%\Scripts\python.exe" -m pip install "%PROJECT_ROOT%[runtime,proof]"
   )
 ) else (
-  "%VENV_DIR%\Scripts\python.exe" -m pip install "%PROJECT_ROOT%[runtime]"
+  "%VENV_DIR%\Scripts\python.exe" -m pip install "%PROJECT_ROOT%[runtime,proof]"
 )
 if exist "%WHEELHOUSE_DIR%\*" (
   "%VENV_DIR%\Scripts\python.exe" -m pip install --no-deps "%PROJECT_ROOT%"
