@@ -1478,7 +1478,15 @@ main() {
     say "Launching NULLA now..."
     say "Verifying live launch through the shell launcher..."
     if [[ -n "${LAUNCH_AGENT_PATH}" ]]; then
-      if wait_for_http_ready "http://127.0.0.1:11435/healthz" 120 "" 3; then
+      local launchd_runtime_ready=0
+      for _ in $(seq 1 120); do
+        if curl -sf --max-time 2 "http://127.0.0.1:11435/healthz" >/dev/null 2>&1; then
+          launchd_runtime_ready=1
+          break
+        fi
+        sleep 1
+      done
+      if [[ "${launchd_runtime_ready}" -eq 1 ]]; then
         say "Launchd runtime verified at http://127.0.0.1:11435"
         exit 0
       fi

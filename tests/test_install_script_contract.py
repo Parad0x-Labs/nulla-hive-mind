@@ -61,7 +61,8 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert '${HOME}/.openclaw-default' in script
     assert 'Skipping Ollama OpenClaw auto-config for isolated home' in script
     assert 'say "Verifying live launch through the shell launcher..."' in script
-    assert 'wait_for_http_ready "http://127.0.0.1:11435/healthz" 120 "" 3' in script
+    assert 'local launchd_runtime_ready=0' in script
+    assert 'for _ in $(seq 1 120); do' in script
     assert 'say "Launchd runtime verified at http://127.0.0.1:11435"' in script
     assert 'say "ERROR: launchd installed NULLA, but the API did not become healthy within 120 seconds."' in script
     assert 'exec "${PROJECT_ROOT}/OpenClaw_NULLA.sh"' in script
