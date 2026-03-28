@@ -18,7 +18,11 @@ def validate_install_profile(
     selected_model: str,
     requested_profile: str | None,
 ) -> tuple[bool, str]:
-    snapshot = build_provider_registry_snapshot()
+    snapshot = build_provider_registry_snapshot(
+        runtime_home=runtime_home,
+        requested_profile=requested_profile,
+        honor_install_profile=True,
+    )
     profile = build_install_profile_truth(
         requested_profile=str(requested_profile or "").strip() or None,
         selected_model=selected_model,

@@ -11,7 +11,7 @@ def test_validate_install_profile_blocks_unready_hybrid_kimi(monkeypatch) -> Non
     monkeypatch.setattr(
         validator,
         "build_provider_registry_snapshot",
-        lambda: SimpleNamespace(capability_truth=()),
+        lambda **_: SimpleNamespace(capability_truth=()),
     )
 
     ok, message = validator.validate_install_profile(
@@ -30,7 +30,7 @@ def test_validate_install_profile_accepts_ready_hybrid_kimi(monkeypatch) -> None
     monkeypatch.setattr(
         validator,
         "build_provider_registry_snapshot",
-        lambda: SimpleNamespace(
+        lambda **_: SimpleNamespace(
             capability_truth=(
                 ProviderCapabilityTruth(
                     provider_id="ollama-local:qwen2.5:7b",
@@ -85,7 +85,7 @@ def test_validate_install_profile_blocks_unready_full_orchestrated(monkeypatch) 
     monkeypatch.setattr(
         validator,
         "build_provider_registry_snapshot",
-        lambda: SimpleNamespace(capability_truth=()),
+        lambda **_: SimpleNamespace(capability_truth=()),
     )
 
     ok, message = validator.validate_install_profile(
@@ -104,7 +104,7 @@ def test_validate_install_profile_accepts_ready_hybrid_fallback(monkeypatch) -> 
     monkeypatch.setattr(
         validator,
         "build_provider_registry_snapshot",
-        lambda: SimpleNamespace(
+        lambda **_: SimpleNamespace(
             capability_truth=(
                 ProviderCapabilityTruth(
                     provider_id="ollama-local:qwen2.5:7b",
@@ -152,3 +152,24 @@ def test_validate_install_profile_accepts_ready_hybrid_fallback(monkeypatch) -> 
 
     assert ok is True
     assert message == ""
+
+
+def test_validate_install_profile_passes_requested_profile_to_registry_snapshot(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _snapshot(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(capability_truth=())
+
+    monkeypatch.setattr(validator, "build_provider_registry_snapshot", _snapshot)
+
+    ok, _message = validator.validate_install_profile(
+        runtime_home="/tmp/nulla-runtime",
+        selected_model="qwen2.5:14b",
+        requested_profile="full-orchestrated",
+    )
+
+    assert ok is False
+    assert captured["runtime_home"] == "/tmp/nulla-runtime"
+    assert captured["requested_profile"] == "full-orchestrated"
+    assert captured["honor_install_profile"] is True
