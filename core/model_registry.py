@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from adapters.base_adapter import ModelAdapter
 from adapters.cloud_fallback_provider import CloudFallbackProvider
@@ -76,6 +77,25 @@ class ModelRegistry:
             adapter = self.build_adapter(manifest)
             warnings.extend(adapter.validate_runtime())
         return warnings
+
+    def prewarm_enabled_providers(self) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for manifest in self.list_manifests(enabled_only=True):
+            if not dict(manifest.runtime_config.get("prewarm") or {}):
+                continue
+            adapter = self.build_adapter(manifest)
+            try:
+                results.append(adapter.prewarm())
+            except Exception as exc:
+                results.append(
+                    {
+                        "ok": False,
+                        "provider_id": manifest.provider_id,
+                        "status": "error",
+                        "error": str(exc),
+                    }
+                )
+        return results
 
     def provider_audit_rows(self) -> list[ProviderAuditRow]:
         rows: list[ProviderAuditRow] = []

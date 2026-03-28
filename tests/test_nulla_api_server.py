@@ -290,6 +290,87 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertEqual(manifests[("llamacpp-local", "qwen2.5:14b-gguf")].runtime_config["base_url"], "http://127.0.0.1:8090/v1")
         self.assertEqual(manifests[("llamacpp-local", "qwen2.5:14b-gguf")].metadata["context_window"], 16384)
 
+    def test_ensure_default_provider_adds_honest_ollama_prewarm_config(self) -> None:
+        manifests = {}
+        registry = mock.Mock()
+
+        def _get_manifest(provider_name: str, model_name: str):
+            return manifests.get((provider_name, model_name))
+
+        def _register_manifest(manifest):
+            manifests[(manifest.provider_name, manifest.model_name)] = manifest
+            return manifest
+
+        registry.get_manifest.side_effect = _get_manifest
+        registry.register_manifest.side_effect = _register_manifest
+
+        _ensure_default_provider(registry, "qwen2.5:14b")
+
+        manifest = manifests[("ollama-local", "qwen2.5:14b")]
+        self.assertEqual(manifest.runtime_config["prewarm"]["strategy"], "ollama_generate")
+        self.assertEqual(manifest.runtime_config["prewarm"]["keep_alive"], "15m")
+
+    def test_bootstrap_runtime_services_runs_provider_prewarm_logging(self) -> None:
+        persona = mock.Mock(persona_id="default")
+        agent = mock.Mock()
+        daemon = mock.Mock()
+        compute_daemon = mock.Mock()
+        model_registry = mock.Mock()
+        model_registry.startup_warnings.return_value = []
+
+        with mock.patch("core.web.api.runtime.bootstrap_runtime_mode", return_value=mock.Mock(backend_selection=mock.Mock(backend_name="mlx", device="mps"))), mock.patch(
+            "core.web.api.runtime.is_first_boot",
+            return_value=False,
+        ), mock.patch("core.credit_ledger.ensure_starter_credits", return_value=False), mock.patch(
+            "core.web.api.runtime.ensure_public_hive_auth",
+            return_value={"ok": True, "status": "ok"},
+        ), mock.patch(
+            "core.web.api.runtime.probe_machine",
+            return_value=mock.Mock(accelerator="mps", gpu_name="Apple GPU"),
+        ), mock.patch(
+            "core.web.api.runtime.select_qwen_tier",
+            return_value=mock.Mock(ollama_tag="qwen2.5:14b"),
+        ), mock.patch(
+            "core.web.api.runtime.ensure_ollama_model",
+        ), mock.patch(
+            "core.web.api.runtime.build_runtime_version_stamp",
+            return_value={"started_at": "2026-03-28T00:00:00.000000Z", "build_id": "test", "branch": "main", "commit": "abc123", "dirty": False},
+        ), mock.patch(
+            "core.web.api.runtime.ComputeModeDaemon",
+            return_value=compute_daemon,
+        ), mock.patch(
+            "core.web.api.runtime.ModelRegistry",
+            return_value=model_registry,
+        ), mock.patch(
+            "core.web.api.runtime.ensure_default_provider",
+        ), mock.patch(
+            "core.web.api.runtime.log_prewarm_results",
+        ) as log_prewarm, mock.patch(
+            "core.web.api.runtime.load_active_persona",
+            return_value=persona,
+        ), mock.patch(
+            "core.web.api.runtime.get_agent_display_name",
+            return_value="NULLA",
+        ), mock.patch(
+            "core.web.api.runtime.ensure_openclaw_registration",
+            return_value=True,
+        ), mock.patch(
+            "core.web.api.runtime.NullaAgent",
+            return_value=agent,
+        ), mock.patch(
+            "core.web.api.runtime.resolve_local_worker_capacity",
+            return_value=(3, 3),
+        ), mock.patch(
+            "core.web.api.runtime.NullaDaemon",
+            return_value=daemon,
+        ):
+            bootstrap_runtime_services(
+                project_root=PROJECT_ROOT,
+                workstation_version="test-workstation",
+            )
+
+        log_prewarm.assert_called_once_with(model_registry)
+
     def test_normalize_chat_history_keeps_full_user_assistant_sequence(self) -> None:
         history = _normalize_chat_history(
             [

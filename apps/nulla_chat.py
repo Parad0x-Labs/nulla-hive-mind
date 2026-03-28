@@ -8,6 +8,25 @@ from core.onboarding import get_agent_display_name, is_first_boot, run_onboardin
 from core.runtime_backbone import build_runtime_backbone
 
 
+def _print_prewarm_results(results: tuple[dict[str, object], ...]) -> None:
+    if not results:
+        return
+    print("Provider prewarm:")
+    for result in results:
+        provider_id = str(result.get("provider_id") or "unknown-provider")
+        status = str(result.get("status") or "unknown").strip() or "unknown"
+        if result.get("ok") and status == "prewarmed":
+            keep_alive = str(result.get("keep_alive") or "").strip() or "unspecified"
+            print(f" - {provider_id}: prewarmed (keep_alive={keep_alive})")
+            continue
+        if result.get("ok"):
+            reason = str(result.get("reason") or "unspecified").strip() or "unspecified"
+            print(f" - {provider_id}: skipped ({reason})")
+            continue
+        error = str(result.get("error") or "unknown_error").strip() or "unknown_error"
+        print(f" - {provider_id}: failed ({error})")
+
+
 def _bootstrap_agent(*, persona_id: str, device: str) -> NullaAgent:
     backbone = build_runtime_backbone(
         mode="chat",
@@ -41,6 +60,7 @@ def _bootstrap_agent(*, persona_id: str, device: str) -> NullaAgent:
         print("Model provider warnings:")
         for warning in provider_warnings:
             print(f" - {warning}")
+    _print_prewarm_results(backbone.provider_snapshot.prewarm_results)
 
     selection = backbone.boot.backend_selection
     if selection is None:

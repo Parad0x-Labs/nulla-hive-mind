@@ -199,6 +199,42 @@ def ensure_default_provider(registry: ModelRegistry, model_tag: str) -> None:
         logger.info("Auto-registered default provider: %s", provider_id)
 
 
+def log_prewarm_results(registry: ModelRegistry) -> None:
+    try:
+        raw_results = registry.prewarm_enabled_providers()
+    except Exception as exc:
+        logger.warning("Provider prewarm enumeration failed: %s", exc)
+        return
+    if not isinstance(raw_results, (list, tuple)):
+        return
+    for result in raw_results:
+        provider_id = str(result.get("provider_id") or "unknown-provider")
+        status = str(result.get("status") or "unknown").strip() or "unknown"
+        if result.get("ok") and status == "prewarmed":
+            logger.info(
+                "Provider prewarmed: %s | keep_alive=%s | load_duration=%s | total_duration=%s",
+                provider_id,
+                result.get("keep_alive"),
+                result.get("load_duration"),
+                result.get("total_duration"),
+            )
+            continue
+        if result.get("ok"):
+            logger.info(
+                "Provider prewarm skipped: %s | status=%s | reason=%s",
+                provider_id,
+                status,
+                result.get("reason") or "unspecified",
+            )
+            continue
+        logger.warning(
+            "Provider prewarm failed: %s | status=%s | error=%s",
+            provider_id,
+            status,
+            result.get("error") or "unknown_error",
+        )
+
+
 def public_hive_auth_snapshot(auth_result: dict[str, Any] | None) -> dict[str, Any]:
     payload = dict(auth_result or {})
     status = str(payload.get("status") or "unknown").strip() or "unknown"
@@ -292,6 +328,7 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
     ensure_default_provider(model_registry, runtime_model_tag)
     for warning in model_registry.startup_warnings():
         logger.warning("Model warning: %s", warning)
+    log_prewarm_results(model_registry)
 
     selection = boot.backend_selection
     if selection is None:

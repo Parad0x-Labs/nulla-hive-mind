@@ -190,6 +190,61 @@ class ModelIntegrationTests(unittest.TestCase):
         self.assertEqual(candidate.provider_name, "helper-http")
         self.assertIn("license_name", candidate.provenance)
 
+    def test_registry_prewarms_only_manifests_that_declare_prewarm(self) -> None:
+        warm_manifest = self.registry.register_manifest(
+            {
+                "provider_name": "ollama-local",
+                "model_name": "qwen2.5:14b",
+                "source_type": "http",
+                "adapter_type": "local_qwen_provider",
+                "license_name": "Apache-2.0",
+                "license_url_or_reference": "https://www.apache.org/licenses/LICENSE-2.0",
+                "weight_location": "external",
+                "redistribution_allowed": True,
+                "runtime_dependency": "ollama",
+                "capabilities": ["classify"],
+                "runtime_config": {
+                    "base_url": "http://127.0.0.1:11434",
+                    "prewarm": {"strategy": "ollama_generate"},
+                },
+                "metadata": {"runtime_family": "ollama"},
+                "enabled": True,
+            }
+        )
+        self.registry.register_manifest(
+            {
+                "provider_name": "vllm-local",
+                "model_name": "qwen2.5:32b",
+                "source_type": "http",
+                "adapter_type": "openai_compatible",
+                "license_name": "Apache-2.0",
+                "license_url_or_reference": "https://www.apache.org/licenses/LICENSE-2.0",
+                "weight_location": "external",
+                "redistribution_allowed": True,
+                "runtime_dependency": "vllm",
+                "capabilities": ["classify"],
+                "runtime_config": {"base_url": "http://127.0.0.1:8100/v1"},
+                "metadata": {"runtime_family": "openai-compatible"},
+                "enabled": True,
+            }
+        )
+
+        with mock.patch.object(self.registry, "build_adapter") as build_adapter:
+            adapter = mock.Mock()
+            adapter.prewarm.return_value = {
+                "ok": True,
+                "provider_id": warm_manifest.provider_id,
+                "status": "prewarmed",
+            }
+            build_adapter.return_value = adapter
+
+            results = self.registry.prewarm_enabled_providers()
+
+        self.assertEqual(results, [{"ok": True, "provider_id": warm_manifest.provider_id, "status": "prewarmed"}])
+        build_adapter.assert_called_once()
+        called_manifest = build_adapter.call_args.args[0]
+        self.assertEqual(called_manifest.provider_id, warm_manifest.provider_id)
+
     def test_teacher_pipeline_drone_swarm_picks_best_candidate_and_tracks_swarm(self) -> None:
         self.registry.register_manifest(
             {

@@ -88,6 +88,13 @@ def _ensure_local_ollama_provider(registry: ModelRegistry, *, model_tag: str) ->
             "health_timeout_seconds": 10,
             "temperature": 0.7,
             "supports_json_mode": False,
+            "prewarm": {
+                "strategy": "ollama_generate",
+                "keep_alive": "15m",
+                "prompt": " ",
+                "raw": True,
+                "timeout_seconds": 20,
+            },
         },
         metadata={
             "runtime_family": "ollama",

@@ -18,6 +18,7 @@ class ProviderRegistrySnapshot:
     warnings: tuple[str, ...]
     audit_rows: tuple[ProviderAuditRow, ...]
     capability_truth: tuple[ProviderCapabilityTruth, ...]
+    prewarm_results: tuple[dict[str, Any], ...] = tuple()
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ def build_provider_registry_snapshot(
     runtime_home: str | None = None,
     requested_profile: str | None = None,
     honor_install_profile: bool = False,
+    run_prewarm: bool = False,
     env: dict[str, str] | None = None,
 ) -> ProviderRegistrySnapshot:
     active_registry = registry or ModelRegistry()
@@ -61,10 +63,17 @@ def build_provider_registry_snapshot(
         manifests = tuple(active_registry.list_manifests(enabled_only=True))
     except Exception:
         manifests = tuple()
+    prewarm_results: tuple[dict[str, Any], ...] = tuple()
+    if run_prewarm:
+        try:
+            prewarm_results = tuple(active_registry.prewarm_enabled_providers())
+        except Exception:
+            prewarm_results = tuple()
     return ProviderRegistrySnapshot(
         warnings=tuple(active_registry.startup_warnings()),
         audit_rows=tuple(active_registry.provider_audit_rows()),
         capability_truth=tuple(provider_capability_truth_for_manifest(manifest) for manifest in manifests),
+        prewarm_results=prewarm_results,
     )
 
 
@@ -104,6 +113,7 @@ def build_runtime_backbone(
         if getattr(getattr(boot, "context", None), "paths", None) is not None
         else None,
         honor_install_profile=True,
+        run_prewarm=True,
     )
     install_profile = build_install_profile_truth(
         probe=probe,

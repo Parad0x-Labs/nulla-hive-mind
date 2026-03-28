@@ -46,6 +46,14 @@ class ModelAdapter(ABC):
     def health_check(self) -> dict[str, Any]:
         return {"ok": True, "provider_id": self.manifest.provider_id}
 
+    def prewarm(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "provider_id": self.manifest.provider_id,
+            "status": "skipped",
+            "reason": "not_supported",
+        }
+
     def list_capabilities(self) -> list[str]:
         return list(self.manifest.capabilities)
 
