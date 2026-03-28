@@ -334,13 +334,50 @@ def test_openai_adapter_stream_text_task_yields_incremental_chunks() -> None:
     response = mock.Mock()
     response.raise_for_status.return_value = None
     response.iter_lines.return_value = [
-        'data: {"choices":[{"delta":{"content":"hello"}}]}',
-        'data: {"choices":[{"delta":{"content":" world"}}]}',
-        "data: [DONE]",
+        b'data: {"choices":[{"delta":{"content":"hello"}}]}',
+        b'data: {"choices":[{"delta":{"content":" world"}}]}',
+        b"data: [DONE]",
     ]
 
     with mock.patch("adapters.openai_compatible_adapter.requests.post", return_value=response):
         chunks = list(adapter.stream_text_task(request))
 
     assert [chunk.delta_text for chunk in chunks if chunk.delta_text] == ["hello", " world"]
+    assert chunks[-1].done is True
+
+
+def test_openai_adapter_stream_text_task_handles_native_ollama_bytes() -> None:
+    adapter = OpenAICompatibleAdapter(
+        SimpleNamespace(
+            provider_id="ollama-local:qwen2.5:14b",
+            model_name="qwen2.5:14b",
+            metadata={"runtime_family": "ollama", "deployment_class": "local"},
+            runtime_config={
+                "base_url": "http://127.0.0.1:11434/v1",
+                "timeout_seconds": 5.0,
+                "temperature": 0.4,
+            },
+        )
+    )
+    request = _to_model_request(
+        _normalize_request(
+            "Reply with exactly: stream model ok",
+            task_class="chat_conversation",
+            task_kind="conversation",
+            output_mode="plain_text",
+        )
+    )
+    response = mock.Mock()
+    response.raise_for_status.return_value = None
+    response.iter_lines.return_value = [
+        b'{"model":"qwen2.5:14b","message":{"role":"assistant","content":"stream"},"done":false}',
+        b'{"model":"qwen2.5:14b","message":{"role":"assistant","content":" model"},"done":false}',
+        b'{"model":"qwen2.5:14b","message":{"role":"assistant","content":" ok"},"done":false}',
+        b'{"model":"qwen2.5:14b","message":{"role":"assistant","content":""},"done":true}',
+    ]
+
+    with mock.patch("adapters.openai_compatible_adapter.requests.post", return_value=response):
+        chunks = list(adapter.stream_text_task(request))
+
+    assert [chunk.delta_text for chunk in chunks if chunk.delta_text] == ["stream", " model", " ok"]
     assert chunks[-1].done is True

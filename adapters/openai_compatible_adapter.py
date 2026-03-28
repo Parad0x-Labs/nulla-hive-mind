@@ -208,7 +208,7 @@ class OpenAICompatibleAdapter(ModelAdapter):
         response.raise_for_status()
         try:
             for raw_line in response.iter_lines(decode_unicode=True):
-                line = str(raw_line or "").strip()
+                line = _normalize_stream_line(raw_line)
                 if not line:
                     continue
                 event = _parse_stream_line(line)
@@ -239,7 +239,7 @@ class OpenAICompatibleAdapter(ModelAdapter):
         response.raise_for_status()
         try:
             for raw_line in response.iter_lines(decode_unicode=True):
-                line = str(raw_line or "").strip()
+                line = _normalize_stream_line(raw_line)
                 if not line:
                     continue
                 event = _parse_stream_line(line)
@@ -408,6 +408,14 @@ def _extract_stream_delta_text(payload: dict[str, Any]) -> str:
     if isinstance(fallback, str):
         return fallback
     return ""
+
+
+def _normalize_stream_line(raw_line: Any) -> str:
+    if raw_line is None:
+        return ""
+    if isinstance(raw_line, bytes):
+        return raw_line.decode("utf-8", errors="replace").strip()
+    return str(raw_line).strip()
 
 
 def _native_ollama_base_url(base_url: str) -> str:
