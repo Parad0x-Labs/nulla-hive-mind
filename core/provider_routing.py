@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import urlparse
 
 from core import policy_engine
 from core.model_health import get_provider_health
@@ -471,7 +473,20 @@ def _role_bonus(manifest: ModelProviderManifest, role: ProviderRole) -> float:
 
 def _is_local_http(manifest: ModelProviderManifest) -> bool:
     base_url = str((manifest.runtime_config or {}).get("base_url") or "").strip().lower()
-    return base_url.startswith("http://127.0.0.1") or base_url.startswith("http://localhost")
+    if not base_url:
+        return False
+    try:
+        hostname = str(urlparse(base_url).hostname or "").strip().lower()
+    except Exception:
+        hostname = ""
+    if not hostname:
+        return False
+    if hostname == "localhost":
+        return True
+    try:
+        return ip_address(hostname).is_loopback or ip_address(hostname).is_unspecified
+    except ValueError:
+        return False
 
 
 def provider_capability_truth_for_manifest(manifest: ModelProviderManifest) -> ProviderCapabilityTruth:
