@@ -6,7 +6,13 @@ from unittest import mock
 
 from core.hardware_tier import MachineProbe, QwenTier
 from core.provider_routing import ProviderCapabilityTruth
-from core.runtime_install_profiles import build_install_profile_truth, normalize_install_profile_id
+from core.runtime_install_profiles import (
+    build_install_profile_truth,
+    format_install_profile_id,
+    install_profile_display_choices,
+    normalize_install_profile_id,
+    preferred_install_profile_id,
+)
 
 
 def _fake_disk_usage_with_free_gb(free_gb: float) -> mock.Mock:
@@ -19,6 +25,40 @@ def test_normalize_install_profile_id_accepts_user_friendly_ollama_aliases() -> 
     assert normalize_install_profile_id("ollama-only") == "local-only"
     assert normalize_install_profile_id("ollama-max") == "local-max"
     assert normalize_install_profile_id("ollama+kimi") == "hybrid-kimi"
+
+
+def test_install_profile_display_helpers_prefer_operator_facing_aliases() -> None:
+    assert preferred_install_profile_id("local-only", allow_auto=False) == "ollama-only"
+    assert format_install_profile_id("local-only", allow_auto=False) == "ollama-only (local-only)"
+    assert install_profile_display_choices()[:4] == (
+        "auto-recommended",
+        "ollama-only (local-only)",
+        "ollama-max (local-max)",
+        "ollama+kimi (hybrid-kimi)",
+    )
+
+
+def test_explicit_request_reason_stays_explicit_instead_of_claiming_env_override() -> None:
+    probe = MachineProbe(
+        cpu_cores=12,
+        ram_gb=24.0,
+        gpu_name="Apple Silicon",
+        vram_gb=24.0,
+        accelerator="mps",
+    )
+    tier = QwenTier("mid", "qwen2.5:14b", 14.0, 10.0, 24.0)
+    with mock.patch("core.runtime_install_profiles.shutil.disk_usage", return_value=_fake_disk_usage_with_free_gb(128.0)):
+        profile = build_install_profile_truth(
+            requested_profile="ollama-only",
+            probe=probe,
+            tier=tier,
+            selected_model="qwen2.5:14b",
+            env={"NULLA_INSTALLED_OLLAMA_MODELS": json.dumps(["qwen2.5:14b"])},
+            runtime_home="/tmp/nulla-runtime",
+        )
+
+    assert profile.profile_id == "local-only"
+    assert any("requested explicitly as `ollama-only`" in reason for reason in profile.reasons)
 
 
 def test_auto_profile_prefers_hybrid_kimi_on_smaller_host_when_kimi_is_configured() -> None:
@@ -244,6 +284,7 @@ def test_installed_profile_record_is_used_when_no_env_override_is_present() -> N
 
     assert profile.profile_id == "hybrid-kimi"
     assert profile.selection_source == "installed_default"
+    assert any("operator lane `ollama+kimi`" in reason for reason in profile.reasons)
 
 
 def test_explicit_full_orchestrated_profile_fails_closed_when_keys_and_space_are_missing() -> None:

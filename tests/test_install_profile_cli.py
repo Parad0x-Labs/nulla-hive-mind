@@ -59,8 +59,8 @@ def test_cmd_install_profile_shows_current_profile(capsys) -> None:
     )
     out = capsys.readouterr().out
     assert "NULLA install profile" in out
-    assert "Stored profile:  local-only" in out
-    assert "Resolved profile: local-only" in out
+    assert "Stored profile:  ollama-only (local-only)" in out
+    assert "Resolved profile: ollama-only (local-only)" in out
 
 
 def test_cmd_install_profile_persists_ready_profile_and_requests_restart(capsys) -> None:
@@ -88,7 +88,7 @@ def test_cmd_install_profile_persists_ready_profile_and_requests_restart(capsys)
         selected_model="qwen2.5:7b",
     )
     out = capsys.readouterr().out
-    assert "Install profile saved: local-only" in out
+    assert "Install profile saved: ollama-only (local-only)" in out
     assert "Restart NULLA to apply the new provider mix." in out
 
 
@@ -117,7 +117,7 @@ def test_cmd_install_profile_accepts_ollama_only_alias(capsys) -> None:
         selected_model="qwen2.5:7b",
     )
     out = capsys.readouterr().out
-    assert "Install profile saved: local-only" in out
+    assert "Install profile saved: ollama-only (local-only)" in out
 
 
 def test_cmd_install_profile_persists_resolved_profile_when_auto_recommended_is_requested(capsys) -> None:
@@ -148,8 +148,8 @@ def test_cmd_install_profile_persists_resolved_profile_when_auto_recommended_is_
         selected_model="qwen2.5:7b",
     )
     out = capsys.readouterr().out
-    assert "Install profile saved: hybrid-kimi" in out
-    assert "Resolved profile:     hybrid-kimi" in out
+    assert "Install profile saved: ollama+kimi (hybrid-kimi)" in out
+    assert "Resolved profile:     ollama+kimi (hybrid-kimi)" in out
 
 
 def test_cmd_install_profile_blocks_unready_profile_switch(capsys) -> None:

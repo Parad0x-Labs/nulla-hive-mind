@@ -490,6 +490,15 @@ print(profile.profile_id)
 }
 
 
+detect_install_profile_display() {
+  local install_profile="$1"
+  "${VENV_DIR}/bin/python" -c "
+from core.runtime_install_profiles import format_install_profile_id
+print(format_install_profile_id('${install_profile}', allow_auto=False))
+" 2>/dev/null || echo "${install_profile}"
+}
+
+
 detect_install_profile_summary() {
   local runtime_home="$1"
   local model_tag="$2"
@@ -1230,8 +1239,10 @@ main() {
   local hardware_summary
   local model_tag
   local recommended_install_profile
+  local recommended_install_profile_display
   local requested_install_profile
   local install_profile
+  local install_profile_display
   local install_profile_summary
   local openclaw_home_override
   hardware_summary="$(detect_hardware_summary)"
@@ -1245,14 +1256,16 @@ main() {
     requested_install_profile="auto-recommended"
   fi
   install_profile="$(detect_install_profile "${runtime_home}" "${model_tag}" "${requested_install_profile}")"
+  recommended_install_profile_display="$(detect_install_profile_display "${recommended_install_profile}")"
+  install_profile_display="$(detect_install_profile_display "${install_profile}")"
   ensure_profile_remote_credentials "${install_profile}"
   install_profile_summary="$(detect_install_profile_summary "${runtime_home}" "${model_tag}" "${requested_install_profile}")"
   openclaw_home_override="$(resolve_openclaw_home_override)"
   say "Step 6/14: Hardware probe complete."
   say "Detected: ${hardware_summary}"
   say "Selected model: ${model_tag}"
-  say "Recommended profile: ${recommended_install_profile}"
-  say "Install profile: ${install_profile}"
+  say "Recommended profile: ${recommended_install_profile_display}"
+  say "Install profile: ${install_profile_display}"
   say "Profile summary: ${install_profile_summary}"
   validate_selected_install_profile "${runtime_home}" "${model_tag}" "${install_profile}"
   persist_install_profile_record "${runtime_home}" "${install_profile}" "${model_tag}"

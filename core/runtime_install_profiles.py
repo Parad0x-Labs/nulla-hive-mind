@@ -40,6 +40,11 @@ _PROFILE_ALIASES = {
     "hybrid_fallback": "hybrid-fallback",
     "full_orchestrated": "full-orchestrated",
 }
+_PROFILE_DISPLAY_IDS = {
+    "local-only": "ollama-only",
+    "local-max": "ollama-max",
+    "hybrid-kimi": "ollama+kimi",
+}
 
 _MODEL_SIZE_GB = {
     "qwen2.5:0.5b": 1.0,
@@ -143,7 +148,7 @@ class InstallProfileTruth:
     def display_summary(self) -> str:
         provider_roles = ", ".join(f"{item.role}:{item.provider_id}" for item in self.provider_mix)
         return (
-            f"{self.profile_id} -> {self.selected_model} "
+            f"{format_install_profile_id(self.profile_id)} -> {self.selected_model} "
             f"({provider_roles}; download~{self.estimated_download_gb:.1f} GB; "
             f"disk~{self.estimated_disk_footprint_gb:.1f} GB)"
         )
@@ -162,7 +167,9 @@ def build_install_profile_truth(
     env_map = os.environ if env is None else env
     active_probe = probe or probe_machine()
     active_tier = tier or select_qwen_tier(active_probe)
-    requested_raw = str(requested_profile or env_map.get("NULLA_INSTALL_PROFILE") or "").strip().lower()
+    requested_arg_raw = str(requested_profile or "").strip().lower()
+    requested_env_raw = str(env_map.get("NULLA_INSTALL_PROFILE") or "").strip().lower()
+    requested_raw = requested_arg_raw or requested_env_raw
     requested = normalize_install_profile_id(requested_raw, allow_auto=True)
     requested_source = "env_override" if requested else ""
     if not requested:
@@ -185,10 +192,10 @@ def build_install_profile_truth(
     if requested:
         if requested_source == "installed_record":
             selection_source = "installed_default"
-            selection_reasons = [f"Install profile came from the installed runtime profile `{requested}`."]
+            selection_reasons = [_installed_profile_reason(requested)]
         else:
             selection_source = "env_override"
-            selection_reasons = [f"Install profile came from NULLA_INSTALL_PROFILE={requested}."]
+            selection_reasons = [_requested_profile_reason(requested_raw, requested, explicit_request=bool(requested_arg_raw))]
         return _compose_install_profile_truth(
             profile_id=requested,
             selection_source=selection_source,
@@ -265,6 +272,27 @@ def normalize_install_profile_id(profile_id: str | None, *, allow_auto: bool = T
     return normalized
 
 
+def preferred_install_profile_id(profile_id: str | None, *, allow_auto: bool = True) -> str:
+    normalized = normalize_install_profile_id(profile_id, allow_auto=allow_auto)
+    if not normalized:
+        return ""
+    return _PROFILE_DISPLAY_IDS.get(normalized, normalized)
+
+
+def format_install_profile_id(profile_id: str | None, *, allow_auto: bool = True) -> str:
+    normalized = normalize_install_profile_id(profile_id, allow_auto=allow_auto)
+    if not normalized:
+        return ""
+    preferred = preferred_install_profile_id(normalized, allow_auto=allow_auto)
+    if preferred == normalized:
+        return normalized
+    return f"{preferred} ({normalized})"
+
+
+def install_profile_display_choices() -> tuple[str, ...]:
+    return tuple(format_install_profile_id(choice) for choice in INSTALL_PROFILE_CHOICES)
+
+
 def installed_profile_id(runtime_home: str | Path | None) -> str:
     return _installed_profile_id(runtime_home)
 
@@ -317,6 +345,26 @@ def _installed_profile_id(runtime_home: str | Path | None) -> str:
     if profile_id in _PROFILE_IDS:
         return profile_id
     return ""
+
+
+def _requested_profile_reason(requested_raw: str, requested: str, *, explicit_request: bool) -> str:
+    if explicit_request:
+        if requested_raw != requested:
+            return f"Install profile was requested explicitly as `{requested_raw}` and resolved to `{requested}`."
+        return f"Install profile was requested explicitly as `{requested}`."
+    if requested_raw != requested:
+        return f"Install profile came from NULLA_INSTALL_PROFILE={requested_raw} and resolved to `{requested}`."
+    return f"Install profile came from NULLA_INSTALL_PROFILE={requested}."
+
+
+def _installed_profile_reason(profile_id: str) -> str:
+    preferred = preferred_install_profile_id(profile_id, allow_auto=False)
+    if preferred != profile_id:
+        return (
+            f"Install profile came from the installed runtime profile `{profile_id}` "
+            f"(operator lane `{preferred}`)."
+        )
+    return f"Install profile came from the installed runtime profile `{profile_id}`."
 
 
 def _compose_install_profile_truth(
@@ -888,8 +936,11 @@ __all__ = [
     "active_install_profile_id",
     "build_install_profile_truth",
     "default_ollama_models_path",
+    "format_install_profile_id",
     "installed_profile_id",
+    "install_profile_display_choices",
     "normalize_install_profile_id",
     "persist_install_profile_record",
+    "preferred_install_profile_id",
     "required_ollama_models_for_profile",
 ]

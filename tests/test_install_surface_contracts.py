@@ -175,5 +175,8 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     assert "install-profile --set ollama-only" in install_doc
     assert "install-profile --set ollama+kimi" in install_doc
     assert "ollama-only" in sh_bootstrap
+    assert "detect_install_profile_display" in sh_installer
+    assert "Recommended profile: ${recommended_install_profile_display}" in sh_installer
+    assert "Install profile: ${install_profile_display}" in sh_installer
     assert "local_plus_kimi" in readme
     assert "first-class installer/runtime lane yet" not in readme

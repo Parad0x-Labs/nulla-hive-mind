@@ -18,7 +18,11 @@ if PROJECT_ROOT not in sys.path:
 from core.hardware_tier import MachineProbe, select_qwen_tier, tier_summary
 from core.provider_routing import ProviderCapabilityTruth
 from core.runtime_backbone import build_provider_registry_snapshot
-from core.runtime_install_profiles import build_install_profile_truth, default_ollama_models_path
+from core.runtime_install_profiles import (
+    build_install_profile_truth,
+    default_ollama_models_path,
+    format_install_profile_id,
+)
 
 
 def detect_ollama_binary() -> str:
@@ -389,6 +393,10 @@ def build_probe_report(
 
     for stack in stacks:
         stack["recommended"] = stack.get("install_profile_id") == profile_truth.profile_id
+        install_profile_id = str(stack.get("install_profile_id") or "").strip()
+        stack["install_profile_display_id"] = (
+            format_install_profile_id(install_profile_id, allow_auto=False) if install_profile_id else ""
+        )
     recommended = next((item for item in stacks if item.get("recommended")), stacks[0])
     report = {
         "schema": "nulla.provider_probe.v1",
@@ -401,6 +409,7 @@ def build_probe_report(
         "remote_env": envs,
         "local_multi_llm_fit": local_fit,
         "recommended_install_profile_id": profile_truth.profile_id,
+        "recommended_install_profile_display_id": format_install_profile_id(profile_truth.profile_id, allow_auto=False),
         "recommended_install_profile_label": profile_truth.label,
         "recommended_install_profile_summary": profile_truth.summary,
         "recommended_stack_id": str(recommended.get("stack_id") or ""),
@@ -426,11 +435,14 @@ def render_probe_report(report: dict[str, Any]) -> str:
     ]
     installed = [str(item.get("name") or "").strip() for item in list(ollama.get("installed_models") or []) if str(item.get("name") or "").strip()]
     lines.append(f"- installed local models: {', '.join(installed) if installed else 'none'}")
-    lines.append(f"- recommended install profile: {report.get('recommended_install_profile_id') or 'unknown'}")
+    display_profile_id = str(report.get("recommended_install_profile_display_id") or "").strip()
+    lines.append(
+        f"- recommended install profile: {display_profile_id or report.get('recommended_install_profile_id') or 'unknown'}"
+    )
     lines.append(f"- recommended stack: {report.get('recommended_stack_id') or 'unknown'}")
     lines.append("- stack status:")
     for stack in stacks:
-        install_profile_id = str(stack.get("install_profile_id") or "").strip()
+        install_profile_id = str(stack.get("install_profile_display_id") or stack.get("install_profile_id") or "").strip()
         profile_suffix = f" -> {install_profile_id}" if install_profile_id else ""
         lines.append(f"  - {stack.get('stack_id')}{profile_suffix}: {stack.get('status')} — {stack.get('reason')}")
     if unsupported_stacks:

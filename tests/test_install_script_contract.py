@@ -33,7 +33,9 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert 'persist_install_profile_record() {' in script
     assert 'persist_provider_env_file() {' in script
     assert 'PROVIDER_ENV_FILE="\\${NULLA_HOME}/config/provider-env.sh"' in script
-    assert 'Recommended profile: ${recommended_install_profile}' in script
+    assert 'detect_install_profile_display() {' in script
+    assert 'Recommended profile: ${recommended_install_profile_display}' in script
+    assert 'Install profile: ${install_profile_display}' in script
     assert 'wait_for_http_ready() {' in script
     assert 'spawn_detached() {' in script
     assert 'curl -sf --max-time 2 "\\${url}" >/dev/null 2>&1' in script

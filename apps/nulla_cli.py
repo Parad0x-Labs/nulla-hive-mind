@@ -35,7 +35,9 @@ from core.runtime_install_profiles import (
     INSTALL_PROFILE_CHOICES,
     active_install_profile_id,
     build_install_profile_truth,
+    format_install_profile_id,
     installed_profile_id,
+    install_profile_display_choices,
     normalize_install_profile_id,
     persist_install_profile_record,
 )
@@ -277,15 +279,15 @@ def cmd_install_profile(*, set_profile: str = "", json_mode: bool = False) -> in
                 )
             )
         else:
-            print(f"Install profile saved: {saved_profile}")
-            print(f"Resolved profile:     {profile.profile_id} ({profile.label})")
+            print(f"Install profile saved: {format_install_profile_id(saved_profile, allow_auto=False)}")
+            print(f"Resolved profile:     {format_install_profile_id(profile.profile_id, allow_auto=False)} ({profile.label})")
             print(f"Summary:              {profile.summary}")
             print(f"Record:               {record_path}")
             print("Next step:            Restart NULLA to apply the new provider mix.")
         return 0
 
     profile = build_install_profile_truth(
-        requested_profile=active_profile or None,
+        requested_profile=None,
         runtime_home=runtime_home,
         provider_capability_truth=provider_snapshot.capability_truth,
     )
@@ -308,10 +310,11 @@ def cmd_install_profile(*, set_profile: str = "", json_mode: bool = False) -> in
     print("NULLA install profile")
     print("=====================")
     print(f"Runtime home:    {runtime_home}")
-    print(f"Stored profile:  {stored_profile or 'none'}")
-    print(f"Resolved profile:{' ' if profile.profile_id else ''}{profile.profile_id} ({profile.label})")
+    print(f"Stored profile:  {format_install_profile_id(stored_profile, allow_auto=False) if stored_profile else 'none'}")
+    resolved_profile_display = format_install_profile_id(profile.profile_id, allow_auto=False)
+    print(f"Resolved profile:{' ' if resolved_profile_display else ''}{resolved_profile_display} ({profile.label})")
     print(f"Summary:         {profile.summary}")
-    print("Available:       " + ", ".join(INSTALL_PROFILE_CHOICES))
+    print("Available:       " + ", ".join(install_profile_display_choices()))
     if profile.reasons:
         print("Notes:")
         for reason in profile.reasons:
