@@ -24,6 +24,7 @@ from .runtime import (
     normalize_chat_history,
     ollama_chat_response,
     openai_chat_response,
+    openai_sse_stream_from_ollama_chunks,
     parameter_count_for_model,
     run_agent,
     runtime_headers,
@@ -302,6 +303,16 @@ def dispatch_post(
                 model=model,
                 include_runtime_events=include_runtime_events,
             )
+            if normalized_path.startswith("/v1/"):
+                return apply_runtime_headers(
+                    stream_response(
+                        200,
+                        openai_sse_stream_from_ollama_chunks(stream_iter, str(model)),
+                        content_type="text/event-stream; charset=utf-8",
+                        headers={"Cache-Control": "no-cache"},
+                    ),
+                    runtime,
+                )
             return apply_runtime_headers(
                 stream_response(200, stream_iter, content_type="application/x-ndjson"),
                 runtime,

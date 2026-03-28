@@ -8,7 +8,7 @@ import queue
 import re
 import subprocess
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -585,6 +585,43 @@ def ollama_stream_chunks(result: dict[str, Any], model: str) -> list[bytes]:
         chunks.append(ollama_stream_chunk(model=model, content=token, created_at=now, done=False))
     chunks.append(ollama_stream_chunk(model=model, content="", created_at=now, done=True, eval_count=len(words)))
     return chunks
+
+
+def openai_sse_stream_from_ollama_chunks(stream: Iterable[bytes], model: str) -> Iterator[bytes]:
+    chunk_id = f"chatcmpl-{hashlib.sha256(f'{model}:{datetime.now(timezone.utc).timestamp()}'.encode()).hexdigest()[:12]}"
+    created = int(datetime.now(timezone.utc).timestamp())
+    emitted_role = False
+    for raw_chunk in stream:
+        raw_text = raw_chunk.decode("utf-8", errors="replace").strip()
+        if not raw_text:
+            continue
+        payload = json.loads(raw_text)
+        message = dict(payload.get("message") or {})
+        content = str(message.get("content") or "")
+        done = bool(payload.get("done"))
+        delta: dict[str, Any] = {}
+        if not emitted_role:
+            delta["role"] = "assistant"
+            emitted_role = True
+        if content:
+            delta["content"] = content
+        event = {
+            "id": chunk_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": delta,
+                    "finish_reason": "stop" if done else None,
+                }
+            ],
+        }
+        yield b"data: " + json.dumps(event, separators=(",", ":")).encode("utf-8") + b"\n\n"
+        if done:
+            yield b"data: [DONE]\n\n"
+            break
 
 
 def format_runtime_event_text(event: dict[str, Any]) -> str:

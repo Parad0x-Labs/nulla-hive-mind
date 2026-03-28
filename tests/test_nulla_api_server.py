@@ -15,6 +15,7 @@ from apps.nulla_api_server import (
     PROJECT_ROOT,
     NullaAPIHandler,
     _daemon_runtime_config,
+    _dispatch_post,
     _ensure_default_provider,
     _format_runtime_event_text,
     _normalize_chat_history,
@@ -71,6 +72,71 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(headers["x-request-id"])
         self.assertEqual(headers["x-correlation-id"], headers["x-request-id"])
+
+    def test_create_app_streaming_v1_chat_completions_uses_openai_sse(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+        stream_chunks = iter(
+            (
+                b'{"model":"nulla","created_at":"2026-03-28T00:00:00.000000Z","message":{"role":"assistant","content":"stream"},"done":false}\n',
+                b'{"model":"nulla","created_at":"2026-03-28T00:00:00.000000Z","message":{"role":"assistant","content":" ok"},"done":false}\n',
+                b'{"model":"nulla","created_at":"2026-03-28T00:00:00.000000Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","eval_count":2}\n',
+            )
+        )
+
+        with mock.patch("apps.nulla_api_server._stream_agent_with_events", return_value=stream_chunks):
+            response = _dispatch_post(
+                path="/v1/chat/completions",
+                body={
+                    "model": "nulla",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": True,
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp",
+            )
+
+        status = response.status
+        body = b"".join(response.stream or ())
+        text = body.decode("utf-8")
+        self.assertEqual(status, 200)
+        self.assertIn("text/event-stream", response.content_type)
+        self.assertIn('data: {"id":"chatcmpl-', text)
+        self.assertIn('"object":"chat.completion.chunk"', text)
+        self.assertIn('"content":"stream"', text)
+        self.assertIn('"content":" ok"', text)
+        self.assertIn("data: [DONE]", text)
+
+    def test_create_app_streaming_api_chat_preserves_ollama_ndjson(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+        stream_chunks = iter(
+            (
+                b'{"model":"nulla","created_at":"2026-03-28T00:00:00.000000Z","message":{"role":"assistant","content":"stream"},"done":false}\n',
+                b'{"model":"nulla","created_at":"2026-03-28T00:00:00.000000Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","eval_count":1}\n',
+            )
+        )
+
+        with mock.patch("apps.nulla_api_server._stream_agent_with_events", return_value=stream_chunks):
+            response = _dispatch_post(
+                path="/api/chat",
+                body={
+                    "model": "nulla",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": True,
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp",
+            )
+
+        status = response.status
+        body = b"".join(response.stream or ())
+        self.assertEqual(status, 200)
+        self.assertIn("application/x-ndjson", response.content_type)
+        self.assertIn(b'"content":"stream"', body)
+        self.assertNotIn(b"data: [DONE]", body)
 
     def test_daemon_runtime_config_uses_env_overrides_for_isolated_acceptance(self) -> None:
         with mock.patch.dict(
