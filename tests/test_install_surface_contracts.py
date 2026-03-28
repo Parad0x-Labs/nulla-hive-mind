@@ -54,6 +54,19 @@ def test_pyproject_runtime_extra_covers_installer_runtime_surface() -> None:
         assert marker in pyproject
 
 
+def test_pyproject_dev_extra_covers_build_and_test_tooling() -> None:
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    for marker in (
+        "dev = [",
+        '"build>=1.2"',
+        '"pytest>=7.0"',
+        '"ruff>=0.3"',
+        '"mypy>=1.8"',
+    ):
+        assert marker in pyproject
+
+
 def test_container_and_docs_share_api_healthz_contract() -> None:
     dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
     install_doc = (REPO_ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")

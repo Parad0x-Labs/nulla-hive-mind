@@ -711,12 +711,101 @@ LAUNCHER_HEAD
   cat >>"${target_path}" <<EOF
 export NULLA_HOME="\${NULLA_HOME:-${runtime_home}}"
 export NULLA_WORKSPACE_ROOT="\${NULLA_WORKSPACE_ROOT:-\${NULLA_HOME}/workspace}"
+export NULLA_OPENCLAW_API_PORT="\${NULLA_OPENCLAW_API_PORT:-11435}"
+export NULLA_OPENCLAW_API_URL="\${NULLA_OPENCLAW_API_URL:-http://127.0.0.1:\${NULLA_OPENCLAW_API_PORT}}"
 PROVIDER_ENV_FILE="\${NULLA_HOME}/config/provider-env.sh"
 if [[ -f "\${PROVIDER_ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
   . "\${PROVIDER_ENV_FILE}"
 fi
 $(web_runtime_exports)
+wait_for_http_ready() {
+  local url="\$1"
+  local max_attempts="\$2"
+  local pid="\${3:-}"
+  local consecutive_target="\${4:-2}"
+  local consecutive=0
+  for _ in \$(seq 1 "\${max_attempts}"); do
+    if [[ -n "\${pid}" ]] && ! kill -0 "\${pid}" >/dev/null 2>&1; then
+      return 1
+    fi
+    if curl -sf --max-time 2 "\${url}" >/dev/null 2>&1; then
+      consecutive=\$((consecutive + 1))
+      if [[ "\${consecutive}" -ge "\${consecutive_target}" ]]; then
+        return 0
+      fi
+    else
+      consecutive=0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+spawn_detached() {
+  local log_path="\$1"
+  shift
+  "\${VENV_PY}" - "\${log_path}" "\$@" <<'PY'
+import subprocess
+import sys
+
+log_path = sys.argv[1]
+command = sys.argv[2:]
+with open(log_path, "ab", buffering=0) as log_stream:
+    child = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=log_stream,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+print(child.pid)
+PY
+}
+
+terminate_pid() {
+  local pid="\$1"
+  [[ -n "\${pid}" ]] || return 0
+  if ! kill -0 "\${pid}" >/dev/null 2>&1; then
+    return 0
+  fi
+  kill "\${pid}" >/dev/null 2>&1 || true
+  for _ in \$(seq 1 10); do
+    if ! kill -0 "\${pid}" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  kill -9 "\${pid}" >/dev/null 2>&1 || true
+}
+
+if [[ "\${NULLA_LAUNCHD_SUPERVISOR:-0}" == "1" ]]; then
+  API_LOG_PATH="\${NULLA_API_LOG_PATH:-\${NULLA_HOME}/logs/api-supervised.log}"
+  mkdir -p "\$(dirname "\${API_LOG_PATH}")"
+  while true; do
+    api_pid="\$(spawn_detached "\${API_LOG_PATH}" "\${VENV_PY}" -m apps.nulla_api_server --port "\${NULLA_OPENCLAW_API_PORT}")"
+    if ! wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 240 "\${api_pid}" 5; then
+      terminate_pid "\${api_pid}"
+      sleep 3
+      continue
+    fi
+    unhealthy=0
+    while kill -0 "\${api_pid}" >/dev/null 2>&1; do
+      if curl -sf --max-time 2 "\${NULLA_OPENCLAW_API_URL}/healthz" >/dev/null 2>&1; then
+        unhealthy=0
+      else
+        unhealthy=\$((unhealthy + 1))
+        if [[ "\${unhealthy}" -ge 3 ]]; then
+          terminate_pid "\${api_pid}"
+          break
+        fi
+      fi
+      sleep 5
+    done
+    sleep 2
+  done
+fi
 echo "Starting NULLA (API + mesh daemon)..."
 echo "OpenClaw connects to http://127.0.0.1:11435"
 exec "\${VENV_PY}" -m apps.nulla_api_server
@@ -855,7 +944,7 @@ if ! wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 2 ""; then
   if port_listening "127.0.0.1" "\${NULLA_OPENCLAW_API_PORT}"; then
     wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 30 "" 3
   else
-    api_pid="\$(spawn_detached /tmp/nulla_api_server.log "\${VENV_PY}" -m apps.nulla_api_server --port "\${NULLA_OPENCLAW_API_PORT}")"
+    api_pid="\$(spawn_detached /tmp/nulla_api_server.log "\${PROJECT_ROOT}/Start_NULLA.sh")"
     wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 30 "\${api_pid}" 3
   fi
 fi
@@ -984,6 +1073,10 @@ install_macos_launch_agent() {
   <dict>
     <key>NULLA_HOME</key>
     <string>${runtime_home}</string>
+    <key>NULLA_LAUNCHD_SUPERVISOR</key>
+    <string>1</string>
+    <key>NULLA_API_LOG_PATH</key>
+    <string>${log_dir}/api-supervised.log</string>
     <key>PATH</key>
     <string>${PROJECT_ROOT}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
@@ -1482,18 +1575,25 @@ main() {
     say "Verifying live launch through the shell launcher..."
     if [[ -n "${LAUNCH_AGENT_PATH}" ]]; then
       local launchd_runtime_ready=0
+      local launchd_runtime_consecutive=0
       for _ in $(seq 1 240); do
-        if curl -sf --max-time 2 "http://127.0.0.1:11435/healthz" >/dev/null 2>&1; then
-          launchd_runtime_ready=1
-          break
+        if curl -sf --max-time 2 "http://127.0.0.1:11435/healthz" >/dev/null 2>&1 && \
+          curl -sf --max-time 2 "http://127.0.0.1:11435/v1/models" >/dev/null 2>&1; then
+          launchd_runtime_consecutive=$((launchd_runtime_consecutive + 1))
+          if [[ "${launchd_runtime_consecutive}" -ge 5 ]]; then
+            launchd_runtime_ready=1
+            break
+          fi
+        else
+          launchd_runtime_consecutive=0
         fi
         sleep 1
       done
       if [[ "${launchd_runtime_ready}" -eq 1 ]]; then
-        say "Launchd runtime verified at http://127.0.0.1:11435"
+        say "Launchd runtime verified at http://127.0.0.1:11435 (stable health + /v1/models)"
         exit 0
       fi
-      say "ERROR: launchd installed NULLA, but the API did not become healthy within 240 seconds."
+      say "ERROR: launchd installed NULLA, but the API did not stay healthy long enough to verify /v1/models within 240 seconds."
       exit 1
     fi
     exec "${PROJECT_ROOT}/OpenClaw_NULLA.sh"

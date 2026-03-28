@@ -51,10 +51,17 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert 'cd "${PROJECT_ROOT}"' in script
     assert 'export NULLA_HOME="\\${NULLA_HOME:-${runtime_home}}"' in script
     assert 'export NULLA_WORKSPACE_ROOT="\\${NULLA_WORKSPACE_ROOT:-\\${NULLA_HOME}/workspace}"' in script
+    assert 'export NULLA_OPENCLAW_API_PORT="\\${NULLA_OPENCLAW_API_PORT:-11435}"' in script
+    assert 'export NULLA_OPENCLAW_API_URL="\\${NULLA_OPENCLAW_API_URL:-http://127.0.0.1:\\${NULLA_OPENCLAW_API_PORT}}"' in script
     assert 'export PATH="${SCRIPT_DIR}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"' in script
     assert 'export NULLA_OPENCLAW_API_URL="\\${NULLA_OPENCLAW_API_URL:-http://127.0.0.1:\\${NULLA_OPENCLAW_API_PORT}}"' in script
+    assert 'if [[ "\\${NULLA_LAUNCHD_SUPERVISOR:-0}" == "1" ]]; then' in script
+    assert 'API_LOG_PATH="\\${NULLA_API_LOG_PATH:-\\${NULLA_HOME}/logs/api-supervised.log}"' in script
+    assert 'terminate_pid() {' in script
+    assert 'api_pid="\\$(spawn_detached "\\${API_LOG_PATH}" "\\${VENV_PY}" -m apps.nulla_api_server --port "\\${NULLA_OPENCLAW_API_PORT}")"' in script
+    assert 'wait_for_http_ready "\\${NULLA_OPENCLAW_API_URL}/healthz" 240 "\\${api_pid}" 5' in script
     assert 'start_new_session=True' in script
-    assert 'api_pid="\\$(spawn_detached /tmp/nulla_api_server.log "\\${VENV_PY}" -m apps.nulla_api_server --port "\\${NULLA_OPENCLAW_API_PORT}")"' in script
+    assert 'api_pid="\\$(spawn_detached /tmp/nulla_api_server.log "\\${PROJECT_ROOT}/Start_NULLA.sh")"' in script
     assert 'wait_for_http_ready "\\${NULLA_OPENCLAW_API_URL}/healthz" 30 "\\${api_pid}" 3' in script
     assert 'spawn_detached /tmp/nulla_openclaw.log ollama launch openclaw --yes --model "\\${MODEL_TAG}"' in script
     assert 'launch openclaw --yes --config --model "${model_tag}"' in script
@@ -63,11 +70,23 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert 'Skipping Ollama OpenClaw auto-config for isolated home' in script
     assert 'say "Verifying live launch through the shell launcher..."' in script
     assert 'local launchd_runtime_ready=0' in script
+    assert 'local launchd_runtime_consecutive=0' in script
     assert 'for _ in $(seq 1 240); do' in script
-    assert 'say "Launchd runtime verified at http://127.0.0.1:11435"' in script
-    assert 'say "ERROR: launchd installed NULLA, but the API did not become healthy within 240 seconds."' in script
+    assert 'curl -sf --max-time 2 "http://127.0.0.1:11435/v1/models" >/dev/null 2>&1' in script
+    assert 'if [[ "${launchd_runtime_consecutive}" -ge 5 ]]; then' in script
+    assert 'say "Launchd runtime verified at http://127.0.0.1:11435 (stable health + /v1/models)"' in script
+    assert 'say "ERROR: launchd installed NULLA, but the API did not stay healthy long enough to verify /v1/models within 240 seconds."' in script
     assert 'exec "${PROJECT_ROOT}/OpenClaw_NULLA.sh"' in script
     assert 'pull_models "${ollama_exe}" "${install_profile}" "${model_tag}"' in script
+
+
+def test_install_script_launch_agent_enables_supervised_runtime() -> None:
+    script = (PROJECT_ROOT / "installer" / "install_nulla.sh").read_text(encoding="utf-8")
+
+    assert '<key>NULLA_LAUNCHD_SUPERVISOR</key>' in script
+    assert '<string>1</string>' in script
+    assert '<key>NULLA_API_LOG_PATH</key>' in script
+    assert '<string>${log_dir}/api-supervised.log</string>' in script
 
 
 def test_install_wrappers_forward_install_profile_and_extra_args() -> None:

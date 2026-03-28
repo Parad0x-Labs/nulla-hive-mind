@@ -69,6 +69,7 @@ proof = [
     "pytest>=7.0",
 ]
 dev = [
+    "build>=1.2",
     "pytest>=7.0",
     "ruff>=0.3",
     "mypy>=1.8",

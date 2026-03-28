@@ -27,6 +27,7 @@ DEFAULT_BASELINE_ROOT = REPO_ROOT / "reports" / "llm_eval" / "baselines"
 DEFAULT_LIVE_RUN_ROOT = REPO_ROOT / "artifacts" / "acceptance_runs" / "llm_eval_live"
 DEFAULT_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_qwen25_7b_profile.json"
 DEFAULT_BASE_URL = "http://127.0.0.1:18080"
+DEFAULT_DOCS_REPORT_PATH = REPO_ROOT / "docs" / "LLM_ACCEPTANCE_REPORT.md"
 
 RECENT_48H_BASELINE_TARGETS = [
     "tests/test_run_local_acceptance.py",
@@ -273,6 +274,16 @@ def _display_path(path: Path | None) -> str:
         return str(path.resolve().relative_to(REPO_ROOT))
     except ValueError:
         return str(path)
+
+
+def _resolve_optional_output_path(raw_value: str | None) -> Path | None:
+    value = str(raw_value or "").strip()
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    return path.resolve()
 
 
 def _write_latency_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -676,6 +687,7 @@ def run(args: argparse.Namespace) -> int:
     baseline_root = Path(args.baseline_root).expanduser().resolve()
     live_run_root = Path(args.live_run_root).expanduser().resolve()
     profile_path = Path(args.profile).expanduser().resolve()
+    docs_report_path = _resolve_optional_output_path(getattr(args, "docs_report_path", ""))
     output_root.mkdir(parents=True, exist_ok=True)
     baseline_root.mkdir(parents=True, exist_ok=True)
     preserved_output_root = _preserve_previous_output_bundle(output_root)
@@ -793,7 +805,8 @@ def run(args: argparse.Namespace) -> int:
     _write_json(output_root / "nullabook_provenance.json", nullabook_provenance)
     _write_markdown(output_root / "regression_48h.md", regression_md)
     _write_markdown(output_root / "failures.md", failures_md)
-    _write_markdown(REPO_ROOT / "docs" / "LLM_ACCEPTANCE_REPORT.md", summary_md)
+    if docs_report_path is not None:
+        _write_markdown(docs_report_path, summary_md)
 
     return 0 if payload["ci_fast_green"] and (args.skip_live_runtime or payload["overall_full_green"]) else 1
 
@@ -806,6 +819,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--branch-label", default="")
+    parser.add_argument("--docs-report-path", default="")
     parser.add_argument("--skip-live-runtime", action="store_true")
     args = parser.parse_args(argv)
     return run(args)

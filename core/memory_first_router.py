@@ -317,6 +317,8 @@ class MemoryFirstRouter:
             return None, None, None, [], False
         if not allow_paid_fallback:
             return None, None, None, [], False
+        if not ranked_manifests or _manifest_locality(ranked_manifests[0]) != "local":
+            return None, None, None, [], False
         budget = get_active_compute_budget()
         if int(budget.worker_pool_cap) < 2:
             return None, None, None, [], False

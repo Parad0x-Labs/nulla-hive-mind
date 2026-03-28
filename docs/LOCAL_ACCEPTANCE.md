@@ -55,6 +55,17 @@ python3 ops/llm_eval.py \
   --base-url http://127.0.0.1:18080
 ```
 
+If you explicitly want to refresh the tracked docs snapshot too:
+
+```bash
+python3 ops/llm_eval.py \
+  --output-root reports/llm_eval/latest \
+  --baseline-root reports/llm_eval/baselines \
+  --live-run-root artifacts/acceptance_runs/llm_eval_live \
+  --base-url http://127.0.0.1:18080 \
+  --docs-report-path docs/LLM_ACCEPTANCE_REPORT.md
+```
+
 What the fast gate proves:
 - rerun of the last 48h LLM/runtime regression pack
 - context-discipline scenarios
@@ -91,4 +102,4 @@ Artifacts:
 
 Note:
 
-- The live acceptance report still stamps the build as `dirty` because `llm_eval` rewrites [`docs/LLM_ACCEPTANCE_REPORT.md`](./LLM_ACCEPTANCE_REPORT.md) during the run. The clean proof checkout had no unrelated code changes before launch.
+- `llm_eval` no longer rewrites [`docs/LLM_ACCEPTANCE_REPORT.md`](./LLM_ACCEPTANCE_REPORT.md) unless `--docs-report-path` is passed explicitly, so normal proof runs stop dirtying the checkout just to publish a docs snapshot.
