@@ -50,9 +50,11 @@ def emit_runtime_event(
     message: str,
     details: dict[str, Any] | None = None,
 ) -> None:
+    normalized_event_type = str(event_type or "status").strip() or "status"
+    raw_message = str(message or "")
     payload = {
-        "event_type": str(event_type or "status").strip() or "status",
-        "message": str(message or "").strip(),
+        "event_type": normalized_event_type,
+        "message": raw_message if normalized_event_type == "model_output_chunk" else raw_message.strip(),
     }
     payload.update(dict(details or {}))
     stream_id = str((source_context or {}).get("runtime_event_stream_id") or "").strip()

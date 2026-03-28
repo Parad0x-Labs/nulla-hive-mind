@@ -13,6 +13,10 @@ _DEFAULT_KIMI_MODEL = "kimi-k2"
 _KIMI_API_KEY_ENV_NAMES = ("KIMI_API_KEY", "MOONSHOT_API_KEY", "NULLA_KIMI_API_KEY")
 _KIMI_BASE_URL_ENV_NAMES = ("KIMI_BASE_URL", "NULLA_KIMI_BASE_URL", "MOONSHOT_BASE_URL")
 _KIMI_MODEL_ENV_NAMES = ("KIMI_MODEL", "NULLA_KIMI_MODEL", "MOONSHOT_MODEL")
+_DEFAULT_TETHER_MODEL = "tether-sonic"
+_TETHER_API_KEY_ENV_NAMES = ("TETHER_API_KEY", "NULLA_TETHER_API_KEY")
+_TETHER_BASE_URL_ENV_NAMES = ("TETHER_BASE_URL", "NULLA_TETHER_BASE_URL")
+_TETHER_MODEL_ENV_NAMES = ("TETHER_MODEL", "NULLA_TETHER_MODEL")
 _DEFAULT_VLLM_BASE_URL = "http://127.0.0.1:8000/v1"
 _DEFAULT_VLLM_CONTEXT_WINDOW = 131072
 _DEFAULT_LLAMACPP_BASE_URL = "http://127.0.0.1:8080/v1"
@@ -52,6 +56,9 @@ def ensure_default_runtime_providers(
         kimi_provider_id = _ensure_kimi_provider(registry, env=env_map)
         if kimi_provider_id:
             changed.append(kimi_provider_id)
+    tether_provider_id = _ensure_tether_provider(registry, env=env_map)
+    if tether_provider_id:
+        changed.append(tether_provider_id)
     return tuple(changed)
 
 
@@ -220,6 +227,59 @@ def _ensure_vllm_provider(
             "context_window": context_window,
             "tool_support": ["structured_json", "tool_calls", "code_complex"],
             "max_safe_concurrency": max_safe_concurrency,
+        },
+        enabled=True,
+    )
+    registry.register_manifest(manifest)
+    return manifest.provider_id
+
+
+def _ensure_tether_provider(
+    registry: ModelRegistry,
+    *,
+    env: Mapping[str, str],
+) -> str:
+    api_key = _env_first(env, *_TETHER_API_KEY_ENV_NAMES)
+    base_url = _env_first(env, *_TETHER_BASE_URL_ENV_NAMES)
+    if not api_key or not base_url:
+        return ""
+    api_key_env = next((name for name in _TETHER_API_KEY_ENV_NAMES if str(env.get(name) or "").strip()), "TETHER_API_KEY")
+    model_name = _env_first(env, *_TETHER_MODEL_ENV_NAMES) or _DEFAULT_TETHER_MODEL
+    existing = registry.get_manifest("tether-remote", model_name)
+    has_base_url = bool(str(getattr(existing, "runtime_config", {}).get("base_url") or "").strip()) if existing else False
+    if existing and existing.enabled and has_base_url:
+        return existing.provider_id
+    manifest = ModelProviderManifest(
+        provider_name="tether-remote",
+        model_name=model_name,
+        source_type="http",
+        adapter_type="openai_compatible",
+        license_name="Provider",
+        license_reference="user-managed",
+        license_url_or_reference="user-managed",
+        weight_location="external",
+        redistribution_allowed=False,
+        runtime_dependency="remote-openai-compatible-provider",
+        notes="Tether remote lane via a user-managed OpenAI-compatible endpoint — auto-registered when TETHER_API_KEY and TETHER_BASE_URL are configured.",
+        capabilities=["summarize", "classify", "format", "extract", "code_basic", "code_complex", "structured_json", "long_context"],
+        runtime_config={
+            "base_url": base_url,
+            "api_path": "/chat/completions",
+            "health_path": "/models",
+            "timeout_seconds": 180,
+            "health_timeout_seconds": 10,
+            "temperature": 0.3,
+            "supports_json_mode": True,
+            "api_key_env": api_key_env,
+        },
+        metadata={
+            "runtime_family": "openai-compatible",
+            "confidence_baseline": 0.76,
+            "orchestration_role": "queen",
+            "deployment_class": "remote",
+            "context_window": 128000,
+            "tool_support": ["structured_json", "code_complex"],
+            "max_safe_concurrency": 2,
         },
         enabled=True,
     )

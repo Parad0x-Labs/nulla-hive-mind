@@ -578,6 +578,8 @@ def ollama_stream_chunks(result: dict[str, Any], model: str) -> list[bytes]:
 
 
 def format_runtime_event_text(event: dict[str, Any]) -> str:
+    if str(event.get("event_type") or "").strip() == "model_output_chunk":
+        return str(event.get("message") or "")
     message = str(event.get("message") or "").strip()
     return message + "\n" if message else ""
 
@@ -595,9 +597,9 @@ def stream_agent_with_events(
     event_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
     stream_context = dict(source_context or {})
     stream_id = ""
-    if include_runtime_events:
-        stream_id = new_runtime_event_stream_id()
-        stream_context["runtime_event_stream_id"] = stream_id
+    saw_model_output = False
+    stream_id = new_runtime_event_stream_id()
+    stream_context["runtime_event_stream_id"] = stream_id
 
     def sink(event: dict[str, Any]) -> None:
         event_queue.put(("event", dict(event)))
@@ -610,7 +612,7 @@ def stream_agent_with_events(
         except Exception as exc:
             event_queue.put(("error", str(exc)))
 
-    if include_runtime_events and stream_id:
+    if stream_id:
         register_runtime_event_sink(stream_id, sink)
     thread = threading.Thread(target=worker, name="nulla-openclaw-stream", daemon=True)
     thread.start()
@@ -619,7 +621,12 @@ def stream_agent_with_events(
         while True:
             kind, payload = event_queue.get()
             if kind == "event":
-                content = format_runtime_event_text(dict(payload or {}))
+                event_payload = dict(payload or {})
+                if str(event_payload.get("event_type") or "").strip() == "model_output_chunk":
+                    saw_model_output = True
+                if not include_runtime_events and str(event_payload.get("event_type") or "").strip() != "model_output_chunk":
+                    continue
+                content = format_runtime_event_text(event_payload)
                 if content:
                     yield ollama_stream_chunk(
                         model=model,
@@ -633,10 +640,21 @@ def stream_agent_with_events(
                     yield chunk
                 break
             if kind == "result":
-                for chunk in ollama_stream_chunks(dict(payload or {}), model):
-                    yield chunk
+                if saw_model_output:
+                    response_text = str(dict(payload or {}).get("response") or "").strip()
+                    eval_count = len(response_text.split()) if response_text else 0
+                    yield ollama_stream_chunk(
+                        model=model,
+                        content="",
+                        created_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                        done=True,
+                        eval_count=eval_count,
+                    )
+                else:
+                    for chunk in ollama_stream_chunks(dict(payload or {}), model):
+                        yield chunk
                 break
     finally:
-        if include_runtime_events and stream_id:
+        if stream_id:
             unregister_runtime_event_sink(stream_id)
         thread.join(timeout=0.1)

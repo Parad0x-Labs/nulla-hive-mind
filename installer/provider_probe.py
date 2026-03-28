@@ -290,7 +290,9 @@ def build_probe_report(
         env=_probe_env_for_install_profile(envs),
     )
     kimi_state, kimi_provider_id = _provider_state_for_prefix(capability_truth, "kimi-remote:")
+    tether_state, tether_provider_id = _provider_state_for_prefix(capability_truth, "tether-remote:")
     kimi_configured = bool(envs.get("kimi", {}).get("configured"))
+    tether_configured = bool(envs.get("tether", {}).get("configured"))
 
     stacks: list[dict[str, Any]] = []
     local_only_ready = bool(binary)
@@ -367,18 +369,39 @@ def build_probe_report(
         }
     )
 
+    if tether_configured:
+        if tether_state == "ready":
+            tether_status = "ready"
+            tether_reason = "Tether credentials are present and runtime bootstrap exposes a real remote Tether queen lane."
+        elif tether_state == "degraded":
+            tether_status = "degraded"
+            tether_reason = "Tether credentials are present and the remote Tether queen lane exists, but it is currently degraded."
+        elif tether_state == "blocked":
+            tether_status = "blocked"
+            tether_reason = "Tether credentials are present, but the remote Tether queen lane is blocked by current health state."
+        else:
+            tether_status = "misconfigured"
+            tether_reason = "Tether credentials are present, but runtime bootstrap did not register a usable Tether lane."
+    else:
+        tether_status = "needs_config"
+        tether_reason = "Tether becomes a real remote queen lane when TETHER_API_KEY and TETHER_BASE_URL are configured."
+    stacks.append(
+        {
+            "stack_id": "local_plus_tether",
+            "install_profile_id": "",
+            "status": tether_status,
+            "recommended": False,
+            "reason": tether_reason,
+            "primary_model": primary_tier.ollama_tag,
+            "helper_model": helper_model if local_fit != "single_model_only" else "",
+            "provider_id": tether_provider_id,
+        }
+    )
+
     unsupported_stacks: list[dict[str, Any]] = []
     if show_unsupported:
         unsupported_stacks.extend(
             [
-                {
-                    "stack_id": "local_plus_tether",
-                    "status": "not_implemented",
-                    "recommended": False,
-                    "reason": "Tether does not have a real first-class installer/runtime lane in this repo yet.",
-                    "primary_model": primary_tier.ollama_tag,
-                    "helper_model": "",
-                },
                 {
                     "stack_id": "local_plus_qvac",
                     "status": "not_implemented",

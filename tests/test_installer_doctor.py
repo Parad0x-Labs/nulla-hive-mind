@@ -25,6 +25,22 @@ def test_install_receipt_exposes_doctor_report_path() -> None:
     assert receipt["install_profile"]["schema"] == "nulla.install_profile.v1"
 
 
+def test_install_receipt_records_launch_agent_path() -> None:
+    receipt = build_receipt(
+        project_root="/tmp/nulla",
+        runtime_home="/tmp/nulla-home",
+        model_tag="qwen2.5:7b",
+        openclaw_enabled=False,
+        openclaw_config_path="",
+        openclaw_agent_dir="",
+        ollama_binary="/tmp/ollama",
+        launch_agent_path="/Users/test/Library/LaunchAgents/ai.nulla.runtime.plist",
+    )
+
+    assert receipt["launch_agent"]["enabled"] is True
+    assert receipt["launch_agent"]["macos"].endswith("ai.nulla.runtime.plist")
+
+
 def test_build_report_marks_missing_components_as_degraded() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
@@ -54,6 +70,35 @@ def test_build_report_marks_missing_components_as_degraded() -> None:
     assert report["components"]["public_hive"]["ok"] is True
     assert report["components"]["public_hive"]["enabled"] is False
     assert report["install_profile"]["schema"] == "nulla.install_profile.v1"
+
+
+def test_build_report_marks_launch_agent_present_when_file_exists() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / ".venv").mkdir()
+        (root / "Start_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "Talk_To_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "OpenClaw_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "Stage_Trainable_Base.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "install_receipt.json").write_text("{}\n", encoding="utf-8")
+        runtime_home = root / ".nulla_runtime"
+        runtime_home.mkdir()
+        launch_agent_path = root / "ai.nulla.runtime.plist"
+        launch_agent_path.write_text("<plist></plist>\n", encoding="utf-8")
+        with mock.patch("core.trainable_base_manager.list_staged_trainable_bases", return_value=[]):
+            report = build_report(
+                project_root=str(root),
+                runtime_home=str(runtime_home),
+                model_tag="qwen2.5:7b",
+                openclaw_enabled=False,
+                openclaw_config_path="",
+                openclaw_agent_dir="",
+                ollama_binary="",
+                launch_agent_path=str(launch_agent_path),
+            )
+
+    assert report["components"]["launch_agent"]["ok"] is True
+    assert report["components"]["launch_agent"]["path"].endswith("ai.nulla.runtime.plist")
 
 
 def test_build_report_flags_missing_public_hive_write_auth() -> None:

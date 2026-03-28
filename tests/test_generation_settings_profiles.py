@@ -7,6 +7,7 @@ import pytest
 
 from adapters.base_adapter import ModelRequest
 from adapters.openai_compatible_adapter import OpenAICompatibleAdapter
+from core.compute_mode import ComputeBudget, set_active_compute_budget
 from core.prompt_normalizer import normalize_prompt
 
 
@@ -265,3 +266,81 @@ def test_openai_adapter_prewarm_skips_non_ollama_runtime() -> None:
     assert result["status"] == "skipped"
     assert result["reason"] == "not_ollama_runtime"
     post_mock.assert_not_called()
+
+
+def test_openai_adapter_uses_native_ollama_chat_and_applies_compute_threads() -> None:
+    adapter = OpenAICompatibleAdapter(
+        SimpleNamespace(
+            provider_id="ollama-local:qwen2.5:14b",
+            model_name="qwen2.5:14b",
+            metadata={"runtime_family": "ollama", "deployment_class": "local"},
+            runtime_config={
+                "base_url": "http://127.0.0.1:11434/v1",
+                "timeout_seconds": 5.0,
+                "temperature": 0.4,
+            },
+        )
+    )
+    request = _to_model_request(
+        _normalize_request(
+            "Explain why this local-first install surface feels fake.",
+            task_class="system_design",
+            task_kind="normalization_assist",
+            output_mode="plain_text",
+        )
+    )
+    response = mock.Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {"message": {"content": "native ollama answer"}, "eval_count": 12}
+
+    set_active_compute_budget(
+        ComputeBudget(
+            mode="balanced",
+            cpu_threads=3,
+            gpu_memory_fraction=0.5,
+            worker_pool_cap=1,
+            reason="test",
+        )
+    )
+    with mock.patch("adapters.openai_compatible_adapter.requests.post", return_value=response) as post_mock:
+        result = adapter.run_text_task(request)
+
+    assert result.output_text == "native ollama answer"
+    assert post_mock.call_args.args[0] == "http://127.0.0.1:11434/api/chat"
+    assert post_mock.call_args.kwargs["json"]["options"]["num_thread"] == 3
+
+
+def test_openai_adapter_stream_text_task_yields_incremental_chunks() -> None:
+    adapter = OpenAICompatibleAdapter(
+        SimpleNamespace(
+            provider_id="kimi-remote:kimi-k2",
+            model_name="kimi-k2",
+            metadata={"runtime_family": "openai-compatible"},
+            runtime_config={
+                "base_url": "https://kimi.example/v1",
+                "supports_json_mode": True,
+                "timeout_seconds": 5.0,
+            },
+        )
+    )
+    request = _to_model_request(
+        _normalize_request(
+            "Summarize the runtime boundary in one paragraph.",
+            task_class="chat_conversation",
+            task_kind="conversation",
+            output_mode="plain_text",
+        )
+    )
+    response = mock.Mock()
+    response.raise_for_status.return_value = None
+    response.iter_lines.return_value = [
+        'data: {"choices":[{"delta":{"content":"hello"}}]}',
+        'data: {"choices":[{"delta":{"content":" world"}}]}',
+        "data: [DONE]",
+    ]
+
+    with mock.patch("adapters.openai_compatible_adapter.requests.post", return_value=response):
+        chunks = list(adapter.stream_text_task(request))
+
+    assert [chunk.delta_text for chunk in chunks if chunk.delta_text] == ["hello", " world"]
+    assert chunks[-1].done is True

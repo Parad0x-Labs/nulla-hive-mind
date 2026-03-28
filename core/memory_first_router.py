@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import queue
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
-from adapters.base_adapter import ModelRequest
+from adapters.base_adapter import ModelAdapter, ModelRequest, ModelResponse
 from core import audit_logger, policy_engine
 from core.cache_freshness_policy import default_ttl_seconds, freshness_score, should_revalidate
 from core.candidate_knowledge_lane import build_task_hash, get_exact_candidate, record_candidate_output
+from core.compute_mode import get_active_compute_budget
 from core.model_health import circuit_is_open, record_provider_failure, record_provider_success
 from core.model_registry import ModelRegistry
 from core.model_trust import output_trust_score
 from core.output_validator import validate_provider_output
 from core.prompt_normalizer import normalize_prompt
 from core.provider_routing import ProviderRole, rank_provider_candidates
+from core.runtime_task_events import emit_runtime_event
 from core.task_router import model_execution_profile
 
 _STRUCTURED_OUTPUT_MODES = {"json_object", "action_plan", "tool_intent", "summary_block"}
@@ -166,6 +170,293 @@ class MemoryFirstRouter:
             source_context=source_context,
         )
 
+    def _build_request(
+        self,
+        *,
+        task: Any,
+        classification: dict[str, Any],
+        interpretation: Any,
+        context_result: Any,
+        persona: Any,
+        output_mode: str,
+        task_kind: str,
+        surface: str,
+        source_context: dict[str, Any] | None,
+    ) -> ModelRequest:
+        internal_request = normalize_prompt(
+            task=task,
+            classification=classification,
+            interpretation=interpretation,
+            context_result=context_result,
+            persona=persona,
+            output_mode=output_mode,
+            task_kind=task_kind,
+            trace_id=str(getattr(task, "task_id", "")),
+            surface=surface,
+            source_context=source_context,
+        )
+        return ModelRequest(
+            task_kind=task_kind,
+            prompt=internal_request.user_prompt(),
+            system_prompt=internal_request.system_prompt(),
+            context=internal_request.context_summary,
+            temperature=internal_request.temperature,
+            max_output_tokens=internal_request.max_output_tokens,
+            messages=internal_request.as_openai_messages(),
+            output_mode=output_mode,
+            trace_id=internal_request.trace_id,
+            contract={"mode": output_mode},
+            metadata={
+                **dict(internal_request.metadata or {}),
+                **({"task_envelope": dict((source_context or {}).get("task_envelope") or {})} if (source_context or {}).get("task_envelope") else {}),
+                **({"task_role": str((source_context or {}).get("task_role") or "")} if (source_context or {}).get("task_role") else {}),
+            },
+            attachments=internal_request.attachments,
+        )
+
+    def _invoke_manifest(
+        self,
+        *,
+        manifest: Any,
+        request: ModelRequest,
+        output_mode: str,
+        task: Any,
+        source_context: dict[str, Any] | None,
+    ) -> tuple[ModelAdapter | None, ModelResponse | None, str | None]:
+        if circuit_is_open(manifest.provider_id):
+            return None, None, "circuit_open"
+
+        adapter = self.registry.build_adapter(manifest)
+        health = adapter.health_check()
+        if not bool(health.get("ok")):
+            record_provider_failure(manifest.provider_id, error=str(health.get("error") or "health_check_failed"))
+            audit_logger.log(
+                "model_provider_unhealthy",
+                target_id=manifest.provider_id,
+                target_type="model_provider",
+                trace_id=getattr(task, "task_id", None),
+                details={"health": health},
+            )
+            return adapter, None, str(health.get("error") or "health_check_failed")
+
+        try:
+            if output_mode in _STRUCTURED_OUTPUT_MODES:
+                response = adapter.run_structured_task(request)
+            elif _streaming_requested(source_context, output_mode=output_mode) and adapter.supports_streaming():
+                response = self._stream_response(
+                    adapter=adapter,
+                    manifest=manifest,
+                    request=request,
+                    source_context=source_context,
+                )
+            else:
+                response = adapter.run_text_task(request)
+            record_provider_success(manifest.provider_id)
+            return adapter, response, None
+        except Exception as exc:
+            record_provider_failure(
+                manifest.provider_id,
+                error=str(exc),
+                timeout="timeout" in str(exc).lower(),
+            )
+            audit_logger.log(
+                "model_provider_execution_failed",
+                target_id=manifest.provider_id,
+                target_type="model_provider",
+                trace_id=getattr(task, "task_id", None),
+                details={"error": str(exc)},
+            )
+            return adapter, None, str(exc)
+
+    def _stream_response(
+        self,
+        *,
+        adapter: ModelAdapter,
+        manifest: Any,
+        request: ModelRequest,
+        source_context: dict[str, Any] | None,
+    ) -> ModelResponse:
+        emitted_chunks: list[str] = []
+        raw_events: list[Any] = []
+        stream_context = _ephemeral_stream_context(source_context)
+        for chunk in adapter.stream_text_task(request):
+            if chunk.delta_text:
+                emitted_chunks.append(chunk.delta_text)
+                emit_runtime_event(
+                    stream_context,
+                    event_type="model_output_chunk",
+                    message=chunk.delta_text,
+                    details={
+                        "provider_id": manifest.provider_id,
+                        "model_name": manifest.model_name,
+                    },
+                )
+            if chunk.raw_event is not None:
+                raw_events.append(chunk.raw_event)
+        return ModelResponse(
+            output_text="".join(emitted_chunks),
+            confidence=float(manifest.metadata.get("confidence_baseline") or 0.65),
+            raw_response=raw_events,
+            provider_id=manifest.provider_id,
+            model_name=manifest.model_name,
+            output_mode=request.output_mode,
+        )
+
+    def _maybe_race_manifests(
+        self,
+        *,
+        ranked_manifests: list[Any],
+        request: ModelRequest,
+        output_mode: str,
+        allow_paid_fallback: bool,
+        task: Any,
+        source_context: dict[str, Any] | None,
+    ) -> tuple[Any | None, ModelAdapter | None, ModelResponse | None, list[str], bool]:
+        if _streaming_requested(source_context, output_mode=output_mode):
+            return None, None, None, [], False
+        if not allow_paid_fallback:
+            return None, None, None, [], False
+        budget = get_active_compute_budget()
+        if int(budget.worker_pool_cap) < 2:
+            return None, None, None, [], False
+        race_pair = _local_remote_race_pair(ranked_manifests)
+        if not race_pair:
+            return None, None, None, [], False
+
+        local_manifest, remote_manifest = race_pair
+        attempted: list[str] = []
+        result_queue: queue.Queue[tuple[Any, ModelAdapter | None, ModelResponse | None, str | None]] = queue.Queue()
+
+        def _worker(manifest: Any) -> None:
+            adapter, response, error = self._invoke_manifest(
+                manifest=manifest,
+                request=request,
+                output_mode=output_mode,
+                task=task,
+                source_context=source_context,
+            )
+            result_queue.put((manifest, adapter, response, error))
+
+        for manifest in (local_manifest, remote_manifest):
+            thread = threading.Thread(
+                target=_worker,
+                args=(manifest,),
+                name=f"nulla-provider-race-{manifest.provider_name}",
+                daemon=True,
+            )
+            thread.start()
+
+        remaining = 2
+        while remaining > 0:
+            manifest, adapter, response, error = result_queue.get()
+            remaining -= 1
+            if error or response is None:
+                attempted.append(manifest.provider_id)
+                continue
+            return manifest, adapter, response, attempted, True
+        for manifest in (local_manifest, remote_manifest):
+            if manifest.provider_id not in attempted:
+                attempted.append(manifest.provider_id)
+        return None, None, None, attempted, True
+
+    def _decision_from_response(
+        self,
+        *,
+        manifest: Any,
+        adapter: ModelAdapter,
+        response: ModelResponse,
+        task_hash: str,
+        task: Any,
+        classification: dict[str, Any],
+        context_result: Any,
+        task_kind: str,
+        output_mode: str,
+        provider_role: ProviderRole,
+        ranked_manifests: list[Any],
+        attempted: list[str],
+        failover_used: bool,
+        source: str,
+    ) -> ModelExecutionDecision:
+        validation = validate_provider_output(
+            provider_id=manifest.provider_id,
+            output_mode=output_mode,
+            raw_text=response.output_text,
+            trace_id=str(getattr(task, "task_id", "")),
+        )
+        freshness = freshness_score(None, None)
+        trust = output_trust_score(
+            manifest=manifest,
+            raw_confidence=float(response.confidence or 0.5),
+            contract_ok=validation.ok,
+            trust_penalty=validation.trust_penalty,
+            freshness_score=freshness,
+            reviewed=False,
+            agreement_score=min(1.0, float(context_result.retrieval_confidence_score or 0.0)),
+        )
+        candidate_id = record_candidate_output(
+            task_hash=task_hash,
+            task_id=str(getattr(task, "task_id", "")),
+            trace_id=str(getattr(task, "task_id", "")),
+            task_class=str(classification.get("task_class", "unknown")),
+            task_kind=task_kind,
+            output_mode=output_mode,
+            provider_name=manifest.provider_name,
+            model_name=manifest.model_name,
+            raw_output=response.output_text,
+            normalized_output=validation.normalized_text,
+            structured_output=validation.structured_output,
+            confidence=float(response.confidence or 0.5),
+            trust_score=trust,
+            validation_state="valid" if validation.ok else "contract_failed",
+            metadata={
+                "cost_class": adapter.estimate_cost_class(),
+                "warnings": validation.warnings,
+                "context_retrieval_confidence": context_result.report.retrieval_confidence,
+            },
+            provenance={
+                **adapter.get_license_metadata(),
+                "provider_id": manifest.provider_id,
+                "output_mode": output_mode,
+            },
+            ttl_seconds=default_ttl_seconds(task_kind=task_kind, output_mode=output_mode),
+        )
+        audit_logger.log(
+            "model_candidate_recorded",
+            target_id=candidate_id,
+            target_type="candidate_knowledge",
+            trace_id=str(getattr(task, "task_id", "")),
+            details={
+                "provider_id": manifest.provider_id,
+                "task_kind": task_kind,
+                "output_mode": output_mode,
+                "validation_ok": validation.ok,
+                "trust_score": trust,
+                "execution_source": source,
+            },
+        )
+        return ModelExecutionDecision(
+            source=source,
+            task_hash=task_hash,
+            provider_id=manifest.provider_id,
+            provider_name=manifest.provider_name,
+            model_name=manifest.model_name,
+            output_text=validation.normalized_text or response.output_text,
+            structured_output=validation.structured_output,
+            confidence=float(response.confidence or 0.5),
+            trust_score=trust,
+            used_model=True,
+            candidate_id=candidate_id,
+            failover_used=failover_used,
+            validation_state="valid" if validation.ok else "contract_failed",
+            details={
+                "warnings": validation.warnings,
+                "contract_error": validation.error,
+                "provider_role": provider_role,
+                "ranked_candidates": [entry.provider_id for entry in ranked_manifests],
+                "attempted": attempted,
+            },
+        )
+
     def _execute_provider_task(
         self,
         *,
@@ -209,158 +500,77 @@ class MemoryFirstRouter:
                 },
             )
 
-        for manifest in ranked_manifests:
-            if circuit_is_open(manifest.provider_id):
-                attempted.append(manifest.provider_id)
-                failover_used = True
-                continue
+        request = self._build_request(
+            task=task,
+            classification=classification,
+            interpretation=interpretation,
+            context_result=context_result,
+            persona=persona,
+            output_mode=output_mode,
+            task_kind=task_kind,
+            surface=surface,
+            source_context=source_context,
+        )
 
-            adapter = self.registry.build_adapter(manifest)
-            health = adapter.health_check()
-            if not bool(health.get("ok")):
-                attempted.append(manifest.provider_id)
-                failover_used = True
-                record_provider_failure(manifest.provider_id, error=str(health.get("error") or "health_check_failed"))
-                audit_logger.log(
-                    "model_provider_unhealthy",
-                    target_id=manifest.provider_id,
-                    target_type="model_provider",
-                    trace_id=getattr(task, "task_id", None),
-                    details={"health": health},
+        raced_manifest, raced_adapter, raced_response, raced_attempted, race_used = self._maybe_race_manifests(
+            ranked_manifests=ranked_manifests,
+            request=request,
+            output_mode=output_mode,
+            allow_paid_fallback=resolved_allow_paid,
+            task=task,
+            source_context=source_context,
+        )
+        if race_used:
+            attempted.extend(raced_attempted)
+            failover_used = True
+            if raced_manifest is not None and raced_adapter is not None and raced_response is not None:
+                return self._decision_from_response(
+                    manifest=raced_manifest,
+                    adapter=raced_adapter,
+                    response=raced_response,
+                    task_hash=task_hash,
+                    task=task,
+                    classification=classification,
+                    context_result=context_result,
+                    task_kind=task_kind,
+                    output_mode=output_mode,
+                    provider_role=provider_role,
+                    ranked_manifests=ranked_manifests,
+                    attempted=attempted,
+                    failover_used=failover_used,
+                    source="provider_race_winner",
                 )
-                continue
 
-            internal_request = normalize_prompt(
-                task=task,
-                classification=classification,
-                interpretation=interpretation,
-                context_result=context_result,
-                persona=persona,
+        skipped_provider_ids = {manifest.provider_id for manifest in ranked_manifests if manifest.provider_id in attempted}
+        for manifest in ranked_manifests:
+            if manifest.provider_id in skipped_provider_ids:
+                continue
+            adapter, response, error = self._invoke_manifest(
+                manifest=manifest,
+                request=request,
                 output_mode=output_mode,
-                task_kind=task_kind,
-                trace_id=str(getattr(task, "task_id", "")),
-                surface=surface,
+                task=task,
                 source_context=source_context,
             )
-            request = ModelRequest(
-                task_kind=task_kind,
-                prompt=internal_request.user_prompt(),
-                system_prompt=internal_request.system_prompt(),
-                context=internal_request.context_summary,
-                temperature=internal_request.temperature,
-                max_output_tokens=internal_request.max_output_tokens,
-                messages=internal_request.as_openai_messages(),
-                output_mode=output_mode,
-                trace_id=internal_request.trace_id,
-                contract={"mode": output_mode},
-                metadata={
-                    **dict(internal_request.metadata or {}),
-                    **({"task_envelope": dict((source_context or {}).get("task_envelope") or {})} if (source_context or {}).get("task_envelope") else {}),
-                    **({"task_role": str((source_context or {}).get("task_role") or "")} if (source_context or {}).get("task_role") else {}),
-                },
-                attachments=internal_request.attachments,
-            )
-            try:
-                response = (
-                    adapter.run_structured_task(request)
-                    if output_mode in _STRUCTURED_OUTPUT_MODES
-                    else adapter.run_text_task(request)
-                )
-                record_provider_success(manifest.provider_id)
-            except Exception as exc:
+            if error or adapter is None or response is None:
                 attempted.append(manifest.provider_id)
                 failover_used = True
-                record_provider_failure(
-                    manifest.provider_id,
-                    error=str(exc),
-                    timeout="timeout" in str(exc).lower(),
-                )
-                audit_logger.log(
-                    "model_provider_execution_failed",
-                    target_id=manifest.provider_id,
-                    target_type="model_provider",
-                    trace_id=getattr(task, "task_id", None),
-                    details={"error": str(exc)},
-                )
                 continue
-
-            validation = validate_provider_output(
-                provider_id=manifest.provider_id,
-                output_mode=output_mode,
-                raw_text=response.output_text,
-                trace_id=str(getattr(task, "task_id", "")),
-            )
-            freshness = freshness_score(None, None)
-            trust = output_trust_score(
+            return self._decision_from_response(
                 manifest=manifest,
-                raw_confidence=float(response.confidence or 0.5),
-                contract_ok=validation.ok,
-                trust_penalty=validation.trust_penalty,
-                freshness_score=freshness,
-                reviewed=False,
-                agreement_score=min(1.0, float(context_result.retrieval_confidence_score or 0.0)),
-            )
-            candidate_id = record_candidate_output(
+                adapter=adapter,
+                response=response,
                 task_hash=task_hash,
-                task_id=str(getattr(task, "task_id", "")),
-                trace_id=str(getattr(task, "task_id", "")),
-                task_class=str(classification.get("task_class", "unknown")),
+                task=task,
+                classification=classification,
+                context_result=context_result,
                 task_kind=task_kind,
                 output_mode=output_mode,
-                provider_name=manifest.provider_name,
-                model_name=manifest.model_name,
-                raw_output=response.output_text,
-                normalized_output=validation.normalized_text,
-                structured_output=validation.structured_output,
-                confidence=float(response.confidence or 0.5),
-                trust_score=trust,
-                validation_state="valid" if validation.ok else "contract_failed",
-                metadata={
-                    "cost_class": adapter.estimate_cost_class(),
-                    "warnings": validation.warnings,
-                    "context_retrieval_confidence": context_result.report.retrieval_confidence,
-                },
-                provenance={
-                    **adapter.get_license_metadata(),
-                    "provider_id": manifest.provider_id,
-                    "output_mode": output_mode,
-                },
-                ttl_seconds=default_ttl_seconds(task_kind=task_kind, output_mode=output_mode),
-            )
-            audit_logger.log(
-                "model_candidate_recorded",
-                target_id=candidate_id,
-                target_type="candidate_knowledge",
-                trace_id=str(getattr(task, "task_id", "")),
-                details={
-                    "provider_id": manifest.provider_id,
-                    "task_kind": task_kind,
-                    "output_mode": output_mode,
-                    "validation_ok": validation.ok,
-                    "trust_score": trust,
-                },
-            )
-            return ModelExecutionDecision(
-                source="provider_execution",
-                task_hash=task_hash,
-                provider_id=manifest.provider_id,
-                provider_name=manifest.provider_name,
-                model_name=manifest.model_name,
-                output_text=validation.normalized_text or response.output_text,
-                structured_output=validation.structured_output,
-                confidence=float(response.confidence or 0.5),
-                trust_score=trust,
-                used_model=True,
-                candidate_id=candidate_id,
+                provider_role=provider_role,
+                ranked_manifests=ranked_manifests,
+                attempted=attempted,
                 failover_used=failover_used,
-                validation_state="valid" if validation.ok else "contract_failed",
-                details={
-                    "warnings": validation.warnings,
-                    "contract_error": validation.error,
-                    "provider_role": provider_role,
-                    "ranked_candidates": [entry.provider_id for entry in ranked_manifests],
-                    "attempted": attempted,
-                },
+                source="provider_execution",
             )
 
         return ModelExecutionDecision(
@@ -409,3 +619,36 @@ def _provider_role_for_request(role: object) -> ProviderRole:
     if candidate in {"drone", "queen"}:
         return candidate
     return "auto"
+
+
+def _streaming_requested(source_context: dict[str, Any] | None, *, output_mode: str) -> bool:
+    if output_mode != "plain_text":
+        return False
+    return bool(str((source_context or {}).get("runtime_event_stream_id") or "").strip())
+
+
+def _ephemeral_stream_context(source_context: dict[str, Any] | None) -> dict[str, Any]:
+    stream_id = str((source_context or {}).get("runtime_event_stream_id") or "").strip()
+    if not stream_id:
+        return {}
+    return {"runtime_event_stream_id": stream_id}
+
+
+def _manifest_locality(manifest: Any) -> str:
+    deployment_class = str(getattr(manifest, "metadata", {}).get("deployment_class") or "").strip().lower()
+    if deployment_class in {"local", "remote"}:
+        return deployment_class
+    base_url = str(getattr(manifest, "runtime_config", {}).get("base_url") or "").strip().lower()
+    if base_url.startswith("http://127.0.0.1") or base_url.startswith("http://localhost"):
+        return "local"
+    return "remote"
+
+
+def _local_remote_race_pair(ranked_manifests: list[Any]) -> tuple[Any, Any] | None:
+    local_manifest = next((manifest for manifest in ranked_manifests if _manifest_locality(manifest) == "local"), None)
+    remote_manifest = next((manifest for manifest in ranked_manifests if _manifest_locality(manifest) == "remote"), None)
+    if local_manifest is None or remote_manifest is None:
+        return None
+    if local_manifest.provider_id == remote_manifest.provider_id:
+        return None
+    return local_manifest, remote_manifest

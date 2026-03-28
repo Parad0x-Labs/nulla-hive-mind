@@ -35,7 +35,7 @@ def test_probe_report_prefers_dual_local_stack_on_24gb_host_with_required_models
     assert dual["status"] == "ready"
 
 
-def test_probe_report_marks_kimi_lane_real_but_unwired_remote_lanes_honestly() -> None:
+def test_probe_report_marks_kimi_and_tether_lanes_real_but_leaves_qvac_honest() -> None:
     report = build_probe_report(
         machine=MachineProbe(cpu_cores=10, ram_gb=24.0, gpu_name="Apple Silicon", vram_gb=24.0, accelerator="mps"),
         ollama_binary="/usr/local/bin/ollama",
@@ -69,12 +69,13 @@ def test_probe_report_marks_kimi_lane_real_but_unwired_remote_lanes_honestly() -
     )
 
     kimi = next(item for item in report["stacks"] if item["stack_id"] == "local_plus_kimi")
-    tether = next(item for item in report["unsupported_stacks"] if item["stack_id"] == "local_plus_tether")
+    tether = next(item for item in report["stacks"] if item["stack_id"] == "local_plus_tether")
     qvac = next(item for item in report["unsupported_stacks"] if item["stack_id"] == "local_plus_qvac")
 
     assert kimi["status"] == "ready"
     assert "real remote kimi queen lane" in kimi["reason"].lower()
-    assert tether["status"] == "not_implemented"
+    assert tether["status"] == "misconfigured"
+    assert "did not register a usable tether lane" in tether["reason"].lower()
     assert qvac["status"] == "not_implemented"
 
 
@@ -136,7 +137,8 @@ def test_render_probe_report_surfaces_installed_models_and_recommendation() -> N
     assert "recommended stack" in rendered.lower()
     assert "qwen2.5:7b" in rendered
     assert "ollama-only (local-only)" in rendered
-    assert "local_plus_tether" not in rendered
+    assert "local_plus_tether" in rendered
+    assert "needs_config" in rendered
 
 
 def test_default_probe_report_hides_unsupported_remote_ideas() -> None:
@@ -153,7 +155,8 @@ def test_default_probe_report_hides_unsupported_remote_ideas() -> None:
     )
 
     assert "unsupported_stacks" not in report
-    assert all(item["stack_id"] not in {"local_plus_tether", "local_plus_qvac"} for item in report["stacks"])
+    assert any(item["stack_id"] == "local_plus_tether" for item in report["stacks"])
+    assert all(item["stack_id"] != "local_plus_qvac" for item in report["stacks"])
 
 
 def test_list_ollama_models_preserves_size_and_modified_columns(monkeypatch) -> None:

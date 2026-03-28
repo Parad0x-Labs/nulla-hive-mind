@@ -412,6 +412,10 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
             _format_runtime_event_text({"message": "Running real tool workspace.read_file."}),
             "Running real tool workspace.read_file.\n",
         )
+        self.assertEqual(
+            _format_runtime_event_text({"event_type": "model_output_chunk", "message": "hello"}),
+            "hello",
+        )
 
     def test_stream_agent_with_events_emits_progress_before_final_response(self) -> None:
         def fake_run_agent(
@@ -486,6 +490,42 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertNotIn("Received request:", joined)
         self.assertNotIn("Running real tool workspace.search_text.", joined)
         self.assertIn("Clean final answer.", joined)
+
+    def test_stream_agent_with_events_prefers_live_model_chunks_over_fake_replay(self) -> None:
+        def fake_run_agent(
+            user_text: str,
+            *,
+            session_id: str | None = None,
+            source_context: dict | None = None,
+        ) -> dict:
+            emit_runtime_event(
+                {"runtime_event_stream_id": str((source_context or {}).get("runtime_event_stream_id") or "")},
+                event_type="model_output_chunk",
+                message="Hello",
+            )
+            emit_runtime_event(
+                {"runtime_event_stream_id": str((source_context or {}).get("runtime_event_stream_id") or "")},
+                event_type="model_output_chunk",
+                message=" world",
+            )
+            return {"response": "Hello world"}
+
+        with mock.patch("apps.nulla_api_server._run_agent", side_effect=fake_run_agent):
+            chunks = list(
+                _stream_agent_with_events(
+                    "say hello",
+                    session_id="openclaw:test",
+                    source_context={"conversation_history": []},
+                    model="nulla",
+                )
+            )
+
+        payloads = [json.loads(line) for line in b"".join(chunks).decode("utf-8").splitlines() if line.strip()]
+        contents = [payload["message"]["content"] for payload in payloads]
+        assert contents.count("Hello") == 1
+        assert contents.count(" world") == 1
+        assert "Hello world" not in contents
+        assert payloads[-1]["done"] is True
 
     def test_run_agent_injects_runtime_session_id_into_source_context(self) -> None:
         seen: dict[str, object] = {}

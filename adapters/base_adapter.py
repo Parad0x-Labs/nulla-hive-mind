@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,6 +37,13 @@ class ModelResponse:
     error: str | None = None
 
 
+@dataclass
+class ModelStreamChunk:
+    delta_text: str
+    raw_event: Any = None
+    done: bool = False
+
+
 class ModelAdapter(ABC):
     def __init__(self, manifest: ModelProviderManifest) -> None:
         self.manifest = manifest
@@ -56,6 +64,9 @@ class ModelAdapter(ABC):
 
     def list_capabilities(self) -> list[str]:
         return list(self.manifest.capabilities)
+
+    def supports_streaming(self) -> bool:
+        return False
 
     def estimate_cost_class(self) -> str:
         base_url = str(self.manifest.runtime_config.get("base_url") or "")
@@ -83,6 +94,10 @@ class ModelAdapter(ABC):
 
     def run_structured_task(self, request: ModelRequest) -> ModelResponse:
         return self.invoke(request)
+
+    def stream_text_task(self, request: ModelRequest) -> Iterable[ModelStreamChunk]:
+        response = self.run_text_task(request)
+        yield ModelStreamChunk(delta_text=response.output_text, raw_event=response.raw_response, done=True)
 
     @abstractmethod
     def invoke(self, request: ModelRequest) -> ModelResponse:

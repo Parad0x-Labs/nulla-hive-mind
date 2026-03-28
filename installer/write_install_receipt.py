@@ -40,6 +40,7 @@ def build_receipt(
     openclaw_config_path: str,
     openclaw_agent_dir: str,
     ollama_binary: str,
+    launch_agent_path: str = "",
 ) -> dict:
     project = Path(project_root).resolve()
     provider_capability_truth, install_profile = _provider_snapshot_and_profile(
@@ -61,6 +62,10 @@ def build_receipt(
         "openclaw_config_path": openclaw_config_path,
         "openclaw_agent_dir": openclaw_agent_dir,
         "ollama_binary": ollama_binary,
+        "launch_agent": {
+            "macos": str(launch_agent_path or ""),
+            "enabled": bool(str(launch_agent_path or "").strip()),
+        },
         "web_stack": {
             "provider_order": ["searxng", "ddg_instant", "duckduckgo_html"],
             "searxng_url": "http://127.0.0.1:8080",
@@ -108,6 +113,7 @@ def main() -> int:
     parser.add_argument("openclaw_config_path")
     parser.add_argument("openclaw_agent_dir")
     parser.add_argument("ollama_binary")
+    parser.add_argument("launch_agent_path")
     args = parser.parse_args()
 
     receipt = build_receipt(
@@ -118,6 +124,7 @@ def main() -> int:
         openclaw_config_path=args.openclaw_config_path,
         openclaw_agent_dir=args.openclaw_agent_dir,
         ollama_binary=args.ollama_binary,
+        launch_agent_path=args.launch_agent_path,
     )
     target_path = Path(args.project_root).resolve() / "install_receipt.json"
     target_path.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

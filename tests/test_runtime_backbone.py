@@ -216,6 +216,44 @@ def test_build_provider_registry_snapshot_accepts_moonshot_aliases_for_kimi() ->
     assert any(item.provider_id == "kimi-remote:kimi-moonshot" for item in snapshot.capability_truth)
 
 
+def test_build_provider_registry_snapshot_auto_registers_tether_when_configured() -> None:
+    manifests = {}
+
+    def _get_manifest(provider_name: str, model_name: str):
+        return manifests.get((provider_name, model_name))
+
+    def _register_manifest(manifest):
+        manifests[(manifest.provider_name, manifest.model_name)] = manifest
+        return manifest
+
+    def _list_manifests(*, enabled_only: bool = False, limit: int = 256):
+        return list(manifests.values())[:limit]
+
+    registry = mock.Mock()
+    registry.startup_warnings.return_value = []
+    registry.provider_audit_rows.return_value = []
+    registry.get_manifest.side_effect = _get_manifest
+    registry.register_manifest.side_effect = _register_manifest
+    registry.list_manifests.side_effect = _list_manifests
+
+    with mock.patch.dict(
+        os.environ,
+        {
+            "TETHER_API_KEY": "test-key",
+            "TETHER_BASE_URL": "https://tether.example/v1",
+            "NULLA_TETHER_MODEL": "tether-edge",
+        },
+        clear=False,
+    ):
+        snapshot = build_provider_registry_snapshot(registry)
+
+    tether_manifest = manifests[("tether-remote", "tether-edge")]
+    assert tether_manifest.adapter_type == "openai_compatible"
+    assert tether_manifest.runtime_config["base_url"] == "https://tether.example/v1"
+    assert tether_manifest.runtime_config["api_key_env"] == "TETHER_API_KEY"
+    assert any(item.provider_id == "tether-remote:tether-edge" for item in snapshot.capability_truth)
+
+
 def test_build_provider_registry_snapshot_auto_registers_vllm_when_configured() -> None:
     manifests = {}
 

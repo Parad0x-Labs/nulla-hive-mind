@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import time
 import unittest
 from unittest import mock
 
+from core.compute_mode import ComputeBudget
 from core.human_input_adapter import HumanInputInterpretation
 from core.identity_manager import load_active_persona
 from core.memory_first_router import MemoryFirstRouter
@@ -141,6 +143,59 @@ class ProviderFailoverTests(unittest.TestCase):
         self.assertTrue(circuit_is_open("local-qwen-http:qwen-local"))
         with mock.patch("core.model_health.time.time", return_value=state.circuit_open_until + 1):
             self.assertFalse(circuit_is_open("local-qwen-http:qwen-local"))
+
+    def test_local_remote_race_returns_first_successful_winner(self) -> None:
+        local_manifest, cloud_manifest = self._register_providers()
+        task = create_task_record("design swarm topology with resilient regions")
+        classification = classify(task.task_summary, context=self.interpretation.as_context())
+        context_result = TieredContextResult(
+            bootstrap_items=[],
+            relevant_items=[],
+            cold_items=[],
+            local_candidates=[],
+            swarm_metadata=[],
+            report=mock.Mock(retrieval_confidence="low", swarm_metadata_consulted=False, cold_archive_opened=False),
+            retrieval_confidence_score=0.15,
+            cold_decision=mock.Mock(allow=False),
+        )
+        context_result.report.to_dict.return_value = {}
+        context_result.report.total_tokens_used.return_value = 0
+        context_result.assembled_context = lambda: "No strong local memory."
+
+        local_adapter = mock.Mock()
+        local_adapter.health_check.return_value = {"ok": True}
+        local_adapter.run_structured_task.side_effect = lambda *_args, **_kwargs: (time.sleep(0.2), mock.Mock(output_text='{"summary":"local"}', confidence=0.7))[1]
+
+        cloud_adapter = mock.Mock()
+        cloud_adapter.health_check.return_value = {"ok": True}
+        cloud_adapter.run_structured_task.return_value = mock.Mock(output_text='{"summary":"remote"}', confidence=0.83)
+        cloud_adapter.get_license_metadata.return_value = {"license_name": "Provider", "license_reference": "user-managed"}
+        cloud_adapter.estimate_cost_class.return_value = "paid_cloud"
+
+        def build_adapter(manifest):
+            if manifest.provider_name == "local-qwen-http":
+                return local_adapter
+            return cloud_adapter
+
+        with mock.patch(
+            "core.memory_first_router.rank_provider_candidates",
+            return_value=[local_manifest, cloud_manifest],
+        ), mock.patch("core.memory_first_router.get_active_compute_budget", return_value=ComputeBudget(mode="max_push", cpu_threads=8, gpu_memory_fraction=0.9, worker_pool_cap=4, reason="test")), mock.patch.object(
+            self.registry,
+            "build_adapter",
+            side_effect=build_adapter,
+        ):
+            result = self.router.resolve(
+                task=task,
+                classification=classification,
+                interpretation=self.interpretation,
+                context_result=context_result,
+                persona=self.persona,
+            )
+
+        self.assertEqual(result.source, "provider_race_winner")
+        self.assertEqual(result.provider_name, "cloud-fallback-http")
+        self.assertTrue(result.failover_used)
 
 
 if __name__ == "__main__":

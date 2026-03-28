@@ -129,6 +129,7 @@ def build_report(
     openclaw_config_path: str,
     openclaw_agent_dir: str,
     ollama_binary: str,
+    launch_agent_path: str = "",
 ) -> dict[str, Any]:
     project = Path(project_root).resolve()
     runtime = Path(runtime_home).expanduser().resolve()
@@ -189,6 +190,11 @@ def build_report(
             "trainable_base": _status(bool(staged_bases), "staged trainable base found" if staged_bases else "no staged trainable base found", staged_bases=staged_bases),
             "ollama": _status(bool(ollama_path), "Ollama binary found" if ollama_path else "Ollama binary missing", path=str(ollama_path or ollama_binary or "")),
             "trace_surface": _status((project / "OpenClaw_NULLA.sh").exists(), "trace launcher path available" if (project / "OpenClaw_NULLA.sh").exists() else "trace launcher path missing", url="http://127.0.0.1:11435/trace"),
+            "launch_agent": _status(
+                (not launch_agent_path) or Path(launch_agent_path).expanduser().exists(),
+                "launch agent present" if launch_agent_path and Path(launch_agent_path).expanduser().exists() else ("launch agent skipped" if not launch_agent_path else "launch agent missing"),
+                path=str(launch_agent_path or ""),
+            ),
             "public_hive": _public_hive_status(project, runtime),
         },
     }
@@ -213,6 +219,7 @@ def main() -> int:
     parser.add_argument("openclaw_config_path")
     parser.add_argument("openclaw_agent_dir")
     parser.add_argument("ollama_binary")
+    parser.add_argument("launch_agent_path")
     args = parser.parse_args()
 
     report = build_report(
@@ -223,6 +230,7 @@ def main() -> int:
         openclaw_config_path=args.openclaw_config_path,
         openclaw_agent_dir=args.openclaw_agent_dir,
         ollama_binary=args.ollama_binary,
+        launch_agent_path=args.launch_agent_path,
     )
     target = Path(args.project_root).resolve() / "install_doctor.json"
     target.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

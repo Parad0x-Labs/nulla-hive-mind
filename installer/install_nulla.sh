@@ -19,6 +19,7 @@ OPENCLAW_PATH_OVERRIDE=""
 OPENCLAW_GATEWAY_BIND="${NULLA_OPENCLAW_GATEWAY_BIND:-}"
 OPENCLAW_GATEWAY_CUSTOM_HOST="${NULLA_OPENCLAW_GATEWAY_CUSTOM_HOST:-}"
 DESKTOP_SHORTCUT_PATH=""
+LAUNCH_AGENT_PATH=""
 RUNTIME_REQUIREMENTS_FILE="${PROJECT_ROOT}/requirements-runtime.txt"
 WHEELHOUSE_DIR="${PROJECT_ROOT}/vendor/wheelhouse"
 BUNDLED_LIQUEFY_DIR="${PROJECT_ROOT}/vendor/liquefy-openclaw-integration"
@@ -430,6 +431,7 @@ persist_provider_env_file() {
   printf '#!/usr/bin/env bash\n' >> "${provider_env_file}"
   for name in \
     KIMI_API_KEY MOONSHOT_API_KEY NULLA_KIMI_API_KEY KIMI_BASE_URL NULLA_KIMI_BASE_URL MOONSHOT_BASE_URL KIMI_MODEL NULLA_KIMI_MODEL MOONSHOT_MODEL \
+    TETHER_API_KEY NULLA_TETHER_API_KEY TETHER_BASE_URL NULLA_TETHER_BASE_URL TETHER_MODEL NULLA_TETHER_MODEL \
     OPENAI_API_KEY \
     VLLM_BASE_URL NULLA_VLLM_BASE_URL VLLM_MODEL NULLA_VLLM_MODEL VLLM_CONTEXT_WINDOW NULLA_VLLM_CONTEXT_WINDOW \
     LLAMACPP_BASE_URL NULLA_LLAMACPP_BASE_URL LLAMA_CPP_BASE_URL NULLA_LLAMA_CPP_BASE_URL \
@@ -869,6 +871,53 @@ EOF
 }
 
 
+install_macos_launch_agent() {
+  local runtime_home="$1"
+  [[ "$(uname)" == "Darwin" ]] || return 0
+
+  local launch_agents_dir="${HOME}/Library/LaunchAgents"
+  local launch_agent_path="${launch_agents_dir}/ai.nulla.runtime.plist"
+  local log_dir="${runtime_home}/logs"
+  mkdir -p "${launch_agents_dir}" "${log_dir}"
+  cat >"${launch_agent_path}" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.nulla.runtime</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${PROJECT_ROOT}/Start_NULLA.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${PROJECT_ROOT}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NULLA_HOME</key>
+    <string>${runtime_home}</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${log_dir}/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>${log_dir}/launchd.err.log</string>
+</dict>
+</plist>
+EOF
+  launchctl bootout "gui/$(id -u)" "${launch_agent_path}" >/dev/null 2>&1 || true
+  if ! launchctl bootstrap "gui/$(id -u)" "${launch_agent_path}" >/dev/null 2>&1; then
+    launchctl load -w "${launch_agent_path}" >/dev/null 2>&1 || true
+  fi
+  LAUNCH_AGENT_PATH="${launch_agent_path}"
+  say "macOS launch agent installed: ${launch_agent_path}"
+}
+
+
 resolve_openclaw_agent_dir() {
   local resolved=""
   case "${OPENCLAW_MODE}" in
@@ -1138,6 +1187,7 @@ write_install_receipt() {
   local openclaw_enabled="$3"
   local ollama_exe="$4"
   local openclaw_agent_dir="$5"
+  local launch_agent_path="$6"
   local openclaw_config_path=""
   local actual_agent_dir=""
   local receipt_path=""
@@ -1158,7 +1208,8 @@ write_install_receipt() {
     "${openclaw_enabled}" \
     "${openclaw_config_path}" \
     "${actual_agent_dir}" \
-    "${ollama_exe:-}" 2>/dev/null || true)"
+    "${ollama_exe:-}" \
+    "${launch_agent_path:-}" 2>/dev/null || true)"
   if [[ -n "${receipt_path}" ]]; then
     say "Install receipt written to ${receipt_path}"
   else
@@ -1173,6 +1224,7 @@ run_install_doctor() {
   local openclaw_enabled="$3"
   local ollama_exe="$4"
   local openclaw_agent_dir="$5"
+  local launch_agent_path="$6"
   local openclaw_config_path=""
   local actual_agent_dir=""
   local report_path=""
@@ -1193,7 +1245,8 @@ run_install_doctor() {
     "${openclaw_enabled}" \
     "${openclaw_config_path}" \
     "${actual_agent_dir}" \
-    "${ollama_exe:-}" 2>/dev/null || true)"
+    "${ollama_exe:-}" \
+    "${launch_agent_path:-}" 2>/dev/null || true)"
   if [[ -n "${report_path}" ]]; then
     say "Doctor report written to ${report_path}"
   else
@@ -1300,8 +1353,9 @@ main() {
   register_openclaw "${runtime_home}" "${model_tag}" "${openclaw_agent_dir}" "${openclaw_enabled}" "${openclaw_home_override}" "${agent_name}"
   pull_models "${ollama_exe}" "${install_profile}" "${model_tag}"
   configure_liquefy
-  write_install_receipt "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}"
-  run_install_doctor "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}"
+  install_macos_launch_agent "${runtime_home}"
+  write_install_receipt "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}" "${LAUNCH_AGENT_PATH}"
+  run_install_doctor "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}" "${LAUNCH_AGENT_PATH}"
 
   say
   say "==============================================="
@@ -1314,6 +1368,9 @@ main() {
   say "Start:   ${PROJECT_ROOT}/OpenClaw_NULLA.sh"
   if [[ -n "${DESKTOP_SHORTCUT_PATH}" ]]; then
     say "Desktop: ${DESKTOP_SHORTCUT_PATH}"
+  fi
+  if [[ -n "${LAUNCH_AGENT_PATH}" ]]; then
+    say "Launchd: ${LAUNCH_AGENT_PATH}"
   fi
   say "Chat:    ${PROJECT_ROOT}/Talk_To_NULLA.sh"
   say "Probe:   ${PROJECT_ROOT}/Probe_NULLA_Stack.sh"
