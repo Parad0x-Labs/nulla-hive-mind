@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from typing import Any
+from urllib import request
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -24,7 +25,65 @@ def detect_ollama_binary() -> str:
     return str(candidate or "")
 
 
-def list_ollama_models(ollama_binary: str | None = None) -> list[dict[str, str]]:
+def _ollama_api_url() -> str:
+    raw = str(os.environ.get("NULLA_RAW_OLLAMA_API_URL") or "").strip()
+    if raw:
+        return raw
+    host = str(os.environ.get("OLLAMA_HOST") or "").strip()
+    if host:
+        if host.startswith(("http://", "https://")):
+            return host
+        return f"http://{host}"
+    return "http://127.0.0.1:11434"
+
+
+def _format_ollama_size_label(value: Any) -> str:
+    try:
+        size = float(value)
+    except Exception:
+        return ""
+    gib = 1024.0 ** 3
+    mib = 1024.0 ** 2
+    if size >= gib:
+        return f"{size / gib:.1f} GB"
+    if size >= mib:
+        return f"{size / mib:.1f} MB"
+    if size > 0:
+        return f"{int(size)} B"
+    return ""
+
+
+def _list_ollama_models_via_api(api_url: str | None = None) -> list[dict[str, str]]:
+    base = str(api_url or "").strip() or _ollama_api_url()
+    url = f"{base.rstrip('/')}/api/tags"
+    try:
+        with request.urlopen(url, timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return []
+    rows: list[dict[str, str]] = []
+    for raw in list(payload.get("models") or []):
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or raw.get("model") or "").strip()
+        if not name:
+            continue
+        digest = str(raw.get("digest") or "").strip()
+        rows.append(
+            {
+                "name": name,
+                "id": digest[:12] if digest else "",
+                "size": _format_ollama_size_label(raw.get("size")),
+                "modified": str(raw.get("modified_at") or "").strip(),
+            }
+        )
+    return rows
+
+
+def list_ollama_models(ollama_binary: str | None = None, ollama_api_url: str | None = None) -> list[dict[str, str]]:
+    api_rows = _list_ollama_models_via_api(ollama_api_url)
+    if api_rows:
+        return api_rows
     binary = str(ollama_binary or "").strip() or detect_ollama_binary()
     if not binary:
         return []

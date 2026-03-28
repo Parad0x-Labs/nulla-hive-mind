@@ -153,6 +153,8 @@ def test_default_probe_report_hides_unsupported_remote_ideas() -> None:
 
 
 def test_list_ollama_models_preserves_size_and_modified_columns(monkeypatch) -> None:
+    monkeypatch.setattr("installer.provider_probe._list_ollama_models_via_api", lambda *args, **kwargs: [])
+
     def fake_run(*args, **kwargs) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             args=args[0],
@@ -175,6 +177,38 @@ def test_list_ollama_models_preserves_size_and_modified_columns(monkeypatch) -> 
             "id": "7cdf5a0187d5",
             "size": "9.0 GB",
             "modified": "3 minutes ago",
+        }
+    ]
+
+
+def test_list_ollama_models_prefers_tags_api_and_avoids_cli_shellout(monkeypatch) -> None:
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            return (
+                b'{"models":[{"name":"qwen2.5:14b","digest":"7cdf5a0187d5abcd","size":8988124069,'
+                b'"modified_at":"2026-03-28T09:38:28Z"}]}'
+            )
+
+    monkeypatch.setattr("installer.provider_probe.request.urlopen", lambda *args, **kwargs: _Response())
+    monkeypatch.setattr(
+        "installer.provider_probe.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("CLI fallback should not run when tags API works")),
+    )
+
+    rows = list_ollama_models("/usr/local/bin/ollama")
+
+    assert rows == [
+        {
+            "name": "qwen2.5:14b",
+            "id": "7cdf5a0187d5",
+            "size": "8.4 GB",
+            "modified": "2026-03-28T09:38:28Z",
         }
     ]
 
