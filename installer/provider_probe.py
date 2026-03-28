@@ -193,10 +193,11 @@ def remote_env_statuses() -> dict[str, dict[str, Any]]:
         "base_url_present": _present("KIMI_BASE_URL", "NULLA_KIMI_BASE_URL", "MOONSHOT_BASE_URL"),
         "model_present": _present("KIMI_MODEL", "NULLA_KIMI_MODEL", "MOONSHOT_MODEL"),
     }
+    generic_remote_api_key = _present("OPENAI_API_KEY", "NULLA_REMOTE_API_KEY", "NULLA_CLOUD_API_KEY")
     generic_remote = {
-        "api_key_present": bool(os.environ.get("NULLA_REMOTE_API_KEY")),
-        "base_url_present": bool(os.environ.get("NULLA_REMOTE_BASE_URL")),
-        "model_present": bool(os.environ.get("NULLA_REMOTE_MODEL")),
+        "api_key_present": generic_remote_api_key,
+        "base_url_present": _present("NULLA_REMOTE_BASE_URL", "OPENAI_BASE_URL") or generic_remote_api_key,
+        "model_present": _present("NULLA_REMOTE_MODEL", "OPENAI_MODEL") or generic_remote_api_key,
     }
     tether = {
         "api_key_present": bool(os.environ.get("TETHER_API_KEY")),
@@ -289,8 +290,13 @@ def build_probe_report(
         provider_capability_truth=capability_truth,
         env=_probe_env_for_install_profile(envs),
     )
+    generic_remote_state, generic_remote_provider_id = _provider_state_for_prefix(
+        capability_truth,
+        "openai-compatible-remote:",
+    )
     kimi_state, kimi_provider_id = _provider_state_for_prefix(capability_truth, "kimi-remote:")
     tether_state, tether_provider_id = _provider_state_for_prefix(capability_truth, "tether-remote:")
+    generic_remote_configured = bool(envs.get("generic_remote", {}).get("configured"))
     kimi_configured = bool(envs.get("kimi", {}).get("configured"))
     tether_configured = bool(envs.get("tether", {}).get("configured"))
 
@@ -337,6 +343,45 @@ def build_probe_report(
             "reason": dual_reason,
             "primary_model": primary_tier.ollama_tag,
             "helper_model": helper_model,
+        }
+    )
+
+    if generic_remote_configured:
+        if generic_remote_state == "ready":
+            generic_remote_status = "ready"
+            generic_remote_reason = (
+                "Generic OpenAI-compatible credentials are present and runtime bootstrap exposes a real remote fallback lane."
+            )
+        elif generic_remote_state == "degraded":
+            generic_remote_status = "degraded"
+            generic_remote_reason = (
+                "Generic OpenAI-compatible credentials are present and the remote fallback lane exists, but it is currently degraded."
+            )
+        elif generic_remote_state == "blocked":
+            generic_remote_status = "blocked"
+            generic_remote_reason = (
+                "Generic OpenAI-compatible credentials are present, but the remote fallback lane is blocked by current health state."
+            )
+        else:
+            generic_remote_status = "misconfigured"
+            generic_remote_reason = (
+                "Generic OpenAI-compatible credentials are present, but runtime bootstrap did not register a usable fallback lane."
+            )
+    else:
+        generic_remote_status = "needs_config"
+        generic_remote_reason = (
+            "A generic remote fallback lane becomes real when OPENAI_API_KEY or NULLA_REMOTE_API_KEY is configured."
+        )
+    stacks.append(
+        {
+            "stack_id": "local_plus_remote_openai_compatible",
+            "install_profile_id": "hybrid-fallback",
+            "status": generic_remote_status,
+            "recommended": False,
+            "reason": generic_remote_reason,
+            "primary_model": primary_tier.ollama_tag,
+            "helper_model": helper_model if local_fit != "single_model_only" else "",
+            "provider_id": generic_remote_provider_id,
         }
     )
 

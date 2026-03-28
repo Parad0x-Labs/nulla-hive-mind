@@ -255,6 +255,43 @@ def test_build_provider_registry_snapshot_auto_registers_tether_when_configured(
     assert any(item.provider_id == "tether-remote:tether-edge" for item in snapshot.capability_truth)
 
 
+def test_build_provider_registry_snapshot_auto_registers_generic_remote_when_openai_is_configured() -> None:
+    manifests = {}
+
+    def _get_manifest(provider_name: str, model_name: str):
+        return manifests.get((provider_name, model_name))
+
+    def _register_manifest(manifest):
+        manifests[(manifest.provider_name, manifest.model_name)] = manifest
+        return manifest
+
+    def _list_manifests(*, enabled_only: bool = False, limit: int = 256):
+        return list(manifests.values())[:limit]
+
+    registry = mock.Mock()
+    registry.startup_warnings.return_value = []
+    registry.provider_audit_rows.return_value = []
+    registry.get_manifest.side_effect = _get_manifest
+    registry.register_manifest.side_effect = _register_manifest
+    registry.list_manifests.side_effect = _list_manifests
+
+    with mock.patch.dict(
+        os.environ,
+        {
+            "OPENAI_API_KEY": "test-key",
+            "OPENAI_MODEL": "gpt-4.1-mini",
+        },
+        clear=False,
+    ):
+        snapshot = build_provider_registry_snapshot(registry)
+
+    remote_manifest = manifests[("openai-compatible-remote", "gpt-4.1-mini")]
+    assert remote_manifest.adapter_type == "cloud_fallback_provider"
+    assert remote_manifest.runtime_config["base_url"] == "https://api.openai.com/v1"
+    assert remote_manifest.runtime_config["api_key_env"] == "OPENAI_API_KEY"
+    assert any(item.provider_id == "openai-compatible-remote:gpt-4.1-mini" for item in snapshot.capability_truth)
+
+
 def test_build_provider_registry_snapshot_auto_registers_vllm_when_configured() -> None:
     manifests = {}
 

@@ -97,3 +97,58 @@ def test_validate_install_profile_blocks_unready_full_orchestrated(monkeypatch) 
     assert ok is False
     assert "full-orchestrated" in message
     assert "not ready" in message
+
+
+def test_validate_install_profile_accepts_ready_hybrid_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        validator,
+        "build_provider_registry_snapshot",
+        lambda: SimpleNamespace(
+            capability_truth=(
+                ProviderCapabilityTruth(
+                    provider_id="ollama-local:qwen2.5:7b",
+                    model_id="qwen2.5:7b",
+                    role_fit="coder",
+                    context_window=32768,
+                    tool_support=("structured_json",),
+                    structured_output_support=True,
+                    tokens_per_second=14.0,
+                    ram_budget_gb=12.0,
+                    vram_budget_gb=0.0,
+                    quantization="Q4_K_M",
+                    locality="local",
+                    privacy_class="local_private",
+                    queue_depth=0,
+                    max_safe_concurrency=1,
+                    availability_state="ready",
+                ),
+                ProviderCapabilityTruth(
+                    provider_id="openai-compatible-remote:gpt-4.1-mini",
+                    model_id="gpt-4.1-mini",
+                    role_fit="queen",
+                    context_window=131072,
+                    tool_support=("tool_calls", "structured_json"),
+                    structured_output_support=True,
+                    tokens_per_second=0.0,
+                    ram_budget_gb=0.0,
+                    vram_budget_gb=0.0,
+                    quantization="provider",
+                    locality="remote",
+                    privacy_class="remote_provider",
+                    queue_depth=0,
+                    max_safe_concurrency=2,
+                    availability_state="ready",
+                ),
+            )
+        ),
+    )
+
+    ok, message = validator.validate_install_profile(
+        runtime_home="/tmp/nulla-runtime",
+        selected_model="qwen2.5:7b",
+        requested_profile="hybrid-fallback",
+    )
+
+    assert ok is True
+    assert message == ""

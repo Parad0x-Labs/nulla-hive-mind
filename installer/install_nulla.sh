@@ -435,7 +435,7 @@ persist_provider_env_file() {
   for name in \
     KIMI_API_KEY MOONSHOT_API_KEY NULLA_KIMI_API_KEY KIMI_BASE_URL NULLA_KIMI_BASE_URL MOONSHOT_BASE_URL KIMI_MODEL NULLA_KIMI_MODEL MOONSHOT_MODEL \
     TETHER_API_KEY NULLA_TETHER_API_KEY TETHER_BASE_URL NULLA_TETHER_BASE_URL TETHER_MODEL NULLA_TETHER_MODEL \
-    OPENAI_API_KEY \
+    OPENAI_API_KEY OPENAI_BASE_URL OPENAI_MODEL NULLA_REMOTE_API_KEY NULLA_REMOTE_BASE_URL NULLA_REMOTE_MODEL NULLA_CLOUD_API_KEY \
     VLLM_BASE_URL NULLA_VLLM_BASE_URL VLLM_MODEL NULLA_VLLM_MODEL VLLM_CONTEXT_WINDOW NULLA_VLLM_CONTEXT_WINDOW \
     LLAMACPP_BASE_URL NULLA_LLAMACPP_BASE_URL LLAMA_CPP_BASE_URL NULLA_LLAMA_CPP_BASE_URL \
     LLAMACPP_MODEL NULLA_LLAMACPP_MODEL LLAMACPP_CONTEXT_WINDOW NULLA_LLAMACPP_CONTEXT_WINDOW; do
@@ -584,6 +584,9 @@ ensure_profile_remote_credentials() {
       export KIMI_API_KEY="${captured_key}"
       say "Captured Kimi credential for this install session. It will be persisted into NULLA runtime config."
       ;;
+  esac
+
+  case "${install_profile}" in
     hybrid-tether)
       if [[ -n "${TETHER_API_KEY:-${NULLA_TETHER_API_KEY:-}}" && -n "${TETHER_BASE_URL:-${NULLA_TETHER_BASE_URL:-}}" ]]; then
         return
@@ -614,6 +617,27 @@ ensure_profile_remote_credentials() {
       export TETHER_API_KEY="${captured_tether_key}"
       export TETHER_BASE_URL="${captured_tether_base_url}"
       say "Captured Tether credentials for this install session. They will be persisted into NULLA runtime config."
+      ;;
+  esac
+
+  case "${install_profile}" in
+    hybrid-fallback|full-orchestrated)
+      if [[ -n "${OPENAI_API_KEY:-${NULLA_REMOTE_API_KEY:-${NULLA_CLOUD_API_KEY:-}}}" ]]; then
+        return
+      fi
+      if [[ "${AUTO_YES}" -eq 1 ]]; then
+        say "ERROR: ${install_profile} requires OPENAI_API_KEY, NULLA_REMOTE_API_KEY, or NULLA_CLOUD_API_KEY for the generic remote fallback lane."
+        say "Export one of those before running the one-line install, or rerun interactively so the installer can prompt and persist it."
+        exit 1
+      fi
+      local captured_remote_key=""
+      captured_remote_key="$(read_secret_from_tty "Enter OpenAI-compatible remote API key (input hidden): ")" || true
+      if [[ -z "${captured_remote_key}" ]]; then
+        say "ERROR: ${install_profile} requires OPENAI_API_KEY, NULLA_REMOTE_API_KEY, or NULLA_CLOUD_API_KEY."
+        exit 1
+      fi
+      export OPENAI_API_KEY="${captured_remote_key}"
+      say "Captured generic remote credential for this install session. It will default to OpenAI unless NULLA_REMOTE_BASE_URL or OPENAI_BASE_URL overrides it."
       ;;
   esac
 }

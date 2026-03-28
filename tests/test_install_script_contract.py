@@ -31,10 +31,12 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert 'ensure_profile_remote_credentials() {' in script
     assert 'Enter Kimi / Moonshot API key' in script
     assert 'Enter Tether API key' in script
+    assert 'Enter OpenAI-compatible remote API key' in script
     assert '"${SCRIPT_DIR}/validate_install_profile.py"' in script
     assert 'persist_install_profile_record() {' in script
     assert 'persist_provider_env_file() {' in script
     assert 'PROVIDER_ENV_FILE="\\${NULLA_HOME}/config/provider-env.sh"' in script
+    assert 'NULLA_REMOTE_API_KEY NULLA_REMOTE_BASE_URL NULLA_REMOTE_MODEL NULLA_CLOUD_API_KEY' in script
     assert 'detect_install_profile_display() {' in script
     assert script.count('cd "${PROJECT_ROOT}" && "${VENV_DIR}/bin/python" -c "') >= 3
     assert 'cd "${PROJECT_ROOT}" && NULLA_HOME="${runtime_home}" NULLA_INSTALL_PROFILE="${requested_profile}" "${VENV_DIR}/bin/python" -c "' in script

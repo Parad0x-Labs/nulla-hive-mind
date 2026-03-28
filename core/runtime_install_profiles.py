@@ -63,6 +63,8 @@ _MODEL_SIZE_GB = {
 _INSTALL_PROFILE_RECORD_RELATIVE_PATH = Path("config") / "install-profile.json"
 _KIMI_API_KEY_ENV_KEYS = ("KIMI_API_KEY", "MOONSHOT_API_KEY", "NULLA_KIMI_API_KEY")
 _KIMI_API_KEY_REASON = "KIMI_API_KEY or MOONSHOT_API_KEY"
+_GENERIC_REMOTE_API_KEY_ENV_KEYS = ("OPENAI_API_KEY", "NULLA_REMOTE_API_KEY", "NULLA_CLOUD_API_KEY")
+_GENERIC_REMOTE_API_KEY_REASON = "OPENAI_API_KEY, NULLA_REMOTE_API_KEY, or NULLA_CLOUD_API_KEY"
 _TETHER_API_KEY_ENV_KEYS = ("TETHER_API_KEY", "NULLA_TETHER_API_KEY")
 _TETHER_BASE_URL_ENV_KEYS = ("TETHER_BASE_URL", "NULLA_TETHER_BASE_URL")
 _TETHER_CONFIG_REASON = "TETHER_API_KEY and TETHER_BASE_URL"
@@ -217,7 +219,12 @@ def build_install_profile_truth(
             installed_ollama_models=installed_ollama_models,
         )
 
-    candidates = _auto_profile_candidates(probe=active_probe, tier=active_tier, env=env_map)
+    candidates = _auto_profile_candidates(
+        probe=active_probe,
+        tier=active_tier,
+        env=env_map,
+        provider_capability_truth=provider_capability_truth,
+    )
     evaluated: list[InstallProfileTruth] = []
     for candidate in candidates:
         evaluated.append(
@@ -461,24 +468,37 @@ def _auto_profile_candidates(
     probe: MachineProbe,
     tier: QwenTier,
     env: Mapping[str, str],
+    provider_capability_truth: tuple[ProviderCapabilityTruth, ...] = (),
 ) -> tuple[str, ...]:
     candidates: list[str] = []
-    kimi_configured = _has_any_env(env, *_KIMI_API_KEY_ENV_KEYS)
-    tether_configured = _has_any_env(env, *_TETHER_API_KEY_ENV_KEYS) and _has_any_env(env, *_TETHER_BASE_URL_ENV_KEYS)
+    kimi_configured = _has_any_env(env, *_KIMI_API_KEY_ENV_KEYS) or _provider_prefix_registered(
+        provider_capability_truth,
+        "kimi-remote:",
+    )
+    tether_configured = (
+        _has_any_env(env, *_TETHER_API_KEY_ENV_KEYS) and _has_any_env(env, *_TETHER_BASE_URL_ENV_KEYS)
+    ) or _provider_prefix_registered(provider_capability_truth, "tether-remote:")
+    generic_remote_configured = _has_any_env(env, *_GENERIC_REMOTE_API_KEY_ENV_KEYS) or _provider_prefix_registered(
+        provider_capability_truth,
+        "openai-compatible-remote:",
+    )
     if tier.tier_name in {"mid", "heavy", "titan"}:
         candidates.append("local-max")
         if kimi_configured:
             candidates.append("hybrid-kimi")
         if tether_configured:
             candidates.append("hybrid-tether")
+        if generic_remote_configured:
+            candidates.append("hybrid-fallback")
         candidates.append("local-only")
         return tuple(dict.fromkeys(candidates))
-    if kimi_configured and tier.tier_name in {"nano", "lite", "base"}:
-        candidates.extend(("hybrid-kimi", "local-only"))
-        return tuple(dict.fromkeys(candidates))
-    if tether_configured and tier.tier_name in {"nano", "lite", "base"}:
-        candidates.extend(("hybrid-tether", "local-only"))
-        return tuple(dict.fromkeys(candidates))
+    if tier.tier_name in {"nano", "lite", "base"}:
+        if kimi_configured:
+            candidates.append("hybrid-kimi")
+        if tether_configured:
+            candidates.append("hybrid-tether")
+        if generic_remote_configured:
+            candidates.append("hybrid-fallback")
     candidates.append("local-only")
     return tuple(dict.fromkeys(candidates))
 
@@ -488,6 +508,8 @@ def _auto_selection_reason(profile_id: str) -> str:
         return "Auto-selected hybrid-kimi because local tier is limited and Kimi is configured."
     if profile_id == "hybrid-tether":
         return "Auto-selected hybrid-tether because local tier is limited and Tether is configured."
+    if profile_id == "hybrid-fallback":
+        return "Auto-selected hybrid-fallback because local tier is limited and a generic remote fallback lane is configured."
     if profile_id == "local-max":
         return "Auto-selected local-max because this machine can hold a stronger fully local lane."
     return "Auto-selected local-only to keep the default runtime local-first and dependency-light."
@@ -576,6 +598,11 @@ def _provider_mix(
     kimi_provider_id = _find_remote_provider_id(provider_capability_truth, hint="kimi")
     tether_provider_id = _find_remote_provider_id(provider_capability_truth, hint="tether")
     fallback_provider_id = _find_remote_provider_id(provider_capability_truth, hint=None, exclude={kimi_provider_id})
+    local_availability = _provider_availability_state(local_provider_id, truth_index)
+    secondary_local_availability = _provider_availability_state(secondary_local_provider_id, truth_index)
+    kimi_availability = _provider_availability_state(kimi_provider_id, truth_index)
+    tether_availability = _provider_availability_state(tether_provider_id, truth_index)
+    fallback_availability = _provider_availability_state(fallback_provider_id, truth_index)
     providers: list[InstallProfileProvider] = []
     reasons: list[str] = []
 
@@ -586,7 +613,7 @@ def _provider_mix(
             locality="local",
             required=True,
             configured=True,
-            availability_state=_provider_availability_state(local_provider_id, truth_index),
+            availability_state=local_availability,
             notes="Primary local Ollama lane.",
         )
     )
@@ -598,7 +625,7 @@ def _provider_mix(
                 locality="local",
                 required=True,
                 configured=True,
-                availability_state=_provider_availability_state(secondary_local_provider_id, truth_index),
+                availability_state=secondary_local_availability,
                 notes=(
                     "Secondary local verification lane."
                     if secondary_local_provider_id != local_provider_id
@@ -607,7 +634,7 @@ def _provider_mix(
             )
         )
     if profile_id == "hybrid-kimi":
-        configured = _has_any_env(env, *_KIMI_API_KEY_ENV_KEYS)
+        configured = _has_any_env(env, *_KIMI_API_KEY_ENV_KEYS) or kimi_availability != "unregistered"
         providers.append(
             InstallProfileProvider(
                 provider_id=kimi_provider_id,
@@ -616,14 +643,16 @@ def _provider_mix(
                 required=True,
                 api_key_envs=_KIMI_API_KEY_ENV_KEYS,
                 configured=configured,
-                availability_state=_provider_availability_state(kimi_provider_id, truth_index),
+                availability_state=kimi_availability,
                 notes="Remote reasoning/synthesis lane.",
             )
         )
         if not configured:
             reasons.append(f"hybrid-kimi needs {_KIMI_API_KEY_REASON} before the remote queen lane is usable.")
     elif profile_id == "hybrid-tether":
-        configured = _has_any_env(env, *_TETHER_API_KEY_ENV_KEYS) and _has_any_env(env, *_TETHER_BASE_URL_ENV_KEYS)
+        configured = (
+            _has_any_env(env, *_TETHER_API_KEY_ENV_KEYS) and _has_any_env(env, *_TETHER_BASE_URL_ENV_KEYS)
+        ) or tether_availability != "unregistered"
         providers.append(
             InstallProfileProvider(
                 provider_id=tether_provider_id,
@@ -632,31 +661,31 @@ def _provider_mix(
                 required=True,
                 api_key_envs=(*_TETHER_API_KEY_ENV_KEYS, *_TETHER_BASE_URL_ENV_KEYS),
                 configured=configured,
-                availability_state=_provider_availability_state(tether_provider_id, truth_index),
+                availability_state=tether_availability,
                 notes="Remote reasoning/synthesis lane via a user-managed Tether endpoint.",
             )
         )
         if not configured:
             reasons.append(f"hybrid-tether needs {_TETHER_CONFIG_REASON} before the remote queen lane is usable.")
     elif profile_id == "hybrid-fallback":
-        configured = _has_any_env(env, "OPENAI_API_KEY", *_KIMI_API_KEY_ENV_KEYS)
+        configured = _has_any_env(env, *_GENERIC_REMOTE_API_KEY_ENV_KEYS) or fallback_availability != "unregistered"
         providers.append(
             InstallProfileProvider(
                 provider_id=fallback_provider_id,
                 role="queen",
                 locality="remote",
                 required=True,
-                api_key_envs=("OPENAI_API_KEY", *_KIMI_API_KEY_ENV_KEYS),
+                api_key_envs=_GENERIC_REMOTE_API_KEY_ENV_KEYS,
                 configured=configured,
-                availability_state=_provider_availability_state(fallback_provider_id, truth_index),
+                availability_state=fallback_availability,
                 notes="Remote fallback lane for when local quality or availability is insufficient.",
             )
         )
         if not configured:
-            reasons.append(f"hybrid-fallback needs OPENAI_API_KEY or {_KIMI_API_KEY_REASON}.")
+            reasons.append(f"hybrid-fallback needs {_GENERIC_REMOTE_API_KEY_REASON}.")
     elif profile_id == "full-orchestrated":
-        kimi_configured = _has_any_env(env, *_KIMI_API_KEY_ENV_KEYS)
-        fallback_configured = _has_any_env(env, "OPENAI_API_KEY", *_KIMI_API_KEY_ENV_KEYS)
+        kimi_configured = _has_any_env(env, *_KIMI_API_KEY_ENV_KEYS) or kimi_availability != "unregistered"
+        fallback_configured = _has_any_env(env, *_GENERIC_REMOTE_API_KEY_ENV_KEYS) or fallback_availability != "unregistered"
         providers.extend(
             [
                 InstallProfileProvider(
@@ -666,7 +695,7 @@ def _provider_mix(
                     required=True,
                     api_key_envs=_KIMI_API_KEY_ENV_KEYS,
                     configured=kimi_configured,
-                    availability_state=_provider_availability_state(kimi_provider_id, truth_index),
+                    availability_state=kimi_availability,
                     notes="Primary remote synthesis lane.",
                 ),
                 InstallProfileProvider(
@@ -674,9 +703,9 @@ def _provider_mix(
                     role="researcher",
                     locality="remote",
                     required=True,
-                    api_key_envs=("OPENAI_API_KEY", *_KIMI_API_KEY_ENV_KEYS),
+                    api_key_envs=_GENERIC_REMOTE_API_KEY_ENV_KEYS,
                     configured=fallback_configured,
-                    availability_state=_provider_availability_state(fallback_provider_id, truth_index),
+                    availability_state=fallback_availability,
                     notes="Remote fallback/research lane.",
                 ),
             ]
@@ -684,7 +713,7 @@ def _provider_mix(
         if not kimi_configured:
             reasons.append(f"full-orchestrated needs {_KIMI_API_KEY_REASON} for the queen lane.")
         if not fallback_configured:
-            reasons.append(f"full-orchestrated needs OPENAI_API_KEY or {_KIMI_API_KEY_REASON} for the remote fallback lane.")
+            reasons.append(f"full-orchestrated needs {_GENERIC_REMOTE_API_KEY_REASON} for the remote fallback lane.")
 
     return tuple(providers), reasons
 
@@ -749,27 +778,48 @@ def _find_remote_provider_id(
     exclude: set[str | None] | None = None,
 ) -> str:
     excluded = {item for item in list(exclude or set()) if item}
-    hinted = [
+    remote_candidates = [
         item
         for item in provider_capability_truth
         if item.locality == "remote" and item.provider_id not in excluded
     ]
-    if hinted:
-        hinted.sort(
+    if hint:
+        hinted = [item for item in remote_candidates if hint in item.provider_id.lower()]
+        if hinted:
+            hinted.sort(
+                key=lambda item: (
+                    _availability_rank(item.availability_state),
+                    1 if item.role_fit == "queen" else 0,
+                    -float(item.queue_depth) / float(max(1, item.max_safe_concurrency)),
+                ),
+                reverse=True,
+            )
+            return hinted[0].provider_id
+        if hint == "kimi":
+            return "kimi-remote"
+        if hint == "tether":
+            return "tether-remote"
+    if remote_candidates:
+        remote_candidates.sort(
             key=lambda item: (
-                1 if hint and hint in item.provider_id.lower() else 0,
                 _availability_rank(item.availability_state),
                 1 if item.role_fit == "queen" else 0,
                 -float(item.queue_depth) / float(max(1, item.max_safe_concurrency)),
             ),
             reverse=True,
         )
-        return hinted[0].provider_id
-    if hint == "kimi":
-        return "kimi-remote"
-    if hint == "tether":
-        return "tether-remote"
+        return remote_candidates[0].provider_id
     return "openai-compatible-remote"
+
+
+def _provider_prefix_registered(
+    provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
+    prefix: str,
+) -> bool:
+    lowered = str(prefix or "").strip().lower()
+    if not lowered:
+        return False
+    return any(str(item.provider_id).lower().startswith(lowered) for item in provider_capability_truth)
 
 
 def _provider_truth_index(

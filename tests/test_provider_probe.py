@@ -81,6 +81,46 @@ def test_probe_report_marks_kimi_and_tether_lanes_real_but_leaves_qvac_honest() 
     assert qvac["status"] == "not_implemented"
 
 
+def test_probe_report_prefers_generic_remote_fallback_when_smaller_host_has_real_remote_lane() -> None:
+    report = build_probe_report(
+        machine=MachineProbe(cpu_cores=8, ram_gb=12.0, gpu_name=None, vram_gb=None, accelerator="cpu"),
+        ollama_binary="/usr/local/bin/ollama",
+        ollama_models=[{"name": "qwen2.5:7b", "id": "b", "size": "4.7 GB", "modified": "today"}],
+        env_statuses={
+            "kimi": {"configured": False},
+            "generic_remote": {"configured": True},
+            "tether": {"configured": False},
+            "qvac": {"configured": False},
+        },
+        provider_capability_truth=(
+            ProviderCapabilityTruth(
+                provider_id="openai-compatible-remote:gpt-4.1-mini",
+                model_id="gpt-4.1-mini",
+                role_fit="queen",
+                context_window=131072,
+                tool_support=("tool_calls", "structured_json"),
+                structured_output_support=True,
+                tokens_per_second=0.0,
+                ram_budget_gb=0.0,
+                vram_budget_gb=0.0,
+                quantization="provider",
+                locality="remote",
+                privacy_class="remote_provider",
+                queue_depth=0,
+                max_safe_concurrency=2,
+                availability_state="ready",
+            ),
+        ),
+    )
+
+    assert report["recommended_stack_id"] == "local_plus_remote_openai_compatible"
+    assert report["recommended_install_profile_id"] == "hybrid-fallback"
+    fallback = next(item for item in report["stacks"] if item["stack_id"] == "local_plus_remote_openai_compatible")
+    assert fallback["recommended"] is True
+    assert fallback["status"] == "ready"
+    assert fallback["install_profile_display_id"] == "hybrid-fallback"
+
+
 def test_probe_report_prefers_kimi_on_smaller_host_when_configured_and_ready() -> None:
     report = build_probe_report(
         machine=MachineProbe(cpu_cores=8, ram_gb=12.0, gpu_name=None, vram_gb=None, accelerator="cpu"),
@@ -139,6 +179,7 @@ def test_render_probe_report_surfaces_installed_models_and_recommendation() -> N
     assert "recommended stack" in rendered.lower()
     assert "qwen2.5:7b" in rendered
     assert "ollama-only (local-only)" in rendered
+    assert "local_plus_remote_openai_compatible" in rendered
     assert "local_plus_tether" in rendered
     assert "ollama+tether (hybrid-tether)" in rendered
     assert "needs_config" in rendered

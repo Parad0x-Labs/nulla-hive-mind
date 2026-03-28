@@ -175,6 +175,65 @@ def test_auto_profile_prefers_hybrid_kimi_when_moonshot_alias_is_configured() ->
     assert any(item.provider_id == "kimi-remote:kimi-k2" and item.role == "queen" for item in profile.provider_mix)
 
 
+def test_auto_profile_prefers_hybrid_fallback_on_smaller_host_when_generic_remote_is_configured() -> None:
+    probe = MachineProbe(
+        cpu_cores=8,
+        ram_gb=12.0,
+        gpu_name=None,
+        vram_gb=None,
+        accelerator="cpu",
+    )
+    tier = QwenTier("base", "qwen2.5:7b", 7.0, 4.0, 12.0)
+    with mock.patch("core.runtime_install_profiles.shutil.disk_usage", return_value=_fake_disk_usage_with_free_gb(128.0)):
+        profile = build_install_profile_truth(
+            probe=probe,
+            tier=tier,
+            env={"OPENAI_API_KEY": "test-key"},
+            provider_capability_truth=(
+                ProviderCapabilityTruth(
+                    provider_id="local-qwen-http:qwen2.5:7b",
+                    model_id="qwen2.5:7b",
+                    role_fit="drone",
+                    context_window=32768,
+                    tool_support=("structured_json",),
+                    structured_output_support=True,
+                    tokens_per_second=14.0,
+                    ram_budget_gb=12.0,
+                    vram_budget_gb=0.0,
+                    quantization="Q4_K_M",
+                    locality="local",
+                    privacy_class="local_private",
+                    queue_depth=0,
+                    max_safe_concurrency=1,
+                ),
+                ProviderCapabilityTruth(
+                    provider_id="openai-compatible-remote:gpt-4.1-mini",
+                    model_id="gpt-4.1-mini",
+                    role_fit="queen",
+                    context_window=131072,
+                    tool_support=("tool_calls", "structured_json"),
+                    structured_output_support=True,
+                    tokens_per_second=0.0,
+                    ram_budget_gb=0.0,
+                    vram_budget_gb=0.0,
+                    quantization="provider",
+                    locality="remote",
+                    privacy_class="remote_provider",
+                    queue_depth=0,
+                    max_safe_concurrency=2,
+                ),
+            ),
+            runtime_home="/tmp/nulla-runtime",
+        )
+
+    assert profile.profile_id == "hybrid-fallback"
+    assert profile.ready is True
+    assert any(
+        item.provider_id == "openai-compatible-remote:gpt-4.1-mini" and item.role == "queen"
+        for item in profile.provider_mix
+    )
+
+
 def test_auto_profile_prefers_hybrid_tether_on_smaller_host_when_tether_is_configured() -> None:
     probe = MachineProbe(
         cpu_cores=8,
