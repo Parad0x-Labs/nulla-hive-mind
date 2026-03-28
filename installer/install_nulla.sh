@@ -454,20 +454,20 @@ detect_model_tag() {
     printf '%s\n' "${override_model##*/}"
     return
   fi
-  "${VENV_DIR}/bin/python" -c "
+  (cd "${PROJECT_ROOT}" && "${VENV_DIR}/bin/python" -c "
 from core.hardware_tier import probe_machine, select_qwen_tier, tier_summary
 summary = tier_summary()
 print(summary['ollama_model'])
-" 2>/dev/null || echo "qwen2.5:7b"
+") 2>/dev/null || echo "qwen2.5:7b"
 }
 
 
 detect_hardware_summary() {
-  "${VENV_DIR}/bin/python" -c "
+  (cd "${PROJECT_ROOT}" && "${VENV_DIR}/bin/python" -c "
 import json
 from core.hardware_tier import tier_summary
 print(json.dumps(tier_summary(), ensure_ascii=False))
-" 2>/dev/null || echo '{"selected_tier":"base","ollama_model":"qwen2.5:7b"}'
+") 2>/dev/null || echo '{"selected_tier":"base","ollama_model":"qwen2.5:7b"}'
 }
 
 
@@ -475,7 +475,7 @@ detect_install_profile() {
   local runtime_home="$1"
   local model_tag="$2"
   local requested_profile="${3:-}"
-  NULLA_HOME="${runtime_home}" NULLA_INSTALL_PROFILE="${requested_profile}" "${VENV_DIR}/bin/python" -c "
+  (cd "${PROJECT_ROOT}" && NULLA_HOME="${runtime_home}" NULLA_INSTALL_PROFILE="${requested_profile}" "${VENV_DIR}/bin/python" -c "
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_install_profiles import build_install_profile_truth
 snapshot = build_provider_registry_snapshot()
@@ -486,16 +486,16 @@ profile = build_install_profile_truth(
     provider_capability_truth=snapshot.capability_truth,
 )
 print(profile.profile_id)
-" 2>/dev/null || echo "local-only"
+") 2>/dev/null || echo "local-only"
 }
 
 
 detect_install_profile_display() {
   local install_profile="$1"
-  "${VENV_DIR}/bin/python" -c "
+  (cd "${PROJECT_ROOT}" && "${VENV_DIR}/bin/python" -c "
 from core.runtime_install_profiles import format_install_profile_id
 print(format_install_profile_id('${install_profile}', allow_auto=False))
-" 2>/dev/null || echo "${install_profile}"
+") 2>/dev/null || echo "${install_profile}"
 }
 
 
@@ -503,7 +503,7 @@ detect_install_profile_summary() {
   local runtime_home="$1"
   local model_tag="$2"
   local requested_profile="${3:-}"
-  NULLA_HOME="${runtime_home}" NULLA_INSTALL_PROFILE="${requested_profile}" "${VENV_DIR}/bin/python" -c "
+  (cd "${PROJECT_ROOT}" && NULLA_HOME="${runtime_home}" NULLA_INSTALL_PROFILE="${requested_profile}" "${VENV_DIR}/bin/python" -c "
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_install_profiles import build_install_profile_truth
 snapshot = build_provider_registry_snapshot()
@@ -514,7 +514,7 @@ profile = build_install_profile_truth(
     provider_capability_truth=snapshot.capability_truth,
 )
 print(profile.display_summary())
-" 2>/dev/null || echo "local-only -> ${model_tag}"
+") 2>/dev/null || echo "local-only -> ${model_tag}"
 }
 
 
