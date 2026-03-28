@@ -24,7 +24,11 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     script = (PROJECT_ROOT / "installer" / "install_nulla.sh").read_text(encoding="utf-8")
 
     assert "--install-profile <profile>" in script
+    assert "ollama-only" in script
+    assert "ollama+kimi" in script
     assert 'validate_selected_install_profile() {' in script
+    assert 'ensure_profile_remote_credentials() {' in script
+    assert 'Enter Kimi / Moonshot API key' in script
     assert '"${SCRIPT_DIR}/validate_install_profile.py"' in script
     assert 'persist_install_profile_record() {' in script
     assert 'persist_provider_env_file() {' in script
@@ -46,6 +50,7 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert 'Skipping Ollama OpenClaw auto-config for isolated home' in script
     assert 'say "Verifying live launch through the shell launcher..."' in script
     assert 'exec "${PROJECT_ROOT}/OpenClaw_NULLA.sh"' in script
+    assert 'pull_models "${ollama_exe}" "${install_profile}" "${model_tag}"' in script
 
 
 def test_install_wrappers_forward_install_profile_and_extra_args() -> None:

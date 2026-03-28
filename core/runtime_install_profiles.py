@@ -24,6 +24,22 @@ INSTALL_PROFILE_CHOICES = (
 )
 
 _PROFILE_IDS = set(INSTALL_PROFILE_CHOICES)
+_PROFILE_ALIASES = {
+    "auto": "auto-recommended",
+    "recommended": "auto-recommended",
+    "ollama-only": "local-only",
+    "ollama_only": "local-only",
+    "local_only": "local-only",
+    "ollama-max": "local-max",
+    "ollama_max": "local-max",
+    "local_max": "local-max",
+    "ollama+kimi": "hybrid-kimi",
+    "ollama-kimi": "hybrid-kimi",
+    "ollama_kimi": "hybrid-kimi",
+    "hybrid_kimi": "hybrid-kimi",
+    "hybrid_fallback": "hybrid-fallback",
+    "full_orchestrated": "full-orchestrated",
+}
 
 _MODEL_SIZE_GB = {
     "qwen2.5:0.5b": 1.0,
@@ -146,7 +162,8 @@ def build_install_profile_truth(
     env_map = os.environ if env is None else env
     active_probe = probe or probe_machine()
     active_tier = tier or select_qwen_tier(active_probe)
-    requested = str(requested_profile or env_map.get("NULLA_INSTALL_PROFILE") or "").strip().lower()
+    requested_raw = str(requested_profile or env_map.get("NULLA_INSTALL_PROFILE") or "").strip().lower()
+    requested = normalize_install_profile_id(requested_raw, allow_auto=True)
     requested_source = "env_override" if requested else ""
     if not requested:
         requested = _installed_profile_id(runtime_home)
@@ -161,8 +178,8 @@ def build_install_profile_truth(
     if requested == "auto-recommended":
         auto_reasons.append("Install profile requested auto-recommended; applying hardware/provider auto selection.")
         requested = ""
-    elif requested and requested not in _PROFILE_IDS:
-        auto_reasons.append(f"Unknown install profile `{requested}`. Falling back to auto-recommended.")
+    elif requested_raw and not requested:
+        auto_reasons.append(f"Unknown install profile `{requested_raw}`. Falling back to auto-recommended.")
         requested = ""
 
     if requested:
@@ -240,6 +257,7 @@ def normalize_install_profile_id(profile_id: str | None, *, allow_auto: bool = T
     normalized = str(profile_id or "").strip().lower()
     if not normalized:
         return ""
+    normalized = _PROFILE_ALIASES.get(normalized, normalized)
     if normalized not in _PROFILE_IDS:
         return ""
     if not allow_auto and normalized == "auto-recommended":
@@ -470,6 +488,11 @@ def _required_ollama_models(*, profile_id: str, model_tag: str) -> tuple[str, ..
         if helper_model not in required_models:
             required_models.append(helper_model)
     return tuple(required_models)
+
+
+def required_ollama_models_for_profile(*, profile_id: str, model_tag: str) -> tuple[str, ...]:
+    normalized_profile = normalize_install_profile_id(profile_id, allow_auto=False)
+    return _required_ollama_models(profile_id=normalized_profile, model_tag=model_tag)
 
 
 def _provider_mix(
@@ -853,4 +876,5 @@ __all__ = [
     "installed_profile_id",
     "normalize_install_profile_id",
     "persist_install_profile_record",
+    "required_ollama_models_for_profile",
 ]

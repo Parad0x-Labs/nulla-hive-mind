@@ -168,11 +168,12 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     assert "--install-profile <id>" in sh_bootstrap
     assert '-InstallProfile hybrid-kimi' in install_doc
     assert '/INSTALLPROFILE=$InstallProfile' in ps_bootstrap
-    assert "install-profile --set local-only" in sh_installer
-    assert "install-profile --set hybrid-kimi" in sh_installer
-    assert "install-profile --set local-only" in readme
-    assert "install-profile --set hybrid-kimi" in readme
-    assert "install-profile --set local-only" in install_doc
-    assert "install-profile --set hybrid-kimi" in install_doc
+    assert "install-profile --set ollama-only" in sh_installer
+    assert "install-profile --set ollama+kimi" in sh_installer
+    assert "install-profile --set ollama-only" in readme
+    assert "install-profile --set ollama+kimi" in readme
+    assert "install-profile --set ollama-only" in install_doc
+    assert "install-profile --set ollama+kimi" in install_doc
+    assert "ollama-only" in sh_bootstrap
     assert "local_plus_kimi" in readme
     assert "first-class installer/runtime lane yet" not in readme

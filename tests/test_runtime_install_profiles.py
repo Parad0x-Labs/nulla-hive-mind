@@ -6,13 +6,19 @@ from unittest import mock
 
 from core.hardware_tier import MachineProbe, QwenTier
 from core.provider_routing import ProviderCapabilityTruth
-from core.runtime_install_profiles import build_install_profile_truth
+from core.runtime_install_profiles import build_install_profile_truth, normalize_install_profile_id
 
 
 def _fake_disk_usage_with_free_gb(free_gb: float) -> mock.Mock:
     fake_usage = mock.Mock()
     fake_usage.free = int(free_gb * 1024**3)
     return fake_usage
+
+
+def test_normalize_install_profile_id_accepts_user_friendly_ollama_aliases() -> None:
+    assert normalize_install_profile_id("ollama-only") == "local-only"
+    assert normalize_install_profile_id("ollama-max") == "local-max"
+    assert normalize_install_profile_id("ollama+kimi") == "hybrid-kimi"
 
 
 def test_auto_profile_prefers_hybrid_kimi_on_smaller_host_when_kimi_is_configured() -> None:

@@ -64,7 +64,7 @@ Options:
   --yes, -y                    Non-interactive install using defaults
   --start                      Launch NULLA immediately after install
   --runtime-home <path>        Override NULLA_HOME path
-  --install-profile <profile>  auto-recommended | local-only | local-max | hybrid-kimi | hybrid-fallback | full-orchestrated
+  --install-profile <profile>  auto-recommended | local-only (alias: ollama-only) | local-max (alias: ollama-max) | hybrid-kimi (alias: ollama+kimi) | hybrid-fallback | full-orchestrated
   --agent-name <name>          Visible agent name for OpenClaw and chat
   --openclaw <mode-or-path>    skip | default | prompt | <custom-path>
   --gateway-bind <mode>        OpenClaw gateway bind: loopback | lan | custom
@@ -160,16 +160,47 @@ parse_args() {
 }
 
 
-validate_install_profile() {
-  local profile="${1:-}"
+canonical_install_profile() {
+  local profile
+  profile="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
   case "${profile}" in
-    ""|auto-recommended|local-only|local-max|hybrid-kimi|hybrid-fallback|full-orchestrated)
+    "")
+      printf '%s' ""
+      ;;
+    auto|recommended|auto-recommended)
+      printf '%s' "auto-recommended"
+      ;;
+    local-only|local_only|ollama-only|ollama_only)
+      printf '%s' "local-only"
+      ;;
+    local-max|local_max|ollama-max|ollama_max)
+      printf '%s' "local-max"
+      ;;
+    hybrid-kimi|hybrid_kimi|ollama+kimi|ollama-kimi|ollama_kimi)
+      printf '%s' "hybrid-kimi"
+      ;;
+    hybrid-fallback|hybrid_fallback)
+      printf '%s' "hybrid-fallback"
+      ;;
+    full-orchestrated|full_orchestrated)
+      printf '%s' "full-orchestrated"
       ;;
     *)
-      say "ERROR: --install-profile must be auto-recommended, local-only, local-max, hybrid-kimi, hybrid-fallback, or full-orchestrated."
-      exit 2
+      printf '%s' ""
       ;;
   esac
+}
+
+
+validate_install_profile() {
+  local profile="${1:-}"
+  if [[ -z "${profile}" ]]; then
+    return
+  fi
+  if [[ -z "$(canonical_install_profile "${profile}")" ]]; then
+    say "ERROR: --install-profile must be auto-recommended, local-only/ollama-only, local-max/ollama-max, hybrid-kimi/ollama+kimi, hybrid-fallback, or full-orchestrated."
+    exit 2
+  fi
 }
 
 
@@ -187,6 +218,7 @@ validate_args() {
     exit 2
   fi
   validate_install_profile "${INSTALL_PROFILE_OVERRIDE}"
+  INSTALL_PROFILE_OVERRIDE="$(canonical_install_profile "${INSTALL_PROFILE_OVERRIDE}")"
 }
 
 
@@ -480,9 +512,11 @@ print(profile.display_summary())
 prompt_install_profile() {
   local default_value="${1:-auto-recommended}"
   local profile=""
-  read -r -p "Install profile [auto-recommended/local-only/local-max/hybrid-kimi/hybrid-fallback/full-orchestrated] [${default_value}]: " profile || true
-  profile="$(printf '%s' "${profile:-$default_value}" | tr '[:upper:]' '[:lower:]')"
-  validate_install_profile "${profile}"
+  local raw_profile=""
+  read -r -p "Install profile [auto-recommended/local-only(ollama-only)/local-max(ollama-max)/hybrid-kimi(ollama+kimi)/hybrid-fallback/full-orchestrated] [${default_value}]: " profile || true
+  raw_profile="$(printf '%s' "${profile:-$default_value}" | tr '[:upper:]' '[:lower:]')"
+  validate_install_profile "${raw_profile}"
+  profile="$(canonical_install_profile "${raw_profile}")"
   printf '%s' "${profile}"
 }
 
@@ -499,6 +533,55 @@ validate_selected_install_profile() {
     say "${validation_output}"
     exit 1
   fi
+}
+
+
+read_secret_from_tty() {
+  local label="$1"
+  local value=""
+  if [[ ! -r /dev/tty ]]; then
+    return 1
+  fi
+  printf '%s' "${label}" > /dev/tty
+  IFS= read -r -s value < /dev/tty || true
+  printf '\n' > /dev/tty
+  printf '%s' "${value}"
+}
+
+
+ensure_profile_remote_credentials() {
+  local install_profile="$1"
+  case "${install_profile}" in
+    hybrid-kimi|full-orchestrated)
+      if [[ -n "${KIMI_API_KEY:-${MOONSHOT_API_KEY:-${NULLA_KIMI_API_KEY:-}}}" ]]; then
+        return
+      fi
+      if [[ "${AUTO_YES}" -eq 1 ]]; then
+        say "ERROR: ${install_profile} requires KIMI_API_KEY or MOONSHOT_API_KEY for the Kimi lane."
+        say "Export KIMI_API_KEY before running the one-line install, or rerun interactively so the installer can prompt and persist it."
+        exit 1
+      fi
+      local captured_key=""
+      captured_key="$(read_secret_from_tty "Enter Kimi / Moonshot API key (input hidden): ")" || true
+      if [[ -z "${captured_key}" ]]; then
+        say "ERROR: ${install_profile} requires KIMI_API_KEY or MOONSHOT_API_KEY."
+        exit 1
+      fi
+      export KIMI_API_KEY="${captured_key}"
+      say "Captured Kimi credential for this install session. It will be persisted into NULLA runtime config."
+      ;;
+  esac
+}
+
+
+detect_required_ollama_models() {
+  local install_profile="$1"
+  local model_tag="$2"
+  NULLA_INSTALL_PROFILE="${install_profile}" "${VENV_DIR}/bin/python" -c "
+from core.runtime_install_profiles import required_ollama_models_for_profile
+for item in required_ollama_models_for_profile(profile_id='${install_profile}', model_tag='${model_tag}'):
+    print(item)
+" 2>/dev/null || printf '%s\n' "${model_tag}"
 }
 
 
@@ -1002,21 +1085,26 @@ seed_agent_identity() {
 }
 
 
-pull_model() {
+pull_models() {
   local ollama_exe="$1"
-  local model_tag="$2"
+  local install_profile="$2"
+  local model_tag="$3"
   if [[ -z "${ollama_exe}" ]]; then
     say "Step 12/14: Model pull skipped because Ollama is unavailable."
     return
   fi
 
   say "Step 12/14: Pulling AI model (this may take a while)..."
-  if "${ollama_exe}" list 2>/dev/null | grep -qi "${model_tag}"; then
-    say "Model ${model_tag} already available."
-  else
-    say "Downloading ${model_tag}..."
-    "${ollama_exe}" pull "${model_tag}" || say "WARNING: Model pull failed. Run manually: ollama pull ${model_tag}"
-  fi
+  local required_model=""
+  while IFS= read -r required_model; do
+    [[ -n "${required_model}" ]] || continue
+    if "${ollama_exe}" list 2>/dev/null | grep -qi "${required_model}"; then
+      say "Model ${required_model} already available."
+      continue
+    fi
+    say "Downloading ${required_model}..."
+    "${ollama_exe}" pull "${required_model}" || say "WARNING: Model pull failed. Run manually: ollama pull ${required_model}"
+  done < <(detect_required_ollama_models "${install_profile}" "${model_tag}")
 }
 
 
@@ -1157,6 +1245,7 @@ main() {
     requested_install_profile="auto-recommended"
   fi
   install_profile="$(detect_install_profile "${runtime_home}" "${model_tag}" "${requested_install_profile}")"
+  ensure_profile_remote_credentials "${install_profile}"
   install_profile_summary="$(detect_install_profile_summary "${runtime_home}" "${model_tag}" "${requested_install_profile}")"
   openclaw_home_override="$(resolve_openclaw_home_override)"
   say "Step 6/14: Hardware probe complete."
@@ -1196,7 +1285,7 @@ main() {
   start_ollama_server "${ollama_exe}"
   configure_openclaw_with_ollama "${ollama_exe}" "${model_tag}" "${openclaw_enabled}" "${openclaw_home_override}"
   register_openclaw "${runtime_home}" "${model_tag}" "${openclaw_agent_dir}" "${openclaw_enabled}" "${openclaw_home_override}" "${agent_name}"
-  pull_model "${ollama_exe}" "${model_tag}"
+  pull_models "${ollama_exe}" "${install_profile}" "${model_tag}"
   configure_liquefy
   write_install_receipt "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}"
   run_install_doctor "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}"
@@ -1217,8 +1306,8 @@ main() {
   say "Probe:   ${PROJECT_ROOT}/Probe_NULLA_Stack.sh"
   say "Credits: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli credits"
   say "Profiles: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile"
-  say "Local only: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile --set local-only"
-  say "Hybrid Kimi: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile --set hybrid-kimi"
+  say "Ollama only: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile --set ollama-only"
+  say "Ollama + Kimi: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile --set ollama+kimi"
   say
   say "NULLA is now wired for OpenClaw-friendly launch,"
   say "with Ollama checked, hardware-tier model selection applied,"

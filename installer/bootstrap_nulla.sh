@@ -34,7 +34,7 @@ Options:
   --dir <install-dir>      Target install folder (default: ${INSTALL_DIR})
   --archive-url <url>      Override the source archive URL
   --sha256 <hex>           Verify the downloaded archive against a SHA-256 digest
-  --install-profile <id>   auto-recommended | local-only | local-max | hybrid-kimi | hybrid-fallback | full-orchestrated
+  --install-profile <id>   auto-recommended | local-only (alias: ollama-only) | local-max (alias: ollama-max) | hybrid-kimi (alias: ollama+kimi) | hybrid-fallback | full-orchestrated
   --no-start               Install but do not launch NULLA
   --help, -h               Show this help
 

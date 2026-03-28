@@ -92,6 +92,34 @@ def test_cmd_install_profile_persists_ready_profile_and_requests_restart(capsys)
     assert "Restart NULLA to apply the new provider mix." in out
 
 
+def test_cmd_install_profile_accepts_ollama_only_alias(capsys) -> None:
+    fake_context = SimpleNamespace(paths=SimpleNamespace(runtime_home="/tmp/nulla-runtime"))
+    snapshot = ProviderRegistrySnapshot(warnings=tuple(), audit_rows=tuple(), capability_truth=tuple())
+
+    with mock.patch("apps.nulla_cli._bootstrap_cli_storage"), mock.patch(
+        "apps.nulla_cli.build_runtime_context",
+        return_value=fake_context,
+    ), mock.patch(
+        "apps.nulla_cli.build_provider_registry_snapshot",
+        return_value=snapshot,
+    ), mock.patch(
+        "apps.nulla_cli.build_install_profile_truth",
+        return_value=_profile(profile_id="local-only"),
+    ), mock.patch(
+        "apps.nulla_cli.persist_install_profile_record",
+        return_value=Path("/tmp/nulla-runtime/config/install-profile.json"),
+    ) as persist_record:
+        assert cmd_install_profile(set_profile="ollama-only", json_mode=False) == 0
+
+    persist_record.assert_called_once_with(
+        "/tmp/nulla-runtime",
+        "local-only",
+        selected_model="qwen2.5:7b",
+    )
+    out = capsys.readouterr().out
+    assert "Install profile saved: local-only" in out
+
+
 def test_cmd_install_profile_persists_resolved_profile_when_auto_recommended_is_requested(capsys) -> None:
     fake_context = SimpleNamespace(paths=SimpleNamespace(runtime_home="/tmp/nulla-runtime"))
     snapshot = ProviderRegistrySnapshot(warnings=tuple(), audit_rows=tuple(), capability_truth=tuple())

@@ -77,33 +77,34 @@ Today that probe is honest about the current support boundary:
 - `local_only` and `local_dual_ollama` are real
 - `local_plus_kimi` is real when `KIMI_API_KEY` or `MOONSHOT_API_KEY` is configured
 - Tether and QVAC are not first-class supported stacks yet
+- the probe now also maps those stacks to install profiles like `local-only`, `local-max`, and `hybrid-kimi`
 
 Safe one-line profile shortcuts for macOS / Linux:
 
 ```bash
-tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile local-only && rm -f "$tmp"
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile ollama-only && rm -f "$tmp"
 ```
 
 ```bash
-tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile local-max && rm -f "$tmp"
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile ollama-max && rm -f "$tmp"
 ```
 
 ```bash
-tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile hybrid-kimi && rm -f "$tmp"
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && KIMI_API_KEY="replace-me" bash "$tmp" --install-profile ollama+kimi && rm -f "$tmp"
 ```
 
 Profile guidance:
 
-- `local-only`: safest default for smaller machines or anyone who wants no remote dependency.
-- `local-max`: for stronger local boxes, roughly 24 GiB+ unified memory or 20+ GiB VRAM / 48 GiB RAM class hardware.
-- `hybrid-kimi`: best for smaller local boxes that still want a stronger remote queen lane; requires `KIMI_API_KEY` or `MOONSHOT_API_KEY`.
+- `local-only` / `ollama-only`: safest default for smaller machines or anyone who wants no remote dependency.
+- `local-max` / `ollama-max`: for stronger local boxes, roughly 24 GiB+ unified memory or 20+ GiB VRAM / 48 GiB RAM class hardware, and the installer now pulls both the primary model and the local helper model when this profile is selected.
+- `hybrid-kimi` / `ollama+kimi`: local Ollama plus a real remote Kimi queen lane. Export `KIMI_API_KEY` or `MOONSHOT_API_KEY` before the one-line install, or run interactively and the installer will prompt once and persist it into the runtime config.
 
 After install, switch profiles without editing env vars:
 
 ```bash
 cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile
-cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set local-only
-cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set hybrid-kimi
+cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-only
+cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama+kimi
 ```
 
 Manual shortcut:

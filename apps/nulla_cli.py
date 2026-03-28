@@ -36,6 +36,7 @@ from core.runtime_install_profiles import (
     active_install_profile_id,
     build_install_profile_truth,
     installed_profile_id,
+    normalize_install_profile_id,
     persist_install_profile_record,
 )
 from core.runtime_paths import data_path
@@ -220,17 +221,18 @@ def cmd_install_profile(*, set_profile: str = "", json_mode: bool = False) -> in
     context = build_runtime_context(mode="cli_install_profile")
     runtime_home = str(context.paths.runtime_home)
     requested_profile = str(set_profile or "").strip().lower()
+    requested_profile_normalized = normalize_install_profile_id(requested_profile, allow_auto=True)
     stored_profile = installed_profile_id(runtime_home)
     provider_snapshot = build_provider_registry_snapshot(
         runtime_home=runtime_home,
-        requested_profile=requested_profile or None,
+        requested_profile=requested_profile_normalized or requested_profile or None,
         honor_install_profile=False,
     )
     active_profile = active_install_profile_id(runtime_home=runtime_home, allow_auto=True)
 
     if requested_profile:
         profile = build_install_profile_truth(
-            requested_profile=requested_profile,
+            requested_profile=requested_profile_normalized or requested_profile,
             runtime_home=runtime_home,
             provider_capability_truth=provider_snapshot.capability_truth,
         )
@@ -959,9 +961,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     install_profile.add_argument(
         "--set",
-        choices=list(INSTALL_PROFILE_CHOICES),
         default="",
-        help="Persist a new install profile and require a restart before it takes effect.",
+        metavar="PROFILE",
+        help=(
+            "Persist a new install profile and require a restart before it takes effect. "
+            "Canonical values: "
+            + ", ".join(INSTALL_PROFILE_CHOICES)
+            + ". Friendly aliases: ollama-only, ollama-max, ollama+kimi."
+        ),
     )
     install_profile.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     identities = sub.add_parser("identities", help="Show local identity lifecycle, revocations, and key history.")

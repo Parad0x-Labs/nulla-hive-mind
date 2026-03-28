@@ -25,8 +25,10 @@ def test_probe_report_prefers_dual_local_stack_on_24gb_host_with_required_models
     )
 
     assert report["recommended_stack_id"] == "local_dual_ollama"
+    assert report["recommended_install_profile_id"] == "local-max"
     assert report["local_multi_llm_fit"] == "pressure_sensitive"
     dual = next(item for item in report["stacks"] if item["stack_id"] == "local_dual_ollama")
+    assert dual["install_profile_id"] == "local-max"
     assert dual["status"] == "ready"
 
 
@@ -106,6 +108,7 @@ def test_probe_report_prefers_kimi_on_smaller_host_when_configured_and_ready() -
     )
 
     assert report["recommended_stack_id"] == "local_plus_kimi"
+    assert report["recommended_install_profile_id"] == "hybrid-kimi"
     kimi = next(item for item in report["stacks"] if item["stack_id"] == "local_plus_kimi")
     assert kimi["recommended"] is True
     assert kimi["status"] == "ready"
@@ -125,6 +128,7 @@ def test_render_probe_report_surfaces_installed_models_and_recommendation() -> N
     )
 
     rendered = render_probe_report(report)
+    assert "recommended install profile" in rendered.lower()
     assert "recommended stack" in rendered.lower()
     assert "qwen2.5:7b" in rendered
     assert "local_only" in rendered

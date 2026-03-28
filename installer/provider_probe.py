@@ -16,6 +16,7 @@ if PROJECT_ROOT not in sys.path:
 from core.hardware_tier import MachineProbe, select_qwen_tier, tier_summary
 from core.provider_routing import ProviderCapabilityTruth
 from core.runtime_backbone import build_provider_registry_snapshot
+from core.runtime_install_profiles import build_install_profile_truth
 
 
 def detect_ollama_binary() -> str:
@@ -118,6 +119,15 @@ def local_multi_llm_fit(summary: dict[str, Any]) -> str:
     return "single_model_only"
 
 
+def _probe_env_for_install_profile(env_statuses: dict[str, dict[str, Any]]) -> dict[str, str]:
+    env = dict(os.environ)
+    if env_statuses.get("kimi", {}).get("configured"):
+        env.setdefault("KIMI_API_KEY", "configured-via-provider-probe")
+    if env_statuses.get("generic_remote", {}).get("configured"):
+        env.setdefault("OPENAI_API_KEY", "configured-via-provider-probe")
+    return env
+
+
 def build_probe_report(
     *,
     machine: MachineProbe | None = None,
@@ -141,17 +151,25 @@ def build_probe_report(
     envs = dict(env_statuses or remote_env_statuses())
     local_fit = local_multi_llm_fit(summary)
     capability_truth = tuple(provider_capability_truth or build_provider_registry_snapshot().capability_truth)
+    profile_truth = build_install_profile_truth(
+        requested_profile="auto-recommended",
+        probe=probe,
+        tier=primary_tier,
+        selected_model=primary_tier.ollama_tag,
+        provider_capability_truth=capability_truth,
+        env=_probe_env_for_install_profile(envs),
+    )
     kimi_state, kimi_provider_id = _provider_state_for_prefix(capability_truth, "kimi-remote:")
     kimi_configured = bool(envs.get("kimi", {}).get("configured"))
-    kimi_usable = kimi_state in {"ready", "degraded"}
 
     stacks: list[dict[str, Any]] = []
     local_only_ready = bool(binary)
     stacks.append(
         {
             "stack_id": "local_only",
+            "install_profile_id": "local-only",
             "status": "ready" if local_only_ready else "needs_install",
-            "recommended": local_fit == "single_model_only" and not (kimi_configured and kimi_usable),
+            "recommended": False,
             "reason": (
                 "Local Ollama lane is ready."
                 if local_only_ready
@@ -181,8 +199,9 @@ def build_probe_report(
     stacks.append(
         {
             "stack_id": "local_dual_ollama",
+            "install_profile_id": "local-max",
             "status": dual_status,
-            "recommended": local_fit in {"comfortable", "pressure_sensitive"},
+            "recommended": False,
             "reason": dual_reason,
             "primary_model": primary_tier.ollama_tag,
             "helper_model": helper_model,
@@ -208,8 +227,9 @@ def build_probe_report(
     stacks.append(
         {
             "stack_id": "local_plus_kimi",
+            "install_profile_id": "hybrid-kimi",
             "status": kimi_status,
-            "recommended": kimi_usable and primary_tier.tier_name in {"nano", "lite", "base"},
+            "recommended": False,
             "reason": kimi_reason,
             "primary_model": primary_tier.ollama_tag,
             "helper_model": helper_model if local_fit != "single_model_only" else "",
@@ -240,6 +260,8 @@ def build_probe_report(
             ]
         )
 
+    for stack in stacks:
+        stack["recommended"] = stack.get("install_profile_id") == profile_truth.profile_id
     recommended = next((item for item in stacks if item.get("recommended")), stacks[0])
     report = {
         "schema": "nulla.provider_probe.v1",
@@ -251,6 +273,9 @@ def build_probe_report(
         },
         "remote_env": envs,
         "local_multi_llm_fit": local_fit,
+        "recommended_install_profile_id": profile_truth.profile_id,
+        "recommended_install_profile_label": profile_truth.label,
+        "recommended_install_profile_summary": profile_truth.summary,
         "recommended_stack_id": str(recommended.get("stack_id") or ""),
         "stacks": stacks,
     }
@@ -274,10 +299,13 @@ def render_probe_report(report: dict[str, Any]) -> str:
     ]
     installed = [str(item.get("name") or "").strip() for item in list(ollama.get("installed_models") or []) if str(item.get("name") or "").strip()]
     lines.append(f"- installed local models: {', '.join(installed) if installed else 'none'}")
+    lines.append(f"- recommended install profile: {report.get('recommended_install_profile_id') or 'unknown'}")
     lines.append(f"- recommended stack: {report.get('recommended_stack_id') or 'unknown'}")
     lines.append("- stack status:")
     for stack in stacks:
-        lines.append(f"  - {stack.get('stack_id')}: {stack.get('status')} — {stack.get('reason')}")
+        install_profile_id = str(stack.get("install_profile_id") or "").strip()
+        profile_suffix = f" -> {install_profile_id}" if install_profile_id else ""
+        lines.append(f"  - {stack.get('stack_id')}{profile_suffix}: {stack.get('status')} — {stack.get('reason')}")
     if unsupported_stacks:
         lines.append("- unsupported stacks:")
         for stack in unsupported_stacks:

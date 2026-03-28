@@ -111,6 +111,40 @@ def test_build_provider_registry_snapshot_honors_local_only_install_profile_for_
     assert not any(item.provider_id.startswith("kimi-remote:") for item in snapshot.capability_truth)
 
 
+def test_build_provider_registry_snapshot_registers_helper_ollama_lane_for_local_max() -> None:
+    manifests = {}
+
+    def _get_manifest(provider_name: str, model_name: str):
+        return manifests.get((provider_name, model_name))
+
+    def _register_manifest(manifest):
+        manifests[(manifest.provider_name, manifest.model_name)] = manifest
+        return manifest
+
+    def _list_manifests(*, enabled_only: bool = False, limit: int = 256):
+        return list(manifests.values())[:limit]
+
+    registry = mock.Mock()
+    registry.startup_warnings.return_value = []
+    registry.provider_audit_rows.return_value = []
+    registry.get_manifest.side_effect = _get_manifest
+    registry.register_manifest.side_effect = _register_manifest
+    registry.list_manifests.side_effect = _list_manifests
+
+    with mock.patch("core.runtime_provider_defaults.default_runtime_model_tag", return_value="qwen2.5:14b"), mock.patch.dict(
+        os.environ,
+        {
+            "NULLA_INSTALL_PROFILE": "local-max",
+        },
+        clear=False,
+    ):
+        snapshot = build_provider_registry_snapshot(registry, honor_install_profile=True)
+
+    assert ("ollama-local", "qwen2.5:14b") in manifests
+    assert ("ollama-local", "qwen2.5:7b") in manifests
+    assert any(item.provider_id == "ollama-local:qwen2.5:7b" for item in snapshot.capability_truth)
+
+
 def test_build_provider_registry_snapshot_accepts_moonshot_aliases_for_kimi() -> None:
     manifests = {}
 

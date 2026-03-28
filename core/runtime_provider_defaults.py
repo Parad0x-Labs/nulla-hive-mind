@@ -5,7 +5,7 @@ from collections.abc import Mapping
 
 from core.hardware_tier import probe_machine, select_qwen_tier
 from core.model_registry import ModelRegistry
-from core.runtime_install_profiles import normalize_install_profile_id
+from core.runtime_install_profiles import normalize_install_profile_id, required_ollama_models_for_profile
 from storage.model_provider_manifest import ModelProviderManifest
 
 _DEFAULT_KIMI_BASE_URL = "https://api.moonshot.ai/v1"
@@ -36,6 +36,11 @@ def ensure_default_runtime_providers(
     active_profile = normalize_install_profile_id(install_profile, allow_auto=False)
     if _ensure_local_ollama_provider(registry, model_tag=local_model):
         changed.append(f"ollama-local:{local_model}")
+    for extra_model in required_ollama_models_for_profile(profile_id=active_profile, model_tag=local_model):
+        if not extra_model or extra_model == local_model:
+            continue
+        if _ensure_local_ollama_provider(registry, model_tag=extra_model):
+            changed.append(f"ollama-local:{extra_model}")
     if _profile_allows_aux_local_providers(active_profile):
         llamacpp_provider_id = _ensure_llamacpp_provider(registry, model_name=local_model, env=env_map)
         if llamacpp_provider_id:

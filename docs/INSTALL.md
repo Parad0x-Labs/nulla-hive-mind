@@ -41,30 +41,30 @@ powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1 -InstallProfile h
 Safe one-line profile shortcuts for macOS / Linux:
 
 ```bash
-tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile local-only && rm -f "$tmp"
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile ollama-only && rm -f "$tmp"
 ```
 
 ```bash
-tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile local-max && rm -f "$tmp"
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile ollama-max && rm -f "$tmp"
 ```
 
 ```bash
-tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile hybrid-kimi && rm -f "$tmp"
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && KIMI_API_KEY="replace-me" bash "$tmp" --install-profile ollama+kimi && rm -f "$tmp"
 ```
 
 After install, inspect or switch profiles without editing env vars:
 
 ```bash
 cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile
-cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set local-only
-cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set hybrid-kimi
+cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-only
+cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama+kimi
 ```
 
 Recommended profile guidance:
 
-1. `local-only` for smaller machines or anyone who wants a strict no-remote default.
-2. `local-max` for stronger local boxes, roughly 24 GiB+ unified memory or 20+ GiB VRAM / 48 GiB RAM class hardware.
-3. `hybrid-kimi` for smaller local boxes that still want a stronger remote queen lane; requires `KIMI_API_KEY` or `MOONSHOT_API_KEY`.
+1. `local-only` / `ollama-only` for smaller machines or anyone who wants a strict no-remote default.
+2. `local-max` / `ollama-max` for stronger local boxes, roughly 24 GiB+ unified memory or 20+ GiB VRAM / 48 GiB RAM class hardware, and the installer now pulls the local helper model too.
+3. `hybrid-kimi` / `ollama+kimi` for smaller local boxes that still want a stronger remote queen lane. Export `KIMI_API_KEY` or `MOONSHOT_API_KEY` before the one-line install, or run interactively and the installer will prompt once and persist it into the runtime config.
 
 The probe reports:
 
@@ -73,6 +73,7 @@ The probe reports:
 3. whether the machine can reasonably run one local model or a primary/helper local pair
 4. which remote provider credentials are actually configured
 5. which provider stacks are real, not wired yet, or unsupported
+6. which install profile those stacks map to in the shipped runtime
 
 Manual local shortcut:
 
