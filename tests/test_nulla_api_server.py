@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -35,6 +37,7 @@ from core.web.api.runtime import (
     build_runtime_version_stamp,
     log_prewarm_results,
 )
+from core.web.api.service import json_response
 from tests.asgi_harness import asgi_request
 
 
@@ -72,6 +75,89 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(headers["x-request-id"])
         self.assertEqual(headers["x-correlation-id"], headers["x-request-id"])
+
+    def test_create_app_keeps_health_responsive_while_post_dispatch_blocks(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA", runtime_version_stamp={"release_version": "0.4.0"})
+        app = create_app(runtime)
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_post_dispatcher(**_: object):
+            entered.set()
+            release.wait(timeout=5)
+            return json_response(200, {"ok": True})
+
+        app.state.post_dispatcher = blocking_post_dispatcher
+
+        import uvicorn
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = int(probe.getsockname()[1])
+
+        server = uvicorn.Server(
+            uvicorn.Config(
+                app,
+                host="127.0.0.1",
+                port=port,
+                access_log=False,
+                log_level="warning",
+            )
+        )
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        post_thread: threading.Thread | None = None
+        try:
+            deadline = time.time() + 5.0
+            while time.time() < deadline:
+                try:
+                    with request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=0.5) as response:
+                        if response.status == 200:
+                            break
+                except Exception:
+                    time.sleep(0.05)
+            else:
+                self.fail("uvicorn test server did not become healthy")
+
+            post_result: dict[str, object] = {}
+
+            def send_blocking_post() -> None:
+                req = request.Request(
+                    f"http://127.0.0.1:{port}/v1/chat/completions",
+                    data=json.dumps(
+                        {
+                            "model": "nulla",
+                            "messages": [{"role": "user", "content": "hello"}],
+                        }
+                    ).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
+                with request.urlopen(req, timeout=5) as response:
+                    post_result["status"] = response.status
+                    post_result["body"] = response.read().decode("utf-8")
+
+            post_thread = threading.Thread(target=send_blocking_post, daemon=True)
+            post_thread.start()
+            self.assertTrue(entered.wait(timeout=2.0))
+
+            started = time.perf_counter()
+            with request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=1.0) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            latency = time.perf_counter() - started
+
+            self.assertEqual(response.status, 200)
+            self.assertTrue(payload["ok"])
+            self.assertLess(latency, 0.5)
+
+            release.set()
+            post_thread.join(timeout=3.0)
+            self.assertEqual(post_result["status"], 200)
+        finally:
+            release.set()
+            server.should_exit = True
+            if post_thread is not None:
+                post_thread.join(timeout=1.0)
+            thread.join(timeout=2.0)
 
     def test_create_app_streaming_v1_chat_completions_uses_openai_sse(self) -> None:
         runtime = RuntimeServices(display_name="NULLA")
