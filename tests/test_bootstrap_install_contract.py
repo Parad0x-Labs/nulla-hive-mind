@@ -13,6 +13,7 @@ def test_shell_bootstrap_falls_back_to_canonical_installer() -> None:
     assert "--install-profile <id>" in script
     assert "ollama-only" in script
     assert "ollama+kimi" in script
+    assert "ollama+tether" in script
     assert "NULLA_INSTALL_PROFILE" in script
     assert 'BUILD_COMMIT=""' in script
     assert 'resolve_archive_commit() {' in script

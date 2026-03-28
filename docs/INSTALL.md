@@ -32,6 +32,8 @@ Force a supported install profile instead of taking the honest auto recommendati
 
 ```bash
 bash bootstrap_nulla.sh --install-profile hybrid-kimi
+
+bash bootstrap_nulla.sh --install-profile hybrid-tether
 ```
 
 ```powershell
@@ -50,6 +52,8 @@ tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-
 
 ```bash
 tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && KIMI_API_KEY="replace-me" bash "$tmp" --install-profile ollama+kimi && rm -f "$tmp"
+
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && TETHER_API_KEY="replace-me" TETHER_BASE_URL="https://tether.example/v1" bash "$tmp" --install-profile ollama+tether && rm -f "$tmp"
 ```
 
 After install, inspect or switch profiles without editing env vars:
@@ -58,6 +62,7 @@ After install, inspect or switch profiles without editing env vars:
 cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile
 cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-only
 cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama+kimi
+cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama+tether
 ```
 
 Recommended profile guidance:
@@ -65,6 +70,7 @@ Recommended profile guidance:
 1. `local-only` / `ollama-only` for smaller machines or anyone who wants a strict no-remote default.
 2. `local-max` / `ollama-max` for stronger local boxes, roughly 24 GiB+ unified memory or 20+ GiB VRAM / 48 GiB RAM class hardware, and the installer now pulls the local helper model too.
 3. `hybrid-kimi` / `ollama+kimi` for smaller local boxes that still want a stronger remote queen lane. Export `KIMI_API_KEY` or `MOONSHOT_API_KEY` before the one-line install, or run interactively and the installer will prompt once and persist it into the runtime config.
+4. `hybrid-tether` / `ollama+tether` for local boxes that want a user-managed remote Tether queen lane. Export `TETHER_API_KEY` and `TETHER_BASE_URL` before the one-line install, or run interactively and the installer will prompt once and persist them into the runtime config.
 
 The probe reports:
 

@@ -388,7 +388,7 @@ def build_probe_report(
     stacks.append(
         {
             "stack_id": "local_plus_tether",
-            "install_profile_id": "",
+            "install_profile_id": "hybrid-tether",
             "status": tether_status,
             "recommended": False,
             "reason": tether_reason,

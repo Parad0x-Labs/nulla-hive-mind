@@ -26,9 +26,11 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert "--install-profile <profile>" in script
     assert "ollama-only" in script
     assert "ollama+kimi" in script
+    assert "ollama+tether" in script
     assert 'validate_selected_install_profile() {' in script
     assert 'ensure_profile_remote_credentials() {' in script
     assert 'Enter Kimi / Moonshot API key' in script
+    assert 'Enter Tether API key' in script
     assert '"${SCRIPT_DIR}/validate_install_profile.py"' in script
     assert 'persist_install_profile_record() {' in script
     assert 'persist_provider_env_file() {' in script
@@ -44,6 +46,7 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert 'curl -sf --max-time 2 "\\${url}" >/dev/null 2>&1' in script
     assert 'cd "${PROJECT_ROOT}"' in script
     assert 'export NULLA_HOME="\\${NULLA_HOME:-${runtime_home}}"' in script
+    assert 'export PATH="${SCRIPT_DIR}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"' in script
     assert 'export NULLA_OPENCLAW_API_URL="\\${NULLA_OPENCLAW_API_URL:-http://127.0.0.1:\\${NULLA_OPENCLAW_API_PORT}}"' in script
     assert 'start_new_session=True' in script
     assert 'api_pid="\\$(spawn_detached /tmp/nulla_api_server.log "\\${VENV_PY}" -m apps.nulla_api_server --port "\\${NULLA_OPENCLAW_API_PORT}")"' in script

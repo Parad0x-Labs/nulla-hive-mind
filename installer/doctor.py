@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -120,6 +121,45 @@ def _public_hive_status(project: Path, runtime: Path) -> dict[str, Any]:
     )
 
 
+def _launch_agent_status(launch_agent_path: str) -> dict[str, Any]:
+    candidate = Path(str(launch_agent_path or "")).expanduser()
+    if not str(launch_agent_path or "").strip():
+        return _status(True, "launch agent skipped", path="")
+    if not candidate.exists():
+        return _status(False, "launch agent missing", path=str(candidate))
+    if sys.platform != "darwin":
+        return _status(True, "launch agent file present", path=str(candidate), loaded=None, running=None)
+
+    uid = os.getuid()
+    label = candidate.stem
+    try:
+        result = subprocess.run(
+            ["launchctl", "print", f"gui/{uid}/{label}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception as exc:  # pragma: no cover - system dependent
+        return _status(
+            False,
+            "launch agent status unavailable",
+            path=str(candidate),
+            error=str(exc),
+            loaded=False,
+            running=False,
+        )
+
+    loaded = result.returncode == 0
+    running = loaded and "state = running" in str(result.stdout or "")
+    if loaded and running:
+        detail = "launch agent loaded and running"
+    elif loaded:
+        detail = "launch agent loaded but not running"
+    else:
+        detail = "launch agent file present but not loaded"
+    return _status(loaded, detail, path=str(candidate), loaded=loaded, running=running)
+
+
 def build_report(
     *,
     project_root: str,
@@ -190,11 +230,7 @@ def build_report(
             "trainable_base": _status(bool(staged_bases), "staged trainable base found" if staged_bases else "no staged trainable base found", staged_bases=staged_bases),
             "ollama": _status(bool(ollama_path), "Ollama binary found" if ollama_path else "Ollama binary missing", path=str(ollama_path or ollama_binary or "")),
             "trace_surface": _status((project / "OpenClaw_NULLA.sh").exists(), "trace launcher path available" if (project / "OpenClaw_NULLA.sh").exists() else "trace launcher path missing", url="http://127.0.0.1:11435/trace"),
-            "launch_agent": _status(
-                (not launch_agent_path) or Path(launch_agent_path).expanduser().exists(),
-                "launch agent present" if launch_agent_path and Path(launch_agent_path).expanduser().exists() else ("launch agent skipped" if not launch_agent_path else "launch agent missing"),
-                path=str(launch_agent_path or ""),
-            ),
+            "launch_agent": _launch_agent_status(launch_agent_path),
             "public_hive": _public_hive_status(project, runtime),
         },
     }

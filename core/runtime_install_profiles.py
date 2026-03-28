@@ -19,6 +19,7 @@ INSTALL_PROFILE_CHOICES = (
     "local-only",
     "local-max",
     "hybrid-kimi",
+    "hybrid-tether",
     "hybrid-fallback",
     "full-orchestrated",
 )
@@ -37,6 +38,10 @@ _PROFILE_ALIASES = {
     "ollama-kimi": "hybrid-kimi",
     "ollama_kimi": "hybrid-kimi",
     "hybrid_kimi": "hybrid-kimi",
+    "ollama+tether": "hybrid-tether",
+    "ollama-tether": "hybrid-tether",
+    "ollama_tether": "hybrid-tether",
+    "hybrid_tether": "hybrid-tether",
     "hybrid_fallback": "hybrid-fallback",
     "full_orchestrated": "full-orchestrated",
 }
@@ -44,6 +49,7 @@ _PROFILE_DISPLAY_IDS = {
     "local-only": "ollama-only",
     "local-max": "ollama-max",
     "hybrid-kimi": "ollama+kimi",
+    "hybrid-tether": "ollama+tether",
 }
 
 _MODEL_SIZE_GB = {
@@ -57,6 +63,9 @@ _MODEL_SIZE_GB = {
 _INSTALL_PROFILE_RECORD_RELATIVE_PATH = Path("config") / "install-profile.json"
 _KIMI_API_KEY_ENV_KEYS = ("KIMI_API_KEY", "MOONSHOT_API_KEY", "NULLA_KIMI_API_KEY")
 _KIMI_API_KEY_REASON = "KIMI_API_KEY or MOONSHOT_API_KEY"
+_TETHER_API_KEY_ENV_KEYS = ("TETHER_API_KEY", "NULLA_TETHER_API_KEY")
+_TETHER_BASE_URL_ENV_KEYS = ("TETHER_BASE_URL", "NULLA_TETHER_BASE_URL")
+_TETHER_CONFIG_REASON = "TETHER_API_KEY and TETHER_BASE_URL"
 _OLLAMA_HELPER_MODEL = "qwen2.5:7b"
 _INSTALLED_OLLAMA_MODELS_ENV_KEY = "NULLA_INSTALLED_OLLAMA_MODELS"
 
@@ -455,14 +464,20 @@ def _auto_profile_candidates(
 ) -> tuple[str, ...]:
     candidates: list[str] = []
     kimi_configured = _has_any_env(env, *_KIMI_API_KEY_ENV_KEYS)
+    tether_configured = _has_any_env(env, *_TETHER_API_KEY_ENV_KEYS) and _has_any_env(env, *_TETHER_BASE_URL_ENV_KEYS)
     if tier.tier_name in {"mid", "heavy", "titan"}:
         candidates.append("local-max")
         if kimi_configured:
             candidates.append("hybrid-kimi")
+        if tether_configured:
+            candidates.append("hybrid-tether")
         candidates.append("local-only")
         return tuple(dict.fromkeys(candidates))
     if kimi_configured and tier.tier_name in {"nano", "lite", "base"}:
         candidates.extend(("hybrid-kimi", "local-only"))
+        return tuple(dict.fromkeys(candidates))
+    if tether_configured and tier.tier_name in {"nano", "lite", "base"}:
+        candidates.extend(("hybrid-tether", "local-only"))
         return tuple(dict.fromkeys(candidates))
     candidates.append("local-only")
     return tuple(dict.fromkeys(candidates))
@@ -471,6 +486,8 @@ def _auto_profile_candidates(
 def _auto_selection_reason(profile_id: str) -> str:
     if profile_id == "hybrid-kimi":
         return "Auto-selected hybrid-kimi because local tier is limited and Kimi is configured."
+    if profile_id == "hybrid-tether":
+        return "Auto-selected hybrid-tether because local tier is limited and Tether is configured."
     if profile_id == "local-max":
         return "Auto-selected local-max because this machine can hold a stronger fully local lane."
     return "Auto-selected local-only to keep the default runtime local-first and dependency-light."
@@ -511,7 +528,7 @@ def _profile_estimates(
 
     if profile_id in {"local-max", "full-orchestrated"}:
         runtime_required_gb += 1.0
-    if profile_id in {"hybrid-kimi", "hybrid-fallback", "full-orchestrated"}:
+    if profile_id in {"hybrid-kimi", "hybrid-tether", "hybrid-fallback", "full-orchestrated"}:
         runtime_required_gb += 0.5
 
     model_buffer_gb = 1.5 if missing_local_models else 0.0
@@ -557,6 +574,7 @@ def _provider_mix(
         primary_provider_id=local_provider_id,
     )
     kimi_provider_id = _find_remote_provider_id(provider_capability_truth, hint="kimi")
+    tether_provider_id = _find_remote_provider_id(provider_capability_truth, hint="tether")
     fallback_provider_id = _find_remote_provider_id(provider_capability_truth, hint=None, exclude={kimi_provider_id})
     providers: list[InstallProfileProvider] = []
     reasons: list[str] = []
@@ -604,6 +622,22 @@ def _provider_mix(
         )
         if not configured:
             reasons.append(f"hybrid-kimi needs {_KIMI_API_KEY_REASON} before the remote queen lane is usable.")
+    elif profile_id == "hybrid-tether":
+        configured = _has_any_env(env, *_TETHER_API_KEY_ENV_KEYS) and _has_any_env(env, *_TETHER_BASE_URL_ENV_KEYS)
+        providers.append(
+            InstallProfileProvider(
+                provider_id=tether_provider_id,
+                role="queen",
+                locality="remote",
+                required=True,
+                api_key_envs=(*_TETHER_API_KEY_ENV_KEYS, *_TETHER_BASE_URL_ENV_KEYS),
+                configured=configured,
+                availability_state=_provider_availability_state(tether_provider_id, truth_index),
+                notes="Remote reasoning/synthesis lane via a user-managed Tether endpoint.",
+            )
+        )
+        if not configured:
+            reasons.append(f"hybrid-tether needs {_TETHER_CONFIG_REASON} before the remote queen lane is usable.")
     elif profile_id == "hybrid-fallback":
         configured = _has_any_env(env, "OPENAI_API_KEY", *_KIMI_API_KEY_ENV_KEYS)
         providers.append(
@@ -733,6 +767,8 @@ def _find_remote_provider_id(
         return hinted[0].provider_id
     if hint == "kimi":
         return "kimi-remote"
+    if hint == "tether":
+        return "tether-remote"
     return "openai-compatible-remote"
 
 
@@ -832,6 +868,7 @@ def _profile_label(profile_id: str) -> str:
         "local-only": "Local only",
         "local-max": "Local max",
         "hybrid-kimi": "Hybrid Kimi",
+        "hybrid-tether": "Hybrid Tether",
         "hybrid-fallback": "Hybrid fallback",
         "full-orchestrated": "Full orchestrated",
     }[profile_id]
@@ -843,6 +880,7 @@ def _profile_summary(profile_id: str) -> str:
         "local-only": "Single local Ollama lane with no remote provider dependency.",
         "local-max": "Heavier fully local lane with extra local verification capacity.",
         "hybrid-kimi": "Local coding lane plus a remote Kimi synthesis lane.",
+        "hybrid-tether": "Local coding lane plus a remote Tether synthesis lane.",
         "hybrid-fallback": "Local coding lane plus a generic remote fallback lane.",
         "full-orchestrated": "Local coding/verifier lanes plus remote synthesis and fallback lanes.",
     }[profile_id]

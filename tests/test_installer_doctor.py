@@ -85,7 +85,13 @@ def test_build_report_marks_launch_agent_present_when_file_exists() -> None:
         runtime_home.mkdir()
         launch_agent_path = root / "ai.nulla.runtime.plist"
         launch_agent_path.write_text("<plist></plist>\n", encoding="utf-8")
-        with mock.patch("core.trainable_base_manager.list_staged_trainable_bases", return_value=[]):
+        with mock.patch("core.trainable_base_manager.list_staged_trainable_bases", return_value=[]), mock.patch(
+            "installer.doctor.sys.platform",
+            "darwin",
+        ), mock.patch(
+            "installer.doctor.subprocess.run",
+            return_value=mock.Mock(returncode=0, stdout="state = running\n", stderr=""),
+        ):
             report = build_report(
                 project_root=str(root),
                 runtime_home=str(runtime_home),
@@ -99,6 +105,44 @@ def test_build_report_marks_launch_agent_present_when_file_exists() -> None:
 
     assert report["components"]["launch_agent"]["ok"] is True
     assert report["components"]["launch_agent"]["path"].endswith("ai.nulla.runtime.plist")
+    assert report["components"]["launch_agent"]["loaded"] is True
+    assert report["components"]["launch_agent"]["running"] is True
+
+
+def test_build_report_marks_launch_agent_degraded_when_file_exists_but_agent_is_not_loaded() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / ".venv").mkdir()
+        (root / "Start_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "Talk_To_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "OpenClaw_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "Stage_Trainable_Base.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "install_receipt.json").write_text("{}\n", encoding="utf-8")
+        runtime_home = root / ".nulla_runtime"
+        runtime_home.mkdir()
+        launch_agent_path = root / "ai.nulla.runtime.plist"
+        launch_agent_path.write_text("<plist></plist>\n", encoding="utf-8")
+        with mock.patch("core.trainable_base_manager.list_staged_trainable_bases", return_value=[]), mock.patch(
+            "installer.doctor.sys.platform",
+            "darwin",
+        ), mock.patch(
+            "installer.doctor.subprocess.run",
+            return_value=mock.Mock(returncode=1, stdout="", stderr="not loaded"),
+        ):
+            report = build_report(
+                project_root=str(root),
+                runtime_home=str(runtime_home),
+                model_tag="qwen2.5:7b",
+                openclaw_enabled=False,
+                openclaw_config_path="",
+                openclaw_agent_dir="",
+                ollama_binary="",
+                launch_agent_path=str(launch_agent_path),
+            )
+
+    assert report["components"]["launch_agent"]["ok"] is False
+    assert report["components"]["launch_agent"]["loaded"] is False
+    assert "launch_agent" in report["degraded_components"]
 
 
 def test_build_report_flags_missing_public_hive_write_auth() -> None:

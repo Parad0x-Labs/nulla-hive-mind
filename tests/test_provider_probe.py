@@ -75,6 +75,8 @@ def test_probe_report_marks_kimi_and_tether_lanes_real_but_leaves_qvac_honest() 
     assert kimi["status"] == "ready"
     assert "real remote kimi queen lane" in kimi["reason"].lower()
     assert tether["status"] == "misconfigured"
+    assert tether["install_profile_id"] == "hybrid-tether"
+    assert tether["install_profile_display_id"] == "ollama+tether (hybrid-tether)"
     assert "did not register a usable tether lane" in tether["reason"].lower()
     assert qvac["status"] == "not_implemented"
 
@@ -138,6 +140,7 @@ def test_render_probe_report_surfaces_installed_models_and_recommendation() -> N
     assert "qwen2.5:7b" in rendered
     assert "ollama-only (local-only)" in rendered
     assert "local_plus_tether" in rendered
+    assert "ollama+tether (hybrid-tether)" in rendered
     assert "needs_config" in rendered
 
 

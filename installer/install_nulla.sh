@@ -65,7 +65,7 @@ Options:
   --yes, -y                    Non-interactive install using defaults
   --start                      Launch NULLA immediately after install
   --runtime-home <path>        Override NULLA_HOME path
-  --install-profile <profile>  auto-recommended | local-only (alias: ollama-only) | local-max (alias: ollama-max) | hybrid-kimi (alias: ollama+kimi) | hybrid-fallback | full-orchestrated
+  --install-profile <profile>  auto-recommended | local-only (alias: ollama-only) | local-max (alias: ollama-max) | hybrid-kimi (alias: ollama+kimi) | hybrid-tether (alias: ollama+tether) | hybrid-fallback | full-orchestrated
   --agent-name <name>          Visible agent name for OpenClaw and chat
   --openclaw <mode-or-path>    skip | default | prompt | <custom-path>
   --gateway-bind <mode>        OpenClaw gateway bind: loopback | lan | custom
@@ -180,6 +180,9 @@ canonical_install_profile() {
     hybrid-kimi|hybrid_kimi|ollama+kimi|ollama-kimi|ollama_kimi)
       printf '%s' "hybrid-kimi"
       ;;
+    hybrid-tether|hybrid_tether|ollama+tether|ollama-tether|ollama_tether)
+      printf '%s' "hybrid-tether"
+      ;;
     hybrid-fallback|hybrid_fallback)
       printf '%s' "hybrid-fallback"
       ;;
@@ -199,7 +202,7 @@ validate_install_profile() {
     return
   fi
   if [[ -z "$(canonical_install_profile "${profile}")" ]]; then
-    say "ERROR: --install-profile must be auto-recommended, local-only/ollama-only, local-max/ollama-max, hybrid-kimi/ollama+kimi, hybrid-fallback, or full-orchestrated."
+    say "ERROR: --install-profile must be auto-recommended, local-only/ollama-only, local-max/ollama-max, hybrid-kimi/ollama+kimi, hybrid-tether/ollama+tether, hybrid-fallback, or full-orchestrated."
     exit 2
   fi
 }
@@ -524,7 +527,7 @@ prompt_install_profile() {
   local default_value="${1:-auto-recommended}"
   local profile=""
   local raw_profile=""
-  read -r -p "Install profile [auto-recommended/local-only(ollama-only)/local-max(ollama-max)/hybrid-kimi(ollama+kimi)/hybrid-fallback/full-orchestrated] [${default_value}]: " profile || true
+  read -r -p "Install profile [auto-recommended/local-only(ollama-only)/local-max(ollama-max)/hybrid-kimi(ollama+kimi)/hybrid-tether(ollama+tether)/hybrid-fallback/full-orchestrated] [${default_value}]: " profile || true
   raw_profile="$(printf '%s' "${profile:-$default_value}" | tr '[:upper:]' '[:lower:]')"
   validate_install_profile "${raw_profile}"
   profile="$(canonical_install_profile "${raw_profile}")"
@@ -580,6 +583,37 @@ ensure_profile_remote_credentials() {
       fi
       export KIMI_API_KEY="${captured_key}"
       say "Captured Kimi credential for this install session. It will be persisted into NULLA runtime config."
+      ;;
+    hybrid-tether)
+      if [[ -n "${TETHER_API_KEY:-${NULLA_TETHER_API_KEY:-}}" && -n "${TETHER_BASE_URL:-${NULLA_TETHER_BASE_URL:-}}" ]]; then
+        return
+      fi
+      if [[ "${AUTO_YES}" -eq 1 ]]; then
+        say "ERROR: ${install_profile} requires TETHER_API_KEY and TETHER_BASE_URL for the Tether lane."
+        say "Export both before running the one-line install, or rerun interactively so the installer can prompt and persist them."
+        exit 1
+      fi
+      local captured_tether_key=""
+      local captured_tether_base_url=""
+      captured_tether_key="$(read_secret_from_tty "Enter Tether API key (input hidden): ")" || true
+      if [[ -z "${captured_tether_key}" ]]; then
+        say "ERROR: ${install_profile} requires TETHER_API_KEY."
+        exit 1
+      fi
+      if [[ ! -r /dev/tty ]]; then
+        say "ERROR: ${install_profile} requires TETHER_BASE_URL."
+        exit 1
+      fi
+      printf '%s' "Enter Tether base URL: " > /dev/tty
+      IFS= read -r captured_tether_base_url < /dev/tty || true
+      printf '\n' > /dev/tty
+      if [[ -z "${captured_tether_base_url}" ]]; then
+        say "ERROR: ${install_profile} requires TETHER_BASE_URL."
+        exit 1
+      fi
+      export TETHER_API_KEY="${captured_tether_key}"
+      export TETHER_BASE_URL="${captured_tether_base_url}"
+      say "Captured Tether credentials for this install session. They will be persisted into NULLA runtime config."
       ;;
   esac
 }
@@ -647,6 +681,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}"
 VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
+export PATH="${SCRIPT_DIR}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 cd "${PROJECT_ROOT}"
 LAUNCHER_HEAD
   cat >>"${target_path}" <<EOF
@@ -675,6 +710,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}"
 VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
+export PATH="${SCRIPT_DIR}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 cd "${PROJECT_ROOT}"
 LAUNCHER_HEAD
   cat >>"${target_path}" <<EOF
@@ -703,6 +739,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}"
 VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
+export PATH="${SCRIPT_DIR}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 cd "${PROJECT_ROOT}"
 LAUNCHER_HEAD
   cat >>"${target_path}" <<EOF
@@ -897,6 +934,8 @@ install_macos_launch_agent() {
   <dict>
     <key>NULLA_HOME</key>
     <string>${runtime_home}</string>
+    <key>PATH</key>
+    <string>${PROJECT_ROOT}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -1378,6 +1417,7 @@ main() {
   say "Profiles: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile"
   say "Ollama only: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile --set ollama-only"
   say "Ollama + Kimi: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile --set ollama+kimi"
+  say "Ollama + Tether: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile --set ollama+tether"
   say
   say "NULLA is now wired for OpenClaw-friendly launch,"
   say "with Ollama checked, hardware-tier model selection applied,"

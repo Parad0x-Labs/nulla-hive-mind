@@ -25,6 +25,7 @@ def test_normalize_install_profile_id_accepts_user_friendly_ollama_aliases() -> 
     assert normalize_install_profile_id("ollama-only") == "local-only"
     assert normalize_install_profile_id("ollama-max") == "local-max"
     assert normalize_install_profile_id("ollama+kimi") == "hybrid-kimi"
+    assert normalize_install_profile_id("ollama+tether") == "hybrid-tether"
 
 
 def test_install_profile_display_helpers_prefer_operator_facing_aliases() -> None:
@@ -36,6 +37,7 @@ def test_install_profile_display_helpers_prefer_operator_facing_aliases() -> Non
         "ollama-max (local-max)",
         "ollama+kimi (hybrid-kimi)",
     )
+    assert "ollama+tether (hybrid-tether)" in install_profile_display_choices()
 
 
 def test_explicit_request_reason_stays_explicit_instead_of_claiming_env_override() -> None:
@@ -171,6 +173,62 @@ def test_auto_profile_prefers_hybrid_kimi_when_moonshot_alias_is_configured() ->
     assert profile.profile_id == "hybrid-kimi"
     assert profile.ready is True
     assert any(item.provider_id == "kimi-remote:kimi-k2" and item.role == "queen" for item in profile.provider_mix)
+
+
+def test_auto_profile_prefers_hybrid_tether_on_smaller_host_when_tether_is_configured() -> None:
+    probe = MachineProbe(
+        cpu_cores=8,
+        ram_gb=12.0,
+        gpu_name=None,
+        vram_gb=None,
+        accelerator="cpu",
+    )
+    tier = QwenTier("base", "qwen2.5:7b", 7.0, 4.0, 12.0)
+    with mock.patch("core.runtime_install_profiles.shutil.disk_usage", return_value=_fake_disk_usage_with_free_gb(128.0)):
+        profile = build_install_profile_truth(
+            probe=probe,
+            tier=tier,
+            env={"TETHER_API_KEY": "test-key", "TETHER_BASE_URL": "https://tether.example/v1"},
+            provider_capability_truth=(
+                ProviderCapabilityTruth(
+                    provider_id="local-qwen-http:qwen2.5:7b",
+                    model_id="qwen2.5:7b",
+                    role_fit="drone",
+                    context_window=32768,
+                    tool_support=("structured_json",),
+                    structured_output_support=True,
+                    tokens_per_second=14.0,
+                    ram_budget_gb=12.0,
+                    vram_budget_gb=0.0,
+                    quantization="Q4_K_M",
+                    locality="local",
+                    privacy_class="local_private",
+                    queue_depth=0,
+                    max_safe_concurrency=1,
+                ),
+                ProviderCapabilityTruth(
+                    provider_id="tether-remote:tether-sonic",
+                    model_id="tether-sonic",
+                    role_fit="queen",
+                    context_window=131072,
+                    tool_support=("tool_calls", "structured_json"),
+                    structured_output_support=True,
+                    tokens_per_second=0.0,
+                    ram_budget_gb=0.0,
+                    vram_budget_gb=0.0,
+                    quantization="provider",
+                    locality="remote",
+                    privacy_class="remote_provider",
+                    queue_depth=0,
+                    max_safe_concurrency=4,
+                ),
+            ),
+            runtime_home="/tmp/nulla-runtime",
+        )
+
+    assert profile.profile_id == "hybrid-tether"
+    assert profile.ready is True
+    assert any(item.provider_id == "tether-remote:tether-sonic" and item.role == "queen" for item in profile.provider_mix)
 
 
 def test_auto_recommended_override_still_resolves_to_real_auto_profile() -> None:
