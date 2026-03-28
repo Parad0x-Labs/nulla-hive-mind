@@ -1478,12 +1478,12 @@ main() {
     say "Launching NULLA now..."
     say "Verifying live launch through the shell launcher..."
     if [[ -n "${LAUNCH_AGENT_PATH}" ]]; then
-      for _ in $(seq 1 45); do
-        if curl -sf --max-time 2 "http://127.0.0.1:11435/healthz" >/dev/null 2>&1; then
-          break
-        fi
-        sleep 1
-      done
+      if wait_for_http_ready "http://127.0.0.1:11435/healthz" 120 "" 3; then
+        say "Launchd runtime verified at http://127.0.0.1:11435"
+        exit 0
+      fi
+      say "ERROR: launchd installed NULLA, but the API did not become healthy within 120 seconds."
+      exit 1
     fi
     exec "${PROJECT_ROOT}/OpenClaw_NULLA.sh"
   fi
