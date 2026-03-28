@@ -787,6 +787,21 @@ wait_for_http_ready() {
   return 1
 }
 
+port_listening() {
+  local host="\$1"
+  local port="\$2"
+  "\${VENV_PY}" - "\${host}" "\${port}" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.settimeout(0.5)
+    raise SystemExit(0 if sock.connect_ex((host, port)) == 0 else 1)
+PY
+}
+
 spawn_detached() {
   local log_path="\$1"
   shift
@@ -810,17 +825,25 @@ PY
 }
 
 if ! wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 2 ""; then
-  api_pid="\$(spawn_detached /tmp/nulla_api_server.log "\${VENV_PY}" -m apps.nulla_api_server --port "\${NULLA_OPENCLAW_API_PORT}")"
-  wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 30 "\${api_pid}" 3
+  if port_listening "127.0.0.1" "\${NULLA_OPENCLAW_API_PORT}"; then
+    wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 30 "" 3
+  else
+    api_pid="\$(spawn_detached /tmp/nulla_api_server.log "\${VENV_PY}" -m apps.nulla_api_server --port "\${NULLA_OPENCLAW_API_PORT}")"
+    wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 30 "\${api_pid}" 3
+  fi
 fi
 
 if ! curl -sf --max-time 2 "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" >/dev/null 2>&1; then
-  if command -v openclaw >/dev/null 2>&1; then
-    openclaw_pid="\$(spawn_detached /tmp/nulla_openclaw.log openclaw gateway run --force)"
-  elif command -v ollama >/dev/null 2>&1; then
-    openclaw_pid="\$(spawn_detached /tmp/nulla_openclaw.log ollama launch openclaw --yes --model "\${MODEL_TAG}")"
+  if port_listening "127.0.0.1" "\${NULLA_OPENCLAW_GATEWAY_PORT}"; then
+    wait_for_http_ready "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" 30 "" 2
+  else
+    if command -v openclaw >/dev/null 2>&1; then
+      openclaw_pid="\$(spawn_detached /tmp/nulla_openclaw.log openclaw gateway run --force)"
+    elif command -v ollama >/dev/null 2>&1; then
+      openclaw_pid="\$(spawn_detached /tmp/nulla_openclaw.log ollama launch openclaw --yes --model "\${MODEL_TAG}")"
+    fi
+    wait_for_http_ready "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" 30 "\${openclaw_pid:-}" 2
   fi
-  wait_for_http_ready "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" 30 "\${openclaw_pid:-}" 2
 fi
 
 if ! curl -sf --max-time 2 "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" >/dev/null 2>&1 && command -v openclaw >/dev/null 2>&1; then
@@ -1430,6 +1453,14 @@ main() {
     say
     say "Launching NULLA now..."
     say "Verifying live launch through the shell launcher..."
+    if [[ -n "${LAUNCH_AGENT_PATH}" ]]; then
+      for _ in $(seq 1 45); do
+        if curl -sf --max-time 2 "http://127.0.0.1:11435/healthz" >/dev/null 2>&1; then
+          break
+        fi
+        sleep 1
+      done
+    fi
     exec "${PROJECT_ROOT}/OpenClaw_NULLA.sh"
   fi
 }

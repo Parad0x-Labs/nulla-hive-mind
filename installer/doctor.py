@@ -202,6 +202,14 @@ def build_report(
         staged_bases = list_staged_trainable_bases()
     except Exception as exc:  # pragma: no cover - best effort only
         staged_bases = [{"error": str(exc)}]
+    trainable_base_error = bool(staged_bases) and "error" in staged_bases[0]
+    trainable_base_ok = not trainable_base_error
+    if trainable_base_error:
+        trainable_base_detail = "trainable base status unavailable"
+    elif staged_bases:
+        trainable_base_detail = "staged trainable base found"
+    else:
+        trainable_base_detail = "no staged trainable base found yet"
 
     report = {
         "project_root": str(project),
@@ -227,7 +235,7 @@ def build_report(
                 agent_dir_exists=bool(openclaw_agent_dir) and Path(openclaw_agent_dir).expanduser().exists(),
             ),
             "liquefy": _status(liquefy_config.exists(), "Liquefy config present" if liquefy_config.exists() else "Liquefy config missing", path=str(liquefy_config)),
-            "trainable_base": _status(bool(staged_bases), "staged trainable base found" if staged_bases else "no staged trainable base found", staged_bases=staged_bases),
+            "trainable_base": _status(trainable_base_ok, trainable_base_detail, staged_bases=staged_bases),
             "ollama": _status(bool(ollama_path), "Ollama binary found" if ollama_path else "Ollama binary missing", path=str(ollama_path or ollama_binary or "")),
             "trace_surface": _status((project / "OpenClaw_NULLA.sh").exists(), "trace launcher path available" if (project / "OpenClaw_NULLA.sh").exists() else "trace launcher path missing", url="http://127.0.0.1:11435/trace"),
             "launch_agent": _launch_agent_status(launch_agent_path),

@@ -67,6 +67,7 @@ def test_build_report_marks_missing_components_as_degraded() -> None:
     assert "openclaw" in report["degraded_components"]
     assert "ollama" in report["degraded_components"]
     assert report["components"]["launchers"]["ok"] is True
+    assert report["components"]["trainable_base"]["ok"] is True
     assert report["components"]["public_hive"]["ok"] is True
     assert report["components"]["public_hive"]["enabled"] is False
     assert report["install_profile"]["schema"] == "nulla.install_profile.v1"

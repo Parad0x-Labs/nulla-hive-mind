@@ -42,8 +42,10 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert 'Recommended profile: ${recommended_install_profile_display}' in script
     assert 'Install profile: ${install_profile_display}' in script
     assert 'wait_for_http_ready() {' in script
+    assert 'port_listening() {' in script
     assert 'spawn_detached() {' in script
     assert 'curl -sf --max-time 2 "\\${url}" >/dev/null 2>&1' in script
+    assert 'if port_listening "127.0.0.1" "\\${NULLA_OPENCLAW_API_PORT}"; then' in script
     assert 'cd "${PROJECT_ROOT}"' in script
     assert 'export NULLA_HOME="\\${NULLA_HOME:-${runtime_home}}"' in script
     assert 'export PATH="${SCRIPT_DIR}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"' in script
