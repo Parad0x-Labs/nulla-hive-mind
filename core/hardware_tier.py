@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import platform
 from dataclasses import dataclass
+from functools import lru_cache
 
 
 @dataclass
@@ -47,10 +48,22 @@ TIERS: list[QwenTier] = [
 ]
 
 
-def probe_machine() -> MachineProbe:
+@lru_cache(maxsize=1)
+def _probe_machine_snapshot() -> tuple[int, float, str | None, float | None, str]:
     cpu_cores = os.cpu_count() or 2
     ram_gb = _detect_ram_gb()
     gpu_name, vram_gb, accelerator = _detect_gpu()
+    return cpu_cores, ram_gb, gpu_name, vram_gb, accelerator
+
+
+def clear_probe_machine_cache() -> None:
+    _probe_machine_snapshot.cache_clear()
+
+
+def probe_machine(*, force_refresh: bool = False) -> MachineProbe:
+    if force_refresh:
+        clear_probe_machine_cache()
+    cpu_cores, ram_gb, gpu_name, vram_gb, accelerator = _probe_machine_snapshot()
     return MachineProbe(
         cpu_cores=cpu_cores,
         ram_gb=ram_gb,

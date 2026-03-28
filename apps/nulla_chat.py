@@ -7,7 +7,25 @@ from core.compute_mode import ComputeModeDaemon
 from core.hardware_tier import probe_machine, select_qwen_tier, tier_summary
 from core.model_registry import ModelRegistry
 from core.onboarding import get_agent_display_name, is_first_boot, run_onboarding_interactive
+from core.provider_bootstrap import ensure_default_provider
 from core.runtime_bootstrap import bootstrap_runtime_mode
+
+
+def _print_prewarm_results(model_registry: ModelRegistry) -> None:
+    for result in model_registry.prewarm_enabled_providers():
+        provider_id = str(result.get("provider_id") or "unknown-provider")
+        status = str(result.get("status") or "unknown")
+        if result.get("ok") and status == "prewarmed":
+            print(
+                f"Model prewarm ready: {provider_id} | "
+                f"keep_alive={result.get('keep_alive') or 'default'} | "
+                f"load_duration={result.get('load_duration')}"
+            )
+            continue
+        if result.get("ok"):
+            print(f"Model prewarm skipped: {provider_id} | {result.get('reason') or status}")
+            continue
+        print(f"Model prewarm failed: {provider_id} | {result.get('error') or result.get('reason') or status}")
 
 
 def _bootstrap_agent(*, persona_id: str, device: str) -> NullaAgent:
@@ -39,11 +57,13 @@ def _bootstrap_agent(*, persona_id: str, device: str) -> NullaAgent:
     )
 
     model_registry = ModelRegistry()
+    ensure_default_provider(model_registry, tier.ollama_tag)
     provider_warnings = model_registry.startup_warnings()
     if provider_warnings:
         print("Model provider warnings:")
         for warning in provider_warnings:
             print(f" - {warning}")
+    _print_prewarm_results(model_registry)
 
     selection = boot.backend_selection
     if selection is None:

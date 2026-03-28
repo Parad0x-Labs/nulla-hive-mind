@@ -217,6 +217,54 @@ class ModelIntegrationTests(unittest.TestCase):
         self.assertEqual(len(loaded), 1)
         self.assertEqual(loaded[0].provider_name, "sample-http")
 
+    def test_registry_prewarms_only_manifests_that_declare_prewarm(self) -> None:
+        self.registry.register_manifest(
+            {
+                "provider_name": "ollama-local",
+                "model_name": "qwen2.5:14b",
+                "source_type": "http",
+                "adapter_type": "local_qwen_provider",
+                "license_name": "Apache-2.0",
+                "license_url_or_reference": "https://www.apache.org/licenses/LICENSE-2.0",
+                "weight_location": "external",
+                "redistribution_allowed": True,
+                "runtime_dependency": "ollama",
+                "capabilities": ["summarize"],
+                "runtime_config": {
+                    "base_url": "http://127.0.0.1:11434",
+                    "prewarm": {"strategy": "ollama_generate", "keep_alive": "15m"},
+                },
+                "metadata": {"runtime_family": "ollama"},
+                "enabled": True,
+            }
+        )
+        self.registry.register_manifest(
+            {
+                "provider_name": "generic-http",
+                "model_name": "helper",
+                "source_type": "http",
+                "license_name": "Apache-2.0",
+                "license_url_or_reference": "https://www.apache.org/licenses/LICENSE-2.0",
+                "weight_location": "external",
+                "redistribution_allowed": True,
+                "runtime_dependency": "openai-compatible-local-runtime",
+                "capabilities": ["summarize"],
+                "runtime_config": {"base_url": "http://127.0.0.1:8000"},
+                "enabled": True,
+            }
+        )
+        response = mock.Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"done": True, "load_duration": 321, "total_duration": 654}
+
+        with mock.patch("adapters.openai_compatible_adapter.requests.post", return_value=response) as post_mock:
+            results = self.registry.prewarm_enabled_providers()
+
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0]["ok"])
+        self.assertEqual(results[0]["provider_id"], "ollama-local:qwen2.5:14b")
+        post_mock.assert_called_once()
+
 
 def _clear_model_manifests() -> None:
     conn = get_connection()

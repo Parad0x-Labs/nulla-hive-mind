@@ -29,6 +29,85 @@ class OpenAICompatibleAdapter(ModelAdapter):
         except Exception as exc:
             return {"ok": False, "provider_id": self.manifest.provider_id, "error": str(exc)}
 
+    def prewarm(self) -> dict[str, Any]:
+        prewarm_config = dict(self.manifest.runtime_config.get("prewarm") or {})
+        if not prewarm_config:
+            return super().prewarm()
+
+        strategy = str(prewarm_config.get("strategy") or "").strip().lower()
+        if strategy != "ollama_generate":
+            return {
+                "ok": False,
+                "provider_id": self.manifest.provider_id,
+                "status": "error",
+                "error": f"unsupported_prewarm_strategy:{strategy or 'missing'}",
+            }
+
+        runtime_family = str(self.manifest.metadata.get("runtime_family") or "").strip().lower()
+        if runtime_family != "ollama":
+            return {
+                "ok": True,
+                "provider_id": self.manifest.provider_id,
+                "status": "skipped",
+                "reason": "not_ollama_runtime",
+                "strategy": strategy,
+            }
+
+        base_url = str(self.manifest.runtime_config.get("base_url") or "").rstrip("/")
+        if not base_url:
+            return {
+                "ok": False,
+                "provider_id": self.manifest.provider_id,
+                "status": "error",
+                "error": "missing_base_url",
+                "strategy": strategy,
+            }
+
+        prompt = prewarm_config.get("prompt")
+        payload: dict[str, Any] = {
+            "model": self.manifest.model_name,
+            "prompt": " " if prompt is None else str(prompt),
+            "stream": False,
+            "keep_alive": prewarm_config.get("keep_alive", "10m"),
+        }
+        if "raw" in prewarm_config:
+            payload["raw"] = bool(prewarm_config.get("raw"))
+        if isinstance(prewarm_config.get("options"), dict) and prewarm_config.get("options"):
+            payload["options"] = dict(prewarm_config["options"])
+
+        timeout_seconds = float(
+            prewarm_config.get("timeout_seconds")
+            or self.manifest.runtime_config.get("health_timeout_seconds")
+            or 15.0
+        )
+        endpoint = f"{_native_ollama_base_url(base_url)}/api/generate"
+        try:
+            response = requests.post(
+                endpoint,
+                json=payload,
+                headers=self._headers(),
+                timeout=timeout_seconds,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return {
+                "ok": True,
+                "provider_id": self.manifest.provider_id,
+                "status": "prewarmed",
+                "strategy": strategy,
+                "keep_alive": payload["keep_alive"],
+                "load_duration": data.get("load_duration"),
+                "total_duration": data.get("total_duration"),
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "provider_id": self.manifest.provider_id,
+                "status": "error",
+                "strategy": strategy,
+                "error": str(exc),
+            }
+
     def run_text_task(self, request: ModelRequest) -> ModelResponse:
         return self._invoke_http(request, force_json=False)
 
@@ -135,3 +214,10 @@ def _extract_openai_text(payload: dict[str, Any]) -> str:
     if isinstance(content, list):
         return "\n".join(str(item.get("text") or "") for item in content if isinstance(item, dict)).strip()
     raise RuntimeError("OpenAI-compatible response did not include textual content.")
+
+
+def _native_ollama_base_url(base_url: str) -> str:
+    clean = str(base_url or "").rstrip("/")
+    if clean.endswith("/v1"):
+        return clean[:-3]
+    return clean

@@ -205,3 +205,63 @@ def test_openai_adapter_forwards_different_payloads_for_chat_and_tool_extraction
     assert tool_payload["top_p"] == pytest.approx(0.15)
     assert tool_payload["max_tokens"] == tool_request.max_output_tokens
     assert tool_payload["response_format"] == {"type": "json_object"}
+
+
+def test_openai_adapter_prewarm_uses_native_ollama_generate_endpoint() -> None:
+    adapter = OpenAICompatibleAdapter(
+        SimpleNamespace(
+            provider_id="ollama-local:qwen2.5:14b",
+            model_name="qwen2.5:14b",
+            metadata={"runtime_family": "ollama"},
+            runtime_config={
+                "base_url": "http://127.0.0.1:11434",
+                "prewarm": {
+                    "strategy": "ollama_generate",
+                    "keep_alive": "15m",
+                    "prompt": " ",
+                    "raw": True,
+                    "timeout_seconds": 3.0,
+                },
+            },
+        )
+    )
+    response = mock.Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {"done": True, "load_duration": 123, "total_duration": 456}
+
+    with mock.patch("adapters.openai_compatible_adapter.requests.post", return_value=response) as post_mock:
+        result = adapter.prewarm()
+
+    assert result["ok"] is True
+    assert result["status"] == "prewarmed"
+    assert result["keep_alive"] == "15m"
+    post_mock.assert_called_once()
+    assert post_mock.call_args.args[0] == "http://127.0.0.1:11434/api/generate"
+    payload = dict(post_mock.call_args.kwargs["json"])
+    assert payload["model"] == "qwen2.5:14b"
+    assert payload["prompt"] == " "
+    assert payload["keep_alive"] == "15m"
+    assert payload["raw"] is True
+    assert payload["stream"] is False
+
+
+def test_openai_adapter_prewarm_skips_non_ollama_runtime() -> None:
+    adapter = OpenAICompatibleAdapter(
+        SimpleNamespace(
+            provider_id="remote-openai:gpt-4o-mini",
+            model_name="gpt-4o-mini",
+            metadata={"runtime_family": "openai"},
+            runtime_config={
+                "base_url": "https://api.example.test",
+                "prewarm": {"strategy": "ollama_generate"},
+            },
+        )
+    )
+
+    with mock.patch("adapters.openai_compatible_adapter.requests.post") as post_mock:
+        result = adapter.prewarm()
+
+    assert result["ok"] is True
+    assert result["status"] == "skipped"
+    assert result["reason"] == "not_ollama_runtime"
+    post_mock.assert_not_called()

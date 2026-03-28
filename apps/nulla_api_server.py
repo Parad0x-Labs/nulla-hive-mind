@@ -47,6 +47,7 @@ from core.onboarding import (
     get_agent_display_name,
     is_first_boot,
 )
+from core.provider_bootstrap import ensure_default_provider
 from core.public_hive_bridge import ensure_public_hive_auth
 from core.release_channel import release_manifest_snapshot
 from core.runtime_bootstrap import bootstrap_runtime_mode
@@ -170,46 +171,35 @@ def _ensure_ollama_model(model_tag: str = "qwen2.5:7b") -> None:
 
 def _ensure_default_provider(registry: ModelRegistry, model_tag: str) -> None:
     """Register the local Ollama Qwen provider if not already present."""
-    from storage.model_provider_manifest import ModelProviderManifest, get_provider_manifest
-    existing = get_provider_manifest("ollama-local", model_tag)
-    existing_caps = {str(item).strip().lower() for item in list(getattr(existing, "capabilities", []) or [])}
-    has_license = bool(
-        str(getattr(existing, "license_name", None) or "").strip()
-        and str(getattr(existing, "resolved_license_reference", None) or "").strip()
-    )
-    if existing and existing.enabled and "tool_intent" in existing_caps and has_license:
-        return
-    parameter_size = _parameter_size_for_model(model_tag)
-    manifest = ModelProviderManifest(
-        provider_name="ollama-local",
-        model_name=model_tag,
-        source_type="http",
-        adapter_type="local_qwen_provider",
-        license_name="Apache-2.0",
-        license_reference="https://huggingface.co/Qwen/Qwen2.5-7B-Instruct/blob/main/LICENSE",
-        license_url_or_reference="https://huggingface.co/Qwen/Qwen2.5-7B-Instruct/blob/main/LICENSE",
-        weight_location="external",
-        runtime_dependency="ollama",
-        notes=f"Local Qwen via Ollama ({parameter_size}) — auto-registered by NULLA API server",
-        capabilities=["summarize", "classify", "format", "extract", "code_basic", "structured_json", "tool_intent"],
-        runtime_config={
-            "base_url": "http://127.0.0.1:11434",
-            "api_path": "/v1/chat/completions",
-            "health_path": "/v1/models",
-            "timeout_seconds": 180,
-            "health_timeout_seconds": 10,
-            "temperature": 0.7,
-            "supports_json_mode": False,
-        },
-        metadata={
-            "runtime_family": "ollama",
-            "confidence_baseline": 0.65,
-            "parameter_count": parameter_size,
-        },
-        enabled=True,
-    )
-    registry.register_manifest(manifest)
-    logger.info("Auto-registered default provider: %s", manifest.provider_id)
+    manifest, created = ensure_default_provider(registry, model_tag)
+    if created:
+        logger.info("Auto-registered default provider: %s", manifest.provider_id)
+
+
+def _log_prewarm_results(registry: ModelRegistry) -> None:
+    for result in registry.prewarm_enabled_providers():
+        provider_id = str(result.get("provider_id") or "unknown-provider")
+        status = str(result.get("status") or "unknown")
+        if result.get("ok") and status == "prewarmed":
+            logger.info(
+                "Model prewarm ready: %s | keep_alive=%s | load_duration=%s",
+                provider_id,
+                result.get("keep_alive") or "default",
+                result.get("load_duration"),
+            )
+            continue
+        if result.get("ok"):
+            logger.info(
+                "Model prewarm skipped: %s | reason=%s",
+                provider_id,
+                result.get("reason") or status,
+            )
+            continue
+        logger.warning(
+            "Model prewarm failed: %s | %s",
+            provider_id,
+            result.get("error") or result.get("reason") or status,
+        )
 
 
 def _bootstrap() -> None:
@@ -259,6 +249,7 @@ def _bootstrap() -> None:
     _ensure_default_provider(model_registry, _runtime_model_tag)
     for w in model_registry.startup_warnings():
         logger.warning("Model warning: %s", w)
+    _log_prewarm_results(model_registry)
 
     selection = boot.backend_selection
     if selection is None:

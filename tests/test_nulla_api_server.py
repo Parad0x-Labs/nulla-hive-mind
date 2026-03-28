@@ -11,6 +11,7 @@ from urllib import request
 from apps.nulla_api_server import (
     PROJECT_ROOT,
     NullaAPIHandler,
+    _ensure_default_provider,
     _format_runtime_event_text,
     _normalize_chat_history,
     _parameter_count_for_model,
@@ -31,6 +32,17 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
     def test_parameter_count_for_model_handles_fractional_billion_sizes(self) -> None:
         self.assertEqual(_parameter_count_for_model("qwen2.5:32b"), 32_000_000_000)
         self.assertEqual(_parameter_count_for_model("qwen2.5:0.5b"), 500_000_000)
+
+    def test_ensure_default_provider_registers_ollama_prewarm_contract(self) -> None:
+        registry = mock.Mock()
+
+        with mock.patch("core.provider_bootstrap.get_provider_manifest", return_value=None):
+            _ensure_default_provider(registry, "qwen2.5:14b")
+
+        manifest = registry.register_manifest.call_args.args[0]
+        self.assertEqual(manifest.runtime_config["prewarm"]["strategy"], "ollama_generate")
+        self.assertEqual(manifest.runtime_config["prewarm"]["keep_alive"], "15m")
+        self.assertTrue(manifest.runtime_config["prewarm"]["raw"])
 
     def test_normalize_chat_history_keeps_full_user_assistant_sequence(self) -> None:
         history = _normalize_chat_history(
