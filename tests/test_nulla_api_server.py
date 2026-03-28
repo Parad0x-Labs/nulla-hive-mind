@@ -10,6 +10,7 @@ import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from unittest import mock
 from urllib import request
 
@@ -75,6 +76,61 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(headers["x-request-id"])
         self.assertEqual(headers["x-correlation-id"], headers["x-request-id"])
+
+    def test_create_app_v1_models_returns_openai_shape_with_provider_models(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA", runtime_parameter_size="14B")
+        app = create_app(runtime)
+
+        with mock.patch(
+            "apps.nulla_api_server.runtime_capability_snapshot",
+            return_value={
+                "provider_capability_truth": [
+                    {"provider_id": "openai-compatible-remote:gpt-mock", "model_id": "gpt-mock"},
+                    {"provider_id": "kimi-remote:kimi-mock", "model_id": "kimi-mock"},
+                ]
+            },
+        ):
+            status, _, body = asgi_request(app, method="GET", path="/v1/models")
+
+        payload = json.loads(body.decode("utf-8"))
+        ids = [item["id"] for item in payload["data"]]
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["object"], "list")
+        self.assertIn("nulla", ids)
+        self.assertIn("gpt-mock", ids)
+        self.assertIn("kimi-mock", ids)
+        self.assertIn("openai-compatible-remote:gpt-mock", ids)
+
+    def test_dispatch_post_carries_requested_model_into_source_context(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+        seen: dict[str, object] = {}
+
+        def fake_run_agent(
+            user_text: str,
+            *,
+            session_id: str | None = None,
+            source_context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            seen["user_text"] = user_text
+            seen["source_context"] = dict(source_context or {})
+            return {"response": "ok", "confidence": 1.0}
+
+        with mock.patch("apps.nulla_api_server._run_agent", side_effect=fake_run_agent):
+            response = _dispatch_post(
+                path="/v1/chat/completions",
+                body={
+                    "model": "openai-compatible-remote:gpt-mock",
+                    "messages": [{"role": "user", "content": "hello"}],
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp",
+            )
+
+        self.assertEqual(response.status, 200)
+        source_context = dict(seen["source_context"])  # type: ignore[arg-type]
+        self.assertEqual(source_context["requested_model"], "openai-compatible-remote:gpt-mock")
 
     def test_create_app_keeps_health_responsive_while_post_dispatch_blocks(self) -> None:
         runtime = RuntimeServices(display_name="NULLA", runtime_version_stamp={"release_version": "0.4.0"})

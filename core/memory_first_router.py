@@ -473,12 +473,15 @@ class MemoryFirstRouter:
         surface: str,
         source_context: dict[str, Any] | None,
     ) -> ModelExecutionDecision:
+        preferred_provider, preferred_model = self._requested_model_preferences(source_context)
         resolved_allow_paid = bool(allow_paid_fallback) and not policy_engine.local_only_mode()
         ranked_manifests = rank_provider_candidates(
             self.registry,
             task_kind=task_kind,
             output_mode=output_mode,
             role=provider_role,
+            preferred_provider=preferred_provider,
+            preferred_model=preferred_model,
             allow_paid_fallback=resolved_allow_paid,
             swarm_size=4,
             min_trust=0.45,
@@ -496,6 +499,7 @@ class MemoryFirstRouter:
                     "attempted": attempted,
                     "reason": "no_ranked_provider",
                     "provider_role": provider_role,
+                    "requested_model": str((source_context or {}).get("requested_model") or "").strip(),
                     "ranked_candidates": [],
                 },
             )
@@ -582,9 +586,32 @@ class MemoryFirstRouter:
                 "attempted": attempted,
                 "reason": "all_ranked_providers_failed",
                 "provider_role": provider_role,
+                "requested_model": str((source_context or {}).get("requested_model") or "").strip(),
                 "ranked_candidates": [entry.provider_id for entry in ranked_manifests],
             },
         )
+
+    def _requested_model_preferences(self, source_context: dict[str, Any] | None) -> tuple[str | None, str | None]:
+        requested_model = str((source_context or {}).get("requested_model") or "").strip()
+        if not requested_model:
+            return None, None
+        lowered = requested_model.lower()
+        if lowered in {"nulla", "nulla:latest"}:
+            return None, None
+
+        manifests = self.registry.list_manifests(enabled_only=True)
+        for manifest in manifests:
+            if requested_model == manifest.provider_id:
+                return manifest.provider_name, manifest.model_name
+        for manifest in manifests:
+            if requested_model == manifest.model_name:
+                return None, manifest.model_name
+
+        provider_hint, separator, model_hint = requested_model.partition(":")
+        if separator and provider_hint and model_hint:
+            if any(provider_hint == manifest.provider_name for manifest in manifests):
+                return provider_hint, model_hint
+        return None, requested_model
 
 
 def _memory_is_good_enough(context_result: Any, classification: dict[str, Any]) -> bool:

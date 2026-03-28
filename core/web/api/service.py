@@ -126,6 +126,71 @@ def capability_snapshot_with_runtime(
     return payload
 
 
+def _runtime_model_catalog(
+    *,
+    capability_snapshot: dict[str, Any],
+    default_model_name: str,
+) -> list[dict[str, str]]:
+    catalog: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def _add(model_id: str, *, owned_by: str) -> None:
+        normalized = str(model_id or "").strip()
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        catalog.append({"id": normalized, "owned_by": str(owned_by or "nulla-runtime").strip() or "nulla-runtime"})
+
+    _add(default_model_name, owned_by="nulla-runtime")
+    for item in list(capability_snapshot.get("provider_capability_truth") or []):
+        if not isinstance(item, dict):
+            continue
+        provider_id = str(item.get("provider_id") or "").strip()
+        model_id = str(item.get("model_id") or "").strip()
+        owned_by = provider_id or "nulla-runtime"
+        if model_id:
+            _add(model_id, owned_by=owned_by)
+        if provider_id:
+            _add(provider_id, owned_by=owned_by)
+    return catalog
+
+
+def _ollama_tag_payload(*, capability_snapshot: dict[str, Any], model_name: str, runtime: RuntimeServices) -> dict[str, Any]:
+    models = []
+    for entry in _runtime_model_catalog(capability_snapshot=capability_snapshot, default_model_name=model_name):
+        models.append(
+            {
+                "name": entry["id"],
+                "model": entry["id"],
+                "modified_at": datetime.now(timezone.utc).isoformat(),
+                "size": 0,
+                "digest": "nulla-runtime",
+                "details": {
+                    "parent_model": "",
+                    "format": "nulla",
+                    "family": "qwen",
+                    "parameter_size": runtime.runtime_parameter_size,
+                    "quantization_level": "runtime",
+                },
+            }
+        )
+    return {"models": models}
+
+
+def _openai_models_payload(*, capability_snapshot: dict[str, Any], model_name: str) -> dict[str, Any]:
+    data = []
+    for entry in _runtime_model_catalog(capability_snapshot=capability_snapshot, default_model_name=model_name):
+        data.append(
+            {
+                "id": entry["id"],
+                "object": "model",
+                "created": 0,
+                "owned_by": entry["owned_by"],
+            }
+        )
+    return {"object": "list", "data": data}
+
+
 def dispatch_get(
     *,
     path: str,
@@ -153,25 +218,12 @@ def dispatch_get(
     if normalized_path == "/":
         return apply_runtime_headers(text_response(200, "Ollama is running"), runtime)
 
-    if normalized_path in {"/api/tags", "/v1/models"}:
-        payload = {
-            "models": [
-                {
-                    "name": model_name,
-                    "model": model_name,
-                    "modified_at": datetime.now(timezone.utc).isoformat(),
-                    "size": 0,
-                    "digest": "nulla-runtime",
-                    "details": {
-                        "parent_model": "",
-                        "format": "nulla",
-                        "family": "qwen",
-                        "parameter_size": runtime.runtime_parameter_size,
-                        "quantization_level": "runtime",
-                    },
-                }
-            ]
-        }
+    if normalized_path == "/api/tags":
+        payload = _ollama_tag_payload(capability_snapshot=capability_snapshot, model_name=model_name, runtime=runtime)
+        return apply_runtime_headers(json_response(200, payload), runtime)
+
+    if normalized_path == "/v1/models":
+        payload = _openai_models_payload(capability_snapshot=capability_snapshot, model_name=model_name)
         return apply_runtime_headers(json_response(200, payload), runtime)
 
     if normalized_path in {"/healthz", "/v1/healthz"}:
@@ -293,6 +345,9 @@ def dispatch_post(
             "workspace": requested_workspace or default_workspace,
             "workspace_root": requested_workspace or default_workspace,
         }
+        requested_model = str(model or "").strip()
+        if requested_model and requested_model not in {str(model_name or "").strip(), f"{str(model_name or '').strip()}:latest"}:
+            source_context["requested_model"] = requested_model
 
         if stream:
             stream_iter = stream_agent_with_events_provider(
