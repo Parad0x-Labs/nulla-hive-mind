@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -357,6 +358,34 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
 
         self.assertEqual(stamp["branch"], "main")
         self.assertEqual(stamp["commit"], "1234567890ab")
+        self.assertEqual(stamp["dirty"], False)
+
+    def test_runtime_version_stamp_ignores_unborn_git_repo_and_uses_build_source_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            config_dir = project_root / "config"
+            config_dir.mkdir(parents=True)
+            (config_dir / "build-source.json").write_text(
+                json.dumps(
+                    {
+                        "branch": "codex/honest-ollama-prewarm-bootstrap",
+                        "ref": "codex/honest-ollama-prewarm-bootstrap",
+                        "commit": "b7672501d12def8844d5d7f9c70bad87b005c28a",
+                        "source_url": "https://github.com/Parad0x-Labs/nulla-hive-mind/archive/refs/heads/codex/honest-ollama-prewarm-bootstrap.tar.gz",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", str(project_root)], check=True, capture_output=True, text=True)
+
+            stamp = build_runtime_version_stamp(
+                project_root=project_root,
+                runtime_model_tag="qwen2.5:14b",
+                workstation_version="test-workstation",
+            )
+
+        self.assertEqual(stamp["branch"], "codex/honest-ollama-prewarm-bootstrap")
+        self.assertEqual(stamp["commit"], "b7672501d12d")
         self.assertEqual(stamp["dirty"], False)
 
     def test_bootstrap_runtime_services_hydrates_public_hive_auth_into_active_runtime_home(self) -> None:

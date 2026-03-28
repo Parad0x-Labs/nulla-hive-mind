@@ -96,6 +96,21 @@ def build_source_metadata(project_root: Path) -> dict[str, str]:
     return metadata
 
 
+def git_checkout_state(project_root: Path) -> dict[str, Any]:
+    commit_full = git_output(project_root, "rev-parse", "HEAD")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit_full):
+        return {"valid": False, "branch": "", "commit": "", "dirty": False}
+    branch = git_output(project_root, "branch", "--show-current")
+    short_commit = git_output(project_root, "rev-parse", "--short=12", "HEAD") or commit_full[:12]
+    dirty = bool(git_output(project_root, "status", "--short"))
+    return {
+        "valid": True,
+        "branch": branch,
+        "commit": short_commit,
+        "dirty": dirty,
+    }
+
+
 def env_int(name: str, default: int) -> int:
     raw = str(os.environ.get(name, "") or "").strip()
     if not raw:
@@ -142,9 +157,15 @@ def parameter_count_for_model(model_tag: str) -> int:
 def build_runtime_version_stamp(*, project_root: Path, runtime_model_tag: str, workstation_version: str) -> dict[str, Any]:
     release = dict(release_manifest_snapshot())
     build_source = build_source_metadata(project_root)
-    branch = git_output(project_root, "branch", "--show-current") or str(build_source.get("branch") or build_source.get("ref") or "")
-    commit = git_output(project_root, "rev-parse", "--short=12", "HEAD") or str(build_source.get("commit") or "").strip()[:12]
-    dirty = bool(git_output(project_root, "status", "--short"))
+    git_state = git_checkout_state(project_root)
+    if bool(git_state.get("valid")):
+        branch = str(git_state.get("branch") or build_source.get("branch") or build_source.get("ref") or "")
+        commit = str(git_state.get("commit") or "").strip()
+        dirty = bool(git_state.get("dirty"))
+    else:
+        branch = str(build_source.get("branch") or build_source.get("ref") or "")
+        commit = str(build_source.get("commit") or "").strip()[:12]
+        dirty = False
     release_version = str(release.get("release_version") or "").strip() or "unknown-release"
     build_parts = [release_version]
     if commit:

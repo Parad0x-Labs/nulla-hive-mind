@@ -710,6 +710,7 @@ cd "${PROJECT_ROOT}"
 LAUNCHER_HEAD
   cat >>"${target_path}" <<EOF
 export NULLA_HOME="\${NULLA_HOME:-${runtime_home}}"
+export NULLA_WORKSPACE_ROOT="\${NULLA_WORKSPACE_ROOT:-\${NULLA_HOME}/workspace}"
 PROVIDER_ENV_FILE="\${NULLA_HOME}/config/provider-env.sh"
 if [[ -f "\${PROVIDER_ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -739,6 +740,7 @@ cd "${PROJECT_ROOT}"
 LAUNCHER_HEAD
   cat >>"${target_path}" <<EOF
 export NULLA_HOME="\${NULLA_HOME:-${runtime_home}}"
+export NULLA_WORKSPACE_ROOT="\${NULLA_WORKSPACE_ROOT:-\${NULLA_HOME}/workspace}"
 PROVIDER_ENV_FILE="\${NULLA_HOME}/config/provider-env.sh"
 if [[ -f "\${PROVIDER_ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -769,6 +771,7 @@ LAUNCHER_HEAD
   cat >>"${target_path}" <<EOF
 MODEL_TAG="${model_tag}"
 export NULLA_HOME="\${NULLA_HOME:-${runtime_home}}"
+export NULLA_WORKSPACE_ROOT="\${NULLA_WORKSPACE_ROOT:-\${NULLA_HOME}/workspace}"
 PROVIDER_ENV_FILE="\${NULLA_HOME}/config/provider-env.sh"
 if [[ -f "\${PROVIDER_ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
