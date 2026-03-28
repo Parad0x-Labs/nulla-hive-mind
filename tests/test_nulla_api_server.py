@@ -28,7 +28,12 @@ from apps.nulla_api_server import (
 )
 from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
 from core.runtime_task_events import emit_runtime_event
-from core.web.api.runtime import RuntimeServices, bootstrap_runtime_services, build_runtime_version_stamp
+from core.web.api.runtime import (
+    RuntimeServices,
+    bootstrap_runtime_services,
+    build_runtime_version_stamp,
+    log_prewarm_results,
+)
 from tests.asgi_harness import asgi_request
 
 
@@ -370,6 +375,27 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
             )
 
         log_prewarm.assert_called_once_with(model_registry)
+
+    def test_log_prewarm_results_treats_background_warmup_as_info(self) -> None:
+        registry = mock.Mock()
+        registry.prewarm_enabled_providers.return_value = [
+            {
+                "ok": True,
+                "provider_id": "ollama-local:qwen2.5:14b",
+                "status": "warming_background",
+                "reason": "cold_start_timeout",
+                "keep_alive": "15m",
+                "timeout_seconds": 45.0,
+                "background_timeout_seconds": 90.0,
+            }
+        ]
+
+        with self.assertLogs("nulla.api", level="INFO") as captured:
+            log_prewarm_results(registry)
+
+        self.assertEqual(len(captured.records), 1)
+        self.assertEqual(captured.records[0].levelname, "INFO")
+        self.assertIn("Provider prewarm continuing in background", captured.output[0])
 
     def test_normalize_chat_history_keeps_full_user_assistant_sequence(self) -> None:
         history = _normalize_chat_history(

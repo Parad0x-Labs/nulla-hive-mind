@@ -219,6 +219,16 @@ def log_prewarm_results(registry: ModelRegistry) -> None:
                 result.get("total_duration"),
             )
             continue
+        if result.get("ok") and status == "warming_background":
+            logger.info(
+                "Provider prewarm continuing in background: %s | reason=%s | keep_alive=%s | timeout_seconds=%s | background_timeout_seconds=%s",
+                provider_id,
+                result.get("reason") or "unspecified",
+                result.get("keep_alive"),
+                result.get("timeout_seconds"),
+                result.get("background_timeout_seconds"),
+            )
+            continue
         if result.get("ok"):
             logger.info(
                 "Provider prewarm skipped: %s | status=%s | reason=%s",

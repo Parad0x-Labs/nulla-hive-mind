@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
+import requests
 
 from adapters.base_adapter import ModelRequest
 from adapters.openai_compatible_adapter import OpenAICompatibleAdapter
@@ -266,6 +267,44 @@ def test_openai_adapter_prewarm_skips_non_ollama_runtime() -> None:
     assert result["status"] == "skipped"
     assert result["reason"] == "not_ollama_runtime"
     post_mock.assert_not_called()
+
+
+def test_openai_adapter_prewarm_degrades_timeout_to_background_warmup() -> None:
+    adapter = OpenAICompatibleAdapter(
+        SimpleNamespace(
+            provider_id="ollama-local:qwen2.5:14b",
+            model_name="qwen2.5:14b",
+            metadata={"runtime_family": "ollama"},
+            runtime_config={
+                "base_url": "http://127.0.0.1:11434/v1",
+                "prewarm": {
+                    "strategy": "ollama_generate",
+                    "keep_alive": "15m",
+                    "timeout_seconds": 12,
+                },
+            },
+        )
+    )
+    worker = mock.Mock()
+
+    with mock.patch(
+        "adapters.openai_compatible_adapter.requests.post",
+        side_effect=requests.exceptions.ReadTimeout("cold load timed out"),
+    ) as post_mock, mock.patch(
+        "adapters.openai_compatible_adapter.threading.Thread",
+        return_value=worker,
+    ) as thread_mock:
+        result = adapter.prewarm()
+
+    assert result["ok"] is True
+    assert result["status"] == "warming_background"
+    assert result["reason"] == "cold_start_timeout"
+    assert result["keep_alive"] == "15m"
+    assert result["timeout_seconds"] == 12
+    assert result["background_timeout_seconds"] == 90.0
+    post_mock.assert_called_once()
+    thread_mock.assert_called_once()
+    worker.start.assert_called_once_with()
 
 
 def test_openai_adapter_uses_native_ollama_chat_and_applies_compute_threads() -> None:

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import threading
 from typing import Any
 
 import requests
 
 from adapters.base_adapter import ModelAdapter, ModelRequest, ModelResponse, ModelStreamChunk
 from core.compute_mode import get_active_compute_budget
+
+logger = logging.getLogger("nulla.model_adapter")
 
 
 class OpenAICompatibleAdapter(ModelAdapter):
@@ -85,6 +89,10 @@ class OpenAICompatibleAdapter(ModelAdapter):
             or self.manifest.runtime_config.get("health_timeout_seconds")
             or 15.0
         )
+        background_timeout_seconds = float(
+            prewarm_config.get("background_timeout_seconds")
+            or max(timeout_seconds * 2.0, 90.0)
+        )
         endpoint = f"{_native_ollama_base_url(base_url)}/api/generate"
         try:
             response = requests.post(
@@ -104,6 +112,22 @@ class OpenAICompatibleAdapter(ModelAdapter):
                 "load_duration": data.get("load_duration"),
                 "total_duration": data.get("total_duration"),
             }
+        except requests.exceptions.Timeout:
+            self._start_background_prewarm(
+                endpoint=endpoint,
+                payload=payload,
+                background_timeout_seconds=background_timeout_seconds,
+            )
+            return {
+                "ok": True,
+                "provider_id": self.manifest.provider_id,
+                "status": "warming_background",
+                "strategy": strategy,
+                "reason": "cold_start_timeout",
+                "keep_alive": payload["keep_alive"],
+                "timeout_seconds": timeout_seconds,
+                "background_timeout_seconds": background_timeout_seconds,
+            }
         except Exception as exc:
             return {
                 "ok": False,
@@ -112,6 +136,57 @@ class OpenAICompatibleAdapter(ModelAdapter):
                 "strategy": strategy,
                 "error": str(exc),
             }
+
+    def _start_background_prewarm(
+        self,
+        *,
+        endpoint: str,
+        payload: dict[str, Any],
+        background_timeout_seconds: float,
+    ) -> None:
+        worker = threading.Thread(
+            target=self._finish_background_prewarm,
+            kwargs={
+                "endpoint": endpoint,
+                "payload": dict(payload),
+                "background_timeout_seconds": background_timeout_seconds,
+            },
+            daemon=True,
+            name=f"nulla-prewarm-{self.manifest.provider_id}",
+        )
+        worker.start()
+
+    def _finish_background_prewarm(
+        self,
+        *,
+        endpoint: str,
+        payload: dict[str, Any],
+        background_timeout_seconds: float,
+    ) -> None:
+        try:
+            response = requests.post(
+                endpoint,
+                json=payload,
+                headers=self._headers(),
+                timeout=background_timeout_seconds,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            logger.warning(
+                "Background provider prewarm failed: %s | error=%s",
+                self.manifest.provider_id,
+                exc,
+            )
+            return
+
+        logger.info(
+            "Background provider prewarm completed: %s | keep_alive=%s | load_duration=%s | total_duration=%s",
+            self.manifest.provider_id,
+            payload.get("keep_alive"),
+            data.get("load_duration"),
+            data.get("total_duration"),
+        )
 
     def run_text_task(self, request: ModelRequest) -> ModelResponse:
         return self._invoke_http(request, force_json=False)
