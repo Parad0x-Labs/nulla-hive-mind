@@ -57,7 +57,7 @@ def build_runtime_context(
     env: Mapping[str, str] | None = None,
 ) -> RuntimeContext:
     env_map = os.environ if env is None else env
-    runtime_home = Path(str(env_map.get("NULLA_HOME") or active_nulla_home())).expanduser().resolve()
+    runtime_home = active_nulla_home(env_map)
     data_dir = (runtime_home / "data").resolve()
     config_home_dir = (runtime_home / "config").resolve()
     resolved_workspace = resolve_workspace_root(workspace_root)

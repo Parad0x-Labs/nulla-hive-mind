@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 from core.openclaw_locator import load_registered_agent_name
-from core.runtime_paths import NULLA_HOME, PROJECT_ROOT, data_path
+from core.runtime_paths import PROJECT_ROOT, active_nulla_home, data_path
 
 _IDENTITY_FILE = "owner_identity.json"
 
@@ -127,7 +127,7 @@ def ensure_openclaw_registration(*, display_name: str | None = None, model_tag: 
             return bool(
                 register(
                     project_root=str(PROJECT_ROOT),
-                    nulla_home=str(NULLA_HOME),
+                    nulla_home=str(active_nulla_home()),
                     model_tag=model_tag,
                     display_name=chosen_name,
                 )

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-NULLA_HOME = Path(os.environ.get("NULLA_HOME", PROJECT_ROOT / ".nulla_local")).resolve()
+NULLA_HOME = (PROJECT_ROOT / ".nulla_local").resolve()
 DATA_DIR = (NULLA_HOME / "data").resolve()
 CONFIG_HOME_DIR = (NULLA_HOME / "config").resolve()
 DOCS_DIR = (PROJECT_ROOT / "docs").resolve()
@@ -18,8 +20,51 @@ def configure_runtime_home(path: str | Path | None) -> None:
     _NULLA_HOME_OVERRIDE = None if path is None else Path(path).expanduser().resolve()
 
 
-def active_nulla_home() -> Path:
-    return (_NULLA_HOME_OVERRIDE or Path(os.environ.get("NULLA_HOME", NULLA_HOME))).resolve()
+def discover_installed_runtime_home(
+    *,
+    project_root: str | Path | None = None,
+) -> Path | None:
+    root = (Path(project_root).expanduser().resolve() if project_root is not None else PROJECT_ROOT.resolve())
+    receipt_path = root / "install_receipt.json"
+    try:
+        payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    candidate = str(payload.get("runtime_home") or "").strip()
+    if not candidate:
+        return None
+    try:
+        return Path(candidate).expanduser().resolve()
+    except Exception:
+        return None
+
+
+def active_nulla_home(env: Mapping[str, str] | None = None) -> Path:
+    if env is None:
+        if _NULLA_HOME_OVERRIDE is not None:
+            return _NULLA_HOME_OVERRIDE.resolve()
+        env_map = os.environ
+        env_home = str(env_map.get("NULLA_HOME") or "").strip()
+        if env_home:
+            return Path(env_home).expanduser().resolve()
+        installed_home = discover_installed_runtime_home()
+        if installed_home is not None:
+            return installed_home
+        return NULLA_HOME.resolve()
+
+    env_map = env
+    explicit_env_home = "NULLA_HOME" in env_map
+    env_home = str(env_map.get("NULLA_HOME") or "").strip()
+    if env_home:
+        return Path(env_home).expanduser().resolve()
+    if _NULLA_HOME_OVERRIDE is not None and not explicit_env_home:
+        return _NULLA_HOME_OVERRIDE.resolve()
+    installed_home = discover_installed_runtime_home()
+    if installed_home is not None:
+        return installed_home
+    return NULLA_HOME.resolve()
 
 
 def active_data_dir() -> Path:

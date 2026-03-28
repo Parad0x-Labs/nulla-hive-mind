@@ -34,7 +34,7 @@ class OnboardingOpenClawRegistrationTests(unittest.TestCase):
 
             with mock.patch.dict("os.environ", {"OPENCLAW_HOME": str(openclaw_home)}, clear=False), mock.patch.object(
                 onboarding, "PROJECT_ROOT", Path("/tmp/nulla-project")
-            ), mock.patch.object(onboarding, "NULLA_HOME", Path("/tmp/nulla-runtime")):
+            ), mock.patch.object(onboarding, "active_nulla_home", return_value=Path("/tmp/nulla-runtime")):
                 ok = onboarding.ensure_openclaw_registration(
                     display_name="Cornholio",
                     model_tag="qwen2.5:14b",

@@ -44,3 +44,20 @@ def test_apply_runtime_context_configures_runtime_home_and_default_db_path(tmp_p
     assert applied is context
     configure_home.assert_called_once_with(context.paths.runtime_home)
     configure_db.assert_called_once_with(context.paths.db_path)
+
+
+def test_build_runtime_context_uses_install_receipt_runtime_home_when_env_is_unset(tmp_path: Path) -> None:
+    runtime_home = tmp_path / "receipt-runtime"
+
+    with mock.patch(
+        "core.runtime_context.active_nulla_home",
+        return_value=runtime_home.resolve(),
+    ), mock.patch.dict(
+        "os.environ",
+        {"NULLA_HOME": "", "NULLA_WORKSPACE_ROOT": ""},
+        clear=False,
+    ):
+        context = build_runtime_context(mode="cli")
+
+    assert context.paths.runtime_home == runtime_home.resolve()
+    assert context.paths.db_path == (runtime_home / "data" / "nulla_web0_v2.db").resolve()

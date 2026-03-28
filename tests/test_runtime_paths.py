@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest import mock
 
-from core.runtime_paths import PROJECT_ROOT, resolve_workspace_root
+from core.runtime_paths import PROJECT_ROOT, active_nulla_home, discover_installed_runtime_home, resolve_workspace_root
 
 
 def test_resolve_workspace_root_prefers_explicit_path(tmp_path: Path) -> None:
@@ -44,3 +45,36 @@ def test_resolve_workspace_root_falls_back_to_project_root_when_cwd_is_missing()
         resolved = resolve_workspace_root()
 
     assert resolved == PROJECT_ROOT.resolve()
+
+
+def test_discover_installed_runtime_home_reads_install_receipt(tmp_path: Path) -> None:
+    runtime_home = tmp_path / "runtime-home"
+    receipt_path = tmp_path / "install_receipt.json"
+    receipt_path.write_text(json.dumps({"runtime_home": str(runtime_home)}), encoding="utf-8")
+
+    resolved = discover_installed_runtime_home(project_root=tmp_path)
+
+    assert resolved == runtime_home.resolve()
+
+
+def test_active_nulla_home_uses_install_receipt_when_env_is_unset(tmp_path: Path) -> None:
+    runtime_home = tmp_path / "runtime-home"
+    receipt_path = tmp_path / "install_receipt.json"
+    receipt_path.write_text(json.dumps({"runtime_home": str(runtime_home)}), encoding="utf-8")
+
+    with mock.patch("core.runtime_paths.PROJECT_ROOT", tmp_path):
+        resolved = active_nulla_home({"NULLA_HOME": ""})
+
+    assert resolved == runtime_home.resolve()
+
+
+def test_active_nulla_home_prefers_environment_over_install_receipt(tmp_path: Path) -> None:
+    receipt_runtime = tmp_path / "receipt-runtime"
+    env_runtime = tmp_path / "env-runtime"
+    receipt_path = tmp_path / "install_receipt.json"
+    receipt_path.write_text(json.dumps({"runtime_home": str(receipt_runtime)}), encoding="utf-8")
+
+    with mock.patch("core.runtime_paths.PROJECT_ROOT", tmp_path):
+        resolved = active_nulla_home({"NULLA_HOME": str(env_runtime)})
+
+    assert resolved == env_runtime.resolve()
