@@ -45,6 +45,7 @@ def collect_recent_llm_inventory(repo_root: Path, *, since_hours: int = 48) -> d
             ],
             cwd=str(repo_root),
             text=True,
+            stderr=subprocess.DEVNULL,
         )
     except Exception:
         output = ""

@@ -112,7 +112,10 @@ def test_git_metadata_falls_back_to_build_source_json_when_git_checkout_is_missi
 
 
 def test_collect_recent_llm_inventory_returns_empty_inventory_when_git_history_is_unavailable(monkeypatch, tmp_path: Path) -> None:
+    seen_kwargs: list[dict[str, object]] = []
+
     def _raise_git_failure(*args, **kwargs):
+        seen_kwargs.append(dict(kwargs))
         raise subprocess.CalledProcessError(128, args[0])
 
     monkeypatch.setattr(subprocess, "check_output", _raise_git_failure)
@@ -128,3 +131,5 @@ def test_collect_recent_llm_inventory_returns_empty_inventory_when_git_history_i
         "docs": [],
         "workflows": [],
     }
+    assert seen_kwargs
+    assert all(item.get("stderr") == subprocess.DEVNULL for item in seen_kwargs)
