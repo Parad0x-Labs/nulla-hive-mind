@@ -55,6 +55,12 @@ curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nu
 bash bootstrap_nulla.sh
 ```
 
+If you need this exact beta branch before it lands on `main`, pin the ref explicitly:
+
+```bash
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --ref codex/honest-ollama-prewarm-bootstrap --install-profile ollama-max && rm -f "$tmp"
+```
+
 Windows PowerShell:
 
 ```powershell
