@@ -190,7 +190,15 @@ def _resolve_runtime_command(
     start_script: Path | None,
 ) -> list[str]:
     bind_host, bind_port = _runtime_endpoint_parts(base_url)
-    if start_script and start_script.exists() and bind_host == "127.0.0.1" and bind_port == 11435:
+    start_script_venv = start_script.parent / ".venv" / "bin" / "python" if start_script else None
+    if (
+        start_script
+        and start_script.exists()
+        and start_script_venv is not None
+        and start_script_venv.exists()
+        and bind_host == "127.0.0.1"
+        and bind_port == 11435
+    ):
         return ["sh", str(start_script)]
     return _default_runtime_command(repo_root=repo_root, base_url=base_url)
 

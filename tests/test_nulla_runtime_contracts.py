@@ -577,6 +577,44 @@ def test_capability_truth_query_reports_self_tool_creation_limits_honestly(make_
     assert "cannot auto-register" in lowered or "cannot register" in lowered
 
 
+def test_generic_capability_inventory_prompt_uses_grounded_fast_path(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("capability inventory should not load context")  # type: ignore[attr-defined]
+
+    with mock.patch.object(
+        agent,
+        "_capability_ledger_entries",
+        return_value=[
+            {
+                "capability_id": "workspace.build_scaffold",
+                "surface": "workspace",
+                "supported": True,
+                "support_level": "partial",
+                "claim": "write narrow Telegram or Discord bot scaffolds into the active workspace",
+                "partial_reason": "This is scaffold-level support only, not a full autonomous build/debug/test loop.",
+            },
+            {
+                "capability_id": "workspace.write",
+                "surface": "workspace",
+                "supported": True,
+                "support_level": "full",
+                "claim": "read and write files inside the active workspace",
+            },
+        ],
+    ):
+        result = agent.run_once(
+            "what can you do right now on this machine?",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+    lowered = result["response"].lower()
+    assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert result["model_execution"]["used_model"] is False
+    assert "wired on this runtime" in lowered
+    assert "read and write files inside the active workspace" in lowered
+    assert "not a full autonomous build/debug/test loop" in lowered
+
+
 def test_unsupported_builder_request_reports_gap_honestly_instead_of_writing_a_brief(make_agent):
     agent = make_agent()
     result = agent.run_once(

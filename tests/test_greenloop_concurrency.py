@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import csv
+import sys
+import types
+from pathlib import Path
 
-from ops.greenloop_concurrency import RequestMeasurement, _parse_levels, _write_summary_csv, summarize_measurements
+from ops import greenloop_concurrency
+from ops.greenloop_concurrency import (
+    RequestMeasurement,
+    _ensure_runtime_warm,
+    _parse_levels,
+    _write_summary_csv,
+    summarize_measurements,
+)
 
 
 def test_parse_levels_rejects_zero() -> None:
@@ -67,3 +78,101 @@ def test_write_summary_csv_writes_expected_columns(tmp_path) -> None:
             "mean_seconds": "0.5",
         }
     ]
+
+
+def test_ensure_runtime_warm_retries_until_success(monkeypatch, tmp_path: Path) -> None:
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    attempts: list[int] = []
+
+    async def _fake_run_probe(
+        client,
+        *,
+        base_url: str,
+        workspace_root: Path,
+        token: str,
+        conversation_id: str,
+        workspace_suffix: str,
+        concurrency: int,
+        request_index: int,
+    ) -> RequestMeasurement:
+        attempts.append(request_index)
+        return RequestMeasurement(
+            concurrency=concurrency,
+            request_index=request_index,
+            success=request_index >= 2,
+            latency_seconds=0.5,
+            status_code=200 if request_index >= 2 else 503,
+            response_bytes=10,
+            token=token,
+            error=None if request_index >= 2 else "warming",
+        )
+
+    monkeypatch.setattr(greenloop_concurrency, "_run_probe", _fake_run_probe)
+    monkeypatch.setitem(sys.modules, "httpx", types.SimpleNamespace(AsyncClient=lambda timeout: _FakeClient()))
+
+    result = asyncio.run(
+        _ensure_runtime_warm(
+            base_url="http://127.0.0.1:18080",
+            workspace_root=tmp_path,
+            timeout_seconds=30.0,
+            warmup_attempts=3,
+        )
+    )
+
+    assert attempts == [1, 2]
+    assert result.success is True
+    assert result.request_index == 2
+
+
+def test_ensure_runtime_warm_raises_after_exhausting_attempts(monkeypatch, tmp_path: Path) -> None:
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    async def _fake_run_probe(
+        client,
+        *,
+        base_url: str,
+        workspace_root: Path,
+        token: str,
+        conversation_id: str,
+        workspace_suffix: str,
+        concurrency: int,
+        request_index: int,
+    ) -> RequestMeasurement:
+        return RequestMeasurement(
+            concurrency=concurrency,
+            request_index=request_index,
+            success=False,
+            latency_seconds=0.5,
+            status_code=504,
+            response_bytes=0,
+            token=token,
+            error="timed out",
+        )
+
+    monkeypatch.setattr(greenloop_concurrency, "_run_probe", _fake_run_probe)
+    monkeypatch.setitem(sys.modules, "httpx", types.SimpleNamespace(AsyncClient=lambda timeout: _FakeClient()))
+
+    try:
+        asyncio.run(
+            _ensure_runtime_warm(
+                base_url="http://127.0.0.1:18080",
+                workspace_root=tmp_path,
+                timeout_seconds=30.0,
+                warmup_attempts=2,
+            )
+        )
+    except RuntimeError as exc:
+        assert "runtime warmup failed after 2 attempt" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("expected RuntimeError")

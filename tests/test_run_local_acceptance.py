@@ -215,6 +215,37 @@ def test_resolve_runtime_command_uses_direct_launch_for_nondefault_port(tmp_path
     assert "18080" in command
 
 
+def test_resolve_runtime_command_uses_start_script_for_default_launch_port_when_repo_venv_exists(tmp_path: Path) -> None:
+    start_script = tmp_path / "run.sh"
+    start_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    venv_python = tmp_path / ".venv" / "bin"
+    venv_python.mkdir(parents=True)
+    (venv_python / "python").write_text("", encoding="utf-8")
+
+    command = acceptance._resolve_runtime_command(
+        repo_root=tmp_path,
+        base_url="http://127.0.0.1:11435",
+        start_script=start_script,
+    )
+
+    assert command == ["sh", str(start_script)]
+
+
+def test_resolve_runtime_command_falls_back_for_default_launch_port_when_start_script_repo_venv_missing(tmp_path: Path) -> None:
+    start_script = tmp_path / "run.sh"
+    start_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    command = acceptance._resolve_runtime_command(
+        repo_root=tmp_path,
+        base_url="http://127.0.0.1:11435",
+        start_script=start_script,
+    )
+
+    assert "apps.nulla_api_server" in command
+    assert "--port" in command
+    assert "11435" in command
+
+
 def test_pick_isolated_daemon_bind_port_returns_stream_safe_pair() -> None:
     port = acceptance._pick_isolated_daemon_bind_port(host="127.0.0.1")
 

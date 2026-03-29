@@ -153,6 +153,41 @@ class BrainHiveResearchPacketTests(unittest.TestCase):
 
         self.assertEqual(questions, [])
 
+    def test_derive_research_questions_uses_template_path_by_default_without_live_model_call(self) -> None:
+        with patch("core.brain_hive_research._derive_questions_via_model", side_effect=AssertionError("live model path should stay off by default")):
+            questions = derive_research_questions(
+                topic_row={
+                    "title": "Agent commons watcher UX",
+                    "summary": "Improve watcher drill-down and task flow UX.",
+                    "topic_tags": ["agent_commons", "design"],
+                },
+                claim_rows=[],
+                evidence_kind_counts=Counter(),
+                trading_feature_export={},
+            )
+
+        self.assertTrue(questions)
+        self.assertTrue(any("watcher" in item.lower() or "task flow" in item.lower() for item in questions))
+
+    def test_derive_research_questions_uses_model_path_when_explicitly_enabled(self) -> None:
+        with patch.dict("os.environ", {"NULLA_BRAIN_HIVE_LIVE_QUESTION_DERIVATION": "1"}, clear=False), patch(
+            "core.brain_hive_research._derive_questions_via_model",
+            return_value=["Focused query one", "Focused query two"],
+        ) as derive_model:
+            questions = derive_research_questions(
+                topic_row={
+                    "title": "Agent commons watcher UX",
+                    "summary": "Improve watcher drill-down and task flow UX.",
+                    "topic_tags": ["agent_commons", "design"],
+                },
+                claim_rows=[],
+                evidence_kind_counts=Counter(),
+                trading_feature_export={},
+            )
+
+        derive_model.assert_called_once()
+        self.assertEqual(questions, ["Focused query one", "Focused query two"])
+
     def test_build_topic_research_packet_surfaces_missing_artifact_refs_instead_of_empty_silence(self) -> None:
         packet = build_topic_research_packet(
             topic={

@@ -81,23 +81,25 @@ def summarize_measurements(
     }
 
 
-async def _run_one(
+async def _run_probe(
     client: Any,
     *,
     base_url: str,
     workspace_root: Path,
+    token: str,
+    conversation_id: str,
+    workspace_suffix: str,
     concurrency: int,
     request_index: int,
 ) -> RequestMeasurement:
-    token = f"GREENLOOP-{concurrency}-{request_index}"
-    workspace = workspace_root / f"c{concurrency}" / f"req-{request_index:02d}"
+    workspace = workspace_root / workspace_suffix
     workspace.mkdir(parents=True, exist_ok=True)
     body = {
         "model": "nulla",
         "messages": [{"role": "user", "content": f"Reply with exactly {token} and nothing else."}],
         "stream": False,
         "workspace": str(workspace),
-        "conversationId": f"greenloop-concurrency-{concurrency}-{request_index}",
+        "conversationId": conversation_id,
     }
     started = time.perf_counter()
     try:
@@ -128,6 +130,64 @@ async def _run_one(
             token=token,
             error=str(exc),
         )
+
+
+async def _run_one(
+    client: Any,
+    *,
+    base_url: str,
+    workspace_root: Path,
+    concurrency: int,
+    request_index: int,
+) -> RequestMeasurement:
+    token = f"GREENLOOP-{concurrency}-{request_index}"
+    return await _run_probe(
+        client,
+        base_url=base_url,
+        workspace_root=workspace_root,
+        token=token,
+        conversation_id=f"greenloop-concurrency-{concurrency}-{request_index}",
+        workspace_suffix=f"c{concurrency}/req-{request_index:02d}",
+        concurrency=concurrency,
+        request_index=request_index,
+    )
+
+
+async def _ensure_runtime_warm(
+    *,
+    base_url: str,
+    workspace_root: Path,
+    timeout_seconds: float,
+    warmup_attempts: int,
+) -> RequestMeasurement:
+    try:
+        import httpx
+    except ModuleNotFoundError as exc:  # pragma: no cover - only exercised in stripped test envs
+        raise RuntimeError("httpx is required to run the greenloop concurrency probe.") from exc
+    attempts = max(1, int(warmup_attempts))
+    last: RequestMeasurement | None = None
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        for attempt in range(1, attempts + 1):
+            last = await _run_probe(
+                client,
+                base_url=base_url,
+                workspace_root=workspace_root,
+                token=f"GREENLOOP-WARMUP-{attempt}",
+                conversation_id=f"greenloop-warmup-{attempt}",
+                workspace_suffix=f"__warmup__/attempt-{attempt:02d}",
+                concurrency=0,
+                request_index=attempt,
+            )
+            if last.success:
+                print(f"[warmup] success attempt={attempt} latency_seconds={last.latency_seconds}")
+                return last
+            detail = last.error or f"status_code={last.status_code}"
+            print(f"[warmup] retry attempt={attempt} detail={detail}")
+            await asyncio.sleep(min(1.0 * attempt, 2.0))
+    detail = "unknown"
+    if last is not None:
+        detail = last.error or f"status_code={last.status_code}"
+    raise RuntimeError(f"runtime warmup failed after {attempts} attempt(s): {detail}")
 
 
 async def _measure_level(
@@ -198,6 +258,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--levels", default="1,2,4")
     parser.add_argument("--requests-per-level", type=int, default=4)
     parser.add_argument("--timeout-seconds", type=float, default=90.0)
+    parser.add_argument("--warmup-timeout-seconds", type=float, default=180.0)
+    parser.add_argument("--warmup-attempts", type=int, default=3)
     parser.add_argument("--workspace-root", default="artifacts/greenloop_concurrency/workspace")
     parser.add_argument("--output-csv", default="reports/greenloop/concurrency.csv")
     parser.add_argument("--output-json", default="reports/greenloop/concurrency.json")
@@ -207,6 +269,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
 async def _async_main(args: argparse.Namespace) -> int:
     levels = _parse_levels(args.levels)
     workspace_root = Path(args.workspace_root).resolve()
+    warmup = await _ensure_runtime_warm(
+        base_url=args.base_url,
+        workspace_root=workspace_root,
+        timeout_seconds=float(args.warmup_timeout_seconds),
+        warmup_attempts=int(args.warmup_attempts),
+    )
     summary_rows: list[dict[str, Any]] = []
     raw_rows: list[dict[str, Any]] = []
     for concurrency in levels:
@@ -220,6 +288,10 @@ async def _async_main(args: argparse.Namespace) -> int:
         summary = summarize_measurements(measurements, wall_seconds=wall_seconds)
         summary_rows.append({"concurrency": concurrency, **summary})
         raw_rows.extend(asdict(row) for row in measurements)
+        print(
+            f"[level {concurrency}] successes={summary['successes']}/{summary['total_requests']} "
+            f"success_rate={summary['success_rate']} p95_seconds={summary['p95_seconds']}"
+        )
     _write_summary_csv(Path(args.output_csv), summary_rows)
     _write_json(
         Path(args.output_json),
@@ -227,6 +299,7 @@ async def _async_main(args: argparse.Namespace) -> int:
             "base_url": args.base_url,
             "levels": list(levels),
             "requests_per_level": int(args.requests_per_level),
+            "warmup": asdict(warmup),
             "workspace_root": str(workspace_root),
             "summary": summary_rows,
             "measurements": raw_rows,

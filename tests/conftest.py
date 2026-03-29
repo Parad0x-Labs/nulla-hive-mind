@@ -25,14 +25,18 @@ from storage.db import active_default_db_path, get_connection, reset_default_con
 from storage.migrations import run_migrations
 
 RUNTIME_TABLES = (
+    "adaptive_lexicon",
     "audit_log",
     "compute_credit_ledger",
     "contribution_ledger",
+    "dialogue_sessions",
+    "dialogue_turns",
     "curiosity_runs",
     "curiosity_topics",
     "dna_wallet_ledger",
     "dna_wallet_profiles",
     "dna_wallet_security",
+    "response_feedback",
     "event_log_v2",
     "hive_idempotency_keys",
     "knowledge_holders",
