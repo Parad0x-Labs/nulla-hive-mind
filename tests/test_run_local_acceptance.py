@@ -81,6 +81,17 @@ def test_load_profile_reads_locked_qwen_profile() -> None:
     assert profile.consistency_min_passes == 2
 
 
+def test_startup_reply_is_coherent_accepts_valid_greetings() -> None:
+    assert acceptance._startup_reply_is_coherent("Hello. What do you need?")
+    assert acceptance._startup_reply_is_coherent("Hey. I'm NULLA. What do you need?")
+    assert acceptance._startup_reply_is_coherent("NULLA here. How can I help?")
+
+
+def test_startup_reply_is_coherent_rejects_non_greetings() -> None:
+    assert not acceptance._startup_reply_is_coherent("")
+    assert not acceptance._startup_reply_is_coherent("The answer is 4.")
+
+
 def test_build_acceptance_summary_enforces_thresholds() -> None:
     profile = acceptance.load_profile()
     summary = acceptance.build_acceptance_summary(

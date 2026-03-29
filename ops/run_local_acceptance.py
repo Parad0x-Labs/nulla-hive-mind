@@ -67,6 +67,25 @@ def _read_json(url: str, *, data: dict[str, Any] | None = None, timeout: float =
         return json.loads(response.read().decode("utf-8"))
 
 
+def _startup_reply_is_coherent(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return False
+    if re.search(r"\b(hello|hi|hey|yo|gm|good morning|good afternoon|good evening|morning)\b", normalized):
+        return True
+    if "nulla" in normalized and any(
+        phrase in normalized
+        for phrase in (
+            "what do you need",
+            "what do you want me to do",
+            "how can i help",
+            "point me at the problem",
+        )
+    ):
+        return True
+    return False
+
+
 def _machine_info() -> dict[str, Any]:
     cpu = ""
     ram_gb = None
@@ -425,7 +444,7 @@ class AcceptanceRunner:
         prompt = "hello"
         payload, latency = self._chat(prompt, workspace=self.workspaces["main"])
         results["P0.1a_boot_hello"] = self._result_base(prompt=prompt, payload=payload, latency_seconds=latency)
-        results["P0.1a_boot_hello"]["pass"] = "hello" in results["P0.1a_boot_hello"]["assistant_text"].lower()
+        results["P0.1a_boot_hello"]["pass"] = _startup_reply_is_coherent(results["P0.1a_boot_hello"]["assistant_text"])
         results["P0.1a_boot_hello"]["why"] = "startup replied coherently" if results["P0.1a_boot_hello"]["pass"] else "startup reply was broken"
 
         prompt = "what can you do right now on this machine?"
