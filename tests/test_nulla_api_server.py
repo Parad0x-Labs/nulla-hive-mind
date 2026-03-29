@@ -347,6 +347,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                         "branch": "main",
                         "ref": "main",
                         "commit": "1234567890abcdef1234567890abcdef12345678",
+                        "dirty_state": True,
                         "source_url": "https://github.com/Parad0x-Labs/nulla-hive-mind/archive/refs/heads/main.tar.gz",
                     }
                 ),
@@ -361,7 +362,8 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
 
         self.assertEqual(stamp["branch"], "main")
         self.assertEqual(stamp["commit"], "1234567890ab")
-        self.assertEqual(stamp["dirty"], False)
+        self.assertEqual(stamp["dirty"], True)
+        self.assertTrue(str(stamp["build_id"]).endswith(".dirty"))
 
     def test_runtime_version_stamp_ignores_unborn_git_repo_and_uses_build_source_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -374,6 +376,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                         "branch": "codex/honest-ollama-prewarm-bootstrap",
                         "ref": "codex/honest-ollama-prewarm-bootstrap",
                         "commit": "b7672501d12def8844d5d7f9c70bad87b005c28a",
+                        "dirty_state": False,
                         "source_url": "https://github.com/Parad0x-Labs/nulla-hive-mind/archive/refs/heads/codex/honest-ollama-prewarm-bootstrap.tar.gz",
                     }
                 ),

@@ -7,6 +7,8 @@ REF="${NULLA_GITHUB_REF:-main}"
 INSTALL_DIR="${NULLA_INSTALL_DIR:-$HOME/nulla-hive-mind}"
 ARCHIVE_URL="${NULLA_ARCHIVE_URL:-https://github.com/${OWNER}/${REPO}/archive/refs/heads/${REF}.tar.gz}"
 ARCHIVE_SHA256="${NULLA_ARCHIVE_SHA256:-}"
+SOURCE_COMMIT="${NULLA_BUILD_COMMIT:-}"
+SOURCE_DIRTY_STATE="${NULLA_BUILD_DIRTY_STATE:-}"
 TMP_DIR=""
 AUTO_START=1
 INSTALL_PROFILE="${NULLA_INSTALL_PROFILE:-}"
@@ -34,7 +36,9 @@ Options:
   --dir <install-dir>      Target install folder (default: ${INSTALL_DIR})
   --archive-url <url>      Override the source archive URL
   --sha256 <hex>           Verify the downloaded archive against a SHA-256 digest
-  --install-profile <id>   auto-recommended | local-only (alias: ollama-only) | local-max (alias: ollama-max) | hybrid-kimi (alias: ollama+kimi) | hybrid-tether (alias: ollama+tether) | hybrid-fallback | full-orchestrated
+  --source-commit <sha>    Override the source commit recorded in build metadata
+  --source-dirty <bool>    Override the source dirty-state recorded in build metadata
+  --install-profile <id>   auto-recommended | local-only (alias: ollama-only) | local-max (alias: ollama-max)
   --no-start               Install but do not launch NULLA
   --help, -h               Show this help
 
@@ -45,6 +49,8 @@ Environment overrides:
   NULLA_INSTALL_DIR
   NULLA_ARCHIVE_URL
   NULLA_ARCHIVE_SHA256
+  NULLA_BUILD_COMMIT
+  NULLA_BUILD_DIRTY_STATE
   NULLA_INSTALL_PROFILE
 EOF
 }
@@ -55,6 +61,23 @@ json_escape() {
   value="${value//\"/\\\"}"
   value="${value//$'\n'/\\n}"
   printf '%s' "${value}"
+}
+
+
+json_bool_or_null() {
+  local normalized
+  normalized="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case "${normalized}" in
+    1|true|yes|on)
+      printf 'true'
+      ;;
+    0|false|no|off)
+      printf 'false'
+      ;;
+    *)
+      printf 'null'
+      ;;
+  esac
 }
 
 
@@ -81,6 +104,16 @@ parse_args() {
         shift
         [[ $# -gt 0 ]] || { say "ERROR: --sha256 requires a value."; exit 2; }
         ARCHIVE_SHA256="$1"
+        ;;
+      --source-commit)
+        shift
+        [[ $# -gt 0 ]] || { say "ERROR: --source-commit requires a value."; exit 2; }
+        SOURCE_COMMIT="$1"
+        ;;
+      --source-dirty)
+        shift
+        [[ $# -gt 0 ]] || { say "ERROR: --source-dirty requires a value."; exit 2; }
+        SOURCE_DIRTY_STATE="$1"
         ;;
       --install-profile)
         shift
@@ -183,6 +216,10 @@ download_and_extract() {
 
 
 resolve_archive_commit() {
+  if [[ -n "${SOURCE_COMMIT}" ]]; then
+    BUILD_COMMIT="${SOURCE_COMMIT}"
+    return 0
+  fi
   case "${ARCHIVE_URL}" in
     "https://github.com/${OWNER}/${REPO}/archive/refs/"*|"https://codeload.github.com/${OWNER}/${REPO}/tar.gz/"*)
       ;;
@@ -204,6 +241,8 @@ write_build_metadata() {
   "ref": "$(json_escape "${REF}")",
   "branch": "$(json_escape "${REF}")",
   "commit": "$(json_escape "${BUILD_COMMIT}")",
+  "dirty_state": $(json_bool_or_null "${SOURCE_DIRTY_STATE}"),
+  "source_kind": "archive",
   "source_url": "$(json_escape "${ARCHIVE_URL}")"
 }
 EOF

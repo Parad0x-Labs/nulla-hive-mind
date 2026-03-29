@@ -118,6 +118,10 @@ def test_runtime_capability_snapshot_exposes_feature_flags_and_capability_rows()
     assert snapshot["feature_flags"]["allow_sandbox_execution"] is True
     assert snapshot["feature_flags"]["allow_remote_only_without_backend"] is False
     assert snapshot["install_profile"]["profile_id"] == "local-only"
+    assert snapshot["install_recommendation"]["recommended_default_profile"] == "local-only"
+    assert snapshot["install_recommendation"]["recommended_optional_profile"] == ""
+    assert snapshot["install_recommendation"]["primary_local_model"] == "qwen2.5:7b"
+    assert snapshot["install_recommendation"]["secondary_local_supported"] is False
     assert snapshot["provider_capability_truth"][0]["provider_id"] == "local-qwen-http:qwen2.5:7b"
     assert snapshot["provider_capability_truth"][0]["availability_state"] == "ready"
     assert snapshot["provider_capability_truth"][0]["circuit_open"] is False

@@ -20,6 +20,7 @@ from core.llm_eval import (
     run_pytest_pack,
     summarize_latency_rows,
 )
+from core.proof_manifest import build_proof_manifest, write_proof_manifest
 from ops import run_local_acceptance as local_acceptance
 
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "reports" / "llm_eval" / "latest"
@@ -439,7 +440,15 @@ def _run_live_acceptance(
     base_url: str,
     profile_path: Path,
     run_root: Path,
+    runtime_home: Path | None = None,
+    workspace_root: Path | None = None,
 ) -> dict[str, Any]:
+    if (runtime_home is None) ^ (workspace_root is None):
+        raise ValueError("runtime_home and workspace_root must be provided together, or neither.")
+    if runtime_home is None and workspace_root is None:
+        discovered_roots = local_acceptance._discover_active_runtime_roots(base_url.rstrip("/"))
+        if discovered_roots is not None:
+            runtime_home, workspace_root = discovered_roots
     preserved_run_root = _preserve_previous_live_run_artifacts(run_root=run_root, profile_path=profile_path)
     profile = local_acceptance.load_profile(profile_path)
     exit_code = local_acceptance.run_full_acceptance(
@@ -447,8 +456,8 @@ def _run_live_acceptance(
         repo_root=REPO_ROOT,
         run_root=run_root,
         profile=profile,
-        runtime_home=(run_root / "runtime_home").resolve(),
-        workspace_root=(run_root / "workspace").resolve(),
+        runtime_home=(runtime_home or (run_root / "runtime_home")).resolve(),
+        workspace_root=(workspace_root or (run_root / "workspace")).resolve(),
         start_script=local_acceptance.DEFAULT_START_SCRIPT,
     )
     online_payload = json.loads((run_root / "evidence" / "online_acceptance.json").read_text(encoding="utf-8"))
@@ -722,6 +731,8 @@ def run(args: argparse.Namespace) -> int:
             base_url=args.base_url,
             profile_path=profile_path,
             run_root=live_run_root,
+            runtime_home=Path(args.runtime_home).expanduser().resolve() if args.runtime_home else None,
+            workspace_root=Path(args.workspace_root).expanduser().resolve() if args.workspace_root else None,
         )
         latency_rows = _collect_latency_rows_from_acceptance(
             run_id=run_id,
@@ -786,6 +797,19 @@ def run(args: argparse.Namespace) -> int:
         and hive_integrity["status"] == "pass"
         and nullabook_provenance["status"] == "pass",
     }
+    proof_manifest = build_proof_manifest(
+        repo_root=REPO_ROOT,
+        generated_by="llm_eval",
+        runtime_health=dict(live_acceptance.get("online", {}).get("health") or {}),
+        runtime_capabilities=dict(live_acceptance.get("online", {}).get("capabilities") or {}),
+        acceptance_summary=dict(live_acceptance.get("summary") or {}),
+        llm_eval_summary=payload,
+    )
+    if not proof_manifest["overall_consistent"]:
+        payload["blockers"].append(
+            "Proof manifest detected mismatched commit/profile/model truth across repo, runtime, or install receipt."
+        )
+        payload["overall_full_green"] = False
 
     summary_md = _render_summary_markdown(payload)
     regression_md = _render_regression_markdown(
@@ -805,6 +829,7 @@ def run(args: argparse.Namespace) -> int:
     _write_json(output_root / "nullabook_provenance.json", nullabook_provenance)
     _write_markdown(output_root / "regression_48h.md", regression_md)
     _write_markdown(output_root / "failures.md", failures_md)
+    write_proof_manifest(output_root / "proof_manifest.json", proof_manifest)
     if docs_report_path is not None:
         _write_markdown(docs_report_path, summary_md)
 
@@ -820,8 +845,12 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--branch-label", default="")
     parser.add_argument("--docs-report-path", default="")
+    parser.add_argument("--runtime-home", default="")
+    parser.add_argument("--workspace-root", default="")
     parser.add_argument("--skip-live-runtime", action="store_true")
     args = parser.parse_args(argv)
+    if bool(args.runtime_home) ^ bool(args.workspace_root):
+        parser.error("`llm_eval` requires both `--runtime-home` and `--workspace-root`, or neither.")
     return run(args)
 
 

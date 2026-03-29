@@ -81,6 +81,13 @@ def test_load_profile_reads_locked_qwen_profile() -> None:
     assert profile.consistency_min_passes == 2
 
 
+def test_run_local_acceptance_bootstraps_repo_root_on_sys_path() -> None:
+    script = Path(acceptance.__file__).read_text(encoding="utf-8")
+
+    assert "if str(REPO_ROOT) not in sys.path:" in script
+    assert "sys.path.insert(0, str(REPO_ROOT))" in script
+
+
 def test_startup_reply_is_coherent_accepts_valid_greetings() -> None:
     assert acceptance._startup_reply_is_coherent("Hello. What do you need?")
     assert acceptance._startup_reply_is_coherent("Hey. I'm NULLA. What do you need?")
@@ -210,6 +217,90 @@ def test_default_runtime_command_targets_api_server_and_base_url_port(tmp_path: 
 
     assert command[-6:] == ["-m", "apps.nulla_api_server", "--bind", "127.0.0.1", "--port", "18080"]
     assert command[0] == str(repo_root / ".venv" / "bin" / "python")
+
+
+def test_full_command_prefers_active_runtime_roots_when_available(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+    start_script = tmp_path / "run.sh"
+    start_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    installed_runtime_home = (tmp_path / "installed_runtime").resolve()
+    installed_workspace = (tmp_path / "installed_workspace").resolve()
+
+    monkeypatch.setattr(
+        acceptance,
+        "_discover_active_runtime_roots",
+        lambda base_url: (installed_runtime_home, installed_workspace),
+    )
+
+    def _fake_run_full_acceptance(**kwargs):
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(acceptance, "run_full_acceptance", _fake_run_full_acceptance)
+
+    rc = acceptance.main(
+        [
+            "full",
+            "--run-root",
+            str(tmp_path / "acceptance"),
+            "--start-script",
+            str(start_script),
+        ]
+    )
+
+    assert rc == 0
+    assert captured["runtime_home"] == installed_runtime_home
+    assert captured["workspace_root"] == installed_workspace
+
+
+def test_full_command_falls_back_to_run_root_when_no_active_runtime_exists(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+    run_root = (tmp_path / "acceptance").resolve()
+    start_script = tmp_path / "run.sh"
+    start_script.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(acceptance, "_discover_active_runtime_roots", lambda base_url: None)
+
+    def _fake_run_full_acceptance(**kwargs):
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(acceptance, "run_full_acceptance", _fake_run_full_acceptance)
+
+    rc = acceptance.main(
+        [
+            "full",
+            "--run-root",
+            str(run_root),
+            "--start-script",
+            str(start_script),
+        ]
+    )
+
+    assert rc == 0
+    assert captured["runtime_home"] == (run_root / "runtime_home").resolve()
+    assert captured["workspace_root"] == (run_root / "workspace").resolve()
+
+
+def test_full_command_requires_runtime_home_and_workspace_root_together(monkeypatch, tmp_path: Path) -> None:
+    start_script = tmp_path / "run.sh"
+    start_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    try:
+        acceptance.main(
+            [
+                "full",
+                "--run-root",
+                str(tmp_path / "acceptance"),
+                "--start-script",
+                str(start_script),
+                "--runtime-home",
+                str(tmp_path / "runtime_home"),
+            ]
+        )
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("expected argparse failure when only one runtime root is provided")
 
 
 def test_resolve_runtime_command_uses_direct_launch_for_nondefault_port(tmp_path: Path) -> None:

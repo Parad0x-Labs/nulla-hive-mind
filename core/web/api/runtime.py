@@ -80,7 +80,18 @@ def git_output(project_root: Path, *args: str) -> str:
     return str(completed.stdout or "").strip()
 
 
-def build_source_metadata(project_root: Path) -> dict[str, str]:
+def _coerce_optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or "").strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def build_source_metadata(project_root: Path) -> dict[str, Any]:
     metadata_path = project_root / BUILD_SOURCE_PATH
     try:
         payload = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -88,11 +99,14 @@ def build_source_metadata(project_root: Path) -> dict[str, str]:
         return {}
     if not isinstance(payload, dict):
         return {}
-    metadata: dict[str, str] = {}
-    for key in ("ref", "branch", "commit", "source_url"):
+    metadata: dict[str, Any] = {}
+    for key in ("ref", "branch", "commit", "source_url", "source_kind"):
         value = str(payload.get(key) or "").strip()
         if value:
             metadata[key] = value
+    dirty_state = _coerce_optional_bool(payload.get("dirty_state"))
+    if dirty_state is not None:
+        metadata["dirty_state"] = dirty_state
     return metadata
 
 
@@ -165,7 +179,7 @@ def build_runtime_version_stamp(*, project_root: Path, runtime_model_tag: str, w
     else:
         branch = str(build_source.get("branch") or build_source.get("ref") or "")
         commit = str(build_source.get("commit") or "").strip()[:12]
-        dirty = False
+        dirty = bool(build_source.get("dirty_state"))
     release_version = str(release.get("release_version") or "").strip() or "unknown-release"
     build_parts = [release_version]
     if commit:

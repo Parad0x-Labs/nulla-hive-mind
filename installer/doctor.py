@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from core.install_recommendations import build_install_recommendation_truth
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_install_profiles import InstallProfileTruth, build_install_profile_truth
 
@@ -180,6 +181,10 @@ def build_report(
         model_tag=model_tag,
         runtime_home=runtime,
     )
+    install_recommendation = build_install_recommendation_truth(
+        selected_model=model_tag,
+        runtime_home=runtime,
+    )
     ollama_path = _resolve_binary(ollama_binary)
 
     launchers = {
@@ -217,6 +222,7 @@ def build_report(
         "selected_model": str(model_tag or "").strip(),
         "provider_capability_truth": provider_capability_truth,
         "install_profile": install_profile.to_dict(),
+        "install_recommendation": install_recommendation.to_dict(),
         "components": {
             "project_root": _status(project.exists(), "project root found" if project.exists() else "project root missing", path=str(project)),
             "runtime_home": _status(runtime.exists(), "runtime home found" if runtime.exists() else "runtime home missing", path=str(runtime)),

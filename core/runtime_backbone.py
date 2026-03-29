@@ -7,6 +7,7 @@ from typing import Any
 from core.backend_manager import BackendManager
 from core.hardware_tier import MachineProbe, QwenTier, probe_machine, select_qwen_tier, tier_summary
 from core.model_registry import ModelRegistry, ProviderAuditRow
+from core.provider_env import merge_provider_env
 from core.provider_routing import ProviderCapabilityTruth, provider_capability_truth_for_manifest
 from core.runtime_bootstrap import BootstrappedRuntime, bootstrap_runtime_mode
 from core.runtime_install_profiles import InstallProfileTruth, active_install_profile_id, build_install_profile_truth
@@ -46,7 +47,7 @@ def build_provider_registry_snapshot(
     env: dict[str, str] | None = None,
 ) -> ProviderRegistrySnapshot:
     active_registry = registry or ModelRegistry()
-    env_map = os.environ if env is None else env
+    env_map = merge_provider_env(runtime_home, env=os.environ if env is None else env)
     install_profile = ""
     if honor_install_profile:
         install_profile = (

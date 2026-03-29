@@ -80,8 +80,11 @@ def test_install_receipt_uses_provider_snapshot_truth_for_profile_and_output() -
     truth = receipt["provider_capability_truth"]
     provider_ids = {item["provider_id"] for item in truth}
     mix_ids = {item["provider_id"] for item in receipt["install_profile"]["provider_mix"]}
+    recommendation = receipt["install_recommendation"]
     assert provider_ids == {"ollama-local:qwen2.5:7b", "kimi-remote:kimi-k2"}
     assert mix_ids <= provider_ids
     assert "kimi-remote:kimi-k2" in mix_ids
+    assert recommendation["recommended_default_profile"] == "local-only"
+    assert recommendation["primary_local_model"] == "qwen2.5:7b"
     queen_lane = next(item for item in receipt["install_profile"]["provider_mix"] if item["role"] == "queen")
     assert queen_lane["availability_state"] == "ready"

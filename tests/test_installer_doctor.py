@@ -280,8 +280,11 @@ def test_build_report_exposes_provider_snapshot_truth_and_profile_mix() -> None:
     truth = report["provider_capability_truth"]
     provider_ids = {item["provider_id"] for item in truth}
     mix_ids = {item["provider_id"] for item in report["install_profile"]["provider_mix"]}
+    recommendation = report["install_recommendation"]
     assert provider_ids == {"ollama-local:qwen2.5:7b", "llamacpp-local:qwen2.5:14b-gguf"}
     assert mix_ids <= provider_ids
+    assert recommendation["recommended_default_profile"] == "local-only"
+    assert recommendation["primary_local_model"] == "qwen2.5:7b"
 
 
 def test_build_report_marks_degraded_install_profile_as_degraded() -> None:

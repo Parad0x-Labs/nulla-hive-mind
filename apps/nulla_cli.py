@@ -22,6 +22,7 @@ from core.dna_payment_bridge import dna_bridge
 from core.dna_wallet_manager import DNAWalletManager
 from core.identity_lifecycle import identity_lifecycle_snapshot
 from core.identity_manager import load_active_persona
+from core.install_recommendations import build_install_recommendation_truth
 from core.local_worker_pool import resolve_local_worker_capacity
 from core.lora_training_pipeline import promote_adaptation_job, run_adaptation_job
 from core.nulla_user_summary import build_user_summary, render_user_summary
@@ -33,6 +34,7 @@ from core.runtime_bootstrap import (
 from core.runtime_context import build_runtime_context
 from core.runtime_install_profiles import (
     INSTALL_PROFILE_CHOICES,
+    PUBLIC_INSTALL_PROFILE_CHOICES,
     active_install_profile_id,
     build_install_profile_truth,
     format_install_profile_id,
@@ -231,6 +233,7 @@ def cmd_install_profile(*, set_profile: str = "", json_mode: bool = False) -> in
         honor_install_profile=False,
     )
     active_profile = active_install_profile_id(runtime_home=runtime_home, allow_auto=True)
+    install_recommendation = build_install_recommendation_truth(runtime_home=runtime_home)
 
     if requested_profile:
         profile = build_install_profile_truth(
@@ -246,6 +249,7 @@ def cmd_install_profile(*, set_profile: str = "", json_mode: bool = False) -> in
                         {
                             "ok": False,
                             "requested_profile": requested_profile,
+                            "install_recommendation": install_recommendation.to_dict(),
                             "resolved_profile": profile.to_dict(),
                             "error": message,
                         },
@@ -266,14 +270,15 @@ def cmd_install_profile(*, set_profile: str = "", json_mode: bool = False) -> in
         if json_mode:
             print(
                 json.dumps(
-                    {
-                        "ok": True,
-                        "record_path": str(record_path),
-                        "requested_profile": requested_profile,
-                        "saved_profile": saved_profile,
-                        "resolved_profile": profile.to_dict(),
-                        "next_step": "Restart NULLA to apply the new provider mix.",
-                    },
+                        {
+                            "ok": True,
+                            "record_path": str(record_path),
+                            "requested_profile": requested_profile,
+                            "saved_profile": saved_profile,
+                            "install_recommendation": install_recommendation.to_dict(),
+                            "resolved_profile": profile.to_dict(),
+                            "next_step": "Restart NULLA to apply the new provider mix.",
+                        },
                     indent=2,
                     sort_keys=True,
                 )
@@ -298,7 +303,9 @@ def cmd_install_profile(*, set_profile: str = "", json_mode: bool = False) -> in
                     "runtime_home": runtime_home,
                     "stored_profile_id": stored_profile or "",
                     "requested_profile_id": active_profile or "",
-                    "available_profiles": list(INSTALL_PROFILE_CHOICES),
+                    "available_profiles": list(PUBLIC_INSTALL_PROFILE_CHOICES),
+                    "all_profiles": list(INSTALL_PROFILE_CHOICES),
+                    "install_recommendation": install_recommendation.to_dict(),
                     "resolved_profile": profile.to_dict(),
                 },
                 indent=2,
@@ -313,6 +320,15 @@ def cmd_install_profile(*, set_profile: str = "", json_mode: bool = False) -> in
     print(f"Stored profile:  {format_install_profile_id(stored_profile, allow_auto=False) if stored_profile else 'none'}")
     resolved_profile_display = format_install_profile_id(profile.profile_id, allow_auto=False)
     print(f"Resolved profile:{' ' if resolved_profile_display else ''}{resolved_profile_display} ({profile.label})")
+    print(
+        f"Recommended default: {format_install_profile_id(install_recommendation.recommended_default_profile, allow_auto=False)}"
+    )
+    optional_profile_display = format_install_profile_id(
+        install_recommendation.recommended_optional_profile,
+        allow_auto=False,
+    )
+    if optional_profile_display:
+        print(f"Optional stronger:   {optional_profile_display} via {install_recommendation.secondary_local_backend}")
     print(f"Summary:         {profile.summary}")
     print("Available:       " + ", ".join(install_profile_display_choices()))
     if profile.reasons:
@@ -969,8 +985,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Persist a new install profile and require a restart before it takes effect. "
             "Canonical values: "
-            + ", ".join(INSTALL_PROFILE_CHOICES)
-            + ". Friendly aliases: ollama-only, ollama-max, ollama+kimi."
+            + ", ".join(PUBLIC_INSTALL_PROFILE_CHOICES)
+            + ". Friendly aliases: ollama-only, ollama-max."
         ),
     )
     install_profile.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")

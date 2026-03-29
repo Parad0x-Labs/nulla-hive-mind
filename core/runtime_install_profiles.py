@@ -12,6 +12,14 @@ from pathlib import Path
 from typing import Any
 
 from core.hardware_tier import MachineProbe, QwenTier, probe_machine, select_qwen_tier
+from core.local_specialist_lane import (
+    DEFAULT_SECONDARY_LOCAL_BACKEND,
+    DEFAULT_SECONDARY_LOCAL_MODEL,
+    secondary_local_model,
+    secondary_local_model_path,
+    secondary_local_provider_id as preferred_secondary_local_provider_id,
+)
+from core.provider_env import merge_provider_env
 from core.provider_routing import ProviderCapabilityTruth
 
 INSTALL_PROFILE_CHOICES = (
@@ -22,6 +30,11 @@ INSTALL_PROFILE_CHOICES = (
     "hybrid-tether",
     "hybrid-fallback",
     "full-orchestrated",
+)
+PUBLIC_INSTALL_PROFILE_CHOICES = (
+    "auto-recommended",
+    "local-only",
+    "local-max",
 )
 
 _PROFILE_IDS = set(INSTALL_PROFILE_CHOICES)
@@ -57,6 +70,7 @@ _MODEL_SIZE_GB = {
     "qwen2.5:3b": 3.5,
     "qwen2.5:7b": 8.0,
     "qwen2.5:14b": 16.0,
+    "qwen2.5:14b-gguf": 18.0,
     "qwen2.5:32b": 36.0,
     "qwen2.5:72b": 80.0,
 }
@@ -68,7 +82,6 @@ _GENERIC_REMOTE_API_KEY_REASON = "OPENAI_API_KEY, NULLA_REMOTE_API_KEY, or NULLA
 _TETHER_API_KEY_ENV_KEYS = ("TETHER_API_KEY", "NULLA_TETHER_API_KEY")
 _TETHER_BASE_URL_ENV_KEYS = ("TETHER_BASE_URL", "NULLA_TETHER_BASE_URL")
 _TETHER_CONFIG_REASON = "TETHER_API_KEY and TETHER_BASE_URL"
-_OLLAMA_HELPER_MODEL = "qwen2.5:7b"
 _INSTALLED_OLLAMA_MODELS_ENV_KEY = "NULLA_INSTALLED_OLLAMA_MODELS"
 
 
@@ -175,7 +188,7 @@ def build_install_profile_truth(
     runtime_home: str | Path | None = None,
     env: Mapping[str, str] | None = None,
 ) -> InstallProfileTruth:
-    env_map = os.environ if env is None else env
+    env_map = merge_provider_env(runtime_home, env=os.environ if env is None else env)
     active_probe = probe or probe_machine()
     active_tier = tier or select_qwen_tier(active_probe)
     requested_arg_raw = str(requested_profile or "").strip().lower()
@@ -305,8 +318,9 @@ def format_install_profile_id(profile_id: str | None, *, allow_auto: bool = True
     return f"{preferred} ({normalized})"
 
 
-def install_profile_display_choices() -> tuple[str, ...]:
-    return tuple(format_install_profile_id(choice) for choice in INSTALL_PROFILE_CHOICES)
+def install_profile_display_choices(*, include_legacy: bool = False) -> tuple[str, ...]:
+    choices = INSTALL_PROFILE_CHOICES if include_legacy else PUBLIC_INSTALL_PROFILE_CHOICES
+    return tuple(format_install_profile_id(choice) for choice in choices)
 
 
 def installed_profile_id(runtime_home: str | Path | None) -> str:
@@ -400,6 +414,8 @@ def _compose_install_profile_truth(
         model_tag=model_tag,
         tier=tier,
         installed_ollama_models=installed_ollama_models,
+        provider_capability_truth=provider_capability_truth,
+        env=env,
     )
     provider_mix, provider_reasons = _provider_mix(
         profile_id=profile_id,
@@ -470,49 +486,14 @@ def _auto_profile_candidates(
     env: Mapping[str, str],
     provider_capability_truth: tuple[ProviderCapabilityTruth, ...] = (),
 ) -> tuple[str, ...]:
-    candidates: list[str] = []
-    kimi_configured = _has_any_env(env, *_KIMI_API_KEY_ENV_KEYS) or _provider_prefix_registered(
-        provider_capability_truth,
-        "kimi-remote:",
-    )
-    tether_configured = (
-        _has_any_env(env, *_TETHER_API_KEY_ENV_KEYS) and _has_any_env(env, *_TETHER_BASE_URL_ENV_KEYS)
-    ) or _provider_prefix_registered(provider_capability_truth, "tether-remote:")
-    generic_remote_configured = _has_any_env(env, *_GENERIC_REMOTE_API_KEY_ENV_KEYS) or _provider_prefix_registered(
-        provider_capability_truth,
-        "openai-compatible-remote:",
-    )
-    if tier.tier_name in {"mid", "heavy", "titan"}:
-        candidates.append("local-max")
-        if kimi_configured:
-            candidates.append("hybrid-kimi")
-        if tether_configured:
-            candidates.append("hybrid-tether")
-        if generic_remote_configured:
-            candidates.append("hybrid-fallback")
-        candidates.append("local-only")
-        return tuple(dict.fromkeys(candidates))
-    if tier.tier_name in {"nano", "lite", "base"}:
-        if kimi_configured:
-            candidates.append("hybrid-kimi")
-        if tether_configured:
-            candidates.append("hybrid-tether")
-        if generic_remote_configured:
-            candidates.append("hybrid-fallback")
-    candidates.append("local-only")
-    return tuple(dict.fromkeys(candidates))
+    del probe, tier, env, provider_capability_truth
+    return ("local-only",)
 
 
 def _auto_selection_reason(profile_id: str) -> str:
-    if profile_id == "hybrid-kimi":
-        return "Auto-selected hybrid-kimi because local tier is limited and Kimi is configured."
-    if profile_id == "hybrid-tether":
-        return "Auto-selected hybrid-tether because local tier is limited and Tether is configured."
-    if profile_id == "hybrid-fallback":
-        return "Auto-selected hybrid-fallback because local tier is limited and a generic remote fallback lane is configured."
     if profile_id == "local-max":
         return "Auto-selected local-max because this machine can hold a stronger fully local lane."
-    return "Auto-selected local-only to keep the default runtime local-first and dependency-light."
+    return "Auto-selected local-only to keep the default runtime local-first, latency-safe, and subscription-free."
 
 
 def _primary_profile_blocker(profile: InstallProfileTruth) -> str:
@@ -540,12 +521,28 @@ def _profile_estimates(
     model_tag: str,
     tier: QwenTier,
     installed_ollama_models: set[str],
+    provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
+    env: Mapping[str, str],
 ) -> dict[str, float]:
     required_local_models = _required_ollama_models(profile_id=profile_id, model_tag=model_tag)
     missing_local_models = tuple(
         model_name for model_name in required_local_models if model_name.lower() not in installed_ollama_models
     )
     missing_model_gb = sum(_estimate_model_storage_gb(model_name) for model_name in missing_local_models)
+    secondary_local_model_name = secondary_local_model(env)
+    secondary_local_provider = preferred_secondary_local_provider_id(env)
+    secondary_local_available = any(
+        str(item.provider_id or "").strip().lower() == secondary_local_provider.lower()
+        for item in provider_capability_truth
+    )
+    secondary_local_path = secondary_local_model_path(env)
+    secondary_local_installed = secondary_local_available or (
+        bool(secondary_local_path)
+        and Path(secondary_local_path).expanduser().exists()
+    )
+    missing_secondary_local_gb = 0.0
+    if profile_id in {"local-max", "full-orchestrated"} and not secondary_local_installed:
+        missing_secondary_local_gb = _estimate_model_storage_gb(secondary_local_model_name)
     runtime_required_gb = 2.5
 
     if profile_id in {"local-max", "full-orchestrated"}:
@@ -553,9 +550,10 @@ def _profile_estimates(
     if profile_id in {"hybrid-kimi", "hybrid-tether", "hybrid-fallback", "full-orchestrated"}:
         runtime_required_gb += 0.5
 
-    model_buffer_gb = 1.5 if missing_local_models else 0.0
-    estimated_download_gb = round(missing_model_gb, 1)
-    model_required_gb = round(missing_model_gb + model_buffer_gb, 1)
+    model_buffer_gb = 1.5 if (missing_local_models or missing_secondary_local_gb > 0.0) else 0.0
+    total_missing_model_gb = missing_model_gb + missing_secondary_local_gb
+    estimated_download_gb = round(total_missing_model_gb, 1)
+    model_required_gb = round(total_missing_model_gb + model_buffer_gb, 1)
     minimum_free_space_gb = round(runtime_required_gb + model_required_gb, 1)
     return {
         "estimated_download_gb": estimated_download_gb,
@@ -569,12 +567,8 @@ def _profile_estimates(
 
 
 def _required_ollama_models(*, profile_id: str, model_tag: str) -> tuple[str, ...]:
-    required_models = [str(model_tag or "").strip() or "qwen2.5:7b"]
-    if profile_id in {"local-max", "full-orchestrated"}:
-        helper_model = _OLLAMA_HELPER_MODEL
-        if helper_model not in required_models:
-            required_models.append(helper_model)
-    return tuple(required_models)
+    del profile_id
+    return (str(model_tag or "").strip() or "qwen2.5:7b",)
 
 
 def required_ollama_models_for_profile(*, profile_id: str, model_tag: str) -> tuple[str, ...]:
@@ -590,10 +584,11 @@ def _provider_mix(
     env: Mapping[str, str],
 ) -> tuple[tuple[InstallProfileProvider, ...], list[str]]:
     truth_index = _provider_truth_index(provider_capability_truth)
-    local_provider_id = _find_local_provider_id(provider_capability_truth, model_tag=model_tag)
+    local_provider_id = _find_primary_local_provider_id(provider_capability_truth, model_tag=model_tag)
     secondary_local_provider_id = _find_secondary_local_provider_id(
         provider_capability_truth,
         primary_provider_id=local_provider_id,
+        env=env,
     )
     kimi_provider_id = _find_remote_provider_id(provider_capability_truth, hint="kimi")
     tether_provider_id = _find_remote_provider_id(provider_capability_truth, hint="tether")
@@ -618,21 +613,27 @@ def _provider_mix(
         )
     )
     if profile_id in {"local-max", "full-orchestrated"}:
+        distinct_secondary = bool(secondary_local_provider_id) and secondary_local_provider_id != local_provider_id
+        verifier_provider_id = secondary_local_provider_id or preferred_secondary_local_provider_id(env)
         providers.append(
             InstallProfileProvider(
-                provider_id=secondary_local_provider_id,
+                provider_id=verifier_provider_id,
                 role="verifier",
                 locality="local",
                 required=True,
-                configured=True,
-                availability_state=secondary_local_availability,
+                configured=distinct_secondary,
+                availability_state=secondary_local_availability if distinct_secondary else "unregistered",
                 notes=(
-                    "Secondary local verification lane."
-                    if secondary_local_provider_id != local_provider_id
-                    else "Secondary local verification lane on the primary local backend."
+                    f"Secondary local verification lane, with {DEFAULT_SECONDARY_LOCAL_BACKEND} required for the stronger dual-local profile."
+                    if distinct_secondary
+                    else f"Distinct {DEFAULT_SECONDARY_LOCAL_BACKEND} verifier lane required before this profile is ready."
                 ),
             )
         )
+        if not distinct_secondary:
+            reasons.append(
+                f"{profile_id} needs a distinct {DEFAULT_SECONDARY_LOCAL_BACKEND} local verifier lane before it can be treated as ready."
+            )
     if profile_id == "hybrid-kimi":
         configured = _has_any_env(env, *_KIMI_API_KEY_ENV_KEYS) or kimi_availability != "unregistered"
         providers.append(
@@ -718,7 +719,7 @@ def _provider_mix(
     return tuple(providers), reasons
 
 
-def _find_local_provider_id(
+def _find_primary_local_provider_id(
     provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
     *,
     model_tag: str,
@@ -726,10 +727,21 @@ def _find_local_provider_id(
     candidates = [item for item in provider_capability_truth if item.locality == "local"]
     if not candidates:
         return f"ollama-local:{model_tag}"
+    ollama_candidates = [item for item in candidates if item.provider_id.lower().startswith("ollama-local:")]
+    if ollama_candidates:
+        ollama_candidates.sort(
+            key=lambda item: (
+                _availability_rank(item.availability_state),
+                1 if str(item.model_id or "").strip().lower() == str(model_tag or "").strip().lower() else 0,
+                1 if item.role_fit == "coder" else 0,
+                -float(item.queue_depth) / float(max(1, item.max_safe_concurrency)),
+            ),
+            reverse=True,
+        )
+        return ollama_candidates[0].provider_id
     candidates.sort(
         key=lambda item: (
             _availability_rank(item.availability_state),
-            1 if item.provider_id.lower().startswith("ollama-local:") else 0,
             1 if item.role_fit == "coder" else 0,
             -float(item.queue_depth) / float(max(1, item.max_safe_concurrency)),
         ),
@@ -742,21 +754,35 @@ def _find_secondary_local_provider_id(
     provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
     *,
     primary_provider_id: str,
+    env: Mapping[str, str],
 ) -> str:
     primary_capability = next(
         (item for item in provider_capability_truth if item.provider_id == primary_provider_id),
         None,
     )
+    preferred_provider_id = preferred_secondary_local_provider_id(env)
     candidates = [
-        item for item in provider_capability_truth if item.locality == "local" and item.provider_id != primary_provider_id
+        item
+        for item in provider_capability_truth
+        if item.locality == "local"
+        and item.provider_id != primary_provider_id
+        and item.provider_id.lower() == preferred_provider_id.lower()
     ]
     if not candidates:
-        return primary_provider_id
+        candidates = [
+            item for item in provider_capability_truth if item.locality == "local" and item.provider_id != primary_provider_id
+        ]
+    if not candidates:
+        return ""
     candidates.sort(
         key=lambda item: (
             _availability_rank(item.availability_state),
             1 if item.role_fit == "verifier" else 0,
-            1 if item.provider_id.lower().startswith(("vllm-local:", "llamacpp-local:")) else 0,
+            2
+            if item.provider_id.lower().startswith("llamacpp-local:")
+            else 1
+            if item.provider_id.lower().startswith("vllm-local:")
+            else 0,
             -float(item.queue_depth) / float(max(1, item.max_safe_concurrency)),
         ),
         reverse=True,
@@ -765,9 +791,9 @@ def _find_secondary_local_provider_id(
     if primary_capability is not None and _availability_rank(best_candidate.availability_state) < _availability_rank(
         primary_capability.availability_state
     ):
-        return primary_provider_id
+        return ""
     if _availability_rank(best_candidate.availability_state) < _availability_rank("degraded"):
-        return primary_provider_id
+        return ""
     return best_candidate.provider_id
 
 
@@ -928,7 +954,7 @@ def _profile_summary(profile_id: str) -> str:
     return {
         "auto-recommended": "Choose the strongest honest profile from current hardware and configured providers.",
         "local-only": "Single local Ollama lane with no remote provider dependency.",
-        "local-max": "Heavier fully local lane with extra local verification capacity.",
+        "local-max": "Primary Ollama companion lane plus an optional llama.cpp local verifier/coding lane.",
         "hybrid-kimi": "Local coding lane plus a remote Kimi synthesis lane.",
         "hybrid-tether": "Local coding lane plus a remote Tether synthesis lane.",
         "hybrid-fallback": "Local coding lane plus a generic remote fallback lane.",
@@ -1018,6 +1044,7 @@ def _installed_ollama_model_tags(
 
 __all__ = [
     "INSTALL_PROFILE_CHOICES",
+    "PUBLIC_INSTALL_PROFILE_CHOICES",
     "InstallProfileProvider",
     "InstallProfileTruth",
     "InstallProfileVolumeCheck",

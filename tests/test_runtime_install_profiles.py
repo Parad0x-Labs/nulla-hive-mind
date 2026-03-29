@@ -31,13 +31,13 @@ def test_normalize_install_profile_id_accepts_user_friendly_ollama_aliases() -> 
 def test_install_profile_display_helpers_prefer_operator_facing_aliases() -> None:
     assert preferred_install_profile_id("local-only", allow_auto=False) == "ollama-only"
     assert format_install_profile_id("local-only", allow_auto=False) == "ollama-only (local-only)"
-    assert install_profile_display_choices()[:4] == (
+    assert install_profile_display_choices() == (
         "auto-recommended",
         "ollama-only (local-only)",
         "ollama-max (local-max)",
-        "ollama+kimi (hybrid-kimi)",
     )
-    assert "ollama+tether (hybrid-tether)" in install_profile_display_choices()
+    assert "ollama+kimi (hybrid-kimi)" in install_profile_display_choices(include_legacy=True)
+    assert "ollama+tether (hybrid-tether)" in install_profile_display_choices(include_legacy=True)
 
 
 def test_explicit_request_reason_stays_explicit_instead_of_claiming_env_override() -> None:
@@ -63,7 +63,7 @@ def test_explicit_request_reason_stays_explicit_instead_of_claiming_env_override
     assert any("requested explicitly as `ollama-only`" in reason for reason in profile.reasons)
 
 
-def test_auto_profile_prefers_hybrid_kimi_on_smaller_host_when_kimi_is_configured() -> None:
+def test_auto_profile_stays_local_only_on_smaller_host_when_kimi_is_configured() -> None:
     probe = MachineProbe(
         cpu_cores=8,
         ram_gb=12.0,
@@ -114,12 +114,13 @@ def test_auto_profile_prefers_hybrid_kimi_on_smaller_host_when_kimi_is_configure
             runtime_home="/tmp/nulla-runtime",
         )
 
-    assert profile.profile_id == "hybrid-kimi"
+    assert profile.profile_id == "local-only"
     assert profile.ready is True
-    assert any(item.provider_id == "kimi-remote:kimi-k2" and item.role == "queen" for item in profile.provider_mix)
+    assert all(item.role != "queen" for item in profile.provider_mix)
+    assert any("local-first" in reason or "subscription-free" in reason for reason in profile.reasons)
 
 
-def test_auto_profile_prefers_hybrid_kimi_when_moonshot_alias_is_configured() -> None:
+def test_auto_profile_stays_local_only_when_moonshot_alias_is_configured() -> None:
     probe = MachineProbe(
         cpu_cores=8,
         ram_gb=12.0,
@@ -170,12 +171,13 @@ def test_auto_profile_prefers_hybrid_kimi_when_moonshot_alias_is_configured() ->
             runtime_home="/tmp/nulla-runtime",
         )
 
-    assert profile.profile_id == "hybrid-kimi"
+    assert profile.profile_id == "local-only"
     assert profile.ready is True
-    assert any(item.provider_id == "kimi-remote:kimi-k2" and item.role == "queen" for item in profile.provider_mix)
+    assert all(item.role != "queen" for item in profile.provider_mix)
+    assert any("local-first" in reason or "subscription-free" in reason for reason in profile.reasons)
 
 
-def test_auto_profile_prefers_hybrid_fallback_on_smaller_host_when_generic_remote_is_configured() -> None:
+def test_auto_profile_stays_local_only_on_smaller_host_when_generic_remote_is_configured() -> None:
     probe = MachineProbe(
         cpu_cores=8,
         ram_gb=12.0,
@@ -226,15 +228,13 @@ def test_auto_profile_prefers_hybrid_fallback_on_smaller_host_when_generic_remot
             runtime_home="/tmp/nulla-runtime",
         )
 
-    assert profile.profile_id == "hybrid-fallback"
+    assert profile.profile_id == "local-only"
     assert profile.ready is True
-    assert any(
-        item.provider_id == "openai-compatible-remote:gpt-4.1-mini" and item.role == "queen"
-        for item in profile.provider_mix
-    )
+    assert all(item.role != "queen" for item in profile.provider_mix)
+    assert any("local-first" in reason or "subscription-free" in reason for reason in profile.reasons)
 
 
-def test_auto_profile_prefers_hybrid_tether_on_smaller_host_when_tether_is_configured() -> None:
+def test_auto_profile_stays_local_only_on_smaller_host_when_tether_is_configured() -> None:
     probe = MachineProbe(
         cpu_cores=8,
         ram_gb=12.0,
@@ -285,9 +285,10 @@ def test_auto_profile_prefers_hybrid_tether_on_smaller_host_when_tether_is_confi
             runtime_home="/tmp/nulla-runtime",
         )
 
-    assert profile.profile_id == "hybrid-tether"
+    assert profile.profile_id == "local-only"
     assert profile.ready is True
-    assert any(item.provider_id == "tether-remote:tether-sonic" and item.role == "queen" for item in profile.provider_mix)
+    assert all(item.role != "queen" for item in profile.provider_mix)
+    assert any("local-first" in reason or "subscription-free" in reason for reason in profile.reasons)
 
 
 def test_auto_recommended_override_still_resolves_to_real_auto_profile() -> None:
@@ -341,7 +342,7 @@ def test_auto_recommended_override_still_resolves_to_real_auto_profile() -> None
         runtime_home="/tmp/nulla-runtime",
     )
 
-    assert profile.profile_id == "hybrid-kimi"
+    assert profile.profile_id == "local-only"
 
 
 def test_installed_profile_record_is_used_when_no_env_override_is_present() -> None:
@@ -497,7 +498,7 @@ def test_local_max_profile_prefers_ollama_coder_even_when_llamacpp_is_listed_fir
     )
 
 
-def test_local_max_profile_routes_around_blocked_ollama_lane() -> None:
+def test_local_max_profile_fails_closed_when_primary_ollama_lane_is_blocked() -> None:
     probe = MachineProbe(
         cpu_cores=16,
         ram_gb=32.0,
@@ -554,11 +555,15 @@ def test_local_max_profile_routes_around_blocked_ollama_lane() -> None:
             runtime_home="/tmp/nulla-runtime",
         )
 
-    assert profile.ready is True
+    assert profile.ready is False
     assert profile.degraded is False
     coder = next(item for item in profile.provider_mix if item.role == "coder")
-    assert coder.provider_id == "llamacpp-local:qwen2.5:14b-gguf"
-    assert coder.availability_state == "ready"
+    verifier = next(item for item in profile.provider_mix if item.role == "verifier")
+    assert coder.provider_id == "ollama-local:qwen2.5:14b"
+    assert coder.availability_state == "blocked"
+    assert verifier.provider_id == "llamacpp-local:qwen2.5:14b-gguf"
+    assert verifier.availability_state == "ready"
+    assert any("beta-ready" in reason for reason in profile.reasons)
 
 
 def test_auto_profile_falls_back_to_local_only_when_local_max_disk_budget_is_not_ready() -> None:
@@ -601,10 +606,10 @@ def test_auto_profile_falls_back_to_local_only_when_local_max_disk_budget_is_not
 
     assert profile.profile_id == "local-only"
     assert profile.ready is True
-    assert any("Auto-fell back from `local-max`" in reason for reason in profile.reasons)
+    assert any("Auto-selected local-only" in reason for reason in profile.reasons)
 
 
-def test_local_max_reuses_installed_ollama_models_when_budgeting_disk() -> None:
+def test_local_max_budgets_for_secondary_llamacpp_lane_even_when_primary_ollama_model_is_installed() -> None:
     probe = MachineProbe(
         cpu_cores=10,
         ram_gb=24.0,
@@ -643,13 +648,14 @@ def test_local_max_reuses_installed_ollama_models_when_budgeting_disk() -> None:
         )
 
     assert profile.profile_id == "local-max"
-    assert profile.ready is True
-    assert profile.minimum_free_space_gb == 3.5
-    assert profile.volume_checks[0].required_gb == 3.5
+    assert profile.ready is False
+    assert profile.minimum_free_space_gb == 23.0
+    assert profile.volume_checks[0].required_gb == 23.0
     assert profile.volume_checks[0].free_gb == 23.0
+    assert any("distinct llama.cpp local verifier lane" in reason for reason in profile.reasons)
 
 
-def test_local_max_detects_installed_models_from_ollama_manifests(tmp_path) -> None:
+def test_local_max_ollama_manifest_detection_does_not_fake_the_secondary_llamacpp_lane(tmp_path) -> None:
     manifest_root = tmp_path / "models" / "manifests" / "registry.ollama.ai" / "library" / "qwen2.5"
     manifest_root.mkdir(parents=True)
     (manifest_root / "14b").write_text("{}", encoding="utf-8")
@@ -695,8 +701,9 @@ def test_local_max_detects_installed_models_from_ollama_manifests(tmp_path) -> N
         )
 
     assert profile.profile_id == "local-max"
-    assert profile.ready is True
-    assert profile.minimum_free_space_gb == 3.5
+    assert profile.ready is False
+    assert profile.minimum_free_space_gb == 23.0
+    assert any("distinct llama.cpp local verifier lane" in reason for reason in profile.reasons)
 
 
 def test_hybrid_kimi_profile_fails_closed_when_selected_remote_lane_is_blocked() -> None:

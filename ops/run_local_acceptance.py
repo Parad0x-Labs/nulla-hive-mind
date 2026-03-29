@@ -18,15 +18,20 @@ from typing import Any
 from urllib import request
 from urllib.parse import urlparse
 
-
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
 REPO_ROOT = _repo_root()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.proof_manifest import build_proof_manifest, write_proof_manifest
+
 DEFAULT_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_qwen25_7b_profile.json"
 DEFAULT_START_SCRIPT = REPO_ROOT / "run.sh"
 DEFAULT_RUNTIME_LAUNCH_AGENT_LABEL = "ai.nulla.runtime"
+DEFAULT_BASE_URL = "http://127.0.0.1:11435"
 
 
 @dataclass(frozen=True)
@@ -65,6 +70,19 @@ def _read_json(url: str, *, data: dict[str, Any] | None = None, timeout: float =
     req = request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     with request.urlopen(req, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _discover_active_runtime_roots(base_url: str) -> tuple[Path, Path] | None:
+    try:
+        health = _read_json(f"{base_url.rstrip('/')}/healthz", timeout=5.0)
+    except Exception:
+        return None
+    capabilities = dict(health.get("capabilities") or {})
+    runtime_home = str(capabilities.get("runtime_home") or "").strip()
+    workspace_root = str(capabilities.get("workspace_root") or "").strip()
+    if not runtime_home or not workspace_root:
+        return None
+    return Path(runtime_home).expanduser().resolve(), Path(workspace_root).expanduser().resolve()
 
 
 def _startup_reply_is_coherent(text: str) -> bool:
@@ -901,8 +919,8 @@ def _start_runtime(
         stderr=subprocess.STDOUT,
         start_new_session=True,
     )
-    _wait_for_runtime(base_url, expected_commit=expected_commit, expected_model=model)
-    return process
+    health = _wait_for_runtime(base_url, expected_commit=expected_commit, expected_model=model)
+    return process, health
 
 
 def run_full_acceptance(
@@ -918,6 +936,7 @@ def run_full_acceptance(
     _preserve_previous_run_artifacts(run_root=run_root, profile=profile)
     expected_commit = _expected_repo_commit(repo_root)
     daemon_bind_port = _pick_isolated_daemon_bind_port(host="127.0.0.1")
+    restored_health: dict[str, Any] = {}
     suspended_launch_agent = _suspend_installed_launch_agent(repo_root=repo_root, base_url=base_url)
     _stop_runtime(base_url)
     _start_runtime(
@@ -963,14 +982,14 @@ def run_full_acceptance(
         _stop_runtime(base_url)
         if suspended_launch_agent is not None:
             _restore_installed_launch_agent(suspended_launch_agent)
-            _wait_for_runtime(
+            restored_health = _wait_for_runtime(
                 base_url,
                 expected_commit=expected_commit,
                 expected_model=_installed_default_model(repo_root),
                 timeout=180.0,
             )
         else:
-            _start_runtime(
+            restore_result = _start_runtime(
                 repo_root=repo_root,
                 base_url=base_url,
                 run_root=run_root,
@@ -981,6 +1000,12 @@ def run_full_acceptance(
                 expected_commit=expected_commit,
                 daemon_bind_port=daemon_bind_port,
             )
+            if (
+                isinstance(restore_result, tuple)
+                and len(restore_result) >= 2
+                and isinstance(restore_result[1], dict)
+            ):
+                restored_health = dict(restore_result[1])
     render_report(
         repo_root=repo_root,
         online_payload=online_payload,
@@ -995,7 +1020,16 @@ def run_full_acceptance(
         manual_btc_check=manual,
         profile=profile,
     )
-    return 0 if summary["overall_green"] else 1
+    restored_health = dict(restored_health or {})
+    proof_manifest = build_proof_manifest(
+        repo_root=repo_root,
+        generated_by="run_local_acceptance",
+        runtime_health=restored_health,
+        runtime_capabilities=dict(restored_health.get("capabilities") or {}),
+        acceptance_summary=summary,
+    )
+    write_proof_manifest(run_root / "evidence" / "proof_manifest.json", proof_manifest)
+    return 0 if summary["overall_green"] and proof_manifest["overall_consistent"] else 1
 
 
 def render_report(
@@ -1150,13 +1184,13 @@ def main(argv: list[str]) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     online = subparsers.add_parser("online")
-    online.add_argument("--base-url", default="http://127.0.0.1:11435")
+    online.add_argument("--base-url", default=DEFAULT_BASE_URL)
     online.add_argument("--run-root", required=True)
     online.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
     online.add_argument("--model", default="")
 
     offline = subparsers.add_parser("offline")
-    offline.add_argument("--base-url", default="http://127.0.0.1:11435")
+    offline.add_argument("--base-url", default=DEFAULT_BASE_URL)
     offline.add_argument("--run-root", required=True)
 
     report = subparsers.add_parser("report")
@@ -1165,7 +1199,7 @@ def main(argv: list[str]) -> int:
     report.add_argument("--manual-btc-json", default="")
 
     full = subparsers.add_parser("full")
-    full.add_argument("--base-url", default="http://127.0.0.1:11435")
+    full.add_argument("--base-url", default=DEFAULT_BASE_URL)
     full.add_argument("--run-root", required=True)
     full.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
     full.add_argument("--runtime-home", default="")
@@ -1211,8 +1245,18 @@ def main(argv: list[str]) -> int:
         return 0 if payload["result"]["pass"] else 1
 
     if args.command == "full":
-        runtime_home = Path(args.runtime_home).expanduser().resolve() if args.runtime_home else (run_root / "runtime_home").resolve()
-        workspace_root = Path(args.workspace_root).expanduser().resolve() if args.workspace_root else (run_root / "workspace").resolve()
+        if bool(args.runtime_home) ^ bool(args.workspace_root):
+            parser.error("`full` requires both `--runtime-home` and `--workspace-root`, or neither.")
+        if args.runtime_home and args.workspace_root:
+            runtime_home = Path(args.runtime_home).expanduser().resolve()
+            workspace_root = Path(args.workspace_root).expanduser().resolve()
+        else:
+            discovered_roots = _discover_active_runtime_roots(args.base_url.rstrip("/"))
+            if discovered_roots is not None:
+                runtime_home, workspace_root = discovered_roots
+            else:
+                runtime_home = (run_root / "runtime_home").resolve()
+                workspace_root = (run_root / "workspace").resolve()
         return run_full_acceptance(
             base_url=args.base_url.rstrip("/"),
             repo_root=REPO_ROOT,

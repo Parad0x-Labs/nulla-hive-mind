@@ -25,8 +25,7 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
 
     assert "--install-profile <profile>" in script
     assert "ollama-only" in script
-    assert "ollama+kimi" in script
-    assert "ollama+tether" in script
+    assert "ollama-max" in script
     assert 'validate_selected_install_profile() {' in script
     assert 'ensure_profile_remote_credentials() {' in script
     assert 'Enter Kimi / Moonshot API key' in script
