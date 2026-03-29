@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from core.hardware_tier import MachineProbe, QwenTier, probe_machine, select_qwen_tier
+from core.hardware_tier import MachineProbe, QwenTier, probe_machine, select_qwen_tier, tier_summary
 from core.local_model_bundles import (
     bundle_spec,
     local_multi_llm_fit_from_probe,
@@ -156,6 +157,46 @@ def build_install_recommendation_truth(
     )
 
 
+def install_recommendation_machine_summary(
+    *,
+    probe: MachineProbe | None = None,
+    tier: QwenTier | None = None,
+    recommendation: InstallRecommendationTruth | None = None,
+    selected_model: str | None = None,
+    runtime_home: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    active_probe = probe or probe_machine()
+    active_tier = tier or select_qwen_tier(active_probe)
+    active_recommendation = recommendation or build_install_recommendation_truth(
+        probe=active_probe,
+        tier=active_tier,
+        selected_model=selected_model,
+        runtime_home=runtime_home,
+        env=env,
+    )
+    summary = dict(tier_summary(active_probe))
+    primary_local_model = str(active_recommendation.primary_local_model or "").strip()
+    if primary_local_model:
+        summary["ollama_model"] = primary_local_model
+        param_billions = _param_billions_for_model(primary_local_model)
+        if param_billions is not None:
+            summary["param_billions"] = param_billions
+    capacity_bucket = str(active_recommendation.capacity_bucket or "").strip()
+    if capacity_bucket:
+        summary["selected_tier"] = f"capacity-{capacity_bucket}"
+        summary["capacity_bucket"] = capacity_bucket
+    if active_recommendation.recommended_bundle_id:
+        summary["recommended_bundle_id"] = active_recommendation.recommended_bundle_id
+    if active_recommendation.recommended_bundle_kind:
+        summary["recommended_bundle_kind"] = active_recommendation.recommended_bundle_kind
+    if active_recommendation.recommended_bundle_models:
+        summary["recommended_bundle_models"] = list(active_recommendation.recommended_bundle_models)
+    if active_recommendation.recommended_optional_profile:
+        summary["recommended_optional_profile"] = active_recommendation.recommended_optional_profile
+    return summary
+
+
 def _free_gb(runtime_home: str | Path | None) -> float:
     candidate = (
         Path(runtime_home).expanduser().resolve()
@@ -174,6 +215,16 @@ def _nearest_existing_path(path: Path) -> Path:
     return current.resolve()
 
 
+def _param_billions_for_model(model_tag: str) -> float | None:
+    match = re.search(r":([0-9]+(?:\.[0-9]+)?)b(?:$|[^a-z0-9])", str(model_tag or "").strip().lower())
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
 __all__ = [
     "DEFAULT_SECONDARY_LOCAL_BACKEND",
     "DEFAULT_SECONDARY_LOCAL_BASE_URL",
@@ -181,5 +232,6 @@ __all__ = [
     "InstallRecommendationTruth",
     "build_install_recommendation_truth",
     "bundle_spec",
+    "install_recommendation_machine_summary",
     "local_multi_llm_fit",
 ]

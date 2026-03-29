@@ -39,6 +39,9 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert "print(build_install_recommendation_truth().primary_local_model)" in script
     assert '") 2>/dev/null || echo "qwen3:8b"' in script
     assert 'PRIMARY_LOCAL_MODEL=qwen3:8b' in script
+    assert "from core.install_recommendations import install_recommendation_machine_summary" in script
+    assert "print(json.dumps(install_recommendation_machine_summary(), ensure_ascii=False))" in script
+    assert '\'{"selected_tier":"capacity-C","ollama_model":"qwen3:8b","recommended_bundle_models":["qwen3:8b","deepseek-r1:8b"]}\'' in script
     assert 'NULLA_REMOTE_API_KEY NULLA_REMOTE_BASE_URL NULLA_REMOTE_MODEL NULLA_CLOUD_API_KEY' in script
     assert 'detect_install_profile_display() {' in script
     assert script.count('cd "${PROJECT_ROOT}" && "${VENV_DIR}/bin/python" -c "') >= 3

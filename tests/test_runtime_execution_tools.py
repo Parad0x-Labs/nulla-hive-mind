@@ -152,8 +152,13 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
                 accelerator="mps",
             ),
         ), mock.patch(
-            "core.runtime_execution_tools.select_qwen_tier",
-            return_value=SimpleNamespace(tier_name="mid", ollama_tag="qwen2.5:14b"),
+            "core.runtime_execution_tools.install_recommendation_machine_summary",
+            return_value={
+                "ollama_model": "qwen3:8b",
+                "selected_tier": "capacity-C",
+                "capacity_bucket": "C",
+                "recommended_bundle_models": ["qwen3:8b", "deepseek-r1:8b"],
+            },
         ), mock.patch(
             "core.runtime_execution_tools._machine_os_details",
             return_value=("macOS", "15.4"),
@@ -180,9 +185,11 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             self.assertIn("24.0 GiB", result.response_text)
             self.assertIn("4480 x 2520", result.response_text)
             self.assertIn("24-inch", result.response_text)
+            self.assertIn("qwen3:8b, deepseek-r1:8b", result.response_text)
             hints = extract_observation_followup_hints(result.details["observation"])
             self.assertEqual(hints["chip_name"], "Apple M4")
-            self.assertEqual(hints["recommended_model"], "qwen2.5:14b")
+            self.assertEqual(hints["recommended_model"], "qwen3:8b")
+            self.assertEqual(hints["recommended_bundle_models"], ["qwen3:8b", "deepseek-r1:8b"])
             self.assertEqual(hints["display_name"], "iMac")
             self.assertEqual(hints["screen_size"], "24-inch (inferred from Apple 4.5K iMac panel)")
 

@@ -14,8 +14,12 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from core.hardware_tier import MachineProbe, select_qwen_tier, tier_summary
-from core.install_recommendations import build_install_recommendation_truth, local_multi_llm_fit
+from core.hardware_tier import MachineProbe, select_qwen_tier
+from core.install_recommendations import (
+    build_install_recommendation_truth,
+    install_recommendation_machine_summary,
+    local_multi_llm_fit,
+)
 from core.provider_routing import ProviderCapabilityTruth
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_install_profiles import (
@@ -252,7 +256,6 @@ def build_probe_report(
     provider_capability_truth: tuple[ProviderCapabilityTruth, ...] | None = None,
     show_unsupported: bool = False,
 ) -> dict[str, Any]:
-    summary = tier_summary(machine)
     probe = machine
     if probe is None:
         from core.hardware_tier import probe_machine
@@ -275,6 +278,11 @@ def build_probe_report(
     recommendation = build_install_recommendation_truth(
         probe=probe,
         tier=primary_tier,
+    )
+    summary = install_recommendation_machine_summary(
+        probe=probe,
+        tier=primary_tier,
+        recommendation=recommendation,
     )
     secondary_local_state, secondary_local_provider_id = _provider_state_for_prefix(
         capability_truth,

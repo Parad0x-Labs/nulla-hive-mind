@@ -479,9 +479,9 @@ print(build_install_recommendation_truth().primary_local_model)
 detect_hardware_summary() {
   (cd "${PROJECT_ROOT}" && "${VENV_DIR}/bin/python" -c "
 import json
-from core.hardware_tier import tier_summary
-print(json.dumps(tier_summary(), ensure_ascii=False))
-") 2>/dev/null || echo '{"selected_tier":"base","ollama_model":"qwen3:8b"}'
+from core.install_recommendations import install_recommendation_machine_summary
+print(json.dumps(install_recommendation_machine_summary(), ensure_ascii=False))
+") 2>/dev/null || echo '{"selected_tier":"capacity-C","ollama_model":"qwen3:8b","recommended_bundle_models":["qwen3:8b","deepseek-r1:8b"]}'
 }
 
 

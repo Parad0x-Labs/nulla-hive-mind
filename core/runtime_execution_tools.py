@@ -35,7 +35,8 @@ from core.execution.workspace_tools import (
     resolve_workspace_path as resolve_workspace_path_impl,
 )
 from core.execution_gate import ExecutionGate
-from core.hardware_tier import probe_machine, select_qwen_tier
+from core.hardware_tier import probe_machine
+from core.install_recommendations import install_recommendation_machine_summary
 from core.learning import promote_verified_procedure
 from core.runtime_paths import resolve_workspace_root
 from core.runtime_tool_contracts import runtime_tool_contract_map, runtime_tool_contracts
@@ -256,6 +257,13 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
             "vram_gb": float(payload.get("vram_gb") or 0.0) if payload.get("vram_gb") is not None else None,
             "accelerator": str(payload.get("accelerator") or "").strip(),
             "recommended_model": str(payload.get("recommended_model") or "").strip(),
+            "selected_tier": str(payload.get("selected_tier") or "").strip(),
+            "capacity_bucket": str(payload.get("capacity_bucket") or "").strip(),
+            "recommended_bundle_models": [
+                str(item).strip()
+                for item in list(payload.get("recommended_bundle_models") or [])
+                if str(item).strip()
+            ],
             "display_name": str(payload.get("display_name") or "").strip(),
             "display_native_resolution": str(payload.get("display_native_resolution") or "").strip(),
             "display_current_resolution": str(payload.get("display_current_resolution") or "").strip(),
@@ -864,7 +872,15 @@ def _machine_chip_name() -> str:
 
 def _inspect_machine_specs() -> RuntimeExecutionResult:
     probe = probe_machine()
-    selected_tier = select_qwen_tier(probe)
+    recommendation_summary = install_recommendation_machine_summary(probe=probe)
+    recommended_model = str(recommendation_summary.get("ollama_model") or "").strip() or "qwen3:8b"
+    recommended_bundle_models = tuple(
+        str(item).strip()
+        for item in recommendation_summary.get("recommended_bundle_models") or ()
+        if str(item).strip()
+    )
+    selected_tier = str(recommendation_summary.get("selected_tier") or "").strip()
+    capacity_bucket = str(recommendation_summary.get("capacity_bucket") or "").strip()
     os_name, os_version = _machine_os_details()
     chip_name = _machine_chip_name()
     display = _machine_display_details()
@@ -888,7 +904,9 @@ def _inspect_machine_specs() -> RuntimeExecutionResult:
         response_lines.append(f"- Current display mode: {display['current_resolution']}")
     if str(display.get("screen_size") or "").strip():
         response_lines.append(f"- Screen size: {display['screen_size']}")
-    response_lines.append(f"- Recommended local model: {selected_tier.ollama_tag}")
+    response_lines.append(f"- Recommended local model: {recommended_model}")
+    if recommended_bundle_models:
+        response_lines.append(f"- Recommended local bundle: {', '.join(recommended_bundle_models)}")
     observation = _tool_observation(
         intent="machine.inspect_specs",
         tool_surface="machine",
@@ -902,8 +920,10 @@ def _inspect_machine_specs() -> RuntimeExecutionResult:
         gpu_name=probe.gpu_name or "",
         vram_gb=round(probe.vram_gb, 1) if probe.vram_gb is not None else None,
         accelerator=probe.accelerator,
-        recommended_model=selected_tier.ollama_tag,
-        selected_tier=selected_tier.tier_name,
+        recommended_model=recommended_model,
+        selected_tier=selected_tier,
+        capacity_bucket=capacity_bucket,
+        recommended_bundle_models=list(recommended_bundle_models),
         display_name=str(display.get("name") or "").strip(),
         display_native_resolution=str(display.get("native_resolution") or "").strip(),
         display_current_resolution=str(display.get("current_resolution") or "").strip(),
@@ -923,8 +943,10 @@ def _inspect_machine_specs() -> RuntimeExecutionResult:
             "gpu_name": probe.gpu_name or "",
             "vram_gb": round(probe.vram_gb, 1) if probe.vram_gb is not None else None,
             "accelerator": probe.accelerator,
-            "recommended_model": selected_tier.ollama_tag,
-            "selected_tier": selected_tier.tier_name,
+            "recommended_model": recommended_model,
+            "selected_tier": selected_tier,
+            "capacity_bucket": capacity_bucket,
+            "recommended_bundle_models": list(recommended_bundle_models),
             "display_name": str(display.get("name") or "").strip(),
             "display_native_resolution": str(display.get("native_resolution") or "").strip(),
             "display_current_resolution": str(display.get("current_resolution") or "").strip(),

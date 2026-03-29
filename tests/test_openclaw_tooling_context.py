@@ -3137,8 +3137,13 @@ class OpenClawToolingContextTests(unittest.TestCase):
                 accelerator="mps",
             ),
         ), mock.patch(
-            "core.runtime_execution_tools.select_qwen_tier",
-            return_value=SimpleNamespace(tier_name="mid", ollama_tag="qwen2.5:14b"),
+            "core.runtime_execution_tools.install_recommendation_machine_summary",
+            return_value={
+                "ollama_model": "qwen3:8b",
+                "selected_tier": "capacity-C",
+                "capacity_bucket": "C",
+                "recommended_bundle_models": ["qwen3:8b", "deepseek-r1:8b"],
+            },
         ), mock.patch(
             "core.runtime_execution_tools._machine_os_details",
             return_value=("macOS", "15.4"),
@@ -3175,8 +3180,13 @@ class OpenClawToolingContextTests(unittest.TestCase):
                 accelerator="mps",
             ),
         ), mock.patch(
-            "core.runtime_execution_tools.select_qwen_tier",
-            return_value=SimpleNamespace(tier_name="mid", ollama_tag="qwen2.5:14b"),
+            "core.runtime_execution_tools.install_recommendation_machine_summary",
+            return_value={
+                "ollama_model": "qwen3:8b",
+                "selected_tier": "capacity-C",
+                "capacity_bucket": "C",
+                "recommended_bundle_models": ["qwen3:8b", "deepseek-r1:8b"],
+            },
         ), mock.patch(
             "core.runtime_execution_tools._machine_os_details",
             return_value=("macOS", "15.4"),
@@ -3323,8 +3333,13 @@ class OpenClawToolingContextTests(unittest.TestCase):
                 accelerator="mps",
             ),
         ), mock.patch(
-            "core.runtime_execution_tools.select_qwen_tier",
-            return_value=SimpleNamespace(tier_name="mid", ollama_tag="qwen2.5:7b"),
+            "core.runtime_execution_tools.install_recommendation_machine_summary",
+            return_value={
+                "ollama_model": "qwen3:8b",
+                "selected_tier": "capacity-C",
+                "capacity_bucket": "C",
+                "recommended_bundle_models": ["qwen3:8b", "deepseek-r1:8b"],
+            },
         ), mock.patch(
             "core.runtime_execution_tools._machine_os_details",
             return_value=("macOS", "26.3"),
@@ -3371,8 +3386,13 @@ class OpenClawToolingContextTests(unittest.TestCase):
                 accelerator="mps",
             ),
         ), mock.patch(
-            "core.runtime_execution_tools.select_qwen_tier",
-            return_value=SimpleNamespace(tier_name="mid", ollama_tag="qwen2.5:7b"),
+            "core.runtime_execution_tools.install_recommendation_machine_summary",
+            return_value={
+                "ollama_model": "qwen3:8b",
+                "selected_tier": "capacity-C",
+                "capacity_bucket": "C",
+                "recommended_bundle_models": ["qwen3:8b", "deepseek-r1:8b"],
+            },
         ), mock.patch(
             "core.runtime_execution_tools._machine_os_details",
             return_value=("macOS", "26.3"),
@@ -3422,8 +3442,13 @@ class OpenClawToolingContextTests(unittest.TestCase):
                 accelerator="mps",
             ),
         ), mock.patch(
-            "core.runtime_execution_tools.select_qwen_tier",
-            return_value=SimpleNamespace(tier_name="mid", ollama_tag="qwen2.5:7b"),
+            "core.runtime_execution_tools.install_recommendation_machine_summary",
+            return_value={
+                "ollama_model": "qwen3:8b",
+                "selected_tier": "capacity-C",
+                "capacity_bucket": "C",
+                "recommended_bundle_models": ["qwen3:8b", "deepseek-r1:8b"],
+            },
         ), mock.patch(
             "core.runtime_execution_tools._machine_os_details",
             return_value=("macOS", "26.3"),

@@ -30,6 +30,10 @@ def test_probe_report_prefers_bundle_local_stack_on_24gb_mps_host_with_required_
     assert report["recommended_install_profile_display_id"] == "ollama-only (local-only)"
     assert report["local_multi_llm_fit"] == "pressure_sensitive"
     assert report["capacity_bucket"] == "C"
+    assert report["machine"]["ollama_model"] == "qwen3:8b"
+    assert report["machine"]["selected_tier"] == "capacity-C"
+    assert report["machine"]["param_billions"] == 8.0
+    assert report["machine"]["recommended_bundle_models"] == ["qwen3:8b", "deepseek-r1:8b"]
     local_only = next(item for item in report["stacks"] if item["stack_id"] == "local_only")
     assert local_only["install_profile_id"] == "local-only"
     assert local_only["install_profile_display_id"] == "ollama-only (local-only)"
