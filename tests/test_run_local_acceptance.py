@@ -21,6 +21,7 @@ def _fake_online_payload(
     runtime_model: str = PRIMARY_MODEL,
     install_profile_id: str = "local-only",
     install_profile_label: str = "Local only",
+    dirty: bool = True,
 ) -> dict[str, object]:
     simple = 4.0 if fast else 10.0
     file_latency = 0.6 if fast else 20.0
@@ -69,7 +70,12 @@ def _fake_online_payload(
             "install_profile_label": install_profile_label,
             "runtime_selected_models": list(BUNDLE_MODELS),
         },
-        "runtime_version": {"commit": commit, "build_id": f"0.4.0-closed-test+{commit}.dirty", "model_tag": runtime_model},
+        "runtime_version": {
+            "commit": commit,
+            "build_id": f"0.4.0-closed-test+{commit}{'.dirty' if dirty else ''}",
+            "model_tag": runtime_model,
+            "dirty": dirty,
+        },
         "capabilities": {
             "install_profile": {
                 "profile_id": install_profile_id,
@@ -216,6 +222,39 @@ def test_render_report_surfaces_runtime_model_and_install_profile(tmp_path: Path
     assert "Runtime bundle models: qwen3:8b, deepseek-r1:8b" in rendered
     assert "Runtime install profile: local-only (Local only)" in rendered
     assert f"NULLA on {RUNTIME_ALT_MODEL} is acceptable for local use under this test profile." in rendered
+
+
+def test_render_report_marks_clean_runtime_honestly(tmp_path: Path) -> None:
+    profile = acceptance.load_profile()
+    output = tmp_path / "evidence" / "NULLA_LOCAL_ACCEPTANCE_REPORT.md"
+    acceptance.render_report(
+        repo_root=Path("/tmp/repo"),
+        online_payload=_fake_online_payload(commit="clean123", dirty=False),
+        offline_payload={"result": {"latency_seconds": 0.05, "pass": True}},
+        manual_btc_check={"pass": True, "source": "CoinGecko", "observed": "$70,573.00 at 2026-03-20 23:09 UTC", "assessment": "tight", "acceptance_response": "Bitcoin is $70,576.00 USD."},
+        output_path=output,
+        profile=profile,
+    )
+    rendered = output.read_text(encoding="utf-8")
+
+    assert "- Runtime build was clean for this acceptance run." in rendered
+    assert "still dirty because the local worktree still has unrelated modifications" not in rendered
+
+
+def test_render_report_marks_dirty_runtime_honestly(tmp_path: Path) -> None:
+    profile = acceptance.load_profile()
+    output = tmp_path / "evidence" / "NULLA_LOCAL_ACCEPTANCE_REPORT.md"
+    acceptance.render_report(
+        repo_root=Path("/tmp/repo"),
+        online_payload=_fake_online_payload(commit="dirty123", dirty=True),
+        offline_payload={"result": {"latency_seconds": 0.05, "pass": True}},
+        manual_btc_check={"pass": True, "source": "CoinGecko", "observed": "$70,573.00 at 2026-03-20 23:09 UTC", "assessment": "tight", "acceptance_response": "Bitcoin is $70,576.00 USD."},
+        output_path=output,
+        profile=profile,
+    )
+    rendered = output.read_text(encoding="utf-8")
+
+    assert "- Runtime build was dirty for this acceptance run, so this proves only the exact dirty tree under test." in rendered
 
 
 def test_default_runtime_command_targets_api_server_and_base_url_port(tmp_path: Path, monkeypatch) -> None:

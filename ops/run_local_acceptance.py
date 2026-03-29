@@ -157,6 +157,24 @@ def _median(values: list[float]) -> float | None:
     return round(float(statistics.median(values)), 3)
 
 
+def _runtime_dirty_state(
+    *,
+    runtime_version: dict[str, Any],
+    health_payload: dict[str, Any],
+) -> bool | None:
+    runtime_dirty = runtime_version.get("dirty")
+    if isinstance(runtime_dirty, bool):
+        return runtime_dirty
+    health_runtime = dict(health_payload.get("runtime") or {})
+    health_dirty = health_runtime.get("dirty")
+    if isinstance(health_dirty, bool):
+        return health_dirty
+    build_id = str(runtime_version.get("build_id") or health_runtime.get("build_id") or "").strip().lower()
+    if not build_id:
+        return None
+    return ".dirty" in build_id or build_id.endswith("dirty")
+
+
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -1163,6 +1181,7 @@ def render_report(
     profile_meta = online_payload.get("profile", {})
     capabilities = online_payload.get("capabilities", {})
     install_profile = capabilities.get("install_profile", {}) if isinstance(capabilities, dict) else {}
+    runtime_dirty = _runtime_dirty_state(runtime_version=runtime, health_payload=online_payload.get("health", {}))
     benchmark_model = (
         str(profile_meta.get("benchmark_model") or profile.model or "").strip() or profile.model
     )
@@ -1198,6 +1217,14 @@ def render_report(
             f"- manual observed value: {manual_btc_check.get('observed', 'n/a')}",
             f"- drift assessment: {manual_btc_check.get('assessment', 'n/a')}",
         ]
+    if runtime_dirty is True:
+        runtime_build_note = (
+            "- Runtime build was dirty for this acceptance run, so this proves only the exact dirty tree under test."
+        )
+    elif runtime_dirty is False:
+        runtime_build_note = "- Runtime build was clean for this acceptance run."
+    else:
+        runtime_build_note = "- Runtime dirty-state could not be verified from the live runtime metadata."
 
     report_lines = [
         "# NULLA LOCAL ACCEPTANCE REPORT",
@@ -1258,7 +1285,7 @@ def render_report(
         *wrong_before_green,
         "",
         "Notes:",
-        "- Runtime build is still dirty because the local worktree still has unrelated modifications outside this acceptance pass.",
+        runtime_build_note,
         "- Live lookup passed locally, but it only counts as final because the manual spot-check was performed separately.",
         "- Helper mesh and public Hive remain alpha surfaces; this acceptance only certifies the local runtime profile tested here.",
         "",
