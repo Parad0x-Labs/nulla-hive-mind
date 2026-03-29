@@ -2,6 +2,26 @@ from __future__ import annotations
 
 from typing import Any
 
+_API_DIRECT_SMALLTALK_FAST_PATHS = {
+    "hi",
+    "hello",
+    "hey",
+    "yo",
+    "sup",
+    "gm",
+    "good morning",
+    "morning",
+    "how are you",
+    "how are you doing",
+    "how are u",
+    "how r u",
+    "thanks",
+    "thank you",
+    "thx",
+    "what can you do",
+    "help",
+}
+
 
 def handle_turn_frontdoor(
     agent: Any,
@@ -272,6 +292,17 @@ def handle_turn_frontdoor(
         smalltalk_phrase = normalized_input.lower().strip(" \t\r\n?!.,")
         if agent._is_chat_truth_surface(source_context):
             is_help_prompt = smalltalk_phrase in {"what can you do", "help"}
+            if source_surface == "api" and smalltalk_phrase in _API_DIRECT_SMALLTALK_FAST_PATHS:
+                return {
+                    "result": agent._fast_path_result(
+                        session_id=session_id,
+                        user_input=effective_input,
+                        response=smalltalk,
+                        confidence=0.90,
+                        source_context=source_context,
+                        reason="help_fast_path" if is_help_prompt else "smalltalk_fast_path",
+                    )
+                }
             return {
                 "result": agent._chat_surface_model_wording_result(
                     session_id=session_id,

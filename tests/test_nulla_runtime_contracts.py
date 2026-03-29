@@ -615,6 +615,24 @@ def test_generic_capability_inventory_prompt_uses_grounded_fast_path(make_agent)
     assert "not a full autonomous build/debug/test loop" in lowered
 
 
+def test_api_surface_greeting_uses_direct_fast_path_even_when_provider_is_cold(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("api greeting fast path should not load context")  # type: ignore[attr-defined]
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        side_effect=AssertionError("api greeting fast path should not hit provider routing")
+    )
+
+    result = agent.run_once(
+        "hello",
+        source_context={"surface": "api", "platform": "api"},
+    )
+
+    lowered = result["response"].lower()
+    assert result["response_class"] == ResponseClass.SMALLTALK.value
+    assert result["model_execution"]["used_model"] is False
+    assert "what do you need" in lowered
+
+
 def test_unsupported_builder_request_reports_gap_honestly_instead_of_writing_a_brief(make_agent):
     agent = make_agent()
     result = agent.run_once(
