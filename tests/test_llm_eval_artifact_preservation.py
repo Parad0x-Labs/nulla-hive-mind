@@ -179,6 +179,49 @@ def _passing_regression_payload(baseline_root: Path, inventory: dict[str, object
     }
 
 
+def test_regression_payload_sanitizes_baseline_command_paths(monkeypatch, tmp_path: Path) -> None:
+    baseline_root = tmp_path / "baselines"
+    baseline_root.mkdir(parents=True)
+    monkeypatch.setattr(
+        llm_eval,
+        "run_pytest_pack",
+        lambda **kwargs: {
+            "name": "recent_48h_llm_regression",
+            "command": ["/Users/sauliuskruopis/nulla-hive-mind/.venv/bin/python", "-m", "pytest"],
+            "targets": ["tests/test_run_local_acceptance.py"],
+            "exit_code": 0,
+            "duration_seconds": 1.23,
+            "summary": {"passed": 1, "failed": 0, "skipped": 0, "xfailed": 0, "xpassed": 0},
+            "status": "pass",
+            "stdout": "/Users/sauliuskruopis/nulla-hive-mind/.venv/bin/python -m pytest\n",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        llm_eval,
+        "compare_pytest_results",
+        lambda current, baseline: {
+            "status": "equal",
+            "baseline_available": False,
+            "summary_delta": {},
+            "duration_delta_seconds": 0.0,
+            "pass_regressed": False,
+            "duration_regressed": False,
+        },
+    )
+
+    payload = llm_eval._regression_payload(
+        baseline_root=baseline_root,
+        inventory={"since_hours": 48, "changed_paths": [], "relevant_paths": [], "tests": [], "scripts": [], "docs": [], "workflows": []},
+    )
+
+    baseline_text = (baseline_root / "recent_48h_regression.json").read_text(encoding="utf-8")
+    assert "/Users/sauliuskruopis" not in baseline_text
+    assert "/Users/<redacted>" in baseline_text
+    assert "/Users/sauliuskruopis" not in json.dumps(payload)
+    assert "/Users/<redacted>" in json.dumps(payload)
+
+
 def test_run_live_acceptance_uses_explicit_runtime_and_workspace_roots(monkeypatch, tmp_path: Path) -> None:
     profile = llm_eval.local_acceptance.AcceptanceProfile(
         profile_id=PROFILE_ID,
@@ -460,3 +503,94 @@ def test_run_writes_docs_report_only_when_explicitly_requested(monkeypatch, tmp_
     assert llm_eval.run(args) == 0
     assert docs_report_path.exists()
     assert "NULLA LLM Acceptance Summary" in docs_report_path.read_text(encoding="utf-8")
+
+
+def test_run_sanitizes_summary_artifacts_before_writing(monkeypatch, tmp_path: Path) -> None:
+    output_root = tmp_path / "reports" / "llm_eval" / "latest"
+    baseline_root = tmp_path / "reports" / "llm_eval" / "baselines"
+    live_run_root = tmp_path / "artifacts" / "acceptance_runs" / "llm_eval_live"
+
+    monkeypatch.setattr(llm_eval, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(llm_eval, "_git_commit", lambda: "abc123")
+    monkeypatch.setattr(llm_eval, "_git_branch", lambda: "main")
+    monkeypatch.setattr(llm_eval.time, "strftime", lambda fmt, now=None: "2026-03-28T20:00:00Z")
+    monkeypatch.setattr(llm_eval.local_acceptance, "_machine_info", lambda: {"platform": "macOS", "python": "3.11.15", "cpu": "Apple M4", "ram_gb": 24.0, "gpu": "Apple M4"})
+    monkeypatch.setattr(
+        llm_eval.local_acceptance,
+        "load_profile",
+        lambda path: llm_eval.local_acceptance.AcceptanceProfile(
+            profile_id=PROFILE_ID,
+            display_name=PROFILE_NAME,
+            model=PRIMARY_MODEL,
+            cold_start_max_seconds=120.0,
+            simple_prompt_median_max_seconds=8.0,
+            simple_prompt_hard_max_seconds=20.0,
+            file_task_median_max_seconds=15.0,
+            live_lookup_median_max_seconds=45.0,
+            chained_task_median_max_seconds=60.0,
+            consistency_min_passes=2,
+            manual_btc_source_label="CoinGecko",
+            manual_btc_source_url="https://example.invalid",
+            bundle_models=BUNDLE_MODELS,
+        ),
+    )
+    monkeypatch.setattr(llm_eval, "collect_recent_llm_inventory", lambda repo_root, since_hours=48: {"since_hours": since_hours, "changed_paths": [], "relevant_paths": [], "tests": [], "scripts": [], "docs": [], "workflows": []})
+    monkeypatch.setattr(
+        llm_eval,
+        "_regression_payload",
+        lambda baseline_root, inventory: {
+            "status": "pass",
+            "baseline_path": "",
+            "inventory": inventory,
+            "current": {
+                "status": "pass",
+                "targets": ["tests/test_run_local_acceptance.py"],
+                "command": ["/Users/sauliuskruopis/nulla-hive-mind/.venv/bin/python", "-m", "pytest"],
+                "stdout": "/Users/sauliuskruopis/nulla-hive-mind/.venv/bin/python -m pytest\n",
+                "stderr": "",
+                "summary": {"passed": 1, "failed": 0, "skipped": 0, "xfailed": 0, "xpassed": 0},
+                "duration_seconds": 0.1,
+            },
+            "comparison": {"status": "equal", "baseline_available": False, "summary_delta": {}, "duration_delta_seconds": 0.0, "pass_regressed": False, "duration_regressed": False},
+        },
+    )
+    monkeypatch.setattr(
+        llm_eval,
+        "_scenario_group_result",
+        lambda name, scenarios: {
+            "category": name,
+            "status": "pass",
+            "scenarios": [
+                {
+                    "scenario_id": "leak-check",
+                    "description": "sanitizer",
+                    "target": "tests/test_dummy.py::test_dummy",
+                    "status": "pass",
+                    "duration_seconds": 0.1,
+                    "summary": {"passed": 1, "failed": 0, "errors": 0, "skipped": 0, "xfailed": 0, "xpassed": 0, "deselected": 0},
+                    "exit_code": 0,
+                    "stdout": "/Users/sauliuskruopis/private/log\n",
+                    "stderr": "",
+                }
+            ],
+            "totals": {"total": 1, "passed": 1, "failed": 0},
+        },
+    )
+
+    args = Namespace(
+        output_root=str(output_root),
+        baseline_root=str(baseline_root),
+        live_run_root=str(live_run_root),
+        profile=str(llm_eval.DEFAULT_PROFILE_PATH),
+        base_url=llm_eval.DEFAULT_BASE_URL,
+        branch_label="",
+        docs_report_path="",
+        runtime_home="",
+        workspace_root="",
+        skip_live_runtime=True,
+    )
+
+    assert llm_eval.run(args) == 0
+    summary_text = (output_root / "summary.json").read_text(encoding="utf-8")
+    assert "/Users/sauliuskruopis" not in summary_text
+    assert "/Users/<redacted>" in summary_text

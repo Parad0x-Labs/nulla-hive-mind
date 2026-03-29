@@ -259,6 +259,10 @@ def _write_markdown(path: Path, text: str) -> None:
     path.write_text(text.rstrip() + "\n", encoding="utf-8")
 
 
+def _sanitize_output(value: Any) -> Any:
+    return local_acceptance._sanitize_data(value, repo_root=REPO_ROOT)
+
+
 def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -352,7 +356,7 @@ def _scenario_group_result(name: str, scenarios: list[dict[str, str]]) -> dict[s
                 "stderr": pack["stderr"],
             }
         )
-    return {
+    return _sanitize_output({
         "category": name,
         "status": "pass" if all(item["status"] == "pass" for item in results) else "fail",
         "scenarios": results,
@@ -361,7 +365,7 @@ def _scenario_group_result(name: str, scenarios: list[dict[str, str]]) -> dict[s
             "passed": sum(1 for item in results if item["status"] == "pass"),
             "failed": sum(1 for item in results if item["status"] != "pass"),
         },
-    }
+    })
 
 
 def _collect_latency_rows_from_acceptance(
@@ -683,14 +687,15 @@ def _regression_payload(
     if baseline_path.exists():
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
     comparison = compare_pytest_results(current, baseline)
+    sanitized_current = _sanitize_output(current)
     if current["exit_code"] == 0:
-        _write_json(baseline_path, current)
+        _write_json(baseline_path, sanitized_current)
     return {
         "status": "pass" if current["exit_code"] == 0 and comparison["status"] != "degraded" else "fail",
         "baseline_path": _display_path(baseline_path) if baseline_path.exists() else "",
-        "inventory": inventory,
-        "current": current,
-        "comparison": comparison,
+        "inventory": _sanitize_output(inventory),
+        "current": sanitized_current,
+        "comparison": _sanitize_output(comparison),
     }
 
 
@@ -828,22 +833,23 @@ def run(args: argparse.Namespace) -> int:
         )
         payload["overall_full_green"] = False
 
-    summary_md = _render_summary_markdown(payload)
+    public_payload = _sanitize_output(payload)
+    summary_md = _render_summary_markdown(public_payload)
     regression_md = _render_regression_markdown(
-        inventory=inventory,
-        recent_pack=regression_48h["current"],
-        comparison=regression_48h["comparison"],
-        baseline_path=Path(regression_48h["baseline_path"]) if regression_48h["baseline_path"] else None,
+        inventory=dict(public_payload["regression_48h"]["inventory"]),
+        recent_pack=dict(public_payload["regression_48h"]["current"]),
+        comparison=dict(public_payload["regression_48h"]["comparison"]),
+        baseline_path=Path(str(public_payload["regression_48h"]["baseline_path"])) if public_payload["regression_48h"]["baseline_path"] else None,
     )
-    failures_md = _failures_markdown(payload)
+    failures_md = _failures_markdown(public_payload)
 
-    _write_json(output_root / "summary.json", payload)
+    _write_json(output_root / "summary.json", public_payload)
     _write_markdown(output_root / "summary.md", summary_md)
     _write_latency_csv(output_root / "latency.csv", latency_rows)
-    _write_json(output_root / "context_discipline.json", context_discipline)
-    _write_json(output_root / "research_quality.json", research_quality)
-    _write_json(output_root / "hive_integrity.json", hive_integrity)
-    _write_json(output_root / "nullabook_provenance.json", nullabook_provenance)
+    _write_json(output_root / "context_discipline.json", public_payload["context_discipline"])
+    _write_json(output_root / "research_quality.json", public_payload["research_quality"])
+    _write_json(output_root / "hive_integrity.json", public_payload["hive_integrity"])
+    _write_json(output_root / "nullabook_provenance.json", public_payload["nullabook_provenance"])
     _write_markdown(output_root / "regression_48h.md", regression_md)
     _write_markdown(output_root / "failures.md", failures_md)
     write_proof_manifest(output_root / "proof_manifest.json", proof_manifest)
