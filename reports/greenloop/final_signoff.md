@@ -1,28 +1,28 @@
 # Final Signoff
 
 - Verdict: `go_with_risk`
-- Risk level: `low`
-- Commit: `15948c7bbf4aefd6ed0f66c7e586ee805f3ac937`
-- Checklist gates: all required gates passed
+- Risk level: `medium`
+- Run id: `greenloop-20260328T194333Z`
+- Branch: `codex/honest-ollama-prewarm-bootstrap`
+- Commit: `dcce6606f49ad938bafe75a0b26b8628af07e2c9`
+- Finished at: `2026-03-28T20:35:16Z`
 
-## What This Signoff Covers
+## Go / No-Go
+- GO for the source-mode greenloop scope exercised here.
+- All required top-level gates are green on this rerun.
+- `ci_fast_green = true`
+- `overall_full_green = true`
 
-- install profile detection and fail-closed validation
-- provider recommendation honesty on this machine
-- full shard regression gate on the current head
-- build and wheel smoke on the current head
-- fast and live llm_eval acceptance on the current head
-- measured API concurrency at worker counts 1, 2, and 4
+## Skipped As Obsolete
+- `python -m apps.nulla_api_server --bind 127.0.0.1 --port 18080` as a standalone signoff gate.
+- Reason: the canonical live proof path now self-manages runtime lifecycle inside `run_local_acceptance.run_full_acceptance()`. A manual prestart was only used to confirm `/healthz` behavior and created double-boot ambiguity if treated as the primary proof path.
 
-## Remaining Followups
-
-- Keep `Beta2_Website/*` out of `main` until the feed contract is repaired and re-proved.
-- Keep the `core/public_hive/*` split and related `hive/` tree out of `main` until it has an isolated redesign proof pack.
-- Keep the `core/runtime_task_rail*` split out of `main` until it lands with its own regression pack.
-- Decouple `llm_eval` from `docs/LLM_ACCEPTANCE_REPORT.md` writes during proof runs so clean-checkout acceptance can stamp a non-dirty build.
-- If Kimi is meant to be first-class on this machine, configure `KIMI_API_KEY` and rerun the provider/install proof lane.
+## Required Follow-Ups
+- Keep future greenloops on a supported interpreter; host default `python3` is still `3.9.6`.
+- If a clean build stamp matters, move generated acceptance docs out of the source checkout or run the proof from an archive build.
+- Continue treating queen-lane routing and local-vs-remote racing as coupled behavior that needs direct golden coverage.
 
 ## Notes
-
-- The live acceptance report still stamps `dirty` because `llm_eval` rewrites `docs/LLM_ACCEPTANCE_REPORT.md` during the run, not because this proof checkout had unrelated code changes before launch.
-- The measured concurrency curve is stable but not linear: success stayed at 1.0 through worker count 4, while throughput flattened from `0.26 req/s` at one worker to `0.229 req/s` at four workers on the locked local `qwen2.5:7b` lane.
+- Active live proof profile: `local-only` on `qwen2.5:7b`
+- The worktree is still dirty after proof because the code fixes and generated acceptance docs are present in the source checkout.
+- Remote-provider live proof was out of scope for this local-only acceptance profile.

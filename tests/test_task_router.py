@@ -4,6 +4,7 @@ from unittest import mock
 
 from core.task_router import (
     _classify_via_model,
+    build_task_envelope_for_request,
     classify,
     evaluate_word_math_request,
     looks_like_live_recency_lookup,
@@ -87,3 +88,32 @@ def test_model_classifier_returns_empty_when_ollama_port_is_unreachable(monkeypa
 
     with mock.patch("requests.post", side_effect=AssertionError("post should not run when socket preflight fails")):
         assert _classify_via_model("do you think boredom is useful?") == ""
+
+
+def test_chat_truth_surface_skips_model_classifier_for_unknown_prompt() -> None:
+    prompt = "Reply with exactly GREENLOOP-WARMUP-4 and nothing else."
+
+    with mock.patch("core.task_router._classify_via_model", side_effect=AssertionError("chat surfaces should not model-classify unknown prompts")):
+        result = classify(
+            prompt,
+            context={
+                "source_surface": "openclaw",
+                "source_platform": "openclaw",
+            },
+        )
+
+    assert result["task_class"] == "unknown"
+
+
+def test_chat_surface_envelope_routes_unknown_prompt_without_model_classifier() -> None:
+    prompt = "Reply with exactly GREENLOOP-WARMUP-5 and nothing else."
+
+    with mock.patch("core.task_router._classify_via_model", side_effect=AssertionError("chat surface envelope should not invoke model classifier")):
+        envelope = build_task_envelope_for_request(
+            prompt,
+            context={},
+            chat_surface=True,
+        )
+
+    assert envelope.inputs["task_class"] == "chat_conversation"
+    assert envelope.inputs["routing_profile"]["output_mode"] == "plain_text"

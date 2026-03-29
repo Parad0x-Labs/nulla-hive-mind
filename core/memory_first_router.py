@@ -78,11 +78,13 @@ class MemoryFirstRouter:
         context_result: Any,
         persona: Any,
         force_model: bool = False,
+        allow_provider_inference: bool = True,
         surface: str = "cli",
         source_context: dict[str, Any] | None = None,
     ) -> ModelExecutionDecision:
+        effective_force_model = bool(force_model) and bool(allow_provider_inference)
         force_model = _force_model_on_chat_surface(
-            force_model=force_model,
+            force_model=effective_force_model,
             surface=surface,
             source_context=source_context,
         )
@@ -122,6 +124,14 @@ class MemoryFirstRouter:
                     task_hash=task_hash,
                     used_model=False,
                     details={"reason": "relevant_local_memory_sufficient"},
+                )
+
+            if not allow_provider_inference:
+                return ModelExecutionDecision(
+                    source="no_cached_or_memory_answer",
+                    task_hash=task_hash,
+                    used_model=False,
+                    details={"reason": "provider_inference_disabled"},
                 )
 
         return self._execute_provider_task(

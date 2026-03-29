@@ -102,9 +102,9 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertIn("kimi-mock", ids)
         self.assertIn("openai-compatible-remote:gpt-mock", ids)
 
-    def test_dispatch_post_carries_requested_model_into_source_context(self) -> None:
+    def test_dispatch_post_marks_chat_requests_as_api_surface_and_carries_requested_model(self) -> None:
         runtime = RuntimeServices(display_name="NULLA")
-        seen: dict[str, object] = {}
+        seen_contexts: list[dict[str, Any]] = []
 
         def fake_run_agent(
             user_text: str,
@@ -112,26 +112,29 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
             session_id: str | None = None,
             source_context: dict[str, Any] | None = None,
         ) -> dict[str, Any]:
-            seen["user_text"] = user_text
-            seen["source_context"] = dict(source_context or {})
+            seen_contexts.append(dict(source_context or {}))
             return {"response": "ok", "confidence": 1.0}
 
         with mock.patch("apps.nulla_api_server._run_agent", side_effect=fake_run_agent):
-            response = _dispatch_post(
-                path="/v1/chat/completions",
-                body={
-                    "model": "openai-compatible-remote:gpt-mock",
-                    "messages": [{"role": "user", "content": "hello"}],
-                },
-                headers={"content-type": "application/json"},
-                runtime=runtime,
-                model_name="nulla",
-                workspace_root_provider=lambda: "/tmp",
-            )
+            for path in ("/v1/chat/completions", "/api/chat"):
+                response = _dispatch_post(
+                    path=path,
+                    body={
+                        "model": "openai-compatible-remote:gpt-mock",
+                        "messages": [{"role": "user", "content": "hello"}],
+                    },
+                    headers={"content-type": "application/json"},
+                    runtime=runtime,
+                    model_name="nulla",
+                    workspace_root_provider=lambda: "/tmp",
+                )
+                self.assertEqual(response.status, 200)
 
-        self.assertEqual(response.status, 200)
-        source_context = dict(seen["source_context"])  # type: ignore[arg-type]
-        self.assertEqual(source_context["requested_model"], "openai-compatible-remote:gpt-mock")
+        self.assertEqual(len(seen_contexts), 2)
+        for source_context in seen_contexts:
+            self.assertEqual(source_context["surface"], "api")
+            self.assertEqual(source_context["platform"], "api")
+            self.assertEqual(source_context["requested_model"], "openai-compatible-remote:gpt-mock")
 
     def test_create_app_keeps_health_responsive_while_post_dispatch_blocks(self) -> None:
         runtime = RuntimeServices(display_name="NULLA", runtime_version_stamp={"release_version": "0.4.0"})
@@ -549,7 +552,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         _ensure_default_provider(registry, "qwen2.5:14b")
 
         manifest = manifests[("ollama-local", "qwen2.5:14b")]
-        self.assertEqual(manifest.runtime_config["prewarm"]["strategy"], "ollama_generate")
+        self.assertEqual(manifest.runtime_config["prewarm"]["strategy"], "ollama_chat")
         self.assertEqual(manifest.runtime_config["prewarm"]["keep_alive"], "15m")
 
     def test_bootstrap_runtime_services_runs_provider_prewarm_logging(self) -> None:
@@ -613,17 +616,16 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
 
         log_prewarm.assert_called_once_with(model_registry)
 
-    def test_log_prewarm_results_treats_background_warmup_as_info(self) -> None:
+    def test_log_prewarm_results_treats_timeout_without_background_as_info(self) -> None:
         registry = mock.Mock()
         registry.prewarm_enabled_providers.return_value = [
             {
                 "ok": True,
                 "provider_id": "ollama-local:qwen2.5:14b",
-                "status": "warming_background",
+                "status": "timed_out",
                 "reason": "cold_start_timeout",
                 "keep_alive": "15m",
                 "timeout_seconds": 45.0,
-                "background_timeout_seconds": 90.0,
             }
         ]
 
@@ -632,7 +634,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
 
         self.assertEqual(len(captured.records), 1)
         self.assertEqual(captured.records[0].levelname, "INFO")
-        self.assertIn("Provider prewarm continuing in background", captured.output[0])
+        self.assertIn("Provider prewarm timed out; continuing without background warming", captured.output[0])
 
     def test_normalize_chat_history_keeps_full_user_assistant_sequence(self) -> None:
         history = _normalize_chat_history(

@@ -1,51 +1,23 @@
 # Failure Ledger
 
-## GL-001 - install_profile_validation
-- Test or benchmark ID: `tests/test_validate_install_profile.py::test_validate_install_profile_blocks_unready_hybrid_kimi`
-- Reproduction command: `python -m pytest -q tests/test_validate_install_profile.py -k hybrid_kimi`
-- Symptom: Selecting the hybrid Kimi install profile could continue into launcher generation even when the remote lane was not configured.
-- Root cause: The installers summarized profile truth but never validated the selected profile readiness before proceeding.
+## GL-20260328-001 - packaging_surface
+- Test or benchmark ID: `python -m build`
+- Reproduction command: `/tmp/nulla_greenloop_runtime_greenloop-20260328T194333Z_py311_v2/bin/python -m build`
+- Symptom: The clean runtime+dev proof environment could not execute `python -m build` because the `build` module was missing.
+- Root cause: The `dev` extra in `pyproject.toml` did not include `build` even though the greenloop contract requires a clean build gate.
+- Files changed: `pyproject.toml`, `tests/test_install_surface_contracts.py`
+- Fix summary: Added `build>=1.2` to the `dev` extra and locked the contract with `test_pyproject_dev_extra_covers_build_and_test_tooling`.
 - Status: `fixed`
-- Remaining risk: Kimi remains optional on this machine because no KIMI_API_KEY is configured.
-- Evidence before: Installer/profile lane review during greenloop found no fail-closed validation for unready hybrid-kimi selections.
-- Evidence after: tests/test_validate_install_profile.py::test_validate_install_profile_blocks_unready_hybrid_kimi; tests/test_validate_install_profile.py::test_validate_install_profile_accepts_ready_hybrid_kimi
+- Rerun evidence: `reports/greenloop/logs/greenloop-20260328T194333Z/rerun_packaging_pytest.log`, `reports/greenloop/logs/greenloop-20260328T194333Z/phase1_v2_build.log`, `reports/greenloop/logs/greenloop-20260328T194333Z/rerun_full_static_build.log`
+- Remaining risk: The repo still requires Python >= 3.10, so operators who default to Python 3.9 must use the installer-created or explicit Python 3.11 interpreter.
 
-## GL-002 - windows_installer_contract
-- Test or benchmark ID: `tests/test_install_script_contract.py::test_install_wrappers_forward_install_profile_and_extra_args`
-- Reproduction command: `python -m pytest -q tests/test_install_script_contract.py -k install_profile`
-- Symptom: The Windows install path could drop the requested install profile when building profile truth and skip explicit readiness validation.
-- Root cause: The batch launcher path did not thread NULLA_INSTALL_PROFILE into the provider-truth helper and did not call the profile validator.
+## GL-20260328-002 - provider_routing
+- Test or benchmark ID: `tests/test_model_execution_layer.py::ModelExecutionLayerTests::test_role_aware_summary_execution_prefers_queen_lane`
+- Reproduction command: `/tmp/nulla_greenloop_runtime_greenloop-20260328T194333Z_py311_v2/bin/python ops/pytest_shards.py --workers 6 --pytest-arg=--tb=short`
+- Symptom: The queen summary path selected `local-qwen-http` instead of the ranked `kimi-cloud-http` lane.
+- Root cause: Local-vs-remote race logic in `core/memory_first_router.py` ignored ranking order and could let a local lane win even when the top-ranked manifest was already a remote queen lane.
+- Files changed: `core/memory_first_router.py`
+- Fix summary: Restricted the race path to cases where the top-ranked manifest is already local.
 - Status: `fixed`
-- Remaining risk: Windows parity still depends on the same remote lane being configured when hybrid-kimi is selected.
-- Evidence before: The batch contract lacked requested_profile forwarding and validate_install_profile invocation.
-- Evidence after: tests/test_install_script_contract.py::test_install_wrappers_forward_install_profile_and_extra_args
-
-## GL-003 - provider_surface_honesty
-- Test or benchmark ID: `tests/test_provider_probe.py::test_default_probe_report_hides_unsupported_remote_ideas`
-- Reproduction command: `python -m pytest -q tests/test_provider_probe.py -k unsupported`
-- Symptom: The default provider probe could surface unsupported remote ideas like Tether or QVAC alongside real install lanes.
-- Root cause: Unsupported remote concepts were included in the default stack surface instead of being isolated behind an explicit flag.
-- Status: `fixed`
-- Remaining risk: Unsupported remote ideas still exist behind --show-unsupported for explicit operator review.
-- Evidence before: Default provider probe output mixed unsupported remote ideas into the normal recommendation surface.
-- Evidence after: tests/test_provider_probe.py::test_default_probe_report_hides_unsupported_remote_ideas
-
-## GL-004 - proof_artifact_preservation
-- Test or benchmark ID: `tests/test_llm_eval_artifact_preservation.py::test_preserve_previous_live_run_artifacts_copies_non_green_bundle`
-- Reproduction command: `python -m pytest -q tests/test_llm_eval_artifact_preservation.py tests/test_run_local_acceptance.py -k preserve_previous`
-- Symptom: A fresh green run could overwrite the previous blocked or red proof bundle and destroy the first-red evidence.
-- Root cause: The acceptance scripts replaced prior output directories in place without preserving failed bundles first.
-- Status: `fixed`
-- Remaining risk: Preserved bundles can still contain local absolute paths unless the operator chooses a sanitized output root.
-- Evidence before: Earlier greenloop reruns replaced blocked output directories in place.
-- Evidence after: tests/test_llm_eval_artifact_preservation.py::test_preserve_previous_output_bundle_copies_non_green_summary; tests/test_llm_eval_artifact_preservation.py::test_preserve_previous_live_run_artifacts_copies_non_green_bundle; tests/test_run_local_acceptance.py::test_preserve_previous_run_artifacts_copies_non_green_bundle
-
-## GL-005 - proof_path_coverage
-- Test or benchmark ID: `tests/test_greenloop_concurrency.py::test_summarize_measurements_counts_successes_and_percentiles`
-- Reproduction command: `python ops/greenloop_concurrency.py --base-url http://127.0.0.1:18080 --workspace-root /tmp/nulla-greenloop-proof/workspace --output-csv reports/greenloop/concurrency.csv --output-json reports/greenloop/concurrency.json`
-- Symptom: The checklist required a real concurrency/performance lane, but the repo had no canonical command to generate concurrency.csv.
-- Root cause: Greenloop stopped at llm_eval and never added a first-class concurrency probe to the proof path.
-- Status: `fixed`
-- Remaining risk: This probe measures single-node API concurrency only; it does not profile helper-mesh or WAN traffic.
-- Evidence before: Repo search showed no tracked greenloop concurrency probe or generator for reports/greenloop/concurrency.csv.
-- Evidence after: tests/test_greenloop_concurrency.py::test_parse_levels_rejects_zero; tests/test_greenloop_concurrency.py::test_summarize_measurements_counts_successes_and_percentiles; tests/test_greenloop_concurrency.py::test_write_summary_csv_writes_expected_columns; reports/greenloop/concurrency.csv
+- Rerun evidence: `reports/greenloop/logs/greenloop-20260328T194333Z/rerun_race2_pytest.log`, `reports/greenloop/logs/greenloop-20260328T194333Z/phase3_pytest_shards_rerun.log`
+- Remaining risk: Future routing-weight changes still need direct queen-lane and race golden coverage.

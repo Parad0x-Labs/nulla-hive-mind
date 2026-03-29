@@ -13,7 +13,7 @@ def test_print_prewarm_results_renders_success_skip_and_failure(capsys) -> None:
             {
                 "ok": True,
                 "provider_id": "ollama-local:qwen2.5:32b",
-                "status": "warming_background",
+                "status": "timed_out",
                 "keep_alive": "15m",
                 "reason": "cold_start_timeout",
             },
@@ -25,7 +25,10 @@ def test_print_prewarm_results_renders_success_skip_and_failure(capsys) -> None:
     output = capsys.readouterr().out
     assert "Provider prewarm:" in output
     assert "ollama-local:qwen2.5:14b: prewarmed (keep_alive=15m)" in output
-    assert "ollama-local:qwen2.5:32b: warming in background (keep_alive=15m, reason=cold_start_timeout)" in output
+    assert (
+        "ollama-local:qwen2.5:32b: prewarm timed out; continuing without background warming "
+        "(keep_alive=15m, reason=cold_start_timeout)"
+    ) in output
     assert "vllm-local:qwen2.5:32b: skipped (not_ollama_runtime)" in output
     assert "ollama-local:qwen2.5:7b: failed (connection refused)" in output
 

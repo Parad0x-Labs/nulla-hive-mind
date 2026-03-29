@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import socket
 from types import SimpleNamespace
 from unittest.mock import Mock
 from urllib.error import URLError
@@ -149,6 +151,36 @@ def block_live_public_hive_network(monkeypatch):
         raise URLError(f"public hive live network blocked under pytest for host '{host or 'unknown'}'")
 
     monkeypatch.setattr(public_hive_client.urllib.request, "urlopen", guarded_urlopen)
+
+
+@pytest.fixture(autouse=True)
+def block_live_local_ollama_under_pytest(monkeypatch):
+    if os.environ.get("NULLA_ALPHA_LIVE_SOAK") == "1" or os.environ.get("NULLA_ALLOW_LIVE_OLLAMA_TESTS") == "1":
+        return
+
+    real_socket_connect = socket.socket.connect
+    real_create_connection = socket.create_connection
+
+    def _is_blocked_ollama_target(host: object, port: object) -> bool:
+        normalized_host = str(host or "").strip().lower()
+        return normalized_host in {"localhost", "127.0.0.1", "::1"} and int(port or 0) == 11434
+
+    def guarded_socket_connect(self, address):
+        if isinstance(address, tuple) and len(address) >= 2 and _is_blocked_ollama_target(address[0], address[1]):
+            raise AssertionError(
+                "pytest attempted to reach live local Ollama on 127.0.0.1:11434 without an explicit live-test opt-in"
+            )
+        return real_socket_connect(self, address)
+
+    def guarded_create_connection(address, *args, **kwargs):
+        if isinstance(address, tuple) and len(address) >= 2 and _is_blocked_ollama_target(address[0], address[1]):
+            raise AssertionError(
+                "pytest attempted to reach live local Ollama on 127.0.0.1:11434 without an explicit live-test opt-in"
+            )
+        return real_create_connection(address, *args, **kwargs)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_socket_connect)
+    monkeypatch.setattr(socket, "create_connection", guarded_create_connection)
 
 
 @pytest.fixture

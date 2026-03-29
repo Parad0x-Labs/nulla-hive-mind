@@ -338,6 +338,8 @@ def dispatch_post(
         ).strip()
         default_workspace = workspace_root_provider()
         source_context = {
+            "surface": "api",
+            "platform": "api",
             "client_conversation_history": history,
             "client_history_message_count": len(history),
             "conversation_history": history,

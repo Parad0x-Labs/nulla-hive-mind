@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import threading
 from typing import Any
 
 import requests
@@ -44,7 +43,7 @@ class OpenAICompatibleAdapter(ModelAdapter):
             return super().prewarm()
 
         strategy = str(prewarm_config.get("strategy") or "").strip().lower()
-        if strategy != "ollama_generate":
+        if strategy not in {"ollama_generate", "ollama_chat"}:
             return {
                 "ok": False,
                 "provider_id": self.manifest.provider_id,
@@ -72,28 +71,17 @@ class OpenAICompatibleAdapter(ModelAdapter):
                 "strategy": strategy,
             }
 
-        prompt = prewarm_config.get("prompt")
-        payload: dict[str, Any] = {
-            "model": self.manifest.model_name,
-            "prompt": " " if prompt is None else str(prompt),
-            "stream": False,
-            "keep_alive": prewarm_config.get("keep_alive", "10m"),
-        }
-        if "raw" in prewarm_config:
-            payload["raw"] = bool(prewarm_config.get("raw"))
-        if isinstance(prewarm_config.get("options"), dict) and prewarm_config.get("options"):
-            payload["options"] = dict(prewarm_config["options"])
+        endpoint, payload = self._ollama_prewarm_request(
+            base_url=base_url,
+            strategy=strategy,
+            prewarm_config=prewarm_config,
+        )
 
         timeout_seconds = float(
             prewarm_config.get("timeout_seconds")
             or self.manifest.runtime_config.get("health_timeout_seconds")
             or 15.0
         )
-        background_timeout_seconds = float(
-            prewarm_config.get("background_timeout_seconds")
-            or max(timeout_seconds * 2.0, 90.0)
-        )
-        endpoint = f"{_native_ollama_base_url(base_url)}/api/generate"
         try:
             response = requests.post(
                 endpoint,
@@ -113,20 +101,14 @@ class OpenAICompatibleAdapter(ModelAdapter):
                 "total_duration": data.get("total_duration"),
             }
         except requests.exceptions.Timeout:
-            self._start_background_prewarm(
-                endpoint=endpoint,
-                payload=payload,
-                background_timeout_seconds=background_timeout_seconds,
-            )
             return {
                 "ok": True,
                 "provider_id": self.manifest.provider_id,
-                "status": "warming_background",
+                "status": "timed_out",
                 "strategy": strategy,
                 "reason": "cold_start_timeout",
                 "keep_alive": payload["keep_alive"],
                 "timeout_seconds": timeout_seconds,
-                "background_timeout_seconds": background_timeout_seconds,
             }
         except Exception as exc:
             return {
@@ -137,56 +119,42 @@ class OpenAICompatibleAdapter(ModelAdapter):
                 "error": str(exc),
             }
 
-    def _start_background_prewarm(
+    def _ollama_prewarm_request(
         self,
         *,
-        endpoint: str,
-        payload: dict[str, Any],
-        background_timeout_seconds: float,
-    ) -> None:
-        worker = threading.Thread(
-            target=self._finish_background_prewarm,
-            kwargs={
-                "endpoint": endpoint,
-                "payload": dict(payload),
-                "background_timeout_seconds": background_timeout_seconds,
-            },
-            daemon=True,
-            name=f"nulla-prewarm-{self.manifest.provider_id}",
-        )
-        worker.start()
+        base_url: str,
+        strategy: str,
+        prewarm_config: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        keep_alive = prewarm_config.get("keep_alive", "10m")
+        native_base_url = _native_ollama_base_url(base_url)
+        if strategy == "ollama_chat":
+            message = prewarm_config.get("message")
+            if message is None:
+                message = prewarm_config.get("prompt")
+            options = dict(prewarm_config.get("options") or {})
+            options.setdefault("num_predict", 1)
+            payload: dict[str, Any] = {
+                "model": self.manifest.model_name,
+                "messages": [{"role": "user", "content": " " if message is None else str(message)}],
+                "stream": False,
+                "keep_alive": keep_alive,
+                "options": options,
+            }
+            return f"{native_base_url}/api/chat", payload
 
-    def _finish_background_prewarm(
-        self,
-        *,
-        endpoint: str,
-        payload: dict[str, Any],
-        background_timeout_seconds: float,
-    ) -> None:
-        try:
-            response = requests.post(
-                endpoint,
-                json=payload,
-                headers=self._headers(),
-                timeout=background_timeout_seconds,
-            )
-            response.raise_for_status()
-            data = response.json()
-        except Exception as exc:
-            logger.warning(
-                "Background provider prewarm failed: %s | error=%s",
-                self.manifest.provider_id,
-                exc,
-            )
-            return
-
-        logger.info(
-            "Background provider prewarm completed: %s | keep_alive=%s | load_duration=%s | total_duration=%s",
-            self.manifest.provider_id,
-            payload.get("keep_alive"),
-            data.get("load_duration"),
-            data.get("total_duration"),
-        )
+        prompt = prewarm_config.get("prompt")
+        payload = {
+            "model": self.manifest.model_name,
+            "prompt": " " if prompt is None else str(prompt),
+            "stream": False,
+            "keep_alive": keep_alive,
+        }
+        if "raw" in prewarm_config:
+            payload["raw"] = bool(prewarm_config.get("raw"))
+        if isinstance(prewarm_config.get("options"), dict) and prewarm_config.get("options"):
+            payload["options"] = dict(prewarm_config["options"])
+        return f"{native_base_url}/api/generate", payload
 
     def run_text_task(self, request: ModelRequest) -> ModelResponse:
         return self._invoke_http(request, force_json=False)
@@ -346,6 +314,11 @@ class OpenAICompatibleAdapter(ModelAdapter):
             payload["max_tokens"] = int(generation_profile["max_output_tokens"])
         if generation_profile.get("top_p") is not None:
             payload["top_p"] = float(generation_profile["top_p"])
+        if self._runtime_family() == "ollama":
+            budget = get_active_compute_budget()
+            payload["options"] = {
+                "num_thread": int(max(1, budget.cpu_threads)),
+            }
         stop_sequences = [str(item) for item in list(generation_profile.get("stop_sequences") or []) if str(item or "").strip()]
         if stop_sequences:
             payload["stop"] = stop_sequences
@@ -385,7 +358,9 @@ class OpenAICompatibleAdapter(ModelAdapter):
         return payload
 
     def _uses_native_ollama_chat(self) -> bool:
-        return self._runtime_family() == "ollama"
+        if self._runtime_family() != "ollama":
+            return False
+        return not bool(str(self.manifest.runtime_config.get("api_path") or "").strip())
 
     def _runtime_family(self) -> str:
         return str(self.manifest.metadata.get("runtime_family") or "").strip().lower()

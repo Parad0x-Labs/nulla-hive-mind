@@ -105,10 +105,9 @@ def _ensure_local_ollama_provider(registry: ModelRegistry, *, model_tag: str) ->
             "temperature": 0.7,
             "supports_json_mode": False,
             "prewarm": {
-                "strategy": "ollama_generate",
+                "strategy": "ollama_chat",
                 "keep_alive": "15m",
-                "prompt": " ",
-                "raw": True,
+                "message": " ",
                 "timeout_seconds": 45,
             },
         },

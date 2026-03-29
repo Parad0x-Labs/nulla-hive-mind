@@ -1,86 +1,196 @@
 {
-  "schema": "nulla.provider_probe.v1",
-  "machine": {
-    "cpu_cores": 10,
-    "ram_gb": 24.0,
-    "gpu": "Apple Silicon (MPS)",
-    "vram_gb": 24.0,
-    "accelerator": "mps",
-    "selected_tier": "mid",
-    "ollama_model": "qwen2.5:14b",
-    "param_billions": 14.0
+  "run_id": "greenloop-20260328T194333Z",
+  "captured_at": "2026-03-28T20:35:16Z",
+  "ollama_list": [
+    "NAME           ID              SIZE      MODIFIED       ",
+    "qwen2.5:14b    7cdf5a0187d5    9.0 GB    28 minutes ago    ",
+    "qwen2.5:7b     845dbda0ea48    4.7 GB    3 weeks ago       "
+  ],
+  "env_vars_affecting_runtime": {
+    "OLLAMA_API_KEY": "ollama-local"
   },
-  "ollama": {
-    "binary_present": true,
-    "binary_path": "/usr/local/bin/ollama",
-    "installed_models": [
-      {
-        "name": "qwen2.5:14b",
-        "id": "7cdf5a0187d5",
-        "size": "9.0 GB",
-        "modified": "12 hours ago"
+  "healthz": {
+    "ok": true,
+    "agent": "NULLA",
+    "daemon": true,
+    "runtime": {
+      "release_version": "0.4.0-closed-test",
+      "minimum_compatible_release": "0.4.0-closed-test",
+      "protocol_version": 1,
+      "rollout_stage": "private_team_test",
+      "channel_name": "closed-test",
+      "branch": "codex/honest-ollama-prewarm-bootstrap",
+      "commit": "dcce6606f49a",
+      "dirty": true,
+      "build_id": "0.4.0-closed-test+dcce6606f49a.dirty",
+      "started_at": "2026-03-28T20:24:33.757833Z",
+      "pid": 67126,
+      "workstation_version": "nulla-workstation-2026-03-13-v1",
+      "model_tag": "qwen2.5:7b"
+    },
+    "capabilities": {
+      "mode": "runtime_capabilities",
+      "runtime_home": "/private/tmp/nulla_ci_ans8Gd/artifacts/acceptance_runs/llm_eval_live/runtime_home",
+      "workspace_root": "/private/tmp/nulla_ci_ans8Gd/artifacts/acceptance_runs/llm_eval_live/workspace",
+      "feature_flags": {
+        "local_only_mode": false,
+        "public_hive_enabled": true,
+        "helper_mesh_enabled": true,
+        "allow_workspace_writes": true,
+        "allow_sandbox_execution": true,
+        "allow_remote_only_without_backend": true
       },
-      {
-        "name": "qwen2.5:7b",
-        "id": "845dbda0ea48",
-        "size": "4.7 GB",
-        "modified": "3 weeks ago"
+      "provider_capability_truth": [
+        {
+          "schema": "nulla.provider_capability.v1",
+          "provider_id": "ollama-local:qwen2.5:7b",
+          "model_id": "qwen2.5:7b",
+          "role_fit": "drone",
+          "context_window": 0,
+          "tool_support": [
+            "structured_json",
+            "tool_calls"
+          ],
+          "structured_output_support": true,
+          "tokens_per_second": 0.0,
+          "ram_budget_gb": 0.0,
+          "vram_budget_gb": 0.0,
+          "quantization": "",
+          "locality": "local",
+          "privacy_class": "local_private",
+          "queue_depth": 0,
+          "max_safe_concurrency": 1,
+          "availability_state": "ready",
+          "circuit_open": false,
+          "last_error": null
+        }
+      ],
+      "install_profile": {
+        "schema": "nulla.install_profile.v1",
+        "profile_id": "local-only",
+        "label": "Local only",
+        "summary": "Single local Ollama lane with no remote provider dependency.",
+        "selection_source": "auto",
+        "selected_model": "qwen2.5:7b",
+        "provider_mix": [
+          {
+            "provider_id": "ollama-local:qwen2.5:7b",
+            "role": "coder",
+            "locality": "local",
+            "required": true,
+            "api_key_envs": [],
+            "configured": true,
+            "availability_state": "ready",
+            "notes": "Primary local Ollama lane."
+          }
+        ],
+        "estimated_download_gb": 0,
+        "estimated_disk_footprint_gb": 2.5,
+        "minimum_free_space_gb": 2.5,
+        "ram_expectation_gb": 12.0,
+        "vram_expectation_gb": 4.0,
+        "ready": true,
+        "degraded": false,
+        "single_volume_ready": true,
+        "reasons": [
+          "Auto-selected local-only to keep the default runtime local-first and dependency-light."
+        ],
+        "volume_checks": [
+          {
+            "volume_id": "/:16777232",
+            "labels": [
+              "ollama_models",
+              "runtime_home"
+            ],
+            "path": "/private/tmp/nulla_ci_ans8Gd/artifacts/acceptance_runs/llm_eval_live/runtime_home",
+            "required_gb": 2.5,
+            "free_gb": 20.5,
+            "ok": true
+          }
+        ]
+      },
+      "capabilities": [
+        {
+          "name": "local_runtime",
+          "state": "implemented",
+          "category": "core",
+          "reason": "Nulla runs locally without the swarm."
+        },
+        {
+          "name": "memory_and_tools",
+          "state": "implemented",
+          "category": "core",
+          "reason": "NULLA can keep context, route tool intent, and execute bounded local/runtime tools."
+        },
+        {
+          "name": "helper_mesh",
+          "state": "implemented",
+          "category": "helper_network",
+          "reason": "Helper coordination lanes are enabled for this runtime."
+        },
+        {
+          "name": "public_hive_surface",
+          "state": "implemented",
+          "category": "surface",
+          "reason": "Public Hive surface is live for this runtime (already_configured)."
+        },
+        {
+          "name": "workspace_write_tools",
+          "state": "implemented",
+          "category": "tooling",
+          "reason": "Workspace write tools are enabled by runtime policy."
+        },
+        {
+          "name": "sandbox_execution",
+          "state": "implemented",
+          "category": "tooling",
+          "reason": "Sandboxed command execution is enabled by runtime policy."
+        },
+        {
+          "name": "remote_only_backend_fallback",
+          "state": "implemented",
+          "category": "model_backend",
+          "reason": "Runtime may stay alive without a healthy local backend and fall back to remote-only behavior."
+        },
+        {
+          "name": "simulated_payments",
+          "state": "simulated",
+          "category": "future_extension",
+          "reason": "Credits and DNA payment flow are explicitly non-trustless."
+        },
+        {
+          "name": "wan_public_mesh",
+          "state": "partial",
+          "category": "future_extension",
+          "reason": "WAN readiness exists behind probes, relays, and fallbacks."
+        }
+      ],
+      "public_hive_auth": {
+        "ok": true,
+        "status": "already_configured"
       }
-    ]
-  },
-  "remote_env": {
-    "kimi": {
-      "api_key_present": false,
-      "base_url_present": false,
-      "model_present": false,
-      "configured": false
-    },
-    "generic_remote": {
-      "api_key_present": false,
-      "base_url_present": false,
-      "model_present": false,
-      "configured": false
-    },
-    "tether": {
-      "api_key_present": false,
-      "base_url_present": false,
-      "model_present": false,
-      "configured": false
-    },
-    "qvac": {
-      "api_key_present": false,
-      "base_url_present": false,
-      "model_present": false,
-      "configured": false
     }
   },
-  "local_multi_llm_fit": "pressure_sensitive",
-  "recommended_stack_id": "local_dual_ollama",
-  "stacks": [
+  "provider_inventory": [
     {
-      "stack_id": "local_only",
-      "status": "ready",
-      "recommended": false,
-      "reason": "Local Ollama lane is ready.",
-      "primary_model": "qwen2.5:14b",
-      "helper_model": ""
-    },
-    {
-      "stack_id": "local_dual_ollama",
-      "status": "ready",
-      "recommended": true,
-      "reason": "This machine can run a primary local model plus a lighter local helper lane, but 24 GiB unified memory is still pressure-sensitive under concurrency.",
-      "primary_model": "qwen2.5:14b",
-      "helper_model": "qwen2.5:7b"
-    },
-    {
-      "stack_id": "local_plus_kimi",
-      "status": "needs_config",
-      "recommended": false,
-      "reason": "Kimi becomes a real remote queen lane when KIMI_API_KEY is configured.",
-      "primary_model": "qwen2.5:14b",
-      "helper_model": "qwen2.5:7b",
-      "provider_id": ""
+      "provider_id": "ollama-local:qwen2.5:7b",
+      "model_id": "qwen2.5:7b",
+      "role_fit": "drone",
+      "locality": "local",
+      "availability_state": "ready",
+      "queue_depth": 0,
+      "max_safe_concurrency": 1,
+      "structured_output_support": true,
+      "context_window": 0,
+      "notes": [
+        "Active provider in the dedicated live-acceptance runtime.",
+        "Local Ollama inventory also contained qwen2.5:14b during proof capture."
+      ]
     }
+  ],
+  "notes": [
+    "The canonical live lane is self-managed by ops/llm_eval.py via run_local_acceptance.run_full_acceptance().",
+    "This proof used the dedicated local-only qwen2.5:7b acceptance runtime; qwen2.5:14b was installed locally but not active in the acceptance runtime.",
+    "wan_public_mesh remains partial in the runtime capability truth and is outside this local-only acceptance scope."
   ]
 }

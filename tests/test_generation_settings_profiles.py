@@ -125,6 +125,30 @@ def test_chat_research_generation_profile_now_uses_same_plain_text_lane() -> Non
     assert profile["adaptive_length"] is True
 
 
+def test_exact_plain_text_chat_generation_profile_stays_short_and_deterministic() -> None:
+    request = _normalize_request(
+        "Reply with exactly GREENLOOP-WARMUP-4 and nothing else.",
+        task_class="chat_conversation",
+        task_kind="normalization_assist",
+        output_mode="plain_text",
+    )
+
+    profile = dict(request.metadata.get("generation_profile") or {})
+    chat_truth = dict(request.metadata.get("chat_truth_prompt") or {})
+    messages = request.as_openai_messages()
+
+    assert profile["profile_id"] == "chat_exact_plain_text"
+    assert request.temperature == pytest.approx(0.05)
+    assert profile["top_p"] == pytest.approx(0.15)
+    assert request.max_output_tokens <= 32
+    assert profile["adaptive_length"] is False
+    assert profile["stop_sequences"] == ["\n"]
+    assert chat_truth["generation_profile_id"] == "chat_exact_plain_text"
+    assert chat_truth["context_attached"] is False
+    assert len(messages) == 2
+    assert messages[-1] == {"role": "user", "content": "Reply with exactly GREENLOOP-WARMUP-4 and nothing else."}
+
+
 @pytest.mark.parametrize(
     ("output_mode", "task_kind", "expected_profile", "expected_temperature", "expected_top_p", "expected_tokens"),
     [
@@ -209,7 +233,7 @@ def test_openai_adapter_forwards_different_payloads_for_chat_and_tool_extraction
     assert tool_payload["response_format"] == {"type": "json_object"}
 
 
-def test_openai_adapter_prewarm_uses_native_ollama_generate_endpoint() -> None:
+def test_openai_adapter_prewarm_uses_native_ollama_chat_endpoint() -> None:
     adapter = OpenAICompatibleAdapter(
         SimpleNamespace(
             provider_id="ollama-local:qwen2.5:14b",
@@ -218,10 +242,9 @@ def test_openai_adapter_prewarm_uses_native_ollama_generate_endpoint() -> None:
             runtime_config={
                 "base_url": "http://127.0.0.1:11434/v1",
                 "prewarm": {
-                    "strategy": "ollama_generate",
+                    "strategy": "ollama_chat",
                     "keep_alive": "15m",
-                    "prompt": " ",
-                    "raw": True,
+                    "message": " ",
                     "timeout_seconds": 9,
                 },
             },
@@ -237,13 +260,13 @@ def test_openai_adapter_prewarm_uses_native_ollama_generate_endpoint() -> None:
     assert result["ok"] is True
     assert result["status"] == "prewarmed"
     post_mock.assert_called_once()
-    assert post_mock.call_args.args[0] == "http://127.0.0.1:11434/api/generate"
+    assert post_mock.call_args.args[0] == "http://127.0.0.1:11434/api/chat"
     assert post_mock.call_args.kwargs["json"] == {
         "model": "qwen2.5:14b",
-        "prompt": " ",
+        "messages": [{"role": "user", "content": " "}],
         "stream": False,
         "keep_alive": "15m",
-        "raw": True,
+        "options": {"num_predict": 1},
     }
 
 
@@ -255,7 +278,7 @@ def test_openai_adapter_prewarm_skips_non_ollama_runtime() -> None:
             metadata={"runtime_family": "openai-compatible"},
             runtime_config={
                 "base_url": "http://127.0.0.1:8000/v1",
-                "prewarm": {"strategy": "ollama_generate"},
+                "prewarm": {"strategy": "ollama_chat"},
             },
         )
     )
@@ -269,7 +292,38 @@ def test_openai_adapter_prewarm_skips_non_ollama_runtime() -> None:
     post_mock.assert_not_called()
 
 
-def test_openai_adapter_prewarm_degrades_timeout_to_background_warmup() -> None:
+def test_openai_adapter_prewarm_times_out_without_background_worker() -> None:
+    adapter = OpenAICompatibleAdapter(
+        SimpleNamespace(
+            provider_id="ollama-local:qwen2.5:14b",
+            model_name="qwen2.5:14b",
+            metadata={"runtime_family": "ollama"},
+            runtime_config={
+                "base_url": "http://127.0.0.1:11434/v1",
+                "prewarm": {
+                    "strategy": "ollama_chat",
+                    "keep_alive": "15m",
+                    "timeout_seconds": 12,
+                },
+            },
+        )
+    )
+
+    with mock.patch(
+        "adapters.openai_compatible_adapter.requests.post",
+        side_effect=requests.exceptions.ReadTimeout("cold load timed out"),
+    ) as post_mock:
+        result = adapter.prewarm()
+
+    assert result["ok"] is True
+    assert result["status"] == "timed_out"
+    assert result["reason"] == "cold_start_timeout"
+    assert result["keep_alive"] == "15m"
+    assert result["timeout_seconds"] == 12
+    post_mock.assert_called_once()
+
+
+def test_openai_adapter_prewarm_keeps_legacy_generate_strategy() -> None:
     adapter = OpenAICompatibleAdapter(
         SimpleNamespace(
             provider_id="ollama-local:qwen2.5:14b",
@@ -280,31 +334,29 @@ def test_openai_adapter_prewarm_degrades_timeout_to_background_warmup() -> None:
                 "prewarm": {
                     "strategy": "ollama_generate",
                     "keep_alive": "15m",
-                    "timeout_seconds": 12,
+                    "prompt": " ",
+                    "raw": True,
                 },
             },
         )
     )
-    worker = mock.Mock()
+    response = mock.Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {"load_duration": 123, "total_duration": 456}
 
-    with mock.patch(
-        "adapters.openai_compatible_adapter.requests.post",
-        side_effect=requests.exceptions.ReadTimeout("cold load timed out"),
-    ) as post_mock, mock.patch(
-        "adapters.openai_compatible_adapter.threading.Thread",
-        return_value=worker,
-    ) as thread_mock:
+    with mock.patch("adapters.openai_compatible_adapter.requests.post", return_value=response) as post_mock:
         result = adapter.prewarm()
 
     assert result["ok"] is True
-    assert result["status"] == "warming_background"
-    assert result["reason"] == "cold_start_timeout"
-    assert result["keep_alive"] == "15m"
-    assert result["timeout_seconds"] == 12
-    assert result["background_timeout_seconds"] == 90.0
-    post_mock.assert_called_once()
-    thread_mock.assert_called_once()
-    worker.start.assert_called_once_with()
+    assert result["status"] == "prewarmed"
+    assert post_mock.call_args.args[0] == "http://127.0.0.1:11434/api/generate"
+    assert post_mock.call_args.kwargs["json"] == {
+        "model": "qwen2.5:14b",
+        "prompt": " ",
+        "stream": False,
+        "keep_alive": "15m",
+        "raw": True,
+    }
 
 
 def test_openai_adapter_uses_native_ollama_chat_and_applies_compute_threads() -> None:
@@ -347,6 +399,53 @@ def test_openai_adapter_uses_native_ollama_chat_and_applies_compute_threads() ->
     assert result.output_text == "native ollama answer"
     assert post_mock.call_args.args[0] == "http://127.0.0.1:11434/api/chat"
     assert post_mock.call_args.kwargs["json"]["options"]["num_thread"] == 3
+
+
+def test_openai_adapter_prefers_manifest_openai_path_for_ollama_and_keeps_thread_budget() -> None:
+    adapter = OpenAICompatibleAdapter(
+        SimpleNamespace(
+            provider_id="ollama-local:qwen2.5:7b",
+            model_name="qwen2.5:7b",
+            metadata={"runtime_family": "ollama", "deployment_class": "local"},
+            runtime_config={
+                "base_url": "http://127.0.0.1:11434",
+                "api_path": "/v1/chat/completions",
+                "timeout_seconds": 5.0,
+                "temperature": 0.4,
+            },
+        )
+    )
+    request = _to_model_request(
+        _normalize_request(
+            "Reply with exactly OPENAI-COMPAT-OK and nothing else.",
+            task_class="chat_conversation",
+            task_kind="normalization_assist",
+            output_mode="plain_text",
+        )
+    )
+    response = mock.Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {"choices": [{"message": {"content": "OPENAI-COMPAT-OK"}}], "usage": {}}
+
+    set_active_compute_budget(
+        ComputeBudget(
+            mode="balanced",
+            cpu_threads=3,
+            gpu_memory_fraction=0.5,
+            worker_pool_cap=1,
+            reason="test",
+        )
+    )
+    with mock.patch("adapters.openai_compatible_adapter.requests.post", return_value=response) as post_mock:
+        result = adapter.run_text_task(request)
+
+    payload = dict(post_mock.call_args.kwargs["json"])
+    assert result.output_text == "OPENAI-COMPAT-OK"
+    assert post_mock.call_args.args[0] == "http://127.0.0.1:11434/v1/chat/completions"
+    assert payload["options"]["num_thread"] == 3
+    assert payload["max_tokens"] == request.max_output_tokens
+    assert payload["temperature"] == pytest.approx(0.05)
+    assert payload["top_p"] == pytest.approx(0.15)
 
 
 def test_openai_adapter_stream_text_task_yields_incremental_chunks() -> None:

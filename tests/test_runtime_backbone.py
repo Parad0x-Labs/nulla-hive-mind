@@ -173,7 +173,7 @@ def test_build_provider_registry_snapshot_includes_local_ollama_prewarm_config()
         snapshot = build_provider_registry_snapshot(registry, run_prewarm=True)
 
     manifest = manifests[("ollama-local", "qwen2.5:14b")]
-    assert manifest.runtime_config["prewarm"]["strategy"] == "ollama_generate"
+    assert manifest.runtime_config["prewarm"]["strategy"] == "ollama_chat"
     assert manifest.runtime_config["prewarm"]["timeout_seconds"] == 45
     assert snapshot.prewarm_results == (
         {"ok": True, "provider_id": "ollama-local:qwen2.5:14b", "status": "prewarmed", "keep_alive": "15m"},

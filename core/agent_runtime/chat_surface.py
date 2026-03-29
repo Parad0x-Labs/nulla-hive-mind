@@ -645,6 +645,7 @@ def chat_surface_model_wording_result(
     reason: str,
     model_input: str,
     fallback_response: str,
+    allow_provider_inference: bool = True,
     tool_backing_sources: list[str] | None = None,
     response_postprocessor: Callable[[str], str] | None = None,
 ) -> dict[str, Any]:
@@ -688,6 +689,7 @@ def chat_surface_model_wording_result(
         context_result=context_result,
         persona=persona,
         force_model=True,
+        allow_provider_inference=allow_provider_inference,
         surface=str((source_context or {}).get("surface", "cli") or "cli"),
         source_context=dict(source_context or {}),
     )

@@ -1,334 +1,268 @@
 {
-  "artifacts": {
-    "concurrency_csv": "reports/greenloop/concurrency.csv",
-    "failure_ledger_md": "reports/greenloop/failure_ledger.md",
-    "fix_ledger_md": "reports/greenloop/fix_ledger.md",
-    "latency_csv": "reports/greenloop/latency.csv",
-    "provider_snapshot_json": "reports/greenloop/provider_snapshot.json",
-    "summary_json": "reports/greenloop/summary.json",
-    "summary_md": "reports/greenloop/summary.md"
+  "metadata": {
+    "repo_url": "https://github.com/Parad0x-Labs/nulla-hive-mind",
+    "branch": "codex/honest-ollama-prewarm-bootstrap",
+    "commit_sha": "dcce6606f49ad938bafe75a0b26b8628af07e2c9",
+    "run_id": "greenloop-20260328T194333Z",
+    "started_at": "2026-03-28T19:43:33Z",
+    "finished_at": "2026-03-28T20:35:16Z",
+    "runner_type": "workstation",
+    "dirty_state": true,
+    "change_summary": "This rerun fixed a missing dev-time build dependency and a provider race-order regression, then re-proved the full greenloop on the dedicated local qwen2.5:7b acceptance runtime."
   },
   "environment": {
+    "os": "macOS-26.3-arm64-arm-64bit",
+    "python_version": "3.11.15",
     "cpu": "Apple M4",
     "cpu_cores": 10,
+    "ram_gb": 24.0,
+    "gpu": "Apple M4",
+    "vram_gb": 24.0,
+    "storage_free_gb": 20.5,
+    "policy_flags": {
+      "local_only_mode": false,
+      "public_hive_enabled": true,
+      "helper_mesh_enabled": true,
+      "allow_workspace_writes": true,
+      "allow_sandbox_execution": true,
+      "allow_remote_only_without_backend": true
+    },
     "env_vars_affecting_runtime": {
       "OLLAMA_API_KEY": "ollama-local"
-    },
-    "gpu": "Apple Silicon (MPS)",
-    "os": "macOS-26.3-arm64-arm-64bit",
-    "policy_flags": {
-      "allow_sandbox_execution": true,
-      "allow_workspace_writes": true,
-      "helper_mesh_enabled": true,
-      "local_only_mode": false,
-      "public_hive_enabled": true
-    },
-    "python_version": "3.11.15",
-    "ram_gb": 24.0,
-    "storage_free_gb": 52.1,
-    "vram_gb": 24.0
-  },
-  "failure_ledger": [
-    {
-      "category": "install_profile_validation",
-      "evidence_after": [
-        "tests/test_validate_install_profile.py::test_validate_install_profile_blocks_unready_hybrid_kimi",
-        "tests/test_validate_install_profile.py::test_validate_install_profile_accepts_ready_hybrid_kimi"
-      ],
-      "evidence_before": [
-        "Installer/profile lane review during greenloop found no fail-closed validation for unready hybrid-kimi selections."
-      ],
-      "failure_id": "GL-001",
-      "first_seen_at": "2026-03-27T05:40:00Z",
-      "remaining_risk": "Kimi remains optional on this machine because no KIMI_API_KEY is configured.",
-      "reproduction_command": "python -m pytest -q tests/test_validate_install_profile.py -k hybrid_kimi",
-      "resolved_at": "2026-03-27T06:40:00Z",
-      "root_cause": "The installers summarized profile truth but never validated the selected profile readiness before proceeding.",
-      "status": "fixed",
-      "symptom": "Selecting the hybrid Kimi install profile could continue into launcher generation even when the remote lane was not configured.",
-      "test_or_benchmark_id": "tests/test_validate_install_profile.py::test_validate_install_profile_blocks_unready_hybrid_kimi"
-    },
-    {
-      "category": "windows_installer_contract",
-      "evidence_after": [
-        "tests/test_install_script_contract.py::test_install_wrappers_forward_install_profile_and_extra_args"
-      ],
-      "evidence_before": [
-        "The batch contract lacked requested_profile forwarding and validate_install_profile invocation."
-      ],
-      "failure_id": "GL-002",
-      "first_seen_at": "2026-03-27T05:40:00Z",
-      "remaining_risk": "Windows parity still depends on the same remote lane being configured when hybrid-kimi is selected.",
-      "reproduction_command": "python -m pytest -q tests/test_install_script_contract.py -k install_profile",
-      "resolved_at": "2026-03-27T06:40:00Z",
-      "root_cause": "The batch launcher path did not thread NULLA_INSTALL_PROFILE into the provider-truth helper and did not call the profile validator.",
-      "status": "fixed",
-      "symptom": "The Windows install path could drop the requested install profile when building profile truth and skip explicit readiness validation.",
-      "test_or_benchmark_id": "tests/test_install_script_contract.py::test_install_wrappers_forward_install_profile_and_extra_args"
-    },
-    {
-      "category": "provider_surface_honesty",
-      "evidence_after": [
-        "tests/test_provider_probe.py::test_default_probe_report_hides_unsupported_remote_ideas"
-      ],
-      "evidence_before": [
-        "Default provider probe output mixed unsupported remote ideas into the normal recommendation surface."
-      ],
-      "failure_id": "GL-003",
-      "first_seen_at": "2026-03-27T05:45:00Z",
-      "remaining_risk": "Unsupported remote ideas still exist behind --show-unsupported for explicit operator review.",
-      "reproduction_command": "python -m pytest -q tests/test_provider_probe.py -k unsupported",
-      "resolved_at": "2026-03-27T06:40:00Z",
-      "root_cause": "Unsupported remote concepts were included in the default stack surface instead of being isolated behind an explicit flag.",
-      "status": "fixed",
-      "symptom": "The default provider probe could surface unsupported remote ideas like Tether or QVAC alongside real install lanes.",
-      "test_or_benchmark_id": "tests/test_provider_probe.py::test_default_probe_report_hides_unsupported_remote_ideas"
-    },
-    {
-      "category": "proof_artifact_preservation",
-      "evidence_after": [
-        "tests/test_llm_eval_artifact_preservation.py::test_preserve_previous_output_bundle_copies_non_green_summary",
-        "tests/test_llm_eval_artifact_preservation.py::test_preserve_previous_live_run_artifacts_copies_non_green_bundle",
-        "tests/test_run_local_acceptance.py::test_preserve_previous_run_artifacts_copies_non_green_bundle"
-      ],
-      "evidence_before": [
-        "Earlier greenloop reruns replaced blocked output directories in place."
-      ],
-      "failure_id": "GL-004",
-      "first_seen_at": "2026-03-27T05:50:00Z",
-      "remaining_risk": "Preserved bundles can still contain local absolute paths unless the operator chooses a sanitized output root.",
-      "reproduction_command": "python -m pytest -q tests/test_llm_eval_artifact_preservation.py tests/test_run_local_acceptance.py -k preserve_previous",
-      "resolved_at": "2026-03-27T06:40:00Z",
-      "root_cause": "The acceptance scripts replaced prior output directories in place without preserving failed bundles first.",
-      "status": "fixed",
-      "symptom": "A fresh green run could overwrite the previous blocked or red proof bundle and destroy the first-red evidence.",
-      "test_or_benchmark_id": "tests/test_llm_eval_artifact_preservation.py::test_preserve_previous_live_run_artifacts_copies_non_green_bundle"
-    },
-    {
-      "category": "proof_path_coverage",
-      "evidence_after": [
-        "tests/test_greenloop_concurrency.py::test_parse_levels_rejects_zero",
-        "tests/test_greenloop_concurrency.py::test_summarize_measurements_counts_successes_and_percentiles",
-        "tests/test_greenloop_concurrency.py::test_write_summary_csv_writes_expected_columns",
-        "reports/greenloop/concurrency.csv"
-      ],
-      "evidence_before": [
-        "Repo search showed no tracked greenloop concurrency probe or generator for reports/greenloop/concurrency.csv."
-      ],
-      "failure_id": "GL-005",
-      "first_seen_at": "2026-03-27T07:10:00Z",
-      "remaining_risk": "This probe measures single-node API concurrency only; it does not profile helper-mesh or WAN traffic.",
-      "reproduction_command": "python ops/greenloop_concurrency.py --base-url http://127.0.0.1:18080 --workspace-root /tmp/nulla-greenloop-proof/workspace --output-csv reports/greenloop/concurrency.csv --output-json reports/greenloop/concurrency.json",
-      "resolved_at": "2026-03-27T07:20:00Z",
-      "root_cause": "Greenloop stopped at llm_eval and never added a first-class concurrency probe to the proof path.",
-      "status": "fixed",
-      "symptom": "The checklist required a real concurrency/performance lane, but the repo had no canonical command to generate concurrency.csv.",
-      "test_or_benchmark_id": "tests/test_greenloop_concurrency.py::test_summarize_measurements_counts_successes_and_percentiles"
     }
-  ],
-  "fix_ledger": [
+  },
+  "provider_inventory": [
     {
-      "files_changed": [
-        "installer/install_nulla.sh",
-        "installer/install_nulla.bat",
-        "installer/validate_install_profile.py",
-        "tests/test_install_script_contract.py",
-        "tests/test_validate_install_profile.py"
-      ],
-      "fix_id": "FX-001",
-      "linked_failure_ids": [
-        "GL-001",
-        "GL-002"
-      ],
-      "safety_notes": "The validator only blocks clearly unready remote profiles; default local-only installs remain unchanged.",
-      "summary": "Added explicit install-profile validation so shell and Windows launchers fail closed when hybrid-kimi is selected without a ready remote lane.",
-      "tests_added_or_updated": [
-        "tests/test_install_script_contract.py::test_install_wrappers_forward_install_profile_and_extra_args",
-        "tests/test_validate_install_profile.py::test_validate_install_profile_blocks_unready_hybrid_kimi",
-        "tests/test_validate_install_profile.py::test_validate_install_profile_accepts_ready_hybrid_kimi"
-      ]
-    },
-    {
-      "files_changed": [
-        "installer/provider_probe.py",
-        "tests/test_provider_probe.py"
-      ],
-      "fix_id": "FX-002",
-      "linked_failure_ids": [
-        "GL-003"
-      ],
-      "safety_notes": "Unsupported ideas still remain visible behind --show-unsupported for deliberate operator review.",
-      "summary": "Separated unsupported remote ideas from the default provider probe surface so install recommendations stay grounded in real lanes.",
-      "tests_added_or_updated": [
-        "tests/test_provider_probe.py::test_default_probe_report_hides_unsupported_remote_ideas"
-      ]
-    },
-    {
-      "files_changed": [
-        "ops/llm_eval.py",
-        "ops/run_local_acceptance.py",
-        "tests/test_llm_eval_artifact_preservation.py",
-        "tests/test_run_local_acceptance.py"
-      ],
-      "fix_id": "FX-003",
-      "linked_failure_ids": [
-        "GL-004"
-      ],
-      "safety_notes": "Preservation only triggers when the prior bundle is blocked or non-green, so clean reruns do not explode the artifact tree.",
-      "summary": "Preserved previous blocked or red llm_eval and local-acceptance bundles before writing a new run so the first-red evidence survives reruns.",
-      "tests_added_or_updated": [
-        "tests/test_llm_eval_artifact_preservation.py::test_preserve_previous_output_bundle_copies_non_green_summary",
-        "tests/test_llm_eval_artifact_preservation.py::test_preserve_previous_live_run_artifacts_copies_non_green_bundle",
-        "tests/test_run_local_acceptance.py::test_preserve_previous_run_artifacts_copies_non_green_bundle"
-      ]
-    },
-    {
-      "files_changed": [
-        ".gitignore",
-        "ops/greenloop_concurrency.py",
-        "tests/test_greenloop_concurrency.py"
-      ],
-      "fix_id": "FX-004",
-      "linked_failure_ids": [
-        "GL-005"
-      ],
-      "safety_notes": "The probe only hits /api/chat with isolated workspaces and does not mutate shared user state.",
-      "summary": "Added a canonical greenloop concurrency probe that records success rate, throughput, and latency percentiles at worker counts 1, 2, and 4.",
-      "tests_added_or_updated": [
-        "tests/test_greenloop_concurrency.py::test_parse_levels_rejects_zero",
-        "tests/test_greenloop_concurrency.py::test_summarize_measurements_counts_successes_and_percentiles",
-        "tests/test_greenloop_concurrency.py::test_write_summary_csv_writes_expected_columns"
+      "provider_id": "ollama-local:qwen2.5:7b",
+      "model_id": "qwen2.5:7b",
+      "role_fit": "drone",
+      "locality": "local",
+      "availability_state": "ready",
+      "queue_depth": 0,
+      "max_safe_concurrency": 1,
+      "structured_output_support": true,
+      "context_window": 0,
+      "notes": [
+        "Active provider in the dedicated live-acceptance runtime.",
+        "Local Ollama inventory also contained qwen2.5:14b during proof capture."
       ]
     }
   ],
   "gates": [
     {
-      "command": "pip install -e \".[dev]\"",
       "gate_id": "install_dev",
-      "notes": "Fresh dev venv install and entrypoint/import smoke passed.",
-      "status": "passed"
+      "command": "pip install -e \".[dev]\"",
+      "status": "passed",
+      "log_path": "reports/greenloop/logs/greenloop-20260328T194333Z/phase1_v2_dev_install.log",
+      "notes": "The host default Python 3.9.6 was blocked by requires-python >=3.10, so the canonical clean-env proof used the explicit Python 3.11 interpreter and venv."
     },
     {
-      "command": "pip install -e \".[runtime,dev]\"",
       "gate_id": "install_runtime_dev",
-      "notes": "Fresh runtime+dev venv install and import smoke passed.",
-      "status": "passed"
+      "command": "pip install -e \".[runtime,dev]\"",
+      "status": "passed",
+      "log_path": "reports/greenloop/logs/greenloop-20260328T194333Z/phase1_v2_runtime_install.log"
     },
     {
-      "command": "ruff check .",
+      "gate_id": "runtime_imports",
+      "command": "python import smoke for optional runtime dependencies",
+      "status": "passed",
+      "log_path": "reports/greenloop/logs/greenloop-20260328T194333Z/phase1_v2_runtime_imports.log",
+      "notes": "Optional runtime imports loaded cleanly, including build, openai, anthropic, sentence_transformers, torch, transformers, playwright, zstandard, and xxhash."
+    },
+    {
+      "gate_id": "entrypoints",
+      "command": "nulla-agent, nulla-api, nulla-daemon, nulla-watch, nulla-benchmark",
+      "status": "passed",
+      "log_path": "reports/greenloop/logs/greenloop-20260328T194333Z/phase1_v2_entrypoints.log"
+    },
+    {
       "gate_id": "ruff",
-      "status": "passed"
+      "command": "ruff check .",
+      "status": "passed",
+      "log_path": "reports/greenloop/logs/greenloop-20260328T194333Z/rerun_full_static_ruff.log"
     },
     {
-      "command": "python -m compileall -q apps core installer ops tests",
       "gate_id": "compileall",
-      "status": "passed"
+      "command": "python -m compileall adapters apps core installer ops tools tests",
+      "status": "passed",
+      "log_path": "reports/greenloop/logs/greenloop-20260328T194333Z/rerun_full_static_compileall.log"
     },
     {
-      "command": "python ops/pytest_shards.py --workers 6 --pytest-arg=--tb=short",
-      "gate_id": "pytest_shards",
-      "status": "passed"
-    },
-    {
-      "command": "python -m build --outdir /tmp/nulla-greenloop-proof-NJxZss/build_dist",
       "gate_id": "build",
-      "notes": "Only warning was the existing setuptools project.license deprecation.",
-      "status": "passed"
+      "command": "python -m build",
+      "status": "passed",
+      "log_path": "reports/greenloop/logs/greenloop-20260328T194333Z/rerun_full_static_build.log",
+      "notes": "The first clean run failed with No module named build; after build>=1.2 was added to the dev extra, build stayed green on rerun."
     },
     {
-      "command": "python ops/llm_eval.py --skip-live-runtime --output-root /tmp/nulla-greenloop-proof-NJxZss/reports/llm_eval/latest --baseline-root reports/llm_eval/baselines",
+      "gate_id": "wheel_smoke",
+      "command": "pip install built wheel into clean venv and import runtime roots",
+      "status": "passed",
+      "log_path": "reports/greenloop/logs/greenloop-20260328T194333Z/rerun_full_static_wheel_smoke.log"
+    },
+    {
+      "gate_id": "pytest_shards",
+      "command": "python ops/pytest_shards.py --workers 6 --pytest-arg=--tb=short",
+      "status": "passed",
+      "log_path": "reports/greenloop/logs/greenloop-20260328T194333Z/phase3_pytest_shards_rerun.log",
+      "notes": "The first shard sweep found the queen-lane routing regression; the final rerun was green across all 6 shards."
+    },
+    {
       "gate_id": "llm_eval_fast",
-      "status": "passed"
+      "command": "python ops/llm_eval.py --skip-live-runtime --output-root reports/llm_eval/latest --baseline-root reports/llm_eval/baselines",
+      "status": "passed",
+      "log_path": "reports/greenloop/logs/greenloop-20260328T194333Z/phase4_llm_eval_fast.log",
+      "notes": "ci_fast_green=true and blockers=[] in reports/llm_eval/latest/summary.json."
     },
     {
-      "command": "python ops/llm_eval.py --output-root /tmp/nulla-greenloop-proof-NJxZss/reports/llm_eval/latest --baseline-root reports/llm_eval/baselines --live-run-root /tmp/nulla-greenloop-proof-NJxZss/artifacts/acceptance_runs/llm_eval_live --base-url http://127.0.0.1:18080",
+      "gate_id": "legacy_manual_api_prestart",
+      "command": "python -m apps.nulla_api_server --bind 127.0.0.1 --port 18080",
+      "status": "skipped",
+      "log_path": "reports/greenloop/logs/greenloop-20260328T194333Z/phase5_api_server.log",
+      "notes": "Structurally obsolete as a signoff gate. ops/llm_eval.py now delegates live proof to run_local_acceptance.run_full_acceptance(), which stops and starts the dedicated acceptance runtime itself. Manual prestart was only used to confirm /healthz semantics and exposed double-boot ambiguity."
+    },
+    {
       "gate_id": "llm_eval_live",
-      "notes": "Live lane stayed green; llm_eval still updates docs/LLM_ACCEPTANCE_REPORT.md during the run, which makes the acceptance build stamp dirty.",
-      "status": "passed"
+      "command": "python ops/llm_eval.py --output-root reports/llm_eval/latest --baseline-root reports/llm_eval/baselines --live-run-root artifacts/acceptance_runs/llm_eval_live --base-url http://127.0.0.1:18080",
+      "status": "passed",
+      "log_path": "artifacts/acceptance_runs/llm_eval_live/evidence/NULLA_LOCAL_ACCEPTANCE_REPORT.md",
+      "notes": "overall_full_green=true; the dedicated local qwen2.5:7b runtime passed both online acceptance and offline honesty."
     },
     {
-      "command": "python ops/greenloop_concurrency.py --base-url http://127.0.0.1:18080 --workspace-root /tmp/nulla-greenloop-proof-NJxZss/artifacts/greenloop_concurrency/workspace --output-csv reports/greenloop/concurrency.csv --output-json reports/greenloop/concurrency.json",
       "gate_id": "greenloop_concurrency",
-      "status": "passed"
+      "command": "python ops/greenloop_concurrency.py --base-url http://127.0.0.1:18080 --levels 1,2,4",
+      "status": "passed",
+      "log_path": "reports/greenloop/logs/greenloop-20260328T194333Z/phase7_greenloop_concurrency.log",
+      "notes": "Success rate held at 1.0 for worker counts 1, 2, and 4."
     }
   ],
-  "metadata": {
-    "branch": "main",
-    "change_summary": "Greenloop rerun on 15948c7 closed install/provider proof gaps, added a canonical concurrency lane, and regenerated the acceptance bundle on the current head.",
-    "commit_sha": "15948c7bbf4aefd6ed0f66c7e586ee805f3ac937",
-    "dirty_state": true,
-    "finished_at": "2026-03-27T07:46:13.957054Z",
-    "repo_url": "https://github.com/Parad0x-Labs/nulla-hive-mind",
-    "run_id": "llm-eval-1774597124",
-    "runner_type": "workstation",
-    "started_at": "2026-03-27T07:23:10.058429Z"
-  },
+  "failure_ledger": [
+    {
+      "failure_id": "GL-20260328-001",
+      "category": "packaging_surface",
+      "test_or_benchmark_id": "python -m build",
+      "reproduction_command": "/tmp/nulla_greenloop_runtime_greenloop-20260328T194333Z_py311_v2/bin/python -m build",
+      "symptom": "The clean runtime+dev proof environment could not execute python -m build because the build module was missing.",
+      "root_cause": "The dev extra in pyproject.toml did not include build even though the greenloop contract requires python -m build inside a clean proof environment.",
+      "status": "fixed",
+      "evidence_before": [
+        "reports/greenloop/logs/greenloop-20260328T194333Z/phase1_build.log:1 (/tmp/nulla_greenloop_runtime_greenloop-20260328T194333Z_py311/bin/python: No module named build)"
+      ],
+      "evidence_after": [
+        "reports/greenloop/logs/greenloop-20260328T194333Z/rerun_packaging_pytest.log (10 passed in 0.08s)",
+        "reports/greenloop/logs/greenloop-20260328T194333Z/phase1_v2_build.log",
+        "reports/greenloop/logs/greenloop-20260328T194333Z/rerun_full_static_build.log"
+      ],
+      "remaining_risk": "The project still requires Python >= 3.10. Hosts that default to Python 3.9 must use the installer-created or explicit 3.11 interpreter for proof runs."
+    },
+    {
+      "failure_id": "GL-20260328-002",
+      "category": "provider_routing",
+      "test_or_benchmark_id": "tests/test_model_execution_layer.py::ModelExecutionLayerTests::test_role_aware_summary_execution_prefers_queen_lane",
+      "reproduction_command": "/tmp/nulla_greenloop_runtime_greenloop-20260328T194333Z_py311_v2/bin/python ops/pytest_shards.py --workers 6 --pytest-arg=--tb=short",
+      "symptom": "The queen summary path selected local-qwen-http instead of the ranked kimi-cloud-http lane.",
+      "root_cause": "The local-vs-remote race path in core/memory_first_router.py ignored ranking order and could let a local lane win even when the top-ranked manifest was already a remote queen lane.",
+      "status": "fixed",
+      "evidence_before": [
+        "reports/greenloop/logs/greenloop-20260328T194333Z/phase3_pytest_shards.log:30 ('local-qwen-http' != 'kimi-cloud-http')",
+        "reports/greenloop/logs/greenloop-20260328T194333Z/rerun_race_pytest_fixed.log (first attempted fix broke provider failover)"
+      ],
+      "evidence_after": [
+        "reports/greenloop/logs/greenloop-20260328T194333Z/rerun_race2_pytest.log (2 passed in 0.06s)",
+        "reports/greenloop/logs/greenloop-20260328T194333Z/phase3_pytest_shards_rerun.log (ok shard 1-6)"
+      ],
+      "remaining_risk": "Local-vs-remote racing remains intentionally enabled when the top-ranked candidate is local, so future routing-weight changes still need direct golden coverage."
+    }
+  ],
+  "fix_ledger": [
+    {
+      "fix_id": "FX-20260328-001",
+      "summary": "Added build>=1.2 to the dev extra and locked the packaging contract with a regression test so clean greenloop environments can run python -m build without ad hoc packages.",
+      "files_changed": [
+        "pyproject.toml",
+        "tests/test_install_surface_contracts.py"
+      ],
+      "tests_added_or_updated": [
+        "tests/test_install_surface_contracts.py::test_pyproject_dev_extra_covers_build_and_test_tooling"
+      ],
+      "safety_notes": "This only expands the declared proof tooling surface; it does not affect runtime dependency resolution for production-only installs.",
+      "linked_failure_ids": [
+        "GL-20260328-001"
+      ]
+    },
+    {
+      "fix_id": "FX-20260328-002",
+      "summary": "Restricted local-vs-remote racing to cases where the top-ranked candidate is already local, preserving queen-lane ranking truth while keeping the fast local race for local-first envelopes.",
+      "files_changed": [
+        "core/memory_first_router.py"
+      ],
+      "tests_added_or_updated": [
+        "tests/test_model_execution_layer.py::ModelExecutionLayerTests::test_role_aware_summary_execution_prefers_queen_lane",
+        "tests/test_provider_failover.py::ProviderFailoverTests::test_local_remote_race_returns_first_successful_winner"
+      ],
+      "safety_notes": "The final fix preserved the intended provider failover race semantics; the intermediate attempt that disabled races too broadly was rejected and not carried forward.",
+      "linked_failure_ids": [
+        "GL-20260328-002"
+      ]
+    }
+  ],
   "metrics": {
+    "latency": {
+      "p50_ms": 463.0,
+      "p95_ms": 38519.3,
+      "p99_ms": 82754.26,
+      "throughput_per_minute": 7.669
+    },
     "concurrency": {
-      "scaling_efficiency_1_to_2": 0.465,
-      "scaling_efficiency_1_to_4": 0.22,
       "workers_1_success_rate": 1.0,
       "workers_2_success_rate": 1.0,
-      "workers_4_success_rate": 1.0
+      "workers_4_success_rate": 1.0,
+      "scaling_efficiency_1_to_2": 1.161,
+      "scaling_efficiency_1_to_4": 0.883
     },
     "hallucination_and_honesty": {
-      "insufficient_evidence_correct_rate": 1.0,
-      "provenance_completeness_rate": 1.0,
+      "unsupported_claim_rate": 0.0,
       "stale_current_answer_rate": 0.0,
-      "unsupported_claim_rate": 0.0
-    },
-    "latency": {
-      "p50_ms": 457.0,
-      "p95_ms": 8113.0,
-      "p99_ms": 10953.0,
-      "throughput_per_minute": 15.6
+      "insufficient_evidence_correct_rate": 1.0,
+      "provenance_completeness_rate": 1.0
     }
   },
-  "provider_inventory": [
-    {
-      "availability_state": "ready",
-      "locality": "local",
-      "max_safe_concurrency": 1,
-      "model_id": "qwen2.5:14b",
-      "notes": [
-        "Primary local model detected by provider probe."
-      ],
-      "provider_id": "ollama-local:qwen2.5:14b",
-      "role_fit": "primary",
-      "structured_output_support": true
-    },
-    {
-      "availability_state": "ready",
-      "locality": "local",
-      "max_safe_concurrency": 1,
-      "model_id": "qwen2.5:7b",
-      "notes": [
-        "Locked acceptance model and helper lane for local proof."
-      ],
-      "provider_id": "ollama-local:qwen2.5:7b",
-      "role_fit": "helper",
-      "structured_output_support": true
-    },
-    {
-      "availability_state": "needs_config",
-      "locality": "remote",
-      "model_id": "moonshot-v1",
-      "notes": [
-        "Profile is visible only as a configured follow-up; this machine has no KIMI_API_KEY."
-      ],
-      "provider_id": "kimi-remote",
-      "role_fit": "remote_queen",
-      "structured_output_support": true
-    }
-  ],
+  "artifacts": {
+    "summary_md": "reports/greenloop/summary.md",
+    "summary_json": "reports/greenloop/summary.json",
+    "latency_csv": "reports/greenloop/latency.csv",
+    "concurrency_csv": "reports/greenloop/concurrency.csv",
+    "provider_snapshot_json": "reports/greenloop/provider_snapshot.json",
+    "failure_ledger_md": "reports/greenloop/failure_ledger.md",
+    "fix_ledger_md": "reports/greenloop/fix_ledger.md",
+    "logs": [
+      "reports/greenloop/logs/greenloop-20260328T194333Z/phase1_build.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/phase1_v2_dev_install.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/phase1_v2_runtime_install.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/phase1_v2_runtime_imports.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/phase1_v2_entrypoints.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/rerun_packaging_pytest.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/rerun_full_static_ruff.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/rerun_full_static_compileall.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/rerun_full_static_build.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/phase3_pytest_shards.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/rerun_race2_pytest.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/phase3_pytest_shards_rerun.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/phase4_llm_eval_fast.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/phase5_api_server.log",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/phase5_healthz.json",
+      "reports/greenloop/logs/greenloop-20260328T194333Z/phase7_greenloop_concurrency.log",
+      "artifacts/acceptance_runs/llm_eval_live/evidence/NULLA_LOCAL_ACCEPTANCE_REPORT.md"
+    ]
+  },
   "signoff": {
-    "notes": "All required gates in the greenloop checklist are green on commit 15948c7. Remaining risk is mostly proof-tooling and unlanded local slices, not the landed runtime/install/provider surface.",
+    "verdict": "go_with_risk",
+    "risk_level": "medium",
     "required_followups": [
-      "Keep Beta2_Website, the public_hive split, and the runtime_task_rail split out of main until they get isolated proof packs.",
-      "Decouple llm_eval from docs/LLM_ACCEPTANCE_REPORT.md writes during proof runs so clean-checkout acceptance can stamp non-dirty builds.",
-      "If Kimi is meant to be first-class on this machine, configure KIMI_API_KEY and rerun the provider probe and install validator."
+      "Keep the manual standalone API prestart out of future greenloop signoff; the canonical live lane already owns runtime lifecycle.",
+      "Do not rely on the host default Python 3.9.6 for proof work; use the supported 3.11 interpreter or installer-created venv.",
+      "If a clean git worktree proof is required, move docs/LLM_ACCEPTANCE_REPORT.md generation out of the source checkout or run proof from an archive build."
     ],
-    "risk_level": "low",
-    "verdict": "go_with_risk"
+    "notes": "All required gates for this rerun are green, but the proof was executed from a dirty source checkout and only the local qwen2.5:7b runtime lane was exercised live."
   }
 }

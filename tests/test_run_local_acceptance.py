@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import socket
 from pathlib import Path
+from types import SimpleNamespace
 
 import ops.run_local_acceptance as acceptance
 
@@ -244,6 +245,100 @@ def test_resolve_runtime_command_falls_back_for_default_launch_port_when_start_s
     assert "apps.nulla_api_server" in command
     assert "--port" in command
     assert "11435" in command
+
+
+def test_suspend_installed_launch_agent_boots_out_loaded_default_port_on_macos(monkeypatch, tmp_path: Path) -> None:
+    launch_agent_path = tmp_path / "ai.nulla.runtime.plist"
+    launch_agent_path.write_text("<plist/>", encoding="utf-8")
+    (tmp_path / "install_receipt.json").write_text(
+        json.dumps({"launch_agent": {"macos": str(launch_agent_path), "enabled": True}}),
+        encoding="utf-8",
+    )
+    commands: list[list[str]] = []
+
+    def _fake_run(command, **kwargs):
+        commands.append(list(command))
+        if command[:2] == ["launchctl", "print"]:
+            return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(acceptance.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(acceptance.subprocess, "run", _fake_run)
+
+    state = acceptance._suspend_installed_launch_agent(
+        repo_root=tmp_path,
+        base_url="http://127.0.0.1:11435",
+    )
+
+    assert state == {"path": str(launch_agent_path.resolve())}
+    assert commands[0][:2] == ["launchctl", "print"]
+    assert commands[1][:2] == ["launchctl", "bootout"]
+
+
+def test_run_full_acceptance_restores_installed_launch_agent_when_suspended(monkeypatch, tmp_path: Path) -> None:
+    profile = acceptance.load_profile()
+    calls: list[str] = []
+    runtime_home = tmp_path / "runtime_home"
+    workspace_root = tmp_path / "workspace"
+    start_script = tmp_path / "Start_NULLA.sh"
+    start_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    monkeypatch.setattr(acceptance.subprocess, "check_output", lambda *args, **kwargs: "9141b55\n")
+    monkeypatch.setattr(acceptance, "_pick_isolated_daemon_bind_port", lambda **kwargs: 60220)
+    monkeypatch.setattr(acceptance, "_suspend_installed_launch_agent", lambda **kwargs: {"path": "/tmp/ai.nulla.runtime.plist"})
+    monkeypatch.setattr(acceptance, "_restore_installed_launch_agent", lambda state: calls.append(f"restore:{state['path']}"))
+    monkeypatch.setattr(acceptance, "_installed_default_model", lambda repo_root: "qwen2.5:14b")
+    monkeypatch.setattr(acceptance, "_stop_runtime", lambda base_url: calls.append(f"stop:{base_url}"))
+    monkeypatch.setattr(
+        acceptance,
+        "_start_runtime",
+        lambda **kwargs: calls.append(f"start:{kwargs['expected_commit']}:{kwargs['daemon_bind_port']}:{kwargs['model']}") or object(),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "_wait_for_runtime",
+        lambda base_url, *, expected_commit, expected_model, timeout=120.0: calls.append(
+            f"wait:{expected_commit}:{expected_model}:{timeout}"
+        ) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        acceptance.AcceptanceRunner,
+        "run_online",
+        lambda self: _fake_online_payload(commit="9141b55"),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "fetch_manual_btc_verification",
+        lambda **kwargs: {
+            "pass": True,
+            "source": "CoinGecko",
+            "observed": "$70,573.00 at 2026-03-20 23:09 UTC",
+            "assessment": "tight",
+            "acceptance_response": "Bitcoin is $70,576.00 USD.",
+        },
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "run_offline_honesty",
+        lambda *args, **kwargs: {"result": {"latency_seconds": 0.05, "pass": True}},
+    )
+    monkeypatch.setattr(acceptance, "render_report", lambda **kwargs: calls.append("report"))
+
+    exit_code = acceptance.run_full_acceptance(
+        base_url="http://127.0.0.1:11435",
+        repo_root=tmp_path,
+        run_root=tmp_path,
+        profile=profile,
+        runtime_home=runtime_home,
+        workspace_root=workspace_root,
+        start_script=start_script,
+    )
+
+    assert exit_code == 0
+    assert calls.count("report") == 1
+    assert calls.count("start:9141b55:60220:qwen2.5:7b") == 2
+    assert "restore:/tmp/ai.nulla.runtime.plist" in calls
+    assert "wait:9141b55:qwen2.5:14b:180.0" in calls
 
 
 def test_pick_isolated_daemon_bind_port_returns_stream_safe_pair() -> None:

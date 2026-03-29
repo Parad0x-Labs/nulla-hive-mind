@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from core import policy_engine
@@ -37,6 +38,10 @@ _TOOL_LABELS = {
     "discord_post": "Discord posting",
     "telegram_send": "Telegram sending",
 }
+_EXACT_OUTPUT_REQUEST_RE = re.compile(
+    r"\b(?:reply|respond|answer|return)\s+with\s+exactly\s*:?\s*(?P<target>.+?)(?:\s+and\s+nothing\s+else)?[.!?]*\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def normalize_prompt(
@@ -157,9 +162,11 @@ def _build_conversational_request(
     """Build a natural conversational prompt for chat surfaces."""
     persona_name = getattr(persona, "display_name", "NULLA")
     persona_tone = getattr(persona, "tone", "calm")
+    exact_output_target = _extract_exact_output_target(user_text)
     prompt_profile = _chat_system_prompt_profile(
         output_mode=output_mode,
         task_kind=task_kind,
+        exact_output_target=exact_output_target,
     )
 
     tone_guide = {
@@ -169,10 +176,12 @@ def _build_conversational_request(
         "savage": "You are blunt and no-nonsense, but still helpful.",
     }.get(persona_tone, "You are helpful and conversational.")
 
-    context_message = _conversational_context_message(
-        context_result,
-        prompt_profile=prompt_profile,
-    )
+    context_message = None
+    if exact_output_target is None:
+        context_message = _conversational_context_message(
+            context_result,
+            prompt_profile=prompt_profile,
+        )
     source_context = dict(source_context or {})
     source_platform = str(source_context.get("platform", "") or "").strip().lower()
     source_surface = str(source_context.get("surface", "") or "").strip().lower()
@@ -187,7 +196,13 @@ def _build_conversational_request(
     tooling_guidance = ""
     tool_catalog_guidance = ""
 
-    if prompt_profile == "chat_minimal":
+    if prompt_profile == "chat_exact":
+        system_content = (
+            f"You are {persona_name}. "
+            "Return only the exact requested text. "
+            "Do not add quotes, labels, markdown, explanation, or extra punctuation unless it is part of the requested text."
+        )
+    elif prompt_profile == "chat_minimal":
         system_content = (
             f"You are {persona_name}. "
             f"{tone_guide} "
@@ -381,6 +396,7 @@ def _generation_profile(
     normalized_task_kind = str(task_kind or "").strip().lower()
     normalized_output_mode = str(output_mode or "plain_text").strip().lower()
     normalized_task_class = str(task_class or "unknown").strip().lower()
+    exact_output_target = _extract_exact_output_target(user_text)
 
     if normalized_output_mode == "tool_intent":
         return {
@@ -414,6 +430,16 @@ def _generation_profile(
         }
 
     if normalized_output_mode == "plain_text" and normalized_surface in _CHAT_SURFACES:
+        if exact_output_target is not None:
+            return {
+                "profile_id": "chat_exact_plain_text",
+                "profile_family": "chat_exact_plain_text",
+                "temperature": 0.05,
+                "top_p": 0.15,
+                "max_output_tokens": _exact_output_max_tokens(exact_output_target),
+                "adaptive_length": False,
+                "stop_sequences": ["\n"],
+            }
         if normalized_task_class in _PLAIN_TEXT_CHAT_TASK_CLASSES or normalized_task_kind in {"conversation", "normalization_assist"}:
             return {
                 "profile_id": "chat_plain_text",
@@ -459,6 +485,16 @@ def _adaptive_chat_max_output_tokens(
     return max(floor, min(ceiling, requested))
 
 
+def _exact_output_max_tokens(target: str) -> int:
+    clean = " ".join(str(target or "").split()).strip()
+    if not clean:
+        return 24
+    word_count = max(1, len(clean.split()))
+    char_count = len(clean)
+    requested = max(16, min(64, word_count * 4 + max(4, char_count // 12)))
+    return requested
+
+
 def surface_from_platform(source_platform: str) -> str:
     if source_platform in _CHAT_SURFACES:
         return source_platform
@@ -496,12 +532,29 @@ def _conversational_context_message(
     )
 
 
-def _chat_system_prompt_profile(*, output_mode: str, task_kind: str) -> str:
+def _chat_system_prompt_profile(*, output_mode: str, task_kind: str, exact_output_target: str | None = None) -> str:
     normalized_output_mode = str(output_mode or "plain_text").strip().lower()
     normalized_task_kind = str(task_kind or "").strip().lower()
+    if normalized_output_mode == "plain_text" and exact_output_target is not None:
+        return "chat_exact"
     if normalized_output_mode == "plain_text" and normalized_task_kind != "tool_intent":
         return "chat_minimal"
     return "chat_operational"
+
+
+def _extract_exact_output_target(user_text: str) -> str | None:
+    text = " ".join(str(user_text or "").split()).strip()
+    if not text:
+        return None
+    match = _EXACT_OUTPUT_REQUEST_RE.search(text)
+    if not match:
+        return None
+    target = str(match.group("target") or "").strip()
+    if not target:
+        return None
+    if len(target) >= 2 and target[0] == target[-1] and target[0] in {'"', "'", "`"}:
+        target = target[1:-1].strip()
+    return target or None
 
 
 def _conversational_safety_guidance() -> str:

@@ -61,6 +61,7 @@ def test_chat_surface_model_wording_result_facade_delegates_to_extracted_module(
         reason="test_reason",
         model_input="hello",
         fallback_response="fallback",
+        allow_provider_inference=True,
         tool_backing_sources=["web_lookup"],
         response_postprocessor=None,
     )

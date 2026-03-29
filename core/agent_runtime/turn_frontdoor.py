@@ -136,6 +136,7 @@ def handle_turn_frontdoor(
                         credit_snapshot=credit_status,
                     ),
                     fallback_response=credit_status,
+                    allow_provider_inference=False,
                 )
             }
         return {
@@ -269,7 +270,8 @@ def handle_turn_frontdoor(
                     response_class=agent.ResponseClass.GENERIC_CONVERSATION,
                     reason="evaluative_conversation_model_wording",
                     model_input=effective_input,
-                    fallback_response="I couldn't produce a grounded conversational reply in this run.",
+                    fallback_response=evaluative,
+                    allow_provider_inference=False,
                 )
             }
         return {
@@ -317,11 +319,8 @@ def handle_turn_frontdoor(
                         user_input=effective_input,
                         phrase=smalltalk_phrase,
                     ),
-                    fallback_response=(
-                        "I couldn't produce a grounded help reply in this run."
-                        if is_help_prompt
-                        else "I couldn't produce a grounded conversational reply in this run."
-                    ),
+                    fallback_response=smalltalk,
+                    allow_provider_inference=False,
                 )
             }
         return {

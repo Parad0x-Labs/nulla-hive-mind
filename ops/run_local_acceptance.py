@@ -26,6 +26,7 @@ def _repo_root() -> Path:
 REPO_ROOT = _repo_root()
 DEFAULT_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_qwen25_7b_profile.json"
 DEFAULT_START_SCRIPT = REPO_ROOT / "run.sh"
+DEFAULT_RUNTIME_LAUNCH_AGENT_LABEL = "ai.nulla.runtime"
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,96 @@ def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _install_receipt(repo_root: Path) -> dict[str, Any]:
+    payload = _read_json_if_exists(repo_root / "install_receipt.json")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _installed_launch_agent_path(repo_root: Path) -> Path | None:
+    launch_agent = dict(_install_receipt(repo_root).get("launch_agent") or {})
+    candidate = str(launch_agent.get("macos") or "").strip()
+    if not candidate:
+        return None
+    try:
+        return Path(candidate).expanduser().resolve()
+    except Exception:
+        return None
+
+
+def _installed_default_model(repo_root: Path) -> str:
+    receipt = _install_receipt(repo_root)
+    selected = str(receipt.get("selected_model") or "").strip()
+    if selected:
+        return selected
+    install_profile = dict(receipt.get("install_profile") or {})
+    selected = str(install_profile.get("selected_model") or "").strip()
+    return selected or "qwen2.5:7b"
+
+
+def _launch_agent_label(path: Path | None) -> str:
+    if path is None:
+        return DEFAULT_RUNTIME_LAUNCH_AGENT_LABEL
+    if path.suffix == ".plist":
+        return path.stem or DEFAULT_RUNTIME_LAUNCH_AGENT_LABEL
+    return path.name or DEFAULT_RUNTIME_LAUNCH_AGENT_LABEL
+
+
+def _launch_agent_loaded(path: Path) -> bool:
+    label = _launch_agent_label(path)
+    domain = f"gui/{os.getuid()}/{label}"
+    result = subprocess.run(
+        ["launchctl", "print", domain],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _suspend_installed_launch_agent(*, repo_root: Path, base_url: str) -> dict[str, str] | None:
+    if platform.system().lower() != "darwin":
+        return None
+    bind_host, bind_port = _runtime_endpoint_parts(base_url)
+    if bind_host != "127.0.0.1" or bind_port != 11435:
+        return None
+    launch_agent_path = _installed_launch_agent_path(repo_root)
+    if launch_agent_path is None or not launch_agent_path.exists():
+        return None
+    if not _launch_agent_loaded(launch_agent_path):
+        return None
+    subprocess.run(
+        ["launchctl", "bootout", f"gui/{os.getuid()}", str(launch_agent_path)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return {"path": str(launch_agent_path)}
+
+
+def _restore_installed_launch_agent(state: dict[str, str] | None) -> None:
+    if not state or platform.system().lower() != "darwin":
+        return
+    path_text = str(state.get("path") or "").strip()
+    if not path_text:
+        return
+    launch_agent_path = Path(path_text).expanduser().resolve()
+    if not launch_agent_path.exists():
+        return
+    result = subprocess.run(
+        ["launchctl", "bootstrap", f"gui/{os.getuid()}", str(launch_agent_path)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if result.returncode != 0:
+        subprocess.run(
+            ["launchctl", "load", "-w", str(launch_agent_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
 
 
 def _expected_repo_commit(repo_root: Path) -> str:
@@ -708,18 +799,33 @@ def _current_health(base_url: str) -> dict[str, Any] | None:
 
 
 def _stop_runtime(base_url: str) -> None:
+    deadline = time.time() + 30.0
+    last_pid = 0
+    while time.time() < deadline:
+        health = _current_health(base_url)
+        if health is None:
+            return
+        pid = int(dict(health.get("runtime") or {}).get("pid") or 0) if isinstance(health, dict) else 0
+        if pid > 0 and pid != last_pid:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            last_pid = pid
+        time.sleep(0.5)
     health = _current_health(base_url)
     pid = int(dict(health.get("runtime") or {}).get("pid") or 0) if isinstance(health, dict) else 0
-    if pid > 0:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
+    if pid <= 0:
+        return
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    kill_deadline = time.time() + 5.0
+    while time.time() < kill_deadline:
+        if _current_health(base_url) is None:
             return
-        deadline = time.time() + 30.0
-        while time.time() < deadline:
-            if _current_health(base_url) is None:
-                return
-            time.sleep(0.5)
+        time.sleep(0.5)
 
 
 def _wait_for_runtime(base_url: str, *, expected_commit: str, expected_model: str, timeout: float = 120.0) -> dict[str, Any]:
@@ -793,6 +899,7 @@ def run_full_acceptance(
     _preserve_previous_run_artifacts(run_root=run_root, profile=profile)
     expected_commit = _expected_repo_commit(repo_root)
     daemon_bind_port = _pick_isolated_daemon_bind_port(host="127.0.0.1")
+    suspended_launch_agent = _suspend_installed_launch_agent(repo_root=repo_root, base_url=base_url)
     _stop_runtime(base_url)
     _start_runtime(
         repo_root=repo_root,
@@ -835,17 +942,26 @@ def run_full_acceptance(
     finally:
         _clear_offline_policy_override(runtime_home)
         _stop_runtime(base_url)
-        _start_runtime(
-            repo_root=repo_root,
-            base_url=base_url,
-            run_root=run_root,
-            runtime_home=runtime_home,
-            workspace_root=workspace_root,
-            model=profile.model,
-            start_script=start_script,
-            expected_commit=expected_commit,
-            daemon_bind_port=daemon_bind_port,
-        )
+        if suspended_launch_agent is not None:
+            _restore_installed_launch_agent(suspended_launch_agent)
+            _wait_for_runtime(
+                base_url,
+                expected_commit=expected_commit,
+                expected_model=_installed_default_model(repo_root),
+                timeout=180.0,
+            )
+        else:
+            _start_runtime(
+                repo_root=repo_root,
+                base_url=base_url,
+                run_root=run_root,
+                runtime_home=runtime_home,
+                workspace_root=workspace_root,
+                model=profile.model,
+                start_script=start_script,
+                expected_commit=expected_commit,
+                daemon_bind_port=daemon_bind_port,
+            )
     render_report(
         repo_root=repo_root,
         online_payload=online_payload,

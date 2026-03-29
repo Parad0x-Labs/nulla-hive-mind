@@ -19,10 +19,13 @@ def _print_prewarm_results(results: tuple[dict[str, object], ...]) -> None:
             keep_alive = str(result.get("keep_alive") or "").strip() or "unspecified"
             print(f" - {provider_id}: prewarmed (keep_alive={keep_alive})")
             continue
-        if result.get("ok") and status == "warming_background":
+        if result.get("ok") and status == "timed_out":
             keep_alive = str(result.get("keep_alive") or "").strip() or "unspecified"
             reason = str(result.get("reason") or "unspecified").strip() or "unspecified"
-            print(f" - {provider_id}: warming in background (keep_alive={keep_alive}, reason={reason})")
+            print(
+                f" - {provider_id}: prewarm timed out; continuing without background warming "
+                f"(keep_alive={keep_alive}, reason={reason})"
+            )
             continue
         if result.get("ok"):
             reason = str(result.get("reason") or "unspecified").strip() or "unspecified"
