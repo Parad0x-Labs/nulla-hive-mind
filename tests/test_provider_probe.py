@@ -9,7 +9,7 @@ from core.provider_routing import ProviderCapabilityTruth
 from installer.provider_probe import build_probe_report, list_ollama_models, remote_env_statuses, render_probe_report
 
 
-def test_probe_report_prefers_dual_local_stack_on_24gb_host_with_required_models() -> None:
+def test_probe_report_prefers_single_local_stack_on_24gb_mps_host_with_required_models() -> None:
     report = build_probe_report(
         machine=MachineProbe(cpu_cores=10, ram_gb=24.0, gpu_name="Apple Silicon", vram_gb=24.0, accelerator="mps"),
         ollama_binary="/usr/local/bin/ollama",
@@ -25,14 +25,20 @@ def test_probe_report_prefers_dual_local_stack_on_24gb_host_with_required_models
         },
     )
 
-    assert report["recommended_stack_id"] == "local_dual_ollama"
-    assert report["recommended_install_profile_id"] == "local-max"
-    assert report["recommended_install_profile_display_id"] == "ollama-max (local-max)"
+    assert report["recommended_stack_id"] == "local_only"
+    assert report["recommended_install_profile_id"] == "local-only"
+    assert report["recommended_install_profile_display_id"] == "ollama-only (local-only)"
     assert report["local_multi_llm_fit"] == "pressure_sensitive"
+    local_only = next(item for item in report["stacks"] if item["stack_id"] == "local_only")
+    assert local_only["install_profile_id"] == "local-only"
+    assert local_only["install_profile_display_id"] == "ollama-only (local-only)"
+    assert local_only["status"] == "ready"
+    assert local_only["recommended"] is True
     dual = next(item for item in report["stacks"] if item["stack_id"] == "local_dual_ollama")
     assert dual["install_profile_id"] == "local-max"
     assert dual["install_profile_display_id"] == "ollama-max (local-max)"
     assert dual["status"] == "ready"
+    assert dual["recommended"] is False
 
 
 def test_probe_report_marks_kimi_and_tether_lanes_real_but_leaves_qvac_honest() -> None:

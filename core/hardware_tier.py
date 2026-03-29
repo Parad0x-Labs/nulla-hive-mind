@@ -3,12 +3,21 @@
 Probes GPU VRAM, system RAM, and CPU cores, then picks the heaviest
 Qwen variant the machine can comfortably run via Ollama.
 
-Tier ladder (all Apache-2.0 Qwen family):
+Baseline tier ladder (all Apache-2.0 Qwen family):
   titan   – qwen2.5:72b   (needs ≥48 GB VRAM or ≥80 GB RAM)
   heavy   – qwen2.5:32b   (needs ≥20 GB VRAM or ≥48 GB RAM)
   mid     – qwen2.5:14b   (needs ≥10 GB VRAM or ≥24 GB RAM)
   base    – qwen2.5:7b    (needs ≥4 GB VRAM  or ≥12 GB RAM)
   lite    – qwen2.5:3b    (needs ≥2 GB VRAM  or ≥6 GB RAM)
+  nano    – qwen2.5:0.5b  (anything else)
+
+Apple Silicon uses unified memory, so the effective thresholds are more
+conservative:
+  titan   – qwen2.5:72b   (needs ≥96 GB RAM)
+  heavy   – qwen2.5:32b   (needs ≥64 GB RAM)
+  mid     – qwen2.5:14b   (needs ≥36 GB RAM)
+  base    – qwen2.5:7b    (needs ≥12 GB RAM)
+  lite    – qwen2.5:3b    (needs ≥6 GB RAM)
   nano    – qwen2.5:0.5b  (anything else)
 """
 
@@ -46,6 +55,15 @@ TIERS: list[QwenTier] = [
     QwenTier("nano",  "qwen2.5:0.5b",  0.5,  0.0,  0.0),
 ]
 
+MPS_TIERS: list[QwenTier] = [
+    QwenTier("titan", "qwen2.5:72b",  72.0, 48.0, 96.0),
+    QwenTier("heavy", "qwen2.5:32b",  32.0, 20.0, 64.0),
+    QwenTier("mid",   "qwen2.5:14b",  14.0, 10.0, 36.0),
+    QwenTier("base",  "qwen2.5:7b",    7.0,  4.0, 12.0),
+    QwenTier("lite",  "qwen2.5:3b",    3.0,  2.0,  6.0),
+    QwenTier("nano",  "qwen2.5:0.5b",  0.5,  0.0,  0.0),
+]
+
 
 def probe_machine() -> MachineProbe:
     cpu_cores = os.cpu_count() or 2
@@ -72,13 +90,15 @@ def select_qwen_tier(probe: MachineProbe | None = None) -> QwenTier:
     if probe is None:
         probe = probe_machine()
 
-    # Apple Silicon reports unified memory, not dedicated VRAM. Treating the
-    # full RAM pool like discrete GPU VRAM over-selects models and can stall
-    # startup on 24 GB hosts by choosing 32B when 14B is the realistic tier.
-    use_vram_thresholds = str(probe.accelerator or "").strip().lower() != "mps"
+    normalized_accelerator = str(probe.accelerator or "").strip().lower()
+    if normalized_accelerator == "mps":
+        for tier in MPS_TIERS:
+            if probe.ram_gb >= tier.min_ram_gb:
+                return tier
+        return MPS_TIERS[-1]
 
     for tier in TIERS:
-        if use_vram_thresholds and probe.vram_gb is not None and probe.vram_gb >= tier.min_vram_gb:
+        if probe.vram_gb is not None and probe.vram_gb >= tier.min_vram_gb:
             return tier
         if probe.ram_gb >= tier.min_ram_gb:
             return tier
