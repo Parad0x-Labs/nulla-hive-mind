@@ -211,7 +211,35 @@ download_and_extract() {
   verify_archive_checksum "${archive_path}"
 
   say "Extracting to ${INSTALL_DIR}"
-  tar -xzf "${archive_path}" --strip-components=1 -C "${INSTALL_DIR}"
+  local -a tar_args=(-xzf "${archive_path}" -C "${INSTALL_DIR}")
+  if archive_has_common_root "${archive_path}"; then
+    tar_args+=(--strip-components=1)
+  fi
+  tar "${tar_args[@]}"
+}
+
+
+archive_has_common_root() {
+  local archive_path="$1"
+  local common_root=""
+  local entry=""
+  while IFS= read -r entry; do
+    entry="${entry#./}"
+    [[ -n "${entry}" ]] || continue
+    [[ "${entry}" != "/" ]] || continue
+    local first_component="${entry%%/*}"
+    if [[ "${entry}" == "${first_component}" ]]; then
+      return 1
+    fi
+    if [[ -z "${common_root}" ]]; then
+      common_root="${first_component}"
+      continue
+    fi
+    if [[ "${first_component}" != "${common_root}" ]]; then
+      return 1
+    fi
+  done < <(tar -tzf "${archive_path}")
+  [[ -n "${common_root}" ]]
 }
 
 

@@ -22,6 +22,7 @@ def test_shell_bootstrap_falls_back_to_canonical_installer() -> None:
     assert 'resolve_archive_commit() {' in script
     assert 'write_build_metadata() {' in script
     assert 'json_bool_or_null() {' in script
+    assert 'archive_has_common_root() {' in script
     assert 'config/build-source.json' in script
     assert '--source-commit <sha>' in script
     assert '--source-dirty <bool>' in script
@@ -37,6 +38,52 @@ def test_shell_bootstrap_falls_back_to_canonical_installer() -> None:
     assert 'exec_with_profile_args "${canonical}" --yes --start --openclaw default' in script
     assert 'exec_with_profile_args "${canonical}" --yes --openclaw default' in script
     assert 'no usable installer entrypoint was found' in script
+
+
+def test_shell_bootstrap_handles_flat_git_archive_without_stripping_root_files(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    install_dir = tmp_path / "install"
+    marker_path = tmp_path / "launcher_args.txt"
+    archive_path = tmp_path / "nulla-flat-bootstrap.tar.gz"
+
+    source_root.mkdir(parents=True)
+    (source_root / "Install_And_Run_NULLA.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f'printf "%s\\n" "$@" > "{marker_path}"\n',
+        encoding="utf-8",
+    )
+    (source_root / "Install_And_Run_NULLA.sh").chmod(0o755)
+    installer_dir = source_root / "installer"
+    installer_dir.mkdir()
+    (installer_dir / "install_nulla.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "exit 99\n",
+        encoding="utf-8",
+    )
+    (installer_dir / "install_nulla.sh").chmod(0o755)
+
+    with tarfile.open(archive_path, "w:gz") as tar:
+        tar.add(source_root / "Install_And_Run_NULLA.sh", arcname="Install_And_Run_NULLA.sh")
+        tar.add(installer_dir, arcname="installer")
+
+    subprocess.run(
+        [
+            "bash",
+            str(PROJECT_ROOT / "installer" / "bootstrap_nulla.sh"),
+            "--archive-url",
+            archive_path.resolve().as_uri(),
+            "--dir",
+            str(install_dir),
+        ],
+        check=True,
+        cwd=PROJECT_ROOT,
+    )
+
+    assert marker_path.exists()
+    assert (install_dir / "Install_And_Run_NULLA.sh").exists()
+    assert (install_dir / "installer" / "install_nulla.sh").exists()
 
 
 def test_powershell_bootstrap_falls_back_to_canonical_installer() -> None:
