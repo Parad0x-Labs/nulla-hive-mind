@@ -22,6 +22,7 @@ _IGNORED_DIRS = {
 
 _IGNORED_KEY_ARTIFACT_ROOTS = (
     Path("artifacts/acceptance_runs"),
+    Path("reports/greenloop"),
 )
 
 _LEGACY_ROOT_DOCS = {

@@ -48,6 +48,7 @@ install_doctor.json
 
 # Explicit guardrail: internal handovers must stay local-only.
 # Never put sensitive/operator handovers under docs/ or any tracked path.
+HANDOVER_*.md
 memory/HANDOVER_*.md
 memory/INTERNAL_TAKEOVER*.md
 memory/*TAKEOVER*.md
@@ -134,5 +135,15 @@ data/owner_identity.json
 
 # Generated evaluation outputs
 artifacts/acceptance_runs/
+artifacts/live_debug_workspace_acceptance_regressions*/
 reports/llm_eval/latest/
 reports/llm_eval/baselines/
+
+# Generated local proof and operator replay outputs
+.codex-skill-staging/
+reports/greenloop/concurrency.json
+reports/greenloop/live_acceptance*/
+reports/greenloop/logs/healthz_*.json
+reports/greenloop/logs/concurrency_probe.json
+reports/greenloop/operator_replay/
+reports/greenloop/start_greenloop_runtime.sh
