@@ -262,10 +262,19 @@ def cmd_install_profile(*, set_profile: str = "", json_mode: bool = False) -> in
                 print(message)
             return 2
         saved_profile = profile.profile_id
+        record_kwargs = {
+            "selected_model": profile.selected_model,
+        }
+        if profile.selected_models:
+            record_kwargs["selected_models"] = profile.selected_models
+        if profile.bundle_id:
+            record_kwargs["bundle_id"] = profile.bundle_id
+        if profile.bundle_kind:
+            record_kwargs["bundle_kind"] = profile.bundle_kind
         record_path = persist_install_profile_record(
             runtime_home,
             saved_profile,
-            selected_model=profile.selected_model,
+            **record_kwargs,
         )
         if json_mode:
             print(
@@ -287,6 +296,8 @@ def cmd_install_profile(*, set_profile: str = "", json_mode: bool = False) -> in
             print(f"Install profile saved: {format_install_profile_id(saved_profile, allow_auto=False)}")
             print(f"Resolved profile:     {format_install_profile_id(profile.profile_id, allow_auto=False)} ({profile.label})")
             print(f"Summary:              {profile.summary}")
+            if profile.selected_models:
+                print(f"Bundle models:        {', '.join(profile.selected_models)}")
             print(f"Record:               {record_path}")
             print("Next step:            Restart NULLA to apply the new provider mix.")
         return 0
@@ -323,6 +334,15 @@ def cmd_install_profile(*, set_profile: str = "", json_mode: bool = False) -> in
     print(
         f"Recommended default: {format_install_profile_id(install_recommendation.recommended_default_profile, allow_auto=False)}"
     )
+    bundle_models = ", ".join(install_recommendation.recommended_bundle_models)
+    if bundle_models:
+        print(
+            f"Recommended bundle:  {install_recommendation.recommended_bundle_id} "
+            f"({install_recommendation.recommended_bundle_kind}) -> {bundle_models}"
+        )
+    fallback_models = ", ".join(install_recommendation.fallback_bundle_models)
+    if fallback_models:
+        print(f"Lighter fallback:    {install_recommendation.fallback_bundle_id} -> {fallback_models}")
     optional_profile_display = format_install_profile_id(
         install_recommendation.recommended_optional_profile,
         allow_auto=False,

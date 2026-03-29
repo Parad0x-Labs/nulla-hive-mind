@@ -23,10 +23,16 @@ def smalltalk_model_input(agent: Any, *, user_input: str, phrase: str) -> str:
         return (
             f"{user_input}\n\n"
             "Ground your reply in currently wired runtime capabilities only. "
-            "Do not imply unsupported abilities.\n\n"
+            "Do not imply unsupported abilities. "
+            "Keep it crisp and operator-facing. "
+            "Do not drift into generic customer-support phrasing.\n\n"
             f"{capability_summary}"
         )
-    return str(user_input or "").strip()
+    return (
+        f"{str(user_input or '').strip()}\n\n"
+        "Reply like a sharp local companion. Keep it brief, natural, and grounded in this runtime. "
+        "Do not use canned system-status slogans, generic assistant filler, or capability speeches."
+    ).strip()
 
 
 def observation_prompt(

@@ -18,7 +18,7 @@ from apps.nulla_agent import NullaAgent
 from apps.nulla_daemon import DaemonConfig, NullaDaemon
 from core import policy_engine
 from core.compute_mode import ComputeModeDaemon
-from core.hardware_tier import probe_machine, select_qwen_tier
+from core.hardware_tier import probe_machine
 from core.identity_manager import load_active_persona
 from core.local_worker_pool import resolve_local_worker_capacity
 from core.model_registry import ModelRegistry
@@ -32,7 +32,7 @@ from core.public_hive_bridge import ensure_public_hive_auth
 from core.release_channel import release_manifest_snapshot
 from core.runtime_bootstrap import bootstrap_runtime_mode
 from core.runtime_paths import active_config_home_dir, resolve_workspace_root
-from core.runtime_provider_defaults import ensure_default_runtime_providers
+from core.runtime_provider_defaults import default_runtime_model_tag, ensure_default_runtime_providers
 from core.runtime_task_events import (
     new_runtime_event_stream_id,
     register_runtime_event_sink,
@@ -55,8 +55,10 @@ class RuntimeServices:
     agent: NullaAgent | None = None
     daemon: NullaDaemon | None = None
     display_name: str = "NULLA"
-    runtime_model_tag: str = "qwen2.5:7b"
-    runtime_parameter_size: str = "7B"
+    runtime_model_tag: str = field(default_factory=default_runtime_model_tag)
+    runtime_parameter_size: str = field(
+        default_factory=lambda: parameter_size_for_model(default_runtime_model_tag())
+    )
     runtime_started_at: str = ""
     runtime_version_stamp: dict[str, Any] = field(default_factory=dict)
     public_hive_auth: dict[str, Any] = field(default_factory=dict)
@@ -205,7 +207,8 @@ def build_runtime_version_stamp(*, project_root: Path, runtime_model_tag: str, w
     }
 
 
-def ensure_ollama_model(model_tag: str = "qwen2.5:7b") -> None:
+def ensure_ollama_model(model_tag: str | None = None) -> None:
+    active_model = str(model_tag or "").strip() or default_runtime_model_tag()
     try:
         result = subprocess.run(
             ["ollama", "list"],
@@ -213,20 +216,27 @@ def ensure_ollama_model(model_tag: str = "qwen2.5:7b") -> None:
             text=True,
             timeout=10,
         )
-        if model_tag in result.stdout:
+        if active_model in result.stdout:
             return
     except Exception:
         pass
-    logger.info("Ollama model '%s' missing — pulling now (this may take a few minutes on first run)...", model_tag)
+    logger.info(
+        "Ollama model '%s' missing — pulling now (this may take a few minutes on first run)...",
+        active_model,
+    )
     try:
         subprocess.run(
-            ["ollama", "pull", model_tag],
+            ["ollama", "pull", active_model],
             timeout=1200,
             capture_output=True,
         )
-        logger.info("Ollama model '%s' pulled successfully.", model_tag)
+        logger.info("Ollama model '%s' pulled successfully.", active_model)
     except Exception as exc:
-        logger.warning("Failed to pull Ollama model '%s': %s — LLM responses will fall back to planning mode.", model_tag, exc)
+        logger.warning(
+            "Failed to pull Ollama model '%s': %s — LLM responses will fall back to planning mode.",
+            active_model,
+            exc,
+        )
 
 
 def ensure_default_provider(registry: ModelRegistry, model_tag: str) -> None:
@@ -346,11 +356,15 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
             logger.warning("Public Hive auth is not wired for writes: %s", auth_status)
 
     probe = probe_machine()
-    tier = select_qwen_tier(probe)
-    runtime_model_tag = tier.ollama_tag
+    runtime_model_tag = env_text("NULLA_OLLAMA_MODEL", default_runtime_model_tag())
     runtime_parameter_size = parameter_size_for_model(runtime_model_tag)
     ensure_ollama_model(runtime_model_tag)
-    logger.info("Hardware: %s | GPU: %s | Model tier: %s", probe.accelerator, probe.gpu_name or "none", tier.ollama_tag)
+    logger.info(
+        "Hardware: %s | GPU: %s | Primary local model: %s",
+        probe.accelerator,
+        probe.gpu_name or "none",
+        runtime_model_tag,
+    )
     runtime_version_stamp = build_runtime_version_stamp(
         project_root=project_root,
         runtime_model_tag=runtime_model_tag,

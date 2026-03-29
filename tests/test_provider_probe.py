@@ -9,13 +9,13 @@ from core.provider_routing import ProviderCapabilityTruth
 from installer.provider_probe import build_probe_report, list_ollama_models, remote_env_statuses, render_probe_report
 
 
-def test_probe_report_prefers_single_local_stack_on_24gb_mps_host_with_required_models() -> None:
+def test_probe_report_prefers_bundle_local_stack_on_24gb_mps_host_with_required_models() -> None:
     report = build_probe_report(
         machine=MachineProbe(cpu_cores=10, ram_gb=24.0, gpu_name="Apple Silicon", vram_gb=24.0, accelerator="mps"),
         ollama_binary="/usr/local/bin/ollama",
         ollama_models=[
-            {"name": "qwen2.5:14b", "id": "a", "size": "9.0 GB", "modified": "today"},
-            {"name": "qwen2.5:7b", "id": "b", "size": "4.7 GB", "modified": "today"},
+            {"name": "qwen3:8b", "id": "a", "size": "5.2 GB", "modified": "today"},
+            {"name": "deepseek-r1:8b", "id": "b", "size": "5.2 GB", "modified": "today"},
         ],
         env_statuses={
             "kimi": {"configured": False},
@@ -29,15 +29,19 @@ def test_probe_report_prefers_single_local_stack_on_24gb_mps_host_with_required_
     assert report["recommended_install_profile_id"] == "local-only"
     assert report["recommended_install_profile_display_id"] == "ollama-only (local-only)"
     assert report["local_multi_llm_fit"] == "pressure_sensitive"
+    assert report["capacity_bucket"] == "C"
     local_only = next(item for item in report["stacks"] if item["stack_id"] == "local_only")
     assert local_only["install_profile_id"] == "local-only"
     assert local_only["install_profile_display_id"] == "ollama-only (local-only)"
     assert local_only["status"] == "ready"
     assert local_only["recommended"] is True
+    assert local_only["bundle_id"] == "dual_qwen3_8b_deepseek_r1_8b"
     recommendation = report["install_recommendation"]
     assert recommendation["recommended_default_profile"] == "local-only"
     assert recommendation["recommended_optional_profile"] == "local-max"
-    assert recommendation["primary_local_model"] == "qwen2.5:7b"
+    assert recommendation["primary_local_model"] == "qwen3:8b"
+    assert recommendation["recommended_bundle_id"] == "dual_qwen3_8b_deepseek_r1_8b"
+    assert recommendation["recommended_bundle_models"] == ["qwen3:8b", "deepseek-r1:8b"]
     assert recommendation["secondary_local_model"] == "qwen2.5:14b-gguf"
     assert recommendation["secondary_local_supported"] is True
     dual = next(item for item in report["stacks"] if item["stack_id"] == "local_plus_llamacpp")
@@ -189,7 +193,7 @@ def test_render_probe_report_surfaces_installed_models_and_recommendation() -> N
     rendered = render_probe_report(report)
     assert "recommended install profile" in rendered.lower()
     assert "recommended stack" in rendered.lower()
-    assert "qwen2.5:7b" in rendered
+    assert "gemma3:4b" in rendered
     assert "ollama-only (local-only)" in rendered
     assert "local_plus_llamacpp" in rendered
     assert "local_plus_remote_openai_compatible" not in rendered

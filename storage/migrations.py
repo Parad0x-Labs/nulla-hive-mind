@@ -1246,6 +1246,7 @@ def _utcnow() -> str:
 def run_migrations(db_path=None) -> None:
     conn = get_connection(db_path) if db_path is not None else get_connection()
     try:
+        _preflight_legacy_schema_sql_tables(conn)
         conn.executescript(SCHEMA_SQL)
 
         # Dynamic patches for existing tables:
@@ -1466,6 +1467,46 @@ def run_migrations(db_path=None) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def _table_exists(conn, table: str) -> bool:
+    _SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    if not _SAFE_IDENT.match(table):
+        raise ValueError(f"Unsafe SQL identifier: table={table!r}")
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
+def _preflight_legacy_schema_sql_tables(conn) -> None:
+    """Patch very old local DB shapes before SCHEMA_SQL adds dependent indexes.
+
+    Some long-lived local runtime homes still carry a `peer_endpoints` table from
+    before the verification/proof columns existed. SCHEMA_SQL now creates indexes
+    over those columns, so the bootstrap must add the missing columns first or the
+    schema script dies before the normal dynamic patch/rebuild path can run.
+    """
+
+    if _table_exists(conn, "peer_endpoints"):
+        _add_column_if_missing(conn, "peer_endpoints", "last_verified_at", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "verification_kind", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "proof_count", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, "peer_endpoints", "proof_message_id", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "proof_message_type", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "proof_hash", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "proof_timestamp", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "last_delivery_attempt_at", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "last_delivery_success_at", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "last_delivery_failure_at", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoints", "consecutive_delivery_failures", "INTEGER NOT NULL DEFAULT 0")
+    if _table_exists(conn, "peer_endpoint_observations"):
+        _add_column_if_missing(conn, "peer_endpoint_observations", "proof_signature", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoint_observations", "proof_timestamp", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoint_observations", "first_verified_at", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoint_observations", "last_verified_at", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "peer_endpoint_observations", "proof_count", "INTEGER NOT NULL DEFAULT 0")
 
 def _add_column_if_missing(conn, table: str, column: str, type_def: str) -> None:
     _SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")

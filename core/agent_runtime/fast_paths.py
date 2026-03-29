@@ -53,8 +53,10 @@ first_live_quote = agent_fast_live_info.first_live_quote
 render_weather_response = agent_fast_live_info.render_weather_response
 render_news_response = agent_fast_live_info.render_news_response
 unresolved_price_lookup_response = agent_fast_live_info.unresolved_price_lookup_response
+looks_like_grounded_price_lookup = agent_fast_live_info.looks_like_grounded_price_lookup
 notes_include_grounded_price_signal = agent_fast_live_info.notes_include_grounded_price_signal
 extract_price_lookup_subject = agent_fast_live_info.extract_price_lookup_subject
+recover_price_lookup_query = agent_fast_live_info.recover_price_lookup_query
 live_info_failure_text = agent_fast_live_info.live_info_failure_text
 
 
@@ -78,6 +80,7 @@ __all__ = [
     "looks_like_exact_workspace_readback_request",
     "looks_like_explicit_workspace_file_request",
     "looks_like_generic_workspace_bootstrap_request",
+    "looks_like_grounded_price_lookup",
     "looks_like_malformed_time_followup",
     "looks_like_personalized_plan_request",
     "looks_like_safe_machine_write_request",
@@ -91,6 +94,7 @@ __all__ = [
     "normalize_live_info_query",
     "notes_include_grounded_price_signal",
     "recent_utility_context",
+    "recover_price_lookup_query",
     "render_companion_continuation_response",
     "render_live_info_response",
     "render_news_response",

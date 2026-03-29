@@ -406,16 +406,23 @@ persist_install_profile_record() {
   local runtime_home="$1"
   local install_profile="$2"
   local model_tag="$3"
-  "${VENV_DIR}/bin/python" - "$runtime_home" "$install_profile" "$model_tag" <<'PY' >/dev/null 2>&1 || true
+  local selected_models_csv="${4:-}"
+  local bundle_id="${5:-}"
+  local bundle_kind="${6:-}"
+  "${VENV_DIR}/bin/python" - "$runtime_home" "$install_profile" "$model_tag" "$selected_models_csv" "$bundle_id" "$bundle_kind" <<'PY' >/dev/null 2>&1 || true
 from pathlib import Path
 import json
 import sys
 
 runtime_home = Path(sys.argv[1]).expanduser().resolve()
+selected_models = [item.strip() for item in str(sys.argv[4]).split(",") if item.strip()]
 payload = {
     "schema": "nulla.install_profile_record.v1",
     "profile_id": str(sys.argv[2]).strip(),
     "selected_model": str(sys.argv[3]).strip(),
+    "selected_models": selected_models,
+    "bundle_id": str(sys.argv[5]).strip(),
+    "bundle_kind": str(sys.argv[6]).strip(),
 }
 target = runtime_home / "config" / "install-profile.json"
 target.parent.mkdir(parents=True, exist_ok=True)
@@ -463,10 +470,9 @@ detect_model_tag() {
     return
   fi
   (cd "${PROJECT_ROOT}" && "${VENV_DIR}/bin/python" -c "
-from core.hardware_tier import probe_machine, select_qwen_tier, tier_summary
-summary = tier_summary()
-print(summary['ollama_model'])
-") 2>/dev/null || echo "qwen2.5:7b"
+from core.install_recommendations import build_install_recommendation_truth
+print(build_install_recommendation_truth().primary_local_model)
+") 2>/dev/null || echo "qwen3:8b"
 }
 
 
@@ -475,7 +481,7 @@ detect_hardware_summary() {
 import json
 from core.hardware_tier import tier_summary
 print(json.dumps(tier_summary(), ensure_ascii=False))
-") 2>/dev/null || echo '{"selected_tier":"base","ollama_model":"qwen2.5:7b"}'
+") 2>/dev/null || echo '{"selected_tier":"base","ollama_model":"qwen3:8b"}'
 }
 
 
@@ -535,7 +541,6 @@ from core.install_recommendations import build_install_recommendation_truth
 from core.runtime_install_profiles import format_install_profile_id
 
 recommendation = build_install_recommendation_truth(
-    selected_model='${model_tag}',
     runtime_home='${runtime_home}',
 )
 fields = {
@@ -544,6 +549,12 @@ fields = {
     'RECOMMENDED_OPTIONAL_PROFILE': recommendation.recommended_optional_profile,
     'RECOMMENDED_OPTIONAL_PROFILE_DISPLAY': format_install_profile_id(recommendation.recommended_optional_profile, allow_auto=False),
     'PRIMARY_LOCAL_MODEL': recommendation.primary_local_model,
+    'CAPACITY_BUCKET': recommendation.capacity_bucket,
+    'RECOMMENDED_BUNDLE_ID': recommendation.recommended_bundle_id,
+    'RECOMMENDED_BUNDLE_KIND': recommendation.recommended_bundle_kind,
+    'RECOMMENDED_BUNDLE_MODELS': ','.join(recommendation.recommended_bundle_models),
+    'FALLBACK_BUNDLE_ID': recommendation.fallback_bundle_id,
+    'FALLBACK_BUNDLE_MODELS': ','.join(recommendation.fallback_bundle_models),
     'SECONDARY_LOCAL_MODEL': recommendation.secondary_local_model,
     'SECONDARY_LOCAL_SUPPORTED': '1' if recommendation.secondary_local_supported else '0',
     'SECONDARY_LOCAL_BACKEND': recommendation.secondary_local_backend,
@@ -555,7 +566,13 @@ RECOMMENDED_DEFAULT_PROFILE=local-only
 RECOMMENDED_DEFAULT_PROFILE_DISPLAY='ollama-only (local-only)'
 RECOMMENDED_OPTIONAL_PROFILE=
 RECOMMENDED_OPTIONAL_PROFILE_DISPLAY=
-PRIMARY_LOCAL_MODEL=qwen2.5:7b
+PRIMARY_LOCAL_MODEL=qwen3:8b
+CAPACITY_BUCKET=B
+RECOMMENDED_BUNDLE_ID=single_qwen3_8b
+RECOMMENDED_BUNDLE_KIND=single
+RECOMMENDED_BUNDLE_MODELS=qwen3:8b
+FALLBACK_BUNDLE_ID=single_gemma3_4b
+FALLBACK_BUNDLE_MODELS=gemma3:4b
 SECONDARY_LOCAL_MODEL=qwen2.5:14b-gguf
 SECONDARY_LOCAL_SUPPORTED=0
 SECONDARY_LOCAL_BACKEND=llama.cpp
@@ -745,9 +762,10 @@ provision_optional_llamacpp_lane() {
 detect_required_ollama_models() {
   local install_profile="$1"
   local model_tag="$2"
+  local runtime_home="$3"
   NULLA_INSTALL_PROFILE="${install_profile}" "${VENV_DIR}/bin/python" -c "
 from core.runtime_install_profiles import required_ollama_models_for_profile
-for item in required_ollama_models_for_profile(profile_id='${install_profile}', model_tag='${model_tag}'):
+for item in required_ollama_models_for_profile(profile_id='${install_profile}', model_tag='${model_tag}', runtime_home='${runtime_home}'):
     print(item)
 " 2>/dev/null || printf '%s\n' "${model_tag}"
 }
@@ -1488,6 +1506,7 @@ pull_models() {
   local ollama_exe="$1"
   local install_profile="$2"
   local model_tag="$3"
+  local runtime_home="$4"
   if [[ -z "${ollama_exe}" ]]; then
     say "Step 12/14: Model pull skipped because Ollama is unavailable."
     return
@@ -1503,7 +1522,7 @@ pull_models() {
     fi
     say "Downloading ${required_model}..."
     "${ollama_exe}" pull "${required_model}" || say "WARNING: Model pull failed. Run manually: ollama pull ${required_model}"
-  done < <(detect_required_ollama_models "${install_profile}" "${model_tag}")
+  done < <(detect_required_ollama_models "${install_profile}" "${model_tag}" "${runtime_home}")
 }
 
 
@@ -1633,6 +1652,12 @@ main() {
   local hardware_summary
   local model_tag
   local primary_local_model
+  local capacity_bucket
+  local recommended_bundle_id
+  local recommended_bundle_kind
+  local recommended_bundle_models
+  local fallback_bundle_id
+  local fallback_bundle_models
   local recommended_optional_profile
   local recommended_optional_profile_display
   local secondary_local_model
@@ -1650,6 +1675,13 @@ main() {
   model_tag="$(detect_model_tag)"
   eval "$(detect_install_recommendation_exports "${runtime_home}" "${model_tag}")"
   primary_local_model="${PRIMARY_LOCAL_MODEL:-${model_tag}}"
+  model_tag="${primary_local_model}"
+  capacity_bucket="${CAPACITY_BUCKET:-unknown}"
+  recommended_bundle_id="${RECOMMENDED_BUNDLE_ID:-}"
+  recommended_bundle_kind="${RECOMMENDED_BUNDLE_KIND:-}"
+  recommended_bundle_models="${RECOMMENDED_BUNDLE_MODELS:-${model_tag}}"
+  fallback_bundle_id="${FALLBACK_BUNDLE_ID:-}"
+  fallback_bundle_models="${FALLBACK_BUNDLE_MODELS:-}"
   recommended_optional_profile="${RECOMMENDED_OPTIONAL_PROFILE:-}"
   recommended_optional_profile_display="${RECOMMENDED_OPTIONAL_PROFILE_DISPLAY:-}"
   secondary_local_model="${SECONDARY_LOCAL_MODEL:-qwen2.5:14b-gguf}"
@@ -1675,7 +1707,12 @@ main() {
   openclaw_home_override="$(resolve_openclaw_home_override)"
   say "Step 6/14: Hardware probe complete."
   say "Detected: ${hardware_summary}"
+  say "Capacity bucket: ${capacity_bucket}"
   say "Primary local model: ${primary_local_model}"
+  say "Recommended local bundle: ${recommended_bundle_id:-unknown} (${recommended_bundle_kind:-unknown}) -> ${recommended_bundle_models}"
+  if [[ -n "${fallback_bundle_models}" ]]; then
+    say "Lighter fallback bundle: ${fallback_bundle_id:-unknown} -> ${fallback_bundle_models}"
+  fi
   say "Recommended profile: ${recommended_install_profile_display}"
   say "Install profile: ${install_profile_display}"
   if [[ "${secondary_local_supported}" == "1" && -n "${recommended_optional_profile_display}" ]]; then
@@ -1686,7 +1723,7 @@ main() {
   fi
   say "Profile summary: ${install_profile_summary}"
   validate_selected_install_profile "${runtime_home}" "${model_tag}" "${install_profile}"
-  persist_install_profile_record "${runtime_home}" "${install_profile}" "${model_tag}"
+  persist_install_profile_record "${runtime_home}" "${install_profile}" "${model_tag}" "${recommended_bundle_models}" "${recommended_bundle_id}" "${recommended_bundle_kind}"
   persist_provider_env_file "${runtime_home}"
 
   say "Step 7/14: Creating launchers..."
@@ -1716,7 +1753,7 @@ main() {
   start_ollama_server "${ollama_exe}"
   configure_openclaw_with_ollama "${ollama_exe}" "${model_tag}" "${openclaw_enabled}" "${openclaw_home_override}"
   register_openclaw "${runtime_home}" "${model_tag}" "${openclaw_agent_dir}" "${openclaw_enabled}" "${openclaw_home_override}" "${agent_name}"
-  pull_models "${ollama_exe}" "${install_profile}" "${model_tag}"
+  pull_models "${ollama_exe}" "${install_profile}" "${model_tag}" "${runtime_home}"
   configure_liquefy
   install_macos_launch_agent "${runtime_home}"
   write_install_receipt "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}" "${LAUNCH_AGENT_PATH}"
@@ -1727,7 +1764,7 @@ main() {
       install_profile="local-max"
       install_profile_display="$(detect_install_profile_display "${install_profile}")"
       validate_selected_install_profile "${runtime_home}" "${model_tag}" "${install_profile}"
-      persist_install_profile_record "${runtime_home}" "${install_profile}" "${model_tag}"
+      persist_install_profile_record "${runtime_home}" "${install_profile}" "${model_tag}" "${recommended_bundle_models}" "${recommended_bundle_id}" "${recommended_bundle_kind}"
       persist_provider_env_file "${runtime_home}"
       write_install_receipt "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}" "${LAUNCH_AGENT_PATH}"
       run_install_doctor "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}" "${LAUNCH_AGENT_PATH}"
@@ -1748,6 +1785,7 @@ main() {
   say
   say "Visible agent name: ${agent_name}"
   say "Selected model: ${model_tag}"
+  say "Selected bundle: ${recommended_bundle_id:-unknown} -> ${recommended_bundle_models}"
   say "Profile: ${install_profile_display}"
   say "Start:   ${PROJECT_ROOT}/OpenClaw_NULLA.sh"
   if [[ -n "${DESKTOP_SHORTCUT_PATH}" ]]; then

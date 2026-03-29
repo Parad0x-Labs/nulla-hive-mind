@@ -31,6 +31,7 @@ if __package__ in {None, ""}:
     _prioritize_project_root_on_sys_path()
 
 from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
+from core.runtime_provider_defaults import default_runtime_model_tag
 from core.runtime_capabilities import runtime_capability_snapshot
 from core.web.api.app import create_api_app
 from core.web.api.runtime import (
@@ -87,12 +88,13 @@ def _sync_runtime_aliases(runtime: RuntimeServices) -> None:
 
 def _compat_runtime_services() -> RuntimeServices:
     runtime = _runtime_services or RuntimeServices()
+    runtime_model_tag = str(runtime.runtime_model_tag or "").strip() or default_runtime_model_tag()
     return RuntimeServices(
         agent=_agent if _agent is not None else runtime.agent,
         daemon=_daemon if _daemon is not None else runtime.daemon,
         display_name=str(runtime.display_name or "NULLA"),
-        runtime_model_tag=str(runtime.runtime_model_tag or "qwen2.5:7b"),
-        runtime_parameter_size=str(runtime.runtime_parameter_size or "7B"),
+        runtime_model_tag=runtime_model_tag,
+        runtime_parameter_size=str(runtime.runtime_parameter_size or _parameter_size_for_model(runtime_model_tag)),
         runtime_started_at=str(runtime.runtime_started_at or ""),
         runtime_version_stamp=dict(runtime.runtime_version_stamp or {}),
         public_hive_auth=dict(runtime.public_hive_auth or {}),

@@ -31,6 +31,18 @@ def build_live_info_response_result(
             source_context=source_context,
         )
     if not notes and live_mode == "fresh_lookup":
+        response = agent._live_info_failure_text(query=query, mode=live_mode)
+        if agent._looks_like_grounded_price_lookup(query):
+            return live_info_result(
+                agent,
+                session_id=session_id,
+                user_input=user_input,
+                response=response,
+                source_context=source_context,
+            )
+        # General fresh lookups should defer to the full reasoning/research lane when
+        # the fast path cannot ground the answer. Otherwise the fast path hijacks
+        # entity/current-info questions and prevents adaptive research from running.
         return None
 
     response = (

@@ -151,3 +151,12 @@ def test_live_info_rendering_and_price_helpers_stay_grounded() -> None:
         notes=notes,
     )
     assert fast_live_info_price.extract_price_lookup_subject("What is the price of BTC now?") == "BTC"
+
+
+def test_price_recovery_does_not_hijack_entity_lookup_prompts() -> None:
+    recovered = fast_live_info_price.recover_price_lookup_query(
+        "find Tolly solana twitter",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert recovered == ""

@@ -269,14 +269,12 @@ def build_probe_report(
         requested_profile="auto-recommended",
         probe=probe,
         tier=primary_tier,
-        selected_model=primary_tier.ollama_tag,
         provider_capability_truth=capability_truth,
         env=_probe_env_for_install_profile(envs),
     )
     recommendation = build_install_recommendation_truth(
         probe=probe,
         tier=primary_tier,
-        selected_model=profile_truth.selected_model,
     )
     secondary_local_state, secondary_local_provider_id = _provider_state_for_prefix(
         capability_truth,
@@ -293,19 +291,36 @@ def build_probe_report(
     tether_configured = bool(envs.get("tether", {}).get("configured"))
 
     stacks: list[dict[str, Any]] = []
-    local_only_ready = bool(binary)
+    recommended_bundle_models = tuple(
+        str(item).strip()
+        for item in list(recommendation.recommended_bundle_models)
+        if str(item).strip()
+    )
+    local_only_ready = bool(binary) and all(model_name in model_names for model_name in recommended_bundle_models)
     stacks.append(
         {
             "stack_id": "local_only",
             "install_profile_id": "local-only",
-            "status": "ready" if local_only_ready else "needs_install",
+            "status": (
+                "ready"
+                if local_only_ready
+                else "needs_setup"
+                if binary
+                else "needs_install"
+            ),
             "recommended": False,
             "reason": (
-                "Local Ollama lane is ready."
+                "The recommended local Ollama bundle is installed and ready."
                 if local_only_ready
-                else "Ollama is missing; installer must provision it before this lane is usable."
+                else "Ollama is present, but the recommended local bundle is not fully pulled yet."
+                if binary
+                else "Ollama is missing; installer must provision it before the default local bundle is usable."
             ),
             "primary_model": recommendation.primary_local_model,
+            "bundle_id": recommendation.recommended_bundle_id,
+            "bundle_kind": recommendation.recommended_bundle_kind,
+            "bundle_models": list(recommendation.recommended_bundle_models),
+            "bundle_roles": list(recommendation.recommended_bundle_roles),
             "helper_model": "",
         }
     )
@@ -390,6 +405,7 @@ def build_probe_report(
         },
         "remote_env": envs,
         "local_multi_llm_fit": local_fit,
+        "capacity_bucket": recommendation.capacity_bucket,
         "recommended_install_profile_id": profile_truth.profile_id,
         "recommended_install_profile_display_id": format_install_profile_id(profile_truth.profile_id, allow_auto=False),
         "recommended_install_profile_label": profile_truth.label,
@@ -414,6 +430,7 @@ def render_probe_report(report: dict[str, Any]) -> str:
         f"- accelerator: {machine.get('accelerator') or 'unknown'}",
         f"- recommended local model: {machine.get('ollama_model') or 'unknown'}",
         f"- local multi-LLM fit: {report.get('local_multi_llm_fit') or 'unknown'}",
+        f"- capacity bucket: {report.get('capacity_bucket') or 'unknown'}",
         f"- ollama present: {'yes' if ollama.get('binary_present') else 'no'}",
     ]
     installed = [str(item.get("name") or "").strip() for item in list(ollama.get("installed_models") or []) if str(item.get("name") or "").strip()]
@@ -425,6 +442,15 @@ def render_probe_report(report: dict[str, Any]) -> str:
     recommendation = dict(report.get("install_recommendation") or {})
     if recommendation:
         lines.append(f"- primary local model: {recommendation.get('primary_local_model') or 'unknown'}")
+        bundle_models = ", ".join(str(item).strip() for item in list(recommendation.get("recommended_bundle_models") or []) if str(item).strip())
+        if bundle_models:
+            lines.append(
+                f"- recommended bundle: {recommendation.get('recommended_bundle_id') or 'unknown'} "
+                f"({recommendation.get('recommended_bundle_kind') or 'unknown'}): {bundle_models}"
+            )
+        fallback_models = ", ".join(str(item).strip() for item in list(recommendation.get("fallback_bundle_models") or []) if str(item).strip())
+        if fallback_models:
+            lines.append(f"- lighter fallback: {recommendation.get('fallback_bundle_id') or 'unknown'}: {fallback_models}")
         optional_profile = str(recommendation.get("recommended_optional_profile_display_id") or "").strip()
         if optional_profile:
             lines.append(f"- optional stronger profile: {optional_profile}")

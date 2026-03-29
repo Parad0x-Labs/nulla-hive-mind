@@ -22,7 +22,7 @@ def test_recent_regression_pack_runner_executes_real_pytest_target() -> None:
     result = run_pytest_pack(
         name="acceptance_recent_smoke",
         repo_root=repo_root,
-        targets=["tests/test_run_local_acceptance.py::test_load_profile_reads_locked_qwen_profile"],
+        targets=["tests/test_run_local_acceptance.py::test_load_profile_reads_locked_local_bundle_profile"],
     )
 
     assert result["exit_code"] == 0

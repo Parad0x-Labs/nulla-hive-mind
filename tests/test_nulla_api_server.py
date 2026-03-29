@@ -399,7 +399,6 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         config_home = runtime_home / "config"
         auth_target = config_home / "agent-bootstrap.json"
         probe = mock.Mock(accelerator="cpu", gpu_name=None)
-        tier = mock.Mock(ollama_tag="qwen2.5:14b")
         boot = mock.Mock(backend_selection=mock.Mock(backend_name="TorchMPSBackend", device="mps"))
         agent = mock.Mock()
         daemon = mock.Mock(config=mock.Mock(bind_port=49152))
@@ -418,8 +417,8 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
             "core.web.api.runtime.ensure_public_hive_auth",
             return_value={"ok": False, "status": "missing_remote_config_path", "watch_host": "hive.example.test"},
         ) as ensure_auth, mock.patch("core.web.api.runtime.probe_machine", return_value=probe), mock.patch(
-            "core.web.api.runtime.select_qwen_tier",
-            return_value=tier,
+            "core.web.api.runtime.default_runtime_model_tag",
+            return_value="qwen3:8b",
         ), mock.patch("core.web.api.runtime.ensure_ollama_model"), mock.patch(
             "core.web.api.runtime.build_runtime_version_stamp",
             return_value={"started_at": "2026-03-27T00:00:00.000000Z", "build_id": "0.4.0+test"},
@@ -576,8 +575,8 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
             "core.web.api.runtime.probe_machine",
             return_value=mock.Mock(accelerator="mps", gpu_name="Apple GPU"),
         ), mock.patch(
-            "core.web.api.runtime.select_qwen_tier",
-            return_value=mock.Mock(ollama_tag="qwen2.5:14b"),
+            "core.web.api.runtime.default_runtime_model_tag",
+            return_value="qwen3:8b",
         ), mock.patch(
             "core.web.api.runtime.ensure_ollama_model",
         ), mock.patch(
@@ -618,6 +617,75 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
             )
 
         log_prewarm.assert_called_once_with(model_registry)
+
+    def test_bootstrap_runtime_services_uses_env_selected_model_for_live_boot(self) -> None:
+        persona = mock.Mock(persona_id="default")
+        agent = mock.Mock()
+        daemon = mock.Mock(config=mock.Mock(bind_port=49152))
+        compute_daemon = mock.Mock()
+        model_registry = mock.Mock()
+        model_registry.startup_warnings.return_value = []
+
+        with mock.patch.dict(os.environ, {"NULLA_OLLAMA_MODEL": "qwen3:8b"}, clear=False), mock.patch(
+            "core.web.api.runtime.bootstrap_runtime_mode",
+            return_value=mock.Mock(backend_selection=mock.Mock(backend_name="mlx", device="mps")),
+        ), mock.patch(
+            "core.web.api.runtime.is_first_boot",
+            return_value=False,
+        ), mock.patch(
+            "core.credit_ledger.ensure_starter_credits",
+            return_value=False,
+        ), mock.patch(
+            "core.web.api.runtime.ensure_public_hive_auth",
+            return_value={"ok": True, "status": "ok"},
+        ), mock.patch(
+            "core.web.api.runtime.probe_machine",
+            return_value=mock.Mock(accelerator="mps", gpu_name="Apple GPU"),
+        ), mock.patch(
+            "core.web.api.runtime.default_runtime_model_tag",
+            return_value="deepseek-r1:8b",
+        ), mock.patch(
+            "core.web.api.runtime.ensure_ollama_model",
+        ) as ensure_model, mock.patch(
+            "core.web.api.runtime.build_runtime_version_stamp",
+            return_value={"started_at": "2026-03-28T00:00:00.000000Z", "build_id": "test", "branch": "main", "commit": "abc123", "dirty": False},
+        ), mock.patch(
+            "core.web.api.runtime.ComputeModeDaemon",
+            return_value=compute_daemon,
+        ), mock.patch(
+            "core.web.api.runtime.ModelRegistry",
+            return_value=model_registry,
+        ), mock.patch(
+            "core.web.api.runtime.ensure_default_provider",
+        ) as ensure_provider, mock.patch(
+            "core.web.api.runtime.log_prewarm_results",
+        ), mock.patch(
+            "core.web.api.runtime.load_active_persona",
+            return_value=persona,
+        ), mock.patch(
+            "core.web.api.runtime.get_agent_display_name",
+            return_value="NULLA",
+        ), mock.patch(
+            "core.web.api.runtime.ensure_openclaw_registration",
+            return_value=True,
+        ), mock.patch(
+            "core.web.api.runtime.NullaAgent",
+            return_value=agent,
+        ), mock.patch(
+            "core.web.api.runtime.resolve_local_worker_capacity",
+            return_value=(3, 3),
+        ), mock.patch(
+            "core.web.api.runtime.NullaDaemon",
+            return_value=daemon,
+        ):
+            runtime = bootstrap_runtime_services(
+                project_root=PROJECT_ROOT,
+                workstation_version="test-workstation",
+            )
+
+        self.assertEqual(runtime.runtime_model_tag, "qwen3:8b")
+        ensure_model.assert_called_once_with("qwen3:8b")
+        ensure_provider.assert_called_once_with(model_registry, "qwen3:8b")
 
     def test_log_prewarm_results_treats_timeout_without_background_as_info(self) -> None:
         registry = mock.Mock()

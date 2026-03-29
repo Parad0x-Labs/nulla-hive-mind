@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import os
+import shutil
 from collections.abc import Mapping
+from pathlib import Path
 
 from core.hardware_tier import probe_machine, select_qwen_tier
+from core.local_model_bundles import manifest_profile_for_model, resolve_local_bundle_recommendation
+from core.local_specialist_lane import secondary_local_model
 from core.model_registry import ModelRegistry
 from core.runtime_install_profiles import normalize_install_profile_id, required_ollama_models_for_profile
 from storage.model_provider_manifest import ModelProviderManifest
@@ -28,8 +32,35 @@ _DEFAULT_LLAMACPP_BASE_URL = "http://127.0.0.1:8080/v1"
 _DEFAULT_LLAMACPP_CONTEXT_WINDOW = 32768
 
 
-def default_runtime_model_tag() -> str:
-    return str(select_qwen_tier(probe_machine()).ollama_tag or "").strip() or "qwen2.5:7b"
+def default_runtime_model_tag(*, env: Mapping[str, str] | None = None) -> str:
+    env_map = os.environ if env is None else env
+    try:
+        recommendation = resolve_local_bundle_recommendation(
+            probe=probe_machine(),
+            free_disk_gb=_default_free_disk_gb(),
+            secondary_local_model_name=secondary_local_model(env_map),
+        )
+        primary_model = str(recommendation.recommended_bundle.primary_model or "").strip()
+        if primary_model:
+            return primary_model
+    except Exception:
+        pass
+    return str(select_qwen_tier(probe_machine()).ollama_tag or "").strip() or "qwen3:8b"
+
+
+def _bundle_role_for_model(required_models: tuple[str, ...], *, primary_model: str, model_name: str) -> str:
+    clean = str(model_name or "").strip().lower()
+    if clean == str(primary_model or "").strip().lower():
+        return "general"
+    if "mistral-small" in clean:
+        return "coding"
+    if "deepseek-r1" in clean:
+        return "reasoning"
+    if "gemma3" in clean:
+        return "lightweight_utility"
+    if required_models and clean == str(required_models[-1]).strip().lower() and len(required_models) > 1:
+        return "reasoning"
+    return "general"
 
 
 def ensure_default_runtime_providers(
@@ -38,18 +69,23 @@ def ensure_default_runtime_providers(
     model_tag: str | None = None,
     env: Mapping[str, str] | None = None,
     install_profile: str | None = None,
+    runtime_home: str | None = None,
 ) -> tuple[str, ...]:
     env_map = os.environ if env is None else env
     changed: list[str] = []
-    local_model = str(model_tag or "").strip() or default_runtime_model_tag()
+    local_model = str(model_tag or "").strip() or default_runtime_model_tag(env=env_map)
     active_profile = normalize_install_profile_id(install_profile, allow_auto=False)
-    if _ensure_local_ollama_provider(registry, model_tag=local_model):
-        changed.append(f"ollama-local:{local_model}")
-    for extra_model in required_ollama_models_for_profile(profile_id=active_profile, model_tag=local_model):
-        if not extra_model or extra_model == local_model:
-            continue
-        if _ensure_local_ollama_provider(registry, model_tag=extra_model):
-            changed.append(f"ollama-local:{extra_model}")
+    required_models = required_ollama_models_for_profile(
+        profile_id=active_profile or "local-only",
+        model_tag=local_model,
+        runtime_home=runtime_home,
+        env=env_map,
+    )
+    primary_model = required_models[0] if required_models else local_model
+    for bundle_model in required_models or (local_model,):
+        role = _bundle_role_for_model(required_models, primary_model=primary_model, model_name=bundle_model)
+        if _ensure_local_ollama_provider(registry, model_tag=bundle_model, bundle_role=role):
+            changed.append(f"ollama-local:{bundle_model}")
     if _profile_allows_aux_local_providers(active_profile):
         llamacpp_provider_id = _ensure_llamacpp_provider(registry, model_name=local_model, env=env_map)
         if llamacpp_provider_id:
@@ -71,7 +107,7 @@ def ensure_default_runtime_providers(
     return tuple(changed)
 
 
-def _ensure_local_ollama_provider(registry: ModelRegistry, *, model_tag: str) -> bool:
+def _ensure_local_ollama_provider(registry: ModelRegistry, *, model_tag: str, bundle_role: str) -> bool:
     existing = registry.get_manifest("ollama-local", model_tag)
     existing_caps_raw = getattr(existing, "capabilities", ()) if existing is not None else ()
     if not isinstance(existing_caps_raw, (list, tuple, set)):
@@ -81,21 +117,24 @@ def _ensure_local_ollama_provider(registry: ModelRegistry, *, model_tag: str) ->
         str(getattr(existing, "license_name", None) or "").strip()
         and str(getattr(existing, "resolved_license_reference", None) or "").strip()
     )
-    if existing and existing.enabled and "tool_intent" in existing_caps and has_license:
+    expected_role = str((getattr(existing, "metadata", {}) or {}).get("bundle_role") or "").strip().lower() if existing else ""
+    if existing and existing.enabled and has_license and expected_role == str(bundle_role or "").strip().lower():
         return False
-    parameter_size = parameter_size_for_model(model_tag)
+    manifest_profile = manifest_profile_for_model(model_name=model_tag, bundle_role=bundle_role)
+    parameter_size = str(manifest_profile.get("parameter_count") or parameter_size_for_model(model_tag))
+    license_reference = str(manifest_profile.get("license_reference") or "user-managed")
     manifest = ModelProviderManifest(
         provider_name="ollama-local",
         model_name=model_tag,
         source_type="http",
         adapter_type="local_qwen_provider",
-        license_name="Apache-2.0",
-        license_reference="https://huggingface.co/Qwen/Qwen2.5-7B-Instruct/blob/main/LICENSE",
-        license_url_or_reference="https://huggingface.co/Qwen/Qwen2.5-7B-Instruct/blob/main/LICENSE",
+        license_name=str(manifest_profile.get("license_name") or "user-managed"),
+        license_reference=license_reference,
+        license_url_or_reference=license_reference,
         weight_location="external",
         runtime_dependency="ollama",
-        notes=f"Local Qwen via Ollama ({parameter_size}) — auto-registered by NULLA runtime",
-        capabilities=["summarize", "classify", "format", "extract", "code_basic", "structured_json", "tool_intent"],
+        notes=f"{manifest_profile.get('notes') or 'Local Ollama lane.'} ({parameter_size}) — auto-registered by NULLA runtime",
+        capabilities=list(manifest_profile.get("capabilities") or ()),
         runtime_config={
             "base_url": "http://127.0.0.1:11434",
             "api_path": "/v1/chat/completions",
@@ -113,11 +152,12 @@ def _ensure_local_ollama_provider(registry: ModelRegistry, *, model_tag: str) ->
         },
         metadata={
             "runtime_family": "ollama",
-            "confidence_baseline": 0.65,
+            "confidence_baseline": float(manifest_profile.get("confidence_baseline") or 0.65),
             "parameter_count": parameter_size,
-            "orchestration_role": "drone",
+            "orchestration_role": str(manifest_profile.get("orchestration_role") or "drone"),
+            "bundle_role": str(manifest_profile.get("bundle_role") or bundle_role or "general"),
             "deployment_class": "local",
-            "tool_support": ["structured_json", "tool_calls"],
+            "tool_support": list(manifest_profile.get("tool_support") or ()),
             "max_safe_concurrency": 1,
         },
         enabled=True,
@@ -188,7 +228,7 @@ def _ensure_vllm_provider(
     base_url = _env_first(env, "VLLM_BASE_URL", "NULLA_VLLM_BASE_URL")
     if not base_url:
         return ""
-    resolved_model_name = _env_first(env, "VLLM_MODEL", "NULLA_VLLM_MODEL") or model_name or default_runtime_model_tag()
+    resolved_model_name = _env_first(env, "VLLM_MODEL", "NULLA_VLLM_MODEL") or model_name or default_runtime_model_tag(env=env)
     existing = registry.get_manifest("vllm-local", resolved_model_name)
     has_base_url = bool(str(getattr(existing, "runtime_config", {}).get("base_url") or "").strip()) if existing else False
     if existing and existing.enabled and has_base_url:
@@ -375,7 +415,7 @@ def _ensure_llamacpp_provider(
         "NULLA_LLAMACPP_MODEL",
         "LLAMA_CPP_MODEL",
         "NULLA_LLAMA_CPP_MODEL",
-    ) or model_name or default_runtime_model_tag()
+    ) or model_name or default_runtime_model_tag(env=env)
     existing = registry.get_manifest("llamacpp-local", resolved_model_name)
     has_base_url = bool(str(getattr(existing, "runtime_config", {}).get("base_url") or "").strip()) if existing else False
     if existing and existing.enabled and has_base_url:
@@ -459,6 +499,14 @@ def _env_int(env: Mapping[str, str], *names: str, default: int) -> int:
         except Exception:
             continue
     return max(1, int(default))
+
+
+def _default_free_disk_gb() -> float:
+    try:
+        usage = shutil.disk_usage(Path.home())
+    except Exception:
+        return 0.0
+    return round(float(usage.free) / float(1024**3), 1)
 
 
 def _profile_allows_aux_local_providers(profile_id: str) -> bool:

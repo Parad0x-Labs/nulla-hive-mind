@@ -7,12 +7,18 @@ from types import SimpleNamespace
 
 import ops.run_local_acceptance as acceptance
 
+PROFILE_ID = "local-bundle-ollama-v1"
+PROFILE_NAME = "NULLA local acceptance for the hardware-aware local Ollama bundle"
+PRIMARY_MODEL = "qwen3:8b"
+RUNTIME_ALT_MODEL = "qwen3:14b"
+BUNDLE_MODELS = ("qwen3:8b", "deepseek-r1:8b")
+
 
 def _fake_online_payload(
     *,
     commit: str = "abc123",
     fast: bool = True,
-    runtime_model: str = "qwen2.5:7b",
+    runtime_model: str = PRIMARY_MODEL,
     install_profile_id: str = "local-only",
     install_profile_label: str = "Local only",
 ) -> dict[str, object]:
@@ -52,19 +58,23 @@ def _fake_online_payload(
     return {
         "captured_at_utc": "2026-03-21T00:00:00Z",
         "model": runtime_model,
+        "selected_models": list(BUNDLE_MODELS),
         "profile": {
-            "id": "local-qwen25-7b-v1",
-            "display_name": "NULLA local acceptance for qwen2.5:7b",
-            "benchmark_model": "qwen2.5:7b",
+            "id": PROFILE_ID,
+            "display_name": PROFILE_NAME,
+            "benchmark_model": PRIMARY_MODEL,
+            "benchmark_bundle_models": list(BUNDLE_MODELS),
             "runtime_model": runtime_model,
             "install_profile_id": install_profile_id,
             "install_profile_label": install_profile_label,
+            "runtime_selected_models": list(BUNDLE_MODELS),
         },
         "runtime_version": {"commit": commit, "build_id": f"0.4.0-closed-test+{commit}.dirty", "model_tag": runtime_model},
         "capabilities": {
             "install_profile": {
                 "profile_id": install_profile_id,
                 "label": install_profile_label,
+                "selected_models": list(BUNDLE_MODELS),
             }
         },
         "machine": {"platform": "macOS", "cpu": "Apple M4", "ram_gb": 24.0, "gpu": "Apple M4"},
@@ -72,12 +82,14 @@ def _fake_online_payload(
     }
 
 
-def test_load_profile_reads_locked_qwen_profile() -> None:
+def test_load_profile_reads_locked_local_bundle_profile() -> None:
     profile = acceptance.load_profile()
 
-    assert profile.profile_id == "local-qwen25-7b-v1"
-    assert profile.model == "qwen2.5:7b"
-    assert profile.cold_start_max_seconds == 120.0
+    assert profile.profile_id == PROFILE_ID
+    assert profile.model == PRIMARY_MODEL
+    assert profile.bundle_models == BUNDLE_MODELS
+    assert profile.cold_start_max_seconds == 30.0
+    assert profile.simple_prompt_hard_max_seconds == 20.0
     assert profile.consistency_min_passes == 2
 
 
@@ -174,10 +186,12 @@ def test_render_report_includes_profile_and_thresholds(tmp_path: Path) -> None:
     )
     rendered = output.read_text(encoding="utf-8")
 
-    assert "Profile: local-qwen25-7b-v1" in rendered
-    assert "Benchmark profile model: qwen2.5:7b" in rendered
+    assert f"Profile: {PROFILE_ID}" in rendered
+    assert f"Benchmark profile model: {PRIMARY_MODEL}" in rendered
+    assert "Benchmark bundle models: qwen3:8b, deepseek-r1:8b" in rendered
     assert "Threshold gates:" in rendered
-    assert "cold start <= 120.0s" in rendered
+    assert "cold start <= 30.0s" in rendered
+    assert "simple prompt hard max <= 20.0s" in rendered
 
 
 def test_render_report_surfaces_runtime_model_and_install_profile(tmp_path: Path) -> None:
@@ -187,7 +201,7 @@ def test_render_report_surfaces_runtime_model_and_install_profile(tmp_path: Path
         repo_root=Path("/tmp/repo"),
         online_payload=_fake_online_payload(
             commit="5fa1dcf",
-            runtime_model="qwen2.5:14b",
+            runtime_model=RUNTIME_ALT_MODEL,
             install_profile_id="local-only",
             install_profile_label="Local only",
         ),
@@ -198,9 +212,10 @@ def test_render_report_surfaces_runtime_model_and_install_profile(tmp_path: Path
     )
     rendered = output.read_text(encoding="utf-8")
 
-    assert "Runtime model: qwen2.5:14b" in rendered
+    assert f"Runtime model: {RUNTIME_ALT_MODEL}" in rendered
+    assert "Runtime bundle models: qwen3:8b, deepseek-r1:8b" in rendered
     assert "Runtime install profile: local-only (Local only)" in rendered
-    assert "NULLA on qwen2.5:14b is acceptable for local use under this test profile." in rendered
+    assert f"NULLA on {RUNTIME_ALT_MODEL} is acceptable for local use under this test profile." in rendered
 
 
 def test_default_runtime_command_targets_api_server_and_base_url_port(tmp_path: Path, monkeypatch) -> None:
@@ -389,7 +404,7 @@ def test_run_full_acceptance_restores_installed_launch_agent_when_suspended(monk
     monkeypatch.setattr(acceptance, "_pick_isolated_daemon_bind_port", lambda **kwargs: 60220)
     monkeypatch.setattr(acceptance, "_suspend_installed_launch_agent", lambda **kwargs: {"path": "/tmp/ai.nulla.runtime.plist"})
     monkeypatch.setattr(acceptance, "_restore_installed_launch_agent", lambda state: calls.append(f"restore:{state['path']}"))
-    monkeypatch.setattr(acceptance, "_installed_default_model", lambda repo_root: "qwen2.5:14b")
+    monkeypatch.setattr(acceptance, "_installed_default_model", lambda repo_root: RUNTIME_ALT_MODEL)
     monkeypatch.setattr(acceptance, "_stop_runtime", lambda base_url: calls.append(f"stop:{base_url}"))
     monkeypatch.setattr(
         acceptance,
@@ -438,9 +453,9 @@ def test_run_full_acceptance_restores_installed_launch_agent_when_suspended(monk
 
     assert exit_code == 0
     assert calls.count("report") == 1
-    assert calls.count("start:9141b55:60220:qwen2.5:7b") == 2
+    assert calls.count(f"start:9141b55:60220:{PRIMARY_MODEL}") == 2
     assert "restore:/tmp/ai.nulla.runtime.plist" in calls
-    assert "wait:9141b55:qwen2.5:14b:180.0" in calls
+    assert f"wait:9141b55:{RUNTIME_ALT_MODEL}:180.0" in calls
 
 
 def test_pick_isolated_daemon_bind_port_returns_stream_safe_pair() -> None:

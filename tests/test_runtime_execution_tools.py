@@ -160,6 +160,14 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
         ), mock.patch(
             "core.runtime_execution_tools._machine_chip_name",
             return_value="Apple M4",
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_display_details",
+            return_value={
+                "name": "iMac",
+                "native_resolution": "4480 x 2520",
+                "current_resolution": "2240 x 1260 @ 60.00Hz",
+                "screen_size": "24-inch (inferred from Apple 4.5K iMac panel)",
+            },
         ):
             result = execute_runtime_tool(
                 "machine.inspect_specs",
@@ -170,9 +178,13 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             self.assertTrue(result.ok)
             self.assertIn("Apple M4", result.response_text)
             self.assertIn("24.0 GiB", result.response_text)
+            self.assertIn("4480 x 2520", result.response_text)
+            self.assertIn("24-inch", result.response_text)
             hints = extract_observation_followup_hints(result.details["observation"])
             self.assertEqual(hints["chip_name"], "Apple M4")
             self.assertEqual(hints["recommended_model"], "qwen2.5:14b")
+            self.assertEqual(hints["display_name"], "iMac")
+            self.assertEqual(hints["screen_size"], "24-inch (inferred from Apple 4.5K iMac panel)")
 
     def test_machine_ensure_directory_creates_requested_safe_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch.dict(
@@ -192,6 +204,29 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             hints = extract_observation_followup_hints(created.details["observation"])
             self.assertEqual(hints["path"], "~/Desktop/MarchTest")
             self.assertEqual(hints["action"], "created")
+
+    def test_machine_write_file_creates_safe_local_text_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            created = execute_runtime_tool(
+                "machine.write_file",
+                {"path": "~/Desktop/MarchTest/chat_session.txt", "content": "You\nhello\n\nNULLA\nhi"},
+                source_context={"workspace": tmpdir},
+            )
+            assert created is not None
+            self.assertTrue(created.ok)
+            self.assertIn("Created file `~/Desktop/MarchTest/chat_session.txt`", created.response_text)
+            self.assertEqual(
+                (Path(tmpdir) / "Desktop" / "MarchTest" / "chat_session.txt").read_text(encoding="utf-8"),
+                "You\nhello\n\nNULLA\nhi",
+            )
+            hints = extract_observation_followup_hints(created.details["observation"])
+            self.assertEqual(hints["path"], "~/Desktop/MarchTest/chat_session.txt")
+            self.assertEqual(hints["action"], "created")
+            self.assertEqual(hints["line_count"], 5)
 
     def test_workspace_ensure_directory_creates_requested_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -269,6 +304,30 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             self.assertEqual(replaced_artifact["action"], "replaced")
             self.assertIn("-print('hello')", replaced_artifact["diff_preview"])
             self.assertIn("+print('goodbye')", replaced_artifact["diff_preview"])
+
+    def test_workspace_write_file_rejects_tilde_home_path_outside_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, tempfile.TemporaryDirectory() as home_tmpdir, mock.patch(
+            "core.execution.workspace_tools.Path.home",
+            return_value=Path(home_tmpdir),
+        ), mock.patch(
+            "core.runtime_execution_tools.Path.home",
+            return_value=Path(home_tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": home_tmpdir},
+            clear=False,
+        ):
+            result = execute_runtime_tool(
+                "workspace.write_file",
+                {"path": "~/Desktop/MarchTest/chat_session.txt", "content": "hello\n"},
+                source_context={"workspace": tmpdir},
+            )
+            assert result is not None
+            self.assertFalse(result.ok)
+            self.assertEqual(result.status, "error")
+            self.assertIn("Path escapes the active workspace", result.response_text)
+            self.assertFalse((Path(tmpdir) / "~").exists())
+            self.assertFalse((Path(home_tmpdir) / "Desktop" / "MarchTest" / "chat_session.txt").exists())
 
     @pytest.mark.skipif(not _UNSHARE_AVAILABLE, reason="unshare not available (CI / non-Linux)")
     def test_sandbox_run_command_executes_local_bounded_command(self) -> None:

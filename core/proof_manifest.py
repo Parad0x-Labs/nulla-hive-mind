@@ -51,6 +51,16 @@ def build_proof_manifest(
         or receipt_payload.get("install_recommendation")
         or {}
     )
+    receipt_selected_models = tuple(
+        str(item).strip()
+        for item in list(receipt_profile.get("selected_models") or receipt_payload.get("selected_models") or [])
+        if str(item).strip()
+    )
+    runtime_selected_models = tuple(
+        str(item).strip()
+        for item in list(runtime_profile.get("selected_models") or [])
+        if str(item).strip()
+    )
     primary_local_model = (
         str(runtime_version.get("model_tag") or "").strip()
         or str(receipt_payload.get("selected_model") or "").strip()
@@ -82,6 +92,13 @@ def build_proof_manifest(
         expected=str(runtime_version.get("model_tag") or "").strip(),
         observed=str(receipt_payload.get("selected_model") or "").strip(),
     )
+    if runtime_selected_models and receipt_selected_models:
+        _append_consistency_check(
+            checks,
+            name="runtime_vs_receipt_selected_models",
+            expected="|".join(runtime_selected_models),
+            observed="|".join(receipt_selected_models),
+        )
     overall_consistent = all(bool(item["pass"]) for item in checks)
     return {
         "schema": "nulla.proof_manifest.v1",
@@ -94,6 +111,9 @@ def build_proof_manifest(
         "install_profile_id": str(runtime_profile.get("profile_id") or receipt_profile.get("profile_id") or "").strip(),
         "install_profile_label": str(runtime_profile.get("label") or receipt_profile.get("label") or "").strip(),
         "primary_local_model": primary_local_model,
+        "selected_models": list(runtime_selected_models or receipt_selected_models),
+        "bundle_id": str(runtime_profile.get("bundle_id") or receipt_profile.get("bundle_id") or "").strip(),
+        "bundle_kind": str(runtime_profile.get("bundle_kind") or receipt_profile.get("bundle_kind") or "").strip(),
         "secondary_local_model": str(recommendation.get("secondary_local_model") or "").strip(),
         "secondary_local_supported": bool(recommendation.get("secondary_local_supported")),
         "recommended_default_profile": str(recommendation.get("recommended_default_profile") or "").strip(),

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 from urllib import request
@@ -41,12 +42,18 @@ class AcceptanceProfile:
     model: str
     cold_start_max_seconds: float
     simple_prompt_median_max_seconds: float
+    simple_prompt_hard_max_seconds: float
     file_task_median_max_seconds: float
     live_lookup_median_max_seconds: float
     chained_task_median_max_seconds: float
     consistency_min_passes: int
     manual_btc_source_label: str
     manual_btc_source_url: str
+    bundle_models: tuple[str, ...] = ()
+    bundle_roles: tuple[tuple[str, str], ...] = ()
+    capacity_bucket: str = ""
+    fallback_bundle_models: tuple[str, ...] = ()
+    advanced_optional_profile: str = ""
 
 
 def _sanitize_text(value: str, *, repo_root: Path) -> str:
@@ -189,9 +196,19 @@ def _installed_default_model(repo_root: Path) -> str:
     selected = str(receipt.get("selected_model") or "").strip()
     if selected:
         return selected
+    selected_models = tuple(str(item).strip() for item in receipt.get("selected_models") or () if str(item).strip())
+    if selected_models:
+        return selected_models[0]
     install_profile = dict(receipt.get("install_profile") or {})
     selected = str(install_profile.get("selected_model") or "").strip()
-    return selected or "qwen2.5:7b"
+    if selected:
+        return selected
+    selected_models = tuple(
+        str(item).strip() for item in install_profile.get("selected_models") or () if str(item).strip()
+    )
+    if selected_models:
+        return selected_models[0]
+    return "qwen3:8b"
 
 
 def _launch_agent_label(path: Path | None) -> str:
@@ -358,12 +375,24 @@ def load_profile(path: str | Path | None = None) -> AcceptanceProfile:
     payload = json.loads(profile_path.read_text(encoding="utf-8"))
     thresholds = dict(payload.get("thresholds") or {})
     manual_btc = dict(payload.get("manual_btc_check") or {})
+    bundle_roles = tuple(
+        (
+            str(item.get("role") or "").strip(),
+            str(item.get("model") or "").strip(),
+        )
+        for item in payload.get("selected_model_roles") or ()
+        if str(item.get("role") or "").strip() and str(item.get("model") or "").strip()
+    )
+    bundle_models = tuple(
+        str(item).strip() for item in payload.get("selected_models") or () if str(item).strip()
+    )
     return AcceptanceProfile(
         profile_id=str(payload.get("profile_id") or profile_path.stem),
         display_name=str(payload.get("display_name") or "NULLA local acceptance"),
-        model=str(payload.get("model") or "qwen2.5:7b"),
+        model=str(payload.get("model") or "qwen3:8b"),
         cold_start_max_seconds=float(thresholds.get("cold_start_max_seconds", 120.0)),
         simple_prompt_median_max_seconds=float(thresholds.get("simple_prompt_median_max_seconds", 8.0)),
+        simple_prompt_hard_max_seconds=float(thresholds.get("simple_prompt_hard_max_seconds", 20.0)),
         file_task_median_max_seconds=float(thresholds.get("file_task_median_max_seconds", 15.0)),
         live_lookup_median_max_seconds=float(thresholds.get("live_lookup_median_max_seconds", 45.0)),
         chained_task_median_max_seconds=float(thresholds.get("chained_task_median_max_seconds", 60.0)),
@@ -372,6 +401,13 @@ def load_profile(path: str | Path | None = None) -> AcceptanceProfile:
         manual_btc_source_url=str(
             manual_btc.get("url") or "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
         ),
+        bundle_models=bundle_models or (str(payload.get("model") or "qwen3:8b"),),
+        bundle_roles=bundle_roles,
+        capacity_bucket=str(payload.get("capacity_bucket") or "").strip(),
+        fallback_bundle_models=tuple(
+            str(item).strip() for item in payload.get("fallback_bundle_models") or () if str(item).strip()
+        ),
+        advanced_optional_profile=str(payload.get("advanced_optional_profile") or "").strip(),
     )
 
 
@@ -384,6 +420,21 @@ def _first_currency_amount(text: str) -> float | None:
 
 def _format_usd(amount: float) -> str:
     return f"${amount:,.2f}"
+
+
+def _market_answer_is_not_future_dated(text: str) -> bool:
+    matches = re.findall(r"\b(20\d{2})-(\d{2})-(\d{2})\b", str(text or ""))
+    if not matches:
+        return True
+    allowed_latest = date.today() + timedelta(days=1)
+    for year, month, day in matches:
+        try:
+            observed = date(int(year), int(month), int(day))
+        except ValueError:
+            continue
+        if observed > allowed_latest:
+            return False
+    return True
 
 
 @dataclass
@@ -533,8 +584,14 @@ class AcceptanceRunner:
         payload, latency = self._chat(prompt, workspace=self.workspaces["lookup"])
         result = self._result_base(prompt=prompt, payload=payload, latency_seconds=latency)
         text = result["assistant_text"]
-        result["pass"] = ("bitcoin" in text.lower() or "btc" in text.lower()) and "source:" in text.lower()
-        result["why"] = "live lookup returned a sourced price (manual verification still required)" if result["pass"] else "live lookup lacked freshness or source"
+        has_source = ("bitcoin" in text.lower() or "btc" in text.lower()) and "source:" in text.lower()
+        not_future_dated = _market_answer_is_not_future_dated(text)
+        result["pass"] = has_source and not_future_dated
+        result["why"] = (
+            "live lookup returned a sourced price without future-dated bluffing (manual verification still required)"
+            if result["pass"]
+            else "live lookup lacked freshness, source, or date sanity"
+        )
         results["P0.4_live_lookup"] = result
 
         prompt = "Create exactly three files: a.txt, b.txt, c.txt. Put ONE, TWO, THREE respectively. Do not create anything else."
@@ -606,12 +663,24 @@ class AcceptanceRunner:
                 "id": self.profile.profile_id,
                 "display_name": self.profile.display_name,
                 "benchmark_model": self.profile.model,
+                "benchmark_bundle_models": list(self.profile.bundle_models),
+                "benchmark_bundle_roles": [
+                    {"role": role, "model": model} for role, model in self.profile.bundle_roles
+                ],
+                "capacity_bucket": self.profile.capacity_bucket,
+                "fallback_bundle_models": list(self.profile.fallback_bundle_models),
+                "advanced_optional_profile": self.profile.advanced_optional_profile,
                 "runtime_model": runtime_model,
                 "install_profile_id": str(install_profile.get("profile_id") or ""),
                 "install_profile_label": str(install_profile.get("label") or ""),
+                "runtime_selected_models": list(install_profile.get("selected_models") or ()),
+                "runtime_selected_model_roles": list(install_profile.get("selected_model_roles") or ()),
+                "bundle_id": str(install_profile.get("bundle_id") or ""),
+                "bundle_kind": str(install_profile.get("bundle_kind") or ""),
             },
             "machine": _sanitize_data(_machine_info(), repo_root=self.repo_root),
             "model": runtime_model,
+            "selected_models": list(install_profile.get("selected_models") or ()),
             "workspaces": {
                 key: _sanitize_text(str(path.relative_to(self.run_root)), repo_root=self.repo_root)
                 for key, path in self.workspaces.items()
@@ -714,6 +783,11 @@ def build_acceptance_summary(
             "limit": profile.simple_prompt_median_max_seconds,
             "actual": _median(simple_latencies),
             "pass": (_median(simple_latencies) or float("inf")) <= profile.simple_prompt_median_max_seconds,
+        },
+        "simple_prompt_hard_max_seconds": {
+            "limit": profile.simple_prompt_hard_max_seconds,
+            "actual": round(max(simple_latencies), 3) if simple_latencies else None,
+            "pass": (max(simple_latencies) if simple_latencies else float("inf")) <= profile.simple_prompt_hard_max_seconds,
         },
         "file_task_median_max_seconds": {
             "limit": profile.file_task_median_max_seconds,
@@ -1092,8 +1166,21 @@ def render_report(
     benchmark_model = (
         str(profile_meta.get("benchmark_model") or profile.model or "").strip() or profile.model
     )
+    benchmark_bundle_models = tuple(
+        str(item).strip() for item in profile_meta.get("benchmark_bundle_models") or profile.bundle_models if str(item).strip()
+    )
     runtime_model = (
         str(online_payload.get("model") or runtime.get("model_tag") or benchmark_model).strip() or benchmark_model
+    )
+    runtime_selected_models = tuple(
+        str(item).strip()
+        for item in (
+            profile_meta.get("runtime_selected_models")
+            or online_payload.get("selected_models")
+            or install_profile.get("selected_models")
+            or ()
+        )
+        if str(item).strip()
     )
     install_profile_id = str(
         profile_meta.get("install_profile_id") or install_profile.get("profile_id") or ""
@@ -1117,7 +1204,17 @@ def render_report(
         "",
         f"Profile: {profile.profile_id} ({profile.display_name})",
         f"Benchmark profile model: {benchmark_model}",
+        (
+            f"Benchmark bundle models: {', '.join(benchmark_bundle_models)}"
+            if benchmark_bundle_models
+            else "Benchmark bundle models: unknown"
+        ),
         f"Runtime model: {runtime_model}",
+        (
+            f"Runtime bundle models: {', '.join(runtime_selected_models)}"
+            if runtime_selected_models
+            else "Runtime bundle models: unknown"
+        ),
         (
             f"Runtime install profile: {install_profile_id} ({install_profile_label})"
             if install_profile_id
@@ -1150,6 +1247,7 @@ def render_report(
         "Threshold gates:",
         f"- cold start <= {profile.cold_start_max_seconds}s: {'PASS' if threshold_checks['cold_start_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['cold_start_max_seconds']['actual']}s)",
         f"- simple prompt median <= {profile.simple_prompt_median_max_seconds}s: {'PASS' if threshold_checks['simple_prompt_median_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['simple_prompt_median_max_seconds']['actual']}s)",
+        f"- simple prompt hard max <= {profile.simple_prompt_hard_max_seconds}s: {'PASS' if threshold_checks['simple_prompt_hard_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['simple_prompt_hard_max_seconds']['actual']}s)",
         f"- file task median <= {profile.file_task_median_max_seconds}s: {'PASS' if threshold_checks['file_task_median_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['file_task_median_max_seconds']['actual']}s)",
         f"- live lookup median <= {profile.live_lookup_median_max_seconds}s: {'PASS' if threshold_checks['live_lookup_median_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['live_lookup_median_max_seconds']['actual']}s)",
         f"- chained task median <= {profile.chained_task_median_max_seconds}s: {'PASS' if threshold_checks['chained_task_median_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['chained_task_median_max_seconds']['actual']}s)",

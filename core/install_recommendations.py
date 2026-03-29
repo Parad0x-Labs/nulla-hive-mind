@@ -8,11 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from core.hardware_tier import MachineProbe, QwenTier, probe_machine, select_qwen_tier
+from core.local_model_bundles import (
+    bundle_spec,
+    local_multi_llm_fit_from_probe,
+    resolve_local_bundle_recommendation,
+)
 from core.local_specialist_lane import (
     DEFAULT_SECONDARY_LOCAL_BACKEND,
     DEFAULT_SECONDARY_LOCAL_BASE_URL,
     DEFAULT_SECONDARY_LOCAL_MODEL,
-    DEFAULT_SECONDARY_LOCAL_PROFILE,
     secondary_local_model,
 )
 from core.provider_env import merge_provider_env
@@ -28,12 +32,23 @@ class InstallRecommendationTruth:
     secondary_local_supported: bool
     selection_reasons: tuple[str, ...]
     local_multi_llm_fit: str
+    capacity_bucket: str
+    free_disk_gb: float
+    safe_disk_floor_gb: float
+    recommended_bundle_id: str
+    recommended_bundle_kind: str
+    recommended_bundle_models: tuple[str, ...]
+    recommended_bundle_roles: tuple[tuple[str, str], ...]
+    fallback_bundle_id: str
+    fallback_bundle_models: tuple[str, ...]
+    fallback_bundle_roles: tuple[tuple[str, str], ...]
+    advanced_optional_profile: str = ""
     secondary_local_backend: str = DEFAULT_SECONDARY_LOCAL_BACKEND
     secondary_local_base_url: str = DEFAULT_SECONDARY_LOCAL_BASE_URL
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schema": "nulla.install_recommendation.v1",
+            "schema": "nulla.install_recommendation.v2",
             "recommended_default_profile": self.recommended_default_profile,
             "recommended_default_profile_display_id": format_install_profile_id(
                 self.recommended_default_profile,
@@ -51,36 +66,29 @@ class InstallRecommendationTruth:
             "secondary_local_supported": self.secondary_local_supported,
             "selection_reasons": list(self.selection_reasons),
             "local_multi_llm_fit": self.local_multi_llm_fit,
+            "capacity_bucket": self.capacity_bucket,
+            "free_disk_gb": self.free_disk_gb,
+            "safe_disk_floor_gb": self.safe_disk_floor_gb,
+            "recommended_bundle_id": self.recommended_bundle_id,
+            "recommended_bundle_kind": self.recommended_bundle_kind,
+            "recommended_bundle_models": list(self.recommended_bundle_models),
+            "recommended_bundle_roles": [
+                {"role": role, "model": model} for role, model in self.recommended_bundle_roles
+            ],
+            "fallback_bundle_id": self.fallback_bundle_id,
+            "fallback_bundle_models": list(self.fallback_bundle_models),
+            "fallback_bundle_roles": [
+                {"role": role, "model": model} for role, model in self.fallback_bundle_roles
+            ],
+            "advanced_optional_profile": self.advanced_optional_profile,
             "secondary_local_backend": self.secondary_local_backend,
             "secondary_local_base_url": self.secondary_local_base_url,
         }
 
 
 def local_multi_llm_fit(probe: MachineProbe | Mapping[str, Any] | None = None) -> str:
-    if probe is None:
-        active_probe = probe_machine()
-        ram_gb = float(active_probe.ram_gb or 0.0)
-        accelerator = str(active_probe.accelerator or "").strip().lower()
-        vram_gb = float(active_probe.vram_gb or 0.0) if active_probe.vram_gb is not None else 0.0
-    elif isinstance(probe, Mapping):
-        ram_gb = float(probe.get("ram_gb") or 0.0)
-        accelerator = str(probe.get("accelerator") or "").strip().lower()
-        vram_gb = float(probe.get("vram_gb") or 0.0) if probe.get("vram_gb") is not None else 0.0
-    else:
-        ram_gb = float(probe.ram_gb or 0.0)
-        accelerator = str(probe.accelerator or "").strip().lower()
-        vram_gb = float(probe.vram_gb or 0.0) if probe.vram_gb is not None else 0.0
-    if accelerator == "mps":
-        if ram_gb >= 48.0:
-            return "comfortable"
-        if ram_gb >= 24.0:
-            return "pressure_sensitive"
-        return "single_model_only"
-    if vram_gb >= 20.0 or ram_gb >= 48.0:
-        return "comfortable"
-    if vram_gb >= 10.0 or ram_gb >= 24.0:
-        return "pressure_sensitive"
-    return "single_model_only"
+    active_probe = probe or probe_machine()
+    return local_multi_llm_fit_from_probe(active_probe)
 
 
 def build_install_recommendation_truth(
@@ -94,64 +102,69 @@ def build_install_recommendation_truth(
     env_map = merge_provider_env(runtime_home, env=os.environ if env is None else env)
     active_probe = probe or probe_machine()
     active_tier = tier or select_qwen_tier(active_probe)
-    primary_local_model = str(selected_model or active_tier.ollama_tag or "").strip() or "qwen2.5:7b"
-    specialist_model = secondary_local_model(env_map)
-    fit = local_multi_llm_fit(active_probe)
     free_gb = _free_gb(runtime_home)
-    secondary_required_gb = _secondary_local_required_disk_gb(specialist_model)
-    disk_ok = free_gb >= secondary_required_gb
-    secondary_supported = fit != "single_model_only" and disk_ok
+    specialist_model = secondary_local_model(env_map)
+    bundle_recommendation = resolve_local_bundle_recommendation(
+        probe=active_probe,
+        free_disk_gb=free_gb,
+        secondary_local_model_name=specialist_model,
+        selected_model=str(selected_model or "").strip(),
+    )
+    recommended_bundle = bundle_recommendation.recommended_bundle
+    fallback_bundle = bundle_recommendation.fallback_bundle
+    primary_local_model = recommended_bundle.primary_model or str(active_tier.ollama_tag or "").strip() or "qwen3:8b"
+
     reasons = [
-        f"Primary local companion model follows hardware tier `{active_tier.tier_name}` and resolves to `{primary_local_model}`.",
-        "Default install stays on the single local Ollama companion lane so first-run latency and companion behavior stay predictable.",
+        (
+            f"Primary local companion model resolves to `{primary_local_model}` "
+            f"for capacity bucket `{bundle_recommendation.capacity_bucket}`."
+        ),
+        (
+            f"Recommended local bundle `{recommended_bundle.bundle_id}` ({recommended_bundle.kind}) "
+            f"fits the current hardware and SSD headroom."
+        ),
+        *bundle_recommendation.selection_reasons,
     ]
-    if secondary_supported:
-        if fit == "comfortable":
-            reasons.append(
-                f"This machine has enough RAM/VRAM headroom and disk for the optional `{DEFAULT_SECONDARY_LOCAL_BACKEND}` verifier lane."
-            )
-        else:
-            reasons.append(
-                f"This machine can carry the optional `{DEFAULT_SECONDARY_LOCAL_BACKEND}` verifier lane, but it is pressure-sensitive under concurrency."
-            )
+    if bundle_recommendation.advanced_optional_allowed:
         reasons.append(
-            f"The optional stronger local lane targets `{specialist_model}` for coding and verifier-heavy work."
+            f"The explicit advanced profile `{DEFAULT_SECONDARY_LOCAL_BACKEND}` lane remains optional and is not auto-installed by the default one-line path."
         )
     else:
-        if fit == "single_model_only":
-            reasons.append(
-                "This machine should stay on one local model at a time; the optional stronger local lane is not recommended."
-            )
-        else:
-            reasons.append(
-                f"The optional stronger local lane is held back because the active target volume only has {free_gb:.1f} GiB free, below the {secondary_required_gb:.1f} GiB floor."
-            )
+        reasons.append(
+            f"The explicit advanced `{DEFAULT_SECONDARY_LOCAL_BACKEND}` lane is not recommended on this host right now."
+        )
+
     return InstallRecommendationTruth(
         recommended_default_profile="local-only",
-        recommended_optional_profile=DEFAULT_SECONDARY_LOCAL_PROFILE if secondary_supported else "",
+        recommended_optional_profile=bundle_recommendation.advanced_optional_profile,
         primary_local_model=primary_local_model,
         secondary_local_model=specialist_model,
-        secondary_local_supported=secondary_supported,
-        selection_reasons=tuple(reasons),
-        local_multi_llm_fit=fit,
+        secondary_local_supported=bundle_recommendation.advanced_optional_allowed,
+        selection_reasons=tuple(dict.fromkeys(reason.strip() for reason in reasons if reason.strip())),
+        local_multi_llm_fit=bundle_recommendation.local_multi_llm_fit,
+        capacity_bucket=bundle_recommendation.capacity_bucket,
+        free_disk_gb=bundle_recommendation.free_disk_gb,
+        safe_disk_floor_gb=bundle_recommendation.safe_disk_floor_gb,
+        recommended_bundle_id=recommended_bundle.bundle_id,
+        recommended_bundle_kind=recommended_bundle.kind,
+        recommended_bundle_models=recommended_bundle.models,
+        recommended_bundle_roles=tuple((item.role, item.model) for item in recommended_bundle.role_models),
+        fallback_bundle_id=fallback_bundle.bundle_id,
+        fallback_bundle_models=fallback_bundle.models,
+        fallback_bundle_roles=tuple((item.role, item.model) for item in fallback_bundle.role_models),
+        advanced_optional_profile=bundle_recommendation.advanced_optional_profile,
     )
-
-def _secondary_local_required_disk_gb(model_name: str) -> float:
-    clean = str(model_name or "").strip().lower()
-    if "32b" in clean:
-        return 38.0
-    if "14b" in clean:
-        return 18.0
-    if "7b" in clean:
-        return 10.0
-    return 16.0
 
 
 def _free_gb(runtime_home: str | Path | None) -> float:
-    candidate = Path(runtime_home).expanduser().resolve() if runtime_home else (Path.home() / ".nulla_runtime").resolve()
+    candidate = (
+        Path(runtime_home).expanduser().resolve()
+        if runtime_home
+        else (Path.home() / ".nulla_runtime").resolve()
+    )
     existing = _nearest_existing_path(candidate)
     usage = shutil.disk_usage(existing)
-    return float(usage.free) / (1024.0 ** 3)
+    return float(usage.free) / (1024.0**3)
 
 
 def _nearest_existing_path(path: Path) -> Path:
@@ -165,8 +178,8 @@ __all__ = [
     "DEFAULT_SECONDARY_LOCAL_BACKEND",
     "DEFAULT_SECONDARY_LOCAL_BASE_URL",
     "DEFAULT_SECONDARY_LOCAL_MODEL",
-    "DEFAULT_SECONDARY_LOCAL_PROFILE",
     "InstallRecommendationTruth",
     "build_install_recommendation_truth",
+    "bundle_spec",
     "local_multi_llm_fit",
 ]

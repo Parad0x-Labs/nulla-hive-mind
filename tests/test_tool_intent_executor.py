@@ -396,6 +396,18 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(first.reason, "planned_machine_specs_inspection")
         self.assertEqual(first.next_payload["intent"], "machine.inspect_specs")
 
+    def test_workflow_planner_routes_screen_size_followup_to_grounded_machine_tool(self) -> None:
+        first = plan_tool_workflow(
+            user_text="you did not answered about screen size?",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "api", "platform": "api"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_machine_specs_inspection")
+        self.assertEqual(first.next_payload["intent"], "machine.inspect_specs")
+
     def test_workflow_planner_does_not_route_capability_question_to_machine_specs(self) -> None:
         first = plan_tool_workflow(
             user_text="what can you do right now on this machine?",

@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from core.hardware_tier import MachineProbe, QwenTier, probe_machine, select_qwen_tier
+from core.local_model_bundles import (
+    model_storage_gb,
+    resolve_local_bundle_recommendation,
+)
 from core.local_specialist_lane import (
     DEFAULT_SECONDARY_LOCAL_BACKEND,
     DEFAULT_SECONDARY_LOCAL_MODEL,
@@ -147,6 +151,12 @@ class InstallProfileTruth:
     single_volume_ready: bool
     reasons: tuple[str, ...]
     volume_checks: tuple[InstallProfileVolumeCheck, ...]
+    selected_models: tuple[str, ...] = ()
+    selected_model_roles: tuple[tuple[str, str], ...] = ()
+    capacity_bucket: str = ""
+    bundle_id: str = ""
+    bundle_kind: str = ""
+    advanced_optional_profile: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -156,6 +166,14 @@ class InstallProfileTruth:
             "summary": self.summary,
             "selection_source": self.selection_source,
             "selected_model": self.selected_model,
+            "selected_models": list(self.selected_models),
+            "selected_model_roles": [
+                {"role": role, "model": model} for role, model in self.selected_model_roles
+            ],
+            "capacity_bucket": self.capacity_bucket,
+            "bundle_id": self.bundle_id,
+            "bundle_kind": self.bundle_kind,
+            "advanced_optional_profile": self.advanced_optional_profile,
             "provider_mix": [item.to_dict() for item in self.provider_mix],
             "estimated_download_gb": self.estimated_download_gb,
             "estimated_disk_footprint_gb": self.estimated_disk_footprint_gb,
@@ -171,8 +189,9 @@ class InstallProfileTruth:
 
     def display_summary(self) -> str:
         provider_roles = ", ".join(f"{item.role}:{item.provider_id}" for item in self.provider_mix)
+        models_label = ", ".join(self.selected_models) if self.selected_models else self.selected_model
         return (
-            f"{format_install_profile_id(self.profile_id)} -> {self.selected_model} "
+            f"{format_install_profile_id(self.profile_id)} -> {models_label} "
             f"({provider_roles}; download~{self.estimated_download_gb:.1f} GB; "
             f"disk~{self.estimated_disk_footprint_gb:.1f} GB)"
         )
@@ -191,16 +210,22 @@ def build_install_profile_truth(
     env_map = merge_provider_env(runtime_home, env=os.environ if env is None else env)
     active_probe = probe or probe_machine()
     active_tier = tier or select_qwen_tier(active_probe)
+    installed_record = _installed_profile_record(runtime_home)
     requested_arg_raw = str(requested_profile or "").strip().lower()
     requested_env_raw = str(env_map.get("NULLA_INSTALL_PROFILE") or "").strip().lower()
     requested_raw = requested_arg_raw or requested_env_raw
     requested = normalize_install_profile_id(requested_raw, allow_auto=True)
     requested_source = "env_override" if requested else ""
     if not requested:
-        requested = _installed_profile_id(runtime_home)
+        requested = str(installed_record.get("profile_id") or "")
         if requested:
             requested_source = "installed_record"
-    model_tag = str(selected_model or active_tier.ollama_tag or "").strip() or "qwen2.5:7b"
+    bundle_recommendation = resolve_local_bundle_recommendation(
+        probe=active_probe,
+        free_disk_gb=_disk_free_gb(_nearest_existing_path(Path(runtime_home).expanduser().resolve())) if runtime_home else _disk_free_gb(_nearest_existing_path(Path.home() / ".nulla_runtime")),
+        secondary_local_model_name=secondary_local_model(env_map),
+        selected_model=str(selected_model or installed_record.get("selected_model") or "").strip(),
+    )
     installed_ollama_models = _installed_ollama_model_tags(
         provider_capability_truth=provider_capability_truth,
         env=env_map,
@@ -224,8 +249,9 @@ def build_install_profile_truth(
             profile_id=requested,
             selection_source=selection_source,
             selection_reasons=selection_reasons,
-            model_tag=model_tag,
+            bundle_recommendation=bundle_recommendation,
             tier=active_tier,
+            probe=active_probe,
             provider_capability_truth=provider_capability_truth,
             runtime_home=runtime_home,
             env=env_map,
@@ -245,8 +271,9 @@ def build_install_profile_truth(
                 profile_id=candidate,
                 selection_source="auto",
                 selection_reasons=[*auto_reasons, _auto_selection_reason(candidate)],
-                model_tag=model_tag,
+                bundle_recommendation=bundle_recommendation,
                 tier=active_tier,
+                probe=active_probe,
                 provider_capability_truth=provider_capability_truth,
                 runtime_home=runtime_home,
                 env=env_map,
@@ -345,6 +372,9 @@ def persist_install_profile_record(
     profile_id: str,
     *,
     selected_model: str = "",
+    selected_models: tuple[str, ...] = (),
+    bundle_id: str = "",
+    bundle_kind: str = "",
 ) -> Path:
     runtime_root = Path(runtime_home).expanduser().resolve()
     target = runtime_root / _INSTALL_PROFILE_RECORD_RELATIVE_PATH
@@ -353,28 +383,36 @@ def persist_install_profile_record(
         "schema": "nulla.install_profile_record.v1",
         "profile_id": str(profile_id or "").strip().lower(),
         "selected_model": str(selected_model or "").strip(),
+        "selected_models": [str(item).strip() for item in selected_models if str(item).strip()],
+        "bundle_id": str(bundle_id or "").strip(),
+        "bundle_kind": str(bundle_kind or "").strip(),
     }
     target.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return target
 
 
 def _installed_profile_id(runtime_home: str | Path | None) -> str:
-    if runtime_home is None:
-        return ""
-    try:
-        record_path = Path(runtime_home).expanduser().resolve() / _INSTALL_PROFILE_RECORD_RELATIVE_PATH
-    except Exception:
-        return ""
-    try:
-        payload = json.loads(record_path.read_text(encoding="utf-8"))
-    except Exception:
-        return ""
-    if not isinstance(payload, dict):
-        return ""
+    payload = _installed_profile_record(runtime_home)
     profile_id = str(payload.get("profile_id") or "").strip().lower()
     if profile_id in _PROFILE_IDS:
         return profile_id
     return ""
+
+
+def _installed_profile_record(runtime_home: str | Path | None) -> dict[str, Any]:
+    if runtime_home is None:
+        return {}
+    try:
+        record_path = Path(runtime_home).expanduser().resolve() / _INSTALL_PROFILE_RECORD_RELATIVE_PATH
+    except Exception:
+        return {}
+    try:
+        payload = json.loads(record_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
 
 
 def _requested_profile_reason(requested_raw: str, requested: str, *, explicit_request: bool) -> str:
@@ -402,24 +440,34 @@ def _compose_install_profile_truth(
     profile_id: str,
     selection_source: str,
     selection_reasons: list[str],
-    model_tag: str,
+    bundle_recommendation: Any,
     tier: QwenTier,
+    probe: MachineProbe,
     provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
     runtime_home: str | Path | None,
     env: Mapping[str, str],
     installed_ollama_models: set[str],
 ) -> InstallProfileTruth:
+    recommended_bundle = bundle_recommendation.recommended_bundle
+    model_tag = recommended_bundle.primary_model
+    selected_role_models = _selected_role_models_for_profile(
+        profile_id=profile_id,
+        recommended_bundle=recommended_bundle,
+        legacy_mode=bool(getattr(bundle_recommendation, "legacy_mode", False)),
+    )
     estimates = _profile_estimates(
         profile_id=profile_id,
-        model_tag=model_tag,
+        bundle_recommendation=bundle_recommendation,
         tier=tier,
+        probe=probe,
         installed_ollama_models=installed_ollama_models,
         provider_capability_truth=provider_capability_truth,
         env=env,
+        runtime_home=runtime_home,
     )
     provider_mix, provider_reasons = _provider_mix(
         profile_id=profile_id,
-        model_tag=model_tag,
+        bundle_recommendation=bundle_recommendation,
         provider_capability_truth=provider_capability_truth,
         env=env,
     )
@@ -465,6 +513,12 @@ def _compose_install_profile_truth(
         summary=_profile_summary(profile_id),
         selection_source=selection_source,
         selected_model=model_tag,
+        selected_models=recommended_bundle.models,
+        selected_model_roles=tuple((item.role, item.model) for item in selected_role_models),
+        capacity_bucket=str(bundle_recommendation.capacity_bucket),
+        bundle_id=recommended_bundle.bundle_id,
+        bundle_kind=recommended_bundle.kind,
+        advanced_optional_profile=str(bundle_recommendation.advanced_optional_profile or ""),
         provider_mix=provider_mix,
         estimated_download_gb=estimates["estimated_download_gb"],
         estimated_disk_footprint_gb=estimates["estimated_disk_footprint_gb"],
@@ -518,17 +572,22 @@ def _primary_profile_blocker(profile: InstallProfileTruth) -> str:
 def _profile_estimates(
     *,
     profile_id: str,
-    model_tag: str,
+    bundle_recommendation: Any,
     tier: QwenTier,
+    probe: MachineProbe,
     installed_ollama_models: set[str],
     provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
     env: Mapping[str, str],
+    runtime_home: str | Path | None,
 ) -> dict[str, float]:
-    required_local_models = _required_ollama_models(profile_id=profile_id, model_tag=model_tag)
+    required_local_models = _required_ollama_models(
+        profile_id=profile_id,
+        bundle_recommendation=bundle_recommendation,
+    )
     missing_local_models = tuple(
         model_name for model_name in required_local_models if model_name.lower() not in installed_ollama_models
     )
-    missing_model_gb = sum(_estimate_model_storage_gb(model_name) for model_name in missing_local_models)
+    missing_model_gb = sum(model_storage_gb(model_name) for model_name in missing_local_models)
     secondary_local_model_name = secondary_local_model(env)
     secondary_local_provider = preferred_secondary_local_provider_id(env)
     secondary_local_available = any(
@@ -542,7 +601,7 @@ def _profile_estimates(
     )
     missing_secondary_local_gb = 0.0
     if profile_id in {"local-max", "full-orchestrated"} and not secondary_local_installed:
-        missing_secondary_local_gb = _estimate_model_storage_gb(secondary_local_model_name)
+        missing_secondary_local_gb = model_storage_gb(secondary_local_model_name)
     runtime_required_gb = 2.5
 
     if profile_id in {"local-max", "full-orchestrated"}:
@@ -555,36 +614,85 @@ def _profile_estimates(
     estimated_download_gb = round(total_missing_model_gb, 1)
     model_required_gb = round(total_missing_model_gb + model_buffer_gb, 1)
     minimum_free_space_gb = round(runtime_required_gb + model_required_gb, 1)
+    bucket = str(bundle_recommendation.capacity_bucket or "")
+    bucket_ram_floor = {
+        "A": 8.0,
+        "B": 16.0,
+        "C": 24.0,
+        "D": 32.0,
+        "E": 48.0,
+    }.get(bucket, max(tier.min_ram_gb, 6.0))
+    bucket_vram_floor = {
+        "A": 0.0,
+        "B": 6.0,
+        "C": 10.0,
+        "D": 16.0,
+        "E": 24.0,
+    }.get(bucket, max(tier.min_vram_gb, 0.0))
     return {
         "estimated_download_gb": estimated_download_gb,
         "estimated_disk_footprint_gb": minimum_free_space_gb,
         "minimum_free_space_gb": minimum_free_space_gb,
         "runtime_required_gb": round(runtime_required_gb, 1),
         "model_required_gb": model_required_gb,
-        "ram_expectation_gb": float(max(tier.min_ram_gb, 6.0)),
-        "vram_expectation_gb": float(max(tier.min_vram_gb, 0.0)),
+        "ram_expectation_gb": float(max(bucket_ram_floor, tier.min_ram_gb, 6.0, float(probe.ram_gb or 0.0) if bucket == "A" else 0.0)),
+        "vram_expectation_gb": float(max(bucket_vram_floor, tier.min_vram_gb, 0.0)),
     }
 
 
-def _required_ollama_models(*, profile_id: str, model_tag: str) -> tuple[str, ...]:
+def _required_ollama_models(
+    *,
+    profile_id: str,
+    bundle_recommendation: Any,
+) -> tuple[str, ...]:
     del profile_id
-    return (str(model_tag or "").strip() or "qwen2.5:7b",)
+    return tuple(
+        str(model_name).strip()
+        for model_name in bundle_recommendation.recommended_bundle.models
+        if str(model_name).strip()
+    )
 
 
-def required_ollama_models_for_profile(*, profile_id: str, model_tag: str) -> tuple[str, ...]:
+def required_ollama_models_for_profile(
+    *,
+    profile_id: str,
+    model_tag: str,
+    probe: MachineProbe | None = None,
+    runtime_home: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
     normalized_profile = normalize_install_profile_id(profile_id, allow_auto=False)
-    return _required_ollama_models(profile_id=normalized_profile, model_tag=model_tag)
+    active_probe = probe or probe_machine()
+    env_map = os.environ if env is None else env
+    recommendation = resolve_local_bundle_recommendation(
+        probe=active_probe,
+        free_disk_gb=_disk_free_gb(
+            _nearest_existing_path(
+                Path(runtime_home).expanduser().resolve() if runtime_home else (Path.home() / ".nulla_runtime")
+            )
+        ),
+        secondary_local_model_name=secondary_local_model(env_map),
+        selected_model=str(model_tag or "").strip(),
+    )
+    return _required_ollama_models(profile_id=normalized_profile, bundle_recommendation=recommendation)
 
 
 def _provider_mix(
     *,
     profile_id: str,
-    model_tag: str,
+    bundle_recommendation: Any,
     provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
     env: Mapping[str, str],
 ) -> tuple[tuple[InstallProfileProvider, ...], list[str]]:
     truth_index = _provider_truth_index(provider_capability_truth)
-    local_provider_id = _find_primary_local_provider_id(provider_capability_truth, model_tag=model_tag)
+    legacy_mode = bool(getattr(bundle_recommendation, "legacy_mode", False))
+    role_models = _selected_role_models_for_profile(
+        profile_id=profile_id,
+        recommended_bundle=bundle_recommendation.recommended_bundle,
+        legacy_mode=legacy_mode,
+    )
+    primary_local_model = bundle_recommendation.recommended_bundle.primary_model
+    local_provider_id = _find_primary_local_provider_id(provider_capability_truth, model_tag=primary_local_model)
     secondary_local_provider_id = _find_secondary_local_provider_id(
         provider_capability_truth,
         primary_provider_id=local_provider_id,
@@ -593,7 +701,6 @@ def _provider_mix(
     kimi_provider_id = _find_remote_provider_id(provider_capability_truth, hint="kimi")
     tether_provider_id = _find_remote_provider_id(provider_capability_truth, hint="tether")
     fallback_provider_id = _find_remote_provider_id(provider_capability_truth, hint=None, exclude={kimi_provider_id})
-    local_availability = _provider_availability_state(local_provider_id, truth_index)
     secondary_local_availability = _provider_availability_state(secondary_local_provider_id, truth_index)
     kimi_availability = _provider_availability_state(kimi_provider_id, truth_index)
     tether_availability = _provider_availability_state(tether_provider_id, truth_index)
@@ -601,17 +708,28 @@ def _provider_mix(
     providers: list[InstallProfileProvider] = []
     reasons: list[str] = []
 
-    providers.append(
-        InstallProfileProvider(
-            provider_id=local_provider_id,
-            role="coder",
-            locality="local",
-            required=True,
-            configured=True,
-            availability_state=local_availability,
-            notes="Primary local Ollama lane.",
+    for role_model in role_models:
+        provider_role = _provider_mix_role_for_bundle_role(
+            role_model.role,
+            profile_id=profile_id,
+            legacy_mode=legacy_mode,
         )
-    )
+        provider_id = _find_local_provider_id_for_model(
+            provider_capability_truth,
+            model_name=role_model.model,
+            fallback_prefix="ollama-local",
+        )
+        providers.append(
+            InstallProfileProvider(
+                provider_id=provider_id,
+                role=provider_role,
+                locality="local",
+                required=True,
+                configured=True,
+                availability_state=_provider_availability_state(provider_id, truth_index),
+                notes=f"Required local Ollama `{provider_role}` lane.",
+            )
+        )
     if profile_id in {"local-max", "full-orchestrated"}:
         distinct_secondary = bool(secondary_local_provider_id) and secondary_local_provider_id != local_provider_id
         verifier_provider_id = secondary_local_provider_id or preferred_secondary_local_provider_id(env)
@@ -748,6 +866,49 @@ def _find_primary_local_provider_id(
         reverse=True,
     )
     return candidates[0].provider_id
+
+
+def _selected_role_models_for_profile(
+    *,
+    profile_id: str,
+    recommended_bundle: Any,
+    legacy_mode: bool,
+) -> tuple[Any, ...]:
+    role_models = tuple(recommended_bundle.role_models)
+    if not role_models:
+        return tuple()
+    if legacy_mode and profile_id in {"local-max", "full-orchestrated"}:
+        return (type(role_models[0])(role="coding", model=recommended_bundle.primary_model),)
+    return role_models
+
+
+def _provider_mix_role_for_bundle_role(
+    bundle_role: str,
+    *,
+    profile_id: str,
+    legacy_mode: bool,
+) -> str:
+    clean_role = str(bundle_role or "").strip().lower()
+    if legacy_mode and profile_id in {"local-max", "full-orchestrated"} and clean_role == "coding":
+        return "coder"
+    return clean_role
+
+
+def _find_local_provider_id_for_model(
+    provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
+    *,
+    model_name: str,
+    fallback_prefix: str,
+) -> str:
+    clean_model = str(model_name or "").strip().lower()
+    for item in provider_capability_truth:
+        if item.locality != "local":
+            continue
+        if str(item.model_id or "").strip().lower() != clean_model:
+            continue
+        return item.provider_id
+    clean_prefix = str(fallback_prefix or "").strip()
+    return f"{clean_prefix}:{model_name}" if clean_prefix else clean_model
 
 
 def _find_secondary_local_provider_id(
@@ -953,8 +1114,8 @@ def _profile_label(profile_id: str) -> str:
 def _profile_summary(profile_id: str) -> str:
     return {
         "auto-recommended": "Choose the strongest honest profile from current hardware and configured providers.",
-        "local-only": "Single local Ollama lane with no remote provider dependency.",
-        "local-max": "Primary Ollama companion lane plus an optional llama.cpp local verifier/coding lane.",
+        "local-only": "Pure local Ollama bundle with no remote provider dependency; may be single, dual, or triple depending on hardware.",
+        "local-max": "Local Ollama bundle plus an explicit llama.cpp verifier/coding lane.",
         "hybrid-kimi": "Local coding lane plus a remote Kimi synthesis lane.",
         "hybrid-tether": "Local coding lane plus a remote Tether synthesis lane.",
         "hybrid-fallback": "Local coding lane plus a generic remote fallback lane.",
@@ -966,10 +1127,7 @@ def _estimate_model_storage_gb(model_tag: str) -> float:
     clean = str(model_tag or "").strip().lower()
     if clean in _MODEL_SIZE_GB:
         return _MODEL_SIZE_GB[clean]
-    match = re.search(r"(\d+(?:\.\d+)?)b", clean)
-    if match:
-        return round(max(1.0, float(match.group(1)) * 1.12), 1)
-    return 8.0
+    return model_storage_gb(clean)
 
 
 def _has_any_env(env: Mapping[str, str], *keys: str) -> bool:

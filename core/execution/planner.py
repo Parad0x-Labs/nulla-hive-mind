@@ -344,6 +344,11 @@ def _extract_machine_specs_request(text: str) -> dict[str, Any] | None:
         "vram",
         "chip",
         "cores",
+        "screen size",
+        "display size",
+        "display resolution",
+        "screen resolution",
+        "monitor resolution",
     )
     mentions_machine_shape = any(marker in lowered for marker in spec_markers)
     mentions_running_host = "running on" in lowered and "machine" in lowered
@@ -362,6 +367,8 @@ def _extract_machine_specs_request(text: str) -> dict[str, Any] | None:
             "running on",
         )
     )
+    if any(marker in lowered for marker in ("screen size", "display size", "display resolution", "screen resolution", "monitor resolution")):
+        wants_inspection = True
     return {} if wants_inspection else None
 
 

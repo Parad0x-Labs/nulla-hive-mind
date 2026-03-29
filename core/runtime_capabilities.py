@@ -132,6 +132,19 @@ def runtime_capability_snapshot(context: RuntimeContext | None = None) -> dict[s
         runtime_home=runtime.paths.runtime_home,
     )
     statuses = runtime_capability_statuses(runtime)
+    active_remote_fallback_available = bool(runtime.feature_flags.allow_remote_only_without_backend) and any(
+        item.locality == "remote" for item in provider_snapshot.capability_truth
+    )
+    capabilities_payload = [asdict(item) for item in statuses]
+    if not active_remote_fallback_available:
+        for row in capabilities_payload:
+            if str(row.get("name") or "").strip() != "remote_only_backend_fallback":
+                continue
+            if str(row.get("state") or "").strip() == "disabled_by_policy":
+                break
+            row["state"] = "disabled_by_profile"
+            row["reason"] = "Current install profile exposes no active remote model lane, so remote-only fallback is unavailable."
+            break
     return {
         "mode": runtime.mode,
         "runtime_home": str(runtime.paths.runtime_home),
@@ -142,10 +155,10 @@ def runtime_capability_snapshot(context: RuntimeContext | None = None) -> dict[s
             "helper_mesh_enabled": runtime.feature_flags.helper_mesh_enabled,
             "allow_workspace_writes": runtime.feature_flags.allow_workspace_writes,
             "allow_sandbox_execution": runtime.feature_flags.allow_sandbox_execution,
-            "allow_remote_only_without_backend": runtime.feature_flags.allow_remote_only_without_backend,
+            "allow_remote_only_without_backend": active_remote_fallback_available,
         },
         "provider_capability_truth": [item.to_dict() for item in provider_snapshot.capability_truth],
         "install_profile": install_profile.to_dict(),
         "install_recommendation": install_recommendation.to_dict(),
-        "capabilities": [asdict(item) for item in statuses],
+        "capabilities": capabilities_payload,
     }

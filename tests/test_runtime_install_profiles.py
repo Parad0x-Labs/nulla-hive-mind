@@ -76,6 +76,7 @@ def test_auto_profile_stays_local_only_on_smaller_host_when_kimi_is_configured()
         profile = build_install_profile_truth(
             probe=probe,
             tier=tier,
+            selected_model="qwen2.5:7b",
             env={"KIMI_API_KEY": "test-key"},
             provider_capability_truth=(
                 ProviderCapabilityTruth(
@@ -133,6 +134,7 @@ def test_auto_profile_stays_local_only_when_moonshot_alias_is_configured() -> No
         profile = build_install_profile_truth(
             probe=probe,
             tier=tier,
+            selected_model="qwen2.5:7b",
             env={"MOONSHOT_API_KEY": "test-key"},
             provider_capability_truth=(
                 ProviderCapabilityTruth(
@@ -190,6 +192,7 @@ def test_auto_profile_stays_local_only_on_smaller_host_when_generic_remote_is_co
         profile = build_install_profile_truth(
             probe=probe,
             tier=tier,
+            selected_model="qwen2.5:7b",
             env={"OPENAI_API_KEY": "test-key"},
             provider_capability_truth=(
                 ProviderCapabilityTruth(
@@ -247,6 +250,7 @@ def test_auto_profile_stays_local_only_on_smaller_host_when_tether_is_configured
         profile = build_install_profile_truth(
             probe=probe,
             tier=tier,
+            selected_model="qwen2.5:7b",
             env={"TETHER_API_KEY": "test-key", "TETHER_BASE_URL": "https://tether.example/v1"},
             provider_capability_truth=(
                 ProviderCapabilityTruth(

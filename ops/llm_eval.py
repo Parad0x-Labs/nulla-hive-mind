@@ -476,6 +476,9 @@ def _run_live_acceptance(
             "profile_id": profile.profile_id,
             "display_name": profile.display_name,
             "model": profile.model,
+            "bundle_models": list(profile.bundle_models),
+            "bundle_roles": [{"role": role, "model": model} for role, model in profile.bundle_roles],
+            "capacity_bucket": profile.capacity_bucket,
         },
         "summary": summary,
         "online": online_payload,
@@ -768,6 +771,13 @@ def run(args: argparse.Namespace) -> int:
     if regression_48h["status"] != "pass":
         failing_targets.extend(regression_48h["current"]["targets"])
 
+    live_profile_meta = dict(live_acceptance.get("online", {}).get("profile") or {})
+    runtime_bundle_models = list(
+        live_profile_meta.get("runtime_selected_models")
+        or live_acceptance.get("online", {}).get("selected_models")
+        or profile.bundle_models
+        or ()
+    )
     payload = {
         "run_id": run_id,
         "timestamp_utc": timestamp_utc,
@@ -778,6 +788,13 @@ def run(args: argparse.Namespace) -> int:
             "profile_id": profile.profile_id,
             "profile_name": profile.display_name,
             "model": profile.model,
+            "bundle_models": runtime_bundle_models,
+            "bundle_roles": list(
+                live_profile_meta.get("runtime_selected_model_roles")
+                or [{"role": role, "model": model} for role, model in profile.bundle_roles]
+            ),
+            "capacity_bucket": str(live_profile_meta.get("capacity_bucket") or profile.capacity_bucket or ""),
+            "install_profile_id": str(live_profile_meta.get("install_profile_id") or ""),
             "base_url": args.base_url,
         },
         "regression_48h": regression_48h,

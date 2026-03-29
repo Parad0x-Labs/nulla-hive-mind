@@ -8,6 +8,8 @@ INSTALL_ROOT="${NULLA_INSTALL_ROOT:-$HOME/nulla-hive-mind}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw-default}"
 OPENCLAW_AGENT_DIR="${NULLA_OPENCLAW_AGENT_DIR:-$HOME/.openclaw/agents/main/agent/nulla}"
 LAUNCH_AGENT_PATH="${NULLA_LAUNCH_AGENT_PATH:-$HOME/Library/LaunchAgents/ai.nulla.runtime.plist}"
+OLLAMA_MODELS_DIR="${OLLAMA_MODELS:-$HOME/.ollama/models}"
+NULLA_LLAMACPP_MODELS_DIR="${NULLA_LLAMACPP_MODELS_DIR:-$HOME/.nulla_runtime/models/llamacpp}"
 AUTO_YES=0
 
 
@@ -132,6 +134,8 @@ remove_targets() {
     "${OPENCLAW_HOME}"
     "${OPENCLAW_AGENT_DIR}"
     "${LAUNCH_AGENT_PATH}"
+    "${OLLAMA_MODELS_DIR}"
+    "${NULLA_LLAMACPP_MODELS_DIR}"
     "${mac_desktop}/Start_NULLA.command"
     "${mac_desktop}/Talk_To_NULLA.command"
     "${mac_desktop}/OpenClaw_NULLA.command"
@@ -152,6 +156,8 @@ main() {
   say "Runtime home:   ${RUNTIME_HOME}"
   say "OpenClaw home:  ${OPENCLAW_HOME}"
   say "OpenClaw agent: ${OPENCLAW_AGENT_DIR}"
+  say "Ollama models:  ${OLLAMA_MODELS_DIR}"
+  say "llama.cpp data: ${NULLA_LLAMACPP_MODELS_DIR}"
   if [[ "${AUTO_YES}" -eq 0 ]]; then
     if ! prompt_yn "Remove this local NULLA install and runtime state?" "N"; then
       say "Cancelled."

@@ -8,6 +8,11 @@ from pathlib import Path
 import ops.llm_eval as llm_eval
 from core.llm_eval.pack import collect_recent_llm_inventory
 
+PROFILE_ID = "local-bundle-ollama-v1"
+PROFILE_NAME = "NULLA local acceptance for the hardware-aware local Ollama bundle"
+PRIMARY_MODEL = "qwen3:8b"
+BUNDLE_MODELS = ("qwen3:8b", "deepseek-r1:8b")
+
 
 def _fake_online_payload(*, failing: bool) -> dict[str, object]:
     p0_pass = not failing
@@ -17,8 +22,15 @@ def _fake_online_payload(*, failing: bool) -> dict[str, object]:
     ]
     return {
         "captured_at_utc": "2026-03-27T00:00:00Z",
-        "model": "qwen2.5:7b",
-        "profile": {"id": "local-qwen25-7b-v1", "display_name": "NULLA local acceptance for qwen2.5:7b"},
+        "model": PRIMARY_MODEL,
+        "selected_models": list(BUNDLE_MODELS),
+        "profile": {
+            "id": PROFILE_ID,
+            "display_name": PROFILE_NAME,
+            "benchmark_model": PRIMARY_MODEL,
+            "benchmark_bundle_models": list(BUNDLE_MODELS),
+            "runtime_selected_models": list(BUNDLE_MODELS),
+        },
         "runtime_version": {"commit": "abc123", "build_id": "test-build"},
         "machine": {"platform": "macOS", "cpu": "Apple M4", "ram_gb": 24.0, "gpu": "Apple M4"},
         "results": {
@@ -169,17 +181,19 @@ def _passing_regression_payload(baseline_root: Path, inventory: dict[str, object
 
 def test_run_live_acceptance_uses_explicit_runtime_and_workspace_roots(monkeypatch, tmp_path: Path) -> None:
     profile = llm_eval.local_acceptance.AcceptanceProfile(
-        profile_id="local-qwen25-7b-v1",
-        display_name="NULLA local acceptance for qwen2.5:7b",
-        model="qwen2.5:7b",
+        profile_id=PROFILE_ID,
+        display_name=PROFILE_NAME,
+        model=PRIMARY_MODEL,
         cold_start_max_seconds=120.0,
         simple_prompt_median_max_seconds=8.0,
+        simple_prompt_hard_max_seconds=20.0,
         file_task_median_max_seconds=15.0,
         live_lookup_median_max_seconds=45.0,
         chained_task_median_max_seconds=60.0,
         consistency_min_passes=2,
         manual_btc_source_label="CoinGecko",
         manual_btc_source_url="https://example.invalid",
+        bundle_models=BUNDLE_MODELS,
     )
     captured: dict[str, Path] = {}
 
@@ -228,17 +242,19 @@ def test_run_live_acceptance_uses_explicit_runtime_and_workspace_roots(monkeypat
 
 def test_run_live_acceptance_discovers_active_runtime_roots_when_not_provided(monkeypatch, tmp_path: Path) -> None:
     profile = llm_eval.local_acceptance.AcceptanceProfile(
-        profile_id="local-qwen25-7b-v1",
-        display_name="NULLA local acceptance for qwen2.5:7b",
-        model="qwen2.5:7b",
+        profile_id=PROFILE_ID,
+        display_name=PROFILE_NAME,
+        model=PRIMARY_MODEL,
         cold_start_max_seconds=120.0,
         simple_prompt_median_max_seconds=8.0,
+        simple_prompt_hard_max_seconds=20.0,
         file_task_median_max_seconds=15.0,
         live_lookup_median_max_seconds=45.0,
         chained_task_median_max_seconds=60.0,
         consistency_min_passes=2,
         manual_btc_source_label="CoinGecko",
         manual_btc_source_url="https://example.invalid",
+        bundle_models=BUNDLE_MODELS,
     )
     captured: dict[str, Path] = {}
     discovered_runtime_home = (tmp_path / "discovered_runtime").resolve()
@@ -350,17 +366,19 @@ def test_run_skips_docs_report_write_by_default(monkeypatch, tmp_path: Path) -> 
         llm_eval.local_acceptance,
         "load_profile",
         lambda path: llm_eval.local_acceptance.AcceptanceProfile(
-            profile_id="local-qwen25-7b-v1",
-            display_name="NULLA local acceptance for qwen2.5:7b",
-            model="qwen2.5:7b",
+            profile_id=PROFILE_ID,
+            display_name=PROFILE_NAME,
+            model=PRIMARY_MODEL,
             cold_start_max_seconds=120.0,
             simple_prompt_median_max_seconds=8.0,
+            simple_prompt_hard_max_seconds=20.0,
             file_task_median_max_seconds=15.0,
             live_lookup_median_max_seconds=45.0,
             chained_task_median_max_seconds=60.0,
             consistency_min_passes=2,
             manual_btc_source_label="CoinGecko",
             manual_btc_source_url="https://example.invalid",
+            bundle_models=BUNDLE_MODELS,
         ),
     )
     monkeypatch.setattr(llm_eval, "collect_recent_llm_inventory", lambda repo_root, since_hours=48: {"since_hours": since_hours, "changed_paths": [], "relevant_paths": [], "tests": [], "scripts": [], "docs": [], "workflows": []})
@@ -403,17 +421,19 @@ def test_run_writes_docs_report_only_when_explicitly_requested(monkeypatch, tmp_
         llm_eval.local_acceptance,
         "load_profile",
         lambda path: llm_eval.local_acceptance.AcceptanceProfile(
-            profile_id="local-qwen25-7b-v1",
-            display_name="NULLA local acceptance for qwen2.5:7b",
-            model="qwen2.5:7b",
+            profile_id=PROFILE_ID,
+            display_name=PROFILE_NAME,
+            model=PRIMARY_MODEL,
             cold_start_max_seconds=120.0,
             simple_prompt_median_max_seconds=8.0,
+            simple_prompt_hard_max_seconds=20.0,
             file_task_median_max_seconds=15.0,
             live_lookup_median_max_seconds=45.0,
             chained_task_median_max_seconds=60.0,
             consistency_min_passes=2,
             manual_btc_source_label="CoinGecko",
             manual_btc_source_url="https://example.invalid",
+            bundle_models=BUNDLE_MODELS,
         ),
     )
     monkeypatch.setattr(llm_eval, "collect_recent_llm_inventory", lambda repo_root, since_hours=48: {"since_hours": since_hours, "changed_paths": [], "relevant_paths": [], "tests": [], "scripts": [], "docs": [], "workflows": []})
