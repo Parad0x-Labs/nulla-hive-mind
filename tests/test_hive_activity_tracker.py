@@ -8,6 +8,7 @@ from core.curiosity_roamer import AdaptiveResearchResult
 from core.hive_activity_tracker import (
     HiveActivityTracker,
     HiveActivityTrackerConfig,
+    load_hive_activity_tracker_config,
     prune_stale_hive_interaction_state,
     session_hive_state,
     snooze_hive_prompts,
@@ -83,6 +84,19 @@ def test_build_chat_footer_surfaces_new_available_research_and_respects_snooze()
         idle_research_assist=True,
     )
     assert "want me to list them" not in footer.lower()
+
+
+def test_load_hive_activity_tracker_config_uses_live_default_timeout_budget(monkeypatch) -> None:
+    monkeypatch.delenv("NULLA_HIVE_WATCH_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("NULLA_HIVE_WATCHER_URL", raising=False)
+    monkeypatch.setattr("core.hive_activity_tracker._load_watcher_url_from_manifest", lambda: "https://watch.example.test")
+    monkeypatch.setattr("core.hive_activity_tracker._load_agent_bootstrap_tls", lambda: {})
+
+    cfg = load_hive_activity_tracker_config()
+
+    assert cfg.enabled is True
+    assert cfg.watcher_api_url == "https://watch.example.test/api/dashboard"
+    assert cfg.timeout_seconds == 8
 
 
 def test_build_chat_footer_reports_watched_topic_updates_once() -> None:

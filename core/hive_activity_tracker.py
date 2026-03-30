@@ -15,6 +15,7 @@ from storage.db import get_connection
 
 _DEFAULT_PROMPT_COOLDOWN_MINUTES = 20
 _DEFAULT_REMINDER_MINUTES = 60
+_DEFAULT_WATCH_TIMEOUT_SECONDS = 8
 _INTERACTION_SELECTION_TTL_MINUTES = 45
 _INTERACTION_ACTIVE_TTL_HOURS = 12
 _HIVE_PULL_PATTERNS = (
@@ -85,7 +86,7 @@ def _contains_phrase_marker(text: str, markers: tuple[str, ...]) -> bool:
 class HiveActivityTrackerConfig:
     enabled: bool = True
     watcher_api_url: str | None = None
-    timeout_seconds: int = 4
+    timeout_seconds: int = _DEFAULT_WATCH_TIMEOUT_SECONDS
     tls_ca_file: str | None = None
     tls_insecure_skip_verify: bool = False
 
@@ -544,7 +545,10 @@ def load_hive_activity_tracker_config() -> HiveActivityTrackerConfig:
     return HiveActivityTrackerConfig(
         enabled=enabled_raw not in {"0", "false", "no", "off"} and bool(api_url),
         watcher_api_url=api_url,
-        timeout_seconds=max(2, int(float(os.environ.get("NULLA_HIVE_WATCH_TIMEOUT_SECONDS") or 4))),
+        timeout_seconds=max(
+            2,
+            int(float(os.environ.get("NULLA_HIVE_WATCH_TIMEOUT_SECONDS") or _DEFAULT_WATCH_TIMEOUT_SECONDS)),
+        ),
         tls_ca_file=tls_ca_file,
         tls_insecure_skip_verify=tls_insecure_skip_verify,
     )

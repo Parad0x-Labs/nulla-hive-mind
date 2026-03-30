@@ -123,6 +123,82 @@ def test_public_hive_bridge_private_post_json_facade_stays_available_for_callers
     assert envelope["payload"]["body"] == "direct bridge transport call"
 
 
+def test_public_hive_bridge_private_get_json_falls_back_to_secondary_seed_and_remembers_it() -> None:
+    seen_urls: list[str] = []
+
+    def fake_urlopen(req, timeout=0, context=None):
+        seen_urls.append(req.full_url)
+        if req.full_url.startswith("http://seed-eu.example.test:8766/"):
+            raise urllib.error.URLError(TimeoutError("timed out"))
+        return _FakeResponse({"ok": True, "result": [{"topic_id": "topic-123"}], "error": None})
+
+    bridge = PublicHiveBridge(
+        PublicHiveBridgeConfig(
+            enabled=True,
+            meet_seed_urls=("http://seed-eu.example.test:8766", "http://seed-us.example.test:8766"),
+            topic_target_url="http://seed-eu.example.test:8766",
+            home_region="eu",
+            auth_token="cluster-token",
+            request_timeout_seconds=7,
+        ),
+        urlopen=fake_urlopen,
+    )
+
+    result = bridge._get_json(
+        "http://seed-eu.example.test:8766",
+        "/v1/hive/research-queue?limit=1",
+    )
+
+    assert result == [{"topic_id": "topic-123"}]
+    assert seen_urls == [
+        "http://seed-eu.example.test:8766/v1/hive/research-queue?limit=1",
+        "http://seed-us.example.test:8766/v1/hive/research-queue?limit=1",
+    ]
+
+    seen_urls.clear()
+    second = bridge._get_json(
+        "http://seed-eu.example.test:8766",
+        "/v1/hive/research-queue?limit=1",
+    )
+
+    assert second == [{"topic_id": "topic-123"}]
+    assert seen_urls == ["http://seed-us.example.test:8766/v1/hive/research-queue?limit=1"]
+
+
+def test_public_hive_bridge_private_post_json_falls_back_to_secondary_seed_for_topic_writes() -> None:
+    seen_urls: list[str] = []
+
+    def fake_urlopen(req, timeout=0, context=None):
+        seen_urls.append(req.full_url)
+        if req.full_url.startswith("http://seed-eu.example.test:8766/"):
+            raise urllib.error.URLError(TimeoutError("timed out"))
+        return _FakeResponse({"ok": True, "result": {"topic_id": "topic-123"}, "error": None})
+
+    bridge = PublicHiveBridge(
+        PublicHiveBridgeConfig(
+            enabled=True,
+            meet_seed_urls=("http://seed-eu.example.test:8766", "http://seed-us.example.test:8766"),
+            topic_target_url="http://seed-eu.example.test:8766",
+            home_region="eu",
+            auth_token="cluster-token",
+            request_timeout_seconds=7,
+        ),
+        urlopen=fake_urlopen,
+    )
+
+    result = bridge._post_json(
+        "http://seed-eu.example.test:8766",
+        "/v1/hive/topics",
+        {"title": "Fallback proof", "summary": "prove second seed write fallback"},
+    )
+
+    assert result["topic_id"] == "topic-123"
+    assert seen_urls == [
+        "http://seed-eu.example.test:8766/v1/hive/topics",
+        "http://seed-us.example.test:8766/v1/hive/topics",
+    ]
+
+
 def test_public_hive_bridge_blocks_live_network_under_pytest() -> None:
     bridge = PublicHiveBridge(
         PublicHiveBridgeConfig(
