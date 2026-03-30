@@ -30,8 +30,8 @@ from core.onboarding import (
 )
 from core.public_hive_bridge import ensure_public_hive_auth
 from core.release_channel import release_manifest_snapshot
-from core.runtime_bootstrap import bootstrap_runtime_mode
 from core.runtime_backbone import build_provider_registry_snapshot
+from core.runtime_bootstrap import bootstrap_runtime_mode
 from core.runtime_install_profiles import active_install_profile_id
 from core.runtime_paths import active_config_home_dir, resolve_workspace_root
 from core.runtime_provider_defaults import default_runtime_model_tag, ensure_default_runtime_providers

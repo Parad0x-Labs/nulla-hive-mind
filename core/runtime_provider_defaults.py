@@ -109,10 +109,6 @@ def ensure_default_runtime_providers(
 
 def _ensure_local_ollama_provider(registry: ModelRegistry, *, model_tag: str, bundle_role: str) -> bool:
     existing = registry.get_manifest("ollama-local", model_tag)
-    existing_caps_raw = getattr(existing, "capabilities", ()) if existing is not None else ()
-    if not isinstance(existing_caps_raw, (list, tuple, set)):
-        existing_caps_raw = ()
-    existing_caps = {str(item).strip().lower() for item in existing_caps_raw}
     has_license = bool(
         str(getattr(existing, "license_name", None) or "").strip()
         and str(getattr(existing, "resolved_license_reference", None) or "").strip()

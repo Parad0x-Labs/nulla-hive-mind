@@ -14,6 +14,11 @@ PRIMARY_MODEL = "qwen3:8b"
 BUNDLE_MODELS = ("qwen3:8b", "deepseek-r1:8b")
 
 
+def test_default_profile_path_tracks_local_acceptance_canonical_profile() -> None:
+    assert llm_eval.DEFAULT_PROFILE_PATH == llm_eval.local_acceptance.DEFAULT_PROFILE_PATH
+    assert llm_eval.DEFAULT_PROFILE_PATH.name == "local_ollama_bundle_profile.json"
+
+
 def _fake_online_payload(*, failing: bool) -> dict[str, object]:
     p0_pass = not failing
     consistency_runs = [

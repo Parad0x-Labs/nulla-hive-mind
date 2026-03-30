@@ -91,7 +91,9 @@ def action_response_class(
         return response_class.TASK_FAILED_USER_SAFE
     if "started hive research on" in lowered or lowered.startswith("autonomous research on"):
         return response_class.TASK_STARTED
-    if reason.startswith("model_tool_intent_"):
+    if reason.startswith("model_tool_intent_") and (
+        lowered.startswith("research follow-up:") or lowered.startswith("research result:")
+    ):
         return response_class.RESEARCH_PROGRESS
     if reason.startswith("hive_topic_create_"):
         return response_class.TASK_STATUS

@@ -65,9 +65,8 @@ def test_openclaw_launcher_exports_project_root_and_health_waits(tmp_path: Path)
     assert 'wait_for_http_ready "${NULLA_OPENCLAW_API_URL}/healthz" 30 "${api_pid}" 3' in script
 
 
-def test_workspace_openclaw_launcher_does_not_expand_empty_profile_array_under_nounset() -> None:
-    script = (PROJECT_ROOT / "OpenClaw_NULLA.sh").read_text(encoding="utf-8")
+def test_workspace_openclaw_launcher_does_not_expand_empty_profile_array_under_nounset(tmp_path: Path) -> None:
+    script = _render_openclaw_launcher(tmp_path)
 
     assert 'PROFILE_ARGS' not in script
-    assert 'if [[ -n "${OPENCLAW_PROFILE}" ]]; then' in script
-    assert 'gateway run --force >/tmp/nulla_openclaw.log 2>&1 &' in script
+    assert 'spawn_detached /tmp/nulla_openclaw.log openclaw gateway run --force' in script

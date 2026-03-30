@@ -20,7 +20,7 @@ from core.execution.artifacts import (
     record_workspace_mutation,
     rollback_last_workspace_mutation,
 )
-from core.execution.git_tools import git_diff_workspace, git_status_workspace
+from core.execution.git_tools import git_diff_workspace, git_status_workspace, git_summary_workspace
 from core.execution.validation_tools import render_validation_result, runtime_validation_command, validation_command
 from core.execution.workspace_tools import (
     apply_unified_diff_workspace,
@@ -372,6 +372,23 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
             "returncode": int(payload.get("returncode") or 0),
             "success": bool(payload.get("success", False)),
         }
+    if intent == "workspace.git_summary":
+        return {
+            "intent": intent,
+            "cwd": str(payload.get("cwd") or "").strip(),
+            "branch": str(payload.get("branch") or "").strip(),
+            "commit": str(payload.get("commit") or "").strip(),
+            "dirty": bool(payload.get("dirty", False)),
+            "local_branch_count": int(payload.get("local_branch_count") or 0),
+            "remote_branch_count": int(payload.get("remote_branch_count") or 0),
+            "total_branch_count": int(payload.get("total_branch_count") or 0),
+            "today_date": str(payload.get("today_date") or "").strip(),
+            "today_commit_count": int(payload.get("today_commit_count") or 0),
+            "yesterday_date": str(payload.get("yesterday_date") or "").strip(),
+            "yesterday_commit_count": int(payload.get("yesterday_commit_count") or 0),
+            "commit_count_scope": str(payload.get("commit_count_scope") or "").strip(),
+            "timezone_label": str(payload.get("timezone_label") or "").strip(),
+        }
     if intent == "orchestration.execute_envelope":
         return {
             "intent": intent,
@@ -488,6 +505,8 @@ def execute_runtime_tool(
             return _git_status(arguments, workspace_root=workspace_root)
         if intent == "workspace.git_diff":
             return _git_diff(arguments, workspace_root=workspace_root)
+        if intent == "workspace.git_summary":
+            return _git_summary(arguments, workspace_root=workspace_root)
         if intent == "workspace.rollback_last_change":
             return _rollback_last_change(arguments, workspace_root=workspace_root, session_id=_runtime_session_id(source_context))
         if intent == "workspace.run_tests":
@@ -1684,6 +1703,36 @@ def _git_diff(arguments: dict[str, Any], *, workspace_root: Path) -> RuntimeExec
         stdout=str(details.get("stdout") or ""),
         stderr=str(details.get("stderr") or ""),
         returncode=int(details.get("returncode") or 0),
+    )
+    return _result_from_payload(
+        ok=bool(payload.get("ok")),
+        status=str(payload.get("status") or ""),
+        response_text=str(payload.get("response_text") or ""),
+        details=details,
+    )
+
+
+def _git_summary(arguments: dict[str, Any], *, workspace_root: Path) -> RuntimeExecutionResult:
+    payload = git_summary_workspace(arguments, workspace_root=workspace_root)
+    details = dict(payload.get("details") or {})
+    details["observation"] = _tool_observation(
+        intent="workspace.git_summary",
+        tool_surface="workspace",
+        ok=bool(payload.get("ok")),
+        status=str(payload.get("status") or ""),
+        cwd=str(details.get("cwd") or ""),
+        branch=str(details.get("branch") or ""),
+        commit=str(details.get("commit") or ""),
+        dirty=bool(details.get("dirty", False)),
+        local_branch_count=int(details.get("local_branch_count") or 0),
+        remote_branch_count=int(details.get("remote_branch_count") or 0),
+        total_branch_count=int(details.get("total_branch_count") or 0),
+        today_date=str(details.get("today_date") or ""),
+        today_commit_count=int(details.get("today_commit_count") or 0),
+        yesterday_date=str(details.get("yesterday_date") or ""),
+        yesterday_commit_count=int(details.get("yesterday_commit_count") or 0),
+        commit_count_scope=str(details.get("commit_count_scope") or ""),
+        timezone_label=str(details.get("timezone_label") or ""),
     )
     return _result_from_payload(
         ok=bool(payload.get("ok")),

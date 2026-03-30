@@ -222,6 +222,44 @@ def _looks_like_tool_inventory_request(text: str) -> bool:
     return any(marker in lowered for marker in _TOOL_INVENTORY_MARKERS)
 
 
+def _planned_git_payload(text: str) -> tuple[str, dict[str, Any]] | None:
+    lowered = f" {' '.join(str(text or '').strip().lower().split())} "
+    if not lowered.strip():
+        return None
+    if any(
+        marker in lowered
+        for marker in (" create ", " write ", " edit ", " change ", " patch ", " delete ", " remove ", " push ", " pull ", " merge ", " checkout ", " rebase ")
+    ):
+        if not any(marker in lowered for marker in (" git status ", " git diff ")):
+            return None
+    mentions_repo = any(marker in lowered for marker in (" git ", " repo ", " repository ", " branch ", " branches ", " commit ", " commits "))
+    if not mentions_repo:
+        return None
+    if any(marker in lowered for marker in (" git diff ", " show diff ", " unstaged diff ", " staged diff ", " git patch ")):
+        return ("planned_workspace_git_diff", {"intent": "workspace.git_diff", "arguments": {}})
+    if any(marker in lowered for marker in (" git status ", " working tree ", " dirty ", " clean repo ", " clean working tree ", " untracked ", " staged ", " unstaged ")):
+        return ("planned_workspace_git_status", {"intent": "workspace.git_status", "arguments": {}})
+    if any(
+        marker in lowered
+        for marker in (
+            " how many branches ",
+            " how many commits ",
+            " branch count ",
+            " commit count ",
+            " commits today ",
+            " commits yesterday ",
+            " branch inventory ",
+            " recent commits ",
+            " git summary ",
+            " git activity ",
+            " current branch ",
+            " head commit ",
+        )
+    ):
+        return ("planned_workspace_git_summary", {"intent": "workspace.git_summary", "arguments": {}})
+    return None
+
+
 def _clean_workspace_path(candidate: str) -> str:
     clean = str(candidate or "").strip().strip("`\"'").strip().rstrip(".,!?")
     if not clean:
@@ -1645,6 +1683,7 @@ def plan_tool_workflow(
     machine_directory_list = _extract_safe_machine_directory_listing(text)
     machine_directory_create = _extract_safe_machine_directory_create(text)
     machine_specs_request = _extract_machine_specs_request(text)
+    git_payload = _planned_git_payload(text)
     workspace_bootstrap_path = _extract_workspace_bootstrap_path(text)
     workspace_bootstrap_request = _looks_like_workspace_bootstrap_request(text)
     workspace_file_plan = _extract_workspace_file_plan(raw_text, source_context=source_context)
@@ -1709,6 +1748,13 @@ def plan_tool_workflow(
                 handled=True,
                 reason="planned_safe_machine_directory_create",
                 next_payload={"intent": "machine.ensure_directory", "arguments": machine_directory_create},
+            )
+        if git_payload is not None:
+            reason, next_payload = git_payload
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason=reason,
+                next_payload=next_payload,
             )
         if workspace_file_plan is not None:
             pending_writes = _pending_workspace_writes(workspace_file_plan, steps)
@@ -2148,6 +2194,9 @@ def plan_tool_workflow(
 
     if last_intent == "machine.inspect_specs":
         return WorkflowPlannerDecision(handled=True, reason="machine_stop_after_specs", stop_after=True)
+
+    if last_intent in {"workspace.git_status", "workspace.git_diff", "workspace.git_summary"}:
+        return WorkflowPlannerDecision(handled=True, reason="workspace_stop_after_git_inspection", stop_after=True)
 
     if last_intent == "workspace.replace_in_file":
         retry_command = _last_command_from_steps(steps) or explicit_command

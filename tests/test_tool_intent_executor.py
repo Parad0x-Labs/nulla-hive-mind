@@ -1224,6 +1224,60 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertTrue(fourth.handled)
         self.assertEqual(fourth.next_payload["intent"], "sandbox.run_command")
 
+    def test_workflow_planner_routes_git_status_requests_into_runtime_git_status(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="git status for this repo",
+            task_class="file_inspection",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertEqual(decision.reason, "planned_workspace_git_status")
+        self.assertEqual(decision.next_payload["intent"], "workspace.git_status")
+
+    def test_workflow_planner_routes_git_activity_requests_into_runtime_git_summary(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="check this git repo and tell me how many branches there are, how many commits happened today, and how many happened yesterday. Use tools and be exact.",
+            task_class="file_inspection",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertEqual(decision.reason, "planned_workspace_git_summary")
+        self.assertEqual(decision.next_payload["intent"], "workspace.git_summary")
+
+    def test_workflow_planner_stops_after_git_inspection(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="check this git repo and tell me how many branches there are, how many commits happened today, and how many happened yesterday. Use tools and be exact.",
+            task_class="file_inspection",
+            executed_steps=[
+                {
+                    "tool_name": "workspace.git_summary",
+                    "arguments": {},
+                    "observation": {
+                        "intent": "workspace.git_summary",
+                        "tool_surface": "workspace",
+                        "ok": True,
+                        "status": "executed",
+                        "local_branch_count": 12,
+                        "remote_branch_count": 4,
+                        "total_branch_count": 16,
+                        "today_date": "2026-03-30",
+                        "today_commit_count": 10,
+                        "yesterday_date": "2026-03-29",
+                        "yesterday_commit_count": 10,
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertTrue(decision.stop_after)
+        self.assertEqual(decision.reason, "workspace_stop_after_git_inspection")
+
     def test_workflow_planner_prefers_validation_intent_for_explicit_pytest_command(self) -> None:
         decision = plan_tool_workflow(
             user_text="run `python3 -m pytest -q test_app.py` and fix the failing tests",

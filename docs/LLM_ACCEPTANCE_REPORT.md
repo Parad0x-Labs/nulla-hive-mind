@@ -1,6 +1,8 @@
 # NULLA LLM Acceptance Summary
 
-- commit SHA: dcce6606f49ad938bafe75a0b26b8628af07e2c9
+Tracked snapshot only. This file is the last committed live LLM acceptance report, not an automatically current-head report. Check [`docs/STATUS.md`](./STATUS.md) and [`docs/LOCAL_ACCEPTANCE.md`](./LOCAL_ACCEPTANCE.md) before treating it as current branch truth.
+
+- snapshot commit SHA: dcce6606f49ad938bafe75a0b26b8628af07e2c9
 - branch: codex/honest-ollama-prewarm-bootstrap
 - test run timestamp: 2026-03-28T20:15:19Z
 - environment: macOS-26.3-arm64-arm-64bit | python 3.11.15 | cpu Apple M4 | ram 24.0 GB | gpu Apple M4

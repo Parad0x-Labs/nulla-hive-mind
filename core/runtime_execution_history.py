@@ -62,7 +62,6 @@ def build_runtime_execution_history(
     receipt_type_seen: set[str] = set()
 
     request_status = _string(session_row.get("status") or checkpoint_row.get("status") or "running").lower() or "running"
-    active_status = request_status
     last_message = _string(session_row.get("last_message"))
     latest_tool = _string(checkpoint_row.get("last_tool_name"))
     stop_reason = ""
@@ -122,8 +121,6 @@ def build_runtime_execution_history(
                 mutating_tools.append(event_tool)
         if event.get("message"):
             last_message = _string(event.get("message"))
-        if event_status:
-            active_status = event_status
         if not stop_reason:
             stop_reason = _string(event.get("stop_reason") or event.get("loop_stop_reason") or event.get("final_stop_reason"))
 

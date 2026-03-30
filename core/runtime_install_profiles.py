@@ -18,9 +18,10 @@ from core.local_model_bundles import (
 )
 from core.local_specialist_lane import (
     DEFAULT_SECONDARY_LOCAL_BACKEND,
-    DEFAULT_SECONDARY_LOCAL_MODEL,
     secondary_local_model,
     secondary_local_model_path,
+)
+from core.local_specialist_lane import (
     secondary_local_provider_id as preferred_secondary_local_provider_id,
 )
 from core.provider_env import merge_provider_env

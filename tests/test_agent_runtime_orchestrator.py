@@ -62,6 +62,40 @@ def test_tool_loop_final_message_facade_matches_extracted_module() -> None:
     )
 
 
+def test_tool_loop_final_message_falls_back_to_git_summary_observation() -> None:
+    synthesis = SimpleNamespace(structured_output={}, output_text="")
+    message = orchestrator.tool_loop_final_message(
+        synthesis,
+        [
+            {
+                "tool_name": "workspace.git_summary",
+                "summary": "Git summary: branch main @ abc123; 7 visible branches (5 local, 2 remote tracking); 3 commits on 2026-03-30; 1 commits on 2026-03-29; dirty no",
+                "observation": {
+                    "intent": "workspace.git_summary",
+                    "cwd": "/tmp/repo",
+                    "branch": "main",
+                    "commit": "abc123",
+                    "dirty": False,
+                    "local_branch_count": 5,
+                    "remote_branch_count": 2,
+                    "total_branch_count": 7,
+                    "today_date": "2026-03-30",
+                    "today_commit_count": 3,
+                    "yesterday_date": "2026-03-29",
+                    "yesterday_commit_count": 1,
+                    "commit_count_scope": "all_visible_refs_unique",
+                    "timezone_label": "UTC",
+                },
+            }
+        ],
+    )
+
+    assert "Git repo summary for `/tmp/repo`:" in message
+    assert "- visible branches: 7 total (5 local, 2 remote tracking)" in message
+    assert "- commits on 2026-03-30: 3" in message
+    assert "- commits on 2026-03-29: 1" in message
+
+
 def test_runtime_preview_facade_matches_extracted_module() -> None:
     agent = _build_agent()
     text = "This is a long enough response to preview cleanly across the extracted orchestrator module boundary."

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core import policy_engine
+from core.runtime_install_profiles import active_install_profile_id, install_profile_runs_local_only
 from core.runtime_paths import (
     DOCS_DIR,
     PROJECT_CONFIG_DIR,
@@ -14,7 +15,6 @@ from core.runtime_paths import (
     configure_runtime_home,
     resolve_workspace_root,
 )
-from core.runtime_install_profiles import active_install_profile_id, install_profile_runs_local_only
 from storage.db import configure_default_db_path
 
 

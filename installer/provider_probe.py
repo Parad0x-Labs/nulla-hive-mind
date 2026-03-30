@@ -288,15 +288,6 @@ def build_probe_report(
         capability_truth,
         "llamacpp-local:",
     )
-    generic_remote_state, generic_remote_provider_id = _provider_state_for_prefix(
-        capability_truth,
-        "openai-compatible-remote:",
-    )
-    kimi_state, kimi_provider_id = _provider_state_for_prefix(capability_truth, "kimi-remote:")
-    tether_state, tether_provider_id = _provider_state_for_prefix(capability_truth, "tether-remote:")
-    generic_remote_configured = bool(envs.get("generic_remote", {}).get("configured"))
-    kimi_configured = bool(envs.get("kimi", {}).get("configured"))
-    tether_configured = bool(envs.get("tether", {}).get("configured"))
 
     stacks: list[dict[str, Any]] = []
     recommended_bundle_models = tuple(

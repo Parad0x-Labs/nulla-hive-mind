@@ -29,7 +29,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.proof_manifest import build_proof_manifest, write_proof_manifest
 
-DEFAULT_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_qwen25_7b_profile.json"
+DEFAULT_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_ollama_bundle_profile.json"
+LEGACY_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_qwen25_7b_profile.json"
 DEFAULT_START_SCRIPT = REPO_ROOT / "run.sh"
 DEFAULT_RUNTIME_LAUNCH_AGENT_LABEL = "ai.nulla.runtime"
 DEFAULT_BASE_URL = "http://127.0.0.1:11435"
@@ -388,8 +389,17 @@ def _pick_isolated_daemon_bind_port(*, host: str = "127.0.0.1", attempts: int = 
     raise RuntimeError(f"Could not find an isolated daemon bind port for host {host!r}.")
 
 
-def load_profile(path: str | Path | None = None) -> AcceptanceProfile:
+def _resolve_profile_path(path: str | Path | None = None) -> Path:
     profile_path = Path(path or DEFAULT_PROFILE_PATH).expanduser().resolve()
+    if profile_path.exists():
+        return profile_path
+    if profile_path == LEGACY_PROFILE_PATH.resolve():
+        return DEFAULT_PROFILE_PATH
+    return profile_path
+
+
+def load_profile(path: str | Path | None = None) -> AcceptanceProfile:
+    profile_path = _resolve_profile_path(path)
     payload = json.loads(profile_path.read_text(encoding="utf-8"))
     thresholds = dict(payload.get("thresholds") or {})
     manual_btc = dict(payload.get("manual_btc_check") or {})

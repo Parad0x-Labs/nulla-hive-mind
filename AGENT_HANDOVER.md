@@ -29,7 +29,7 @@ Mandatory LLM proof path for any claim about model quality, latency, logic, fres
 
 1. `ops/run_local_acceptance.py`
 2. `ops/llm_eval.py`
-3. `config/acceptance/local_qwen25_7b_profile.json`
+3. `config/acceptance/local_ollama_bundle_profile.json`
 4. `tests/test_run_local_acceptance.py`
 5. `tests/test_milestone1_ai_first_evals.py`
 6. `tests/acceptance/test_llm_speed_real.py`

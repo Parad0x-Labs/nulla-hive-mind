@@ -440,12 +440,12 @@ def _probe_ram_gb(probe: MachineProbe | Mapping[str, Any]) -> float:
 
 
 __all__ = [
-    "BundleRoleModel",
-    "LocalBundleRecommendation",
-    "LocalBundleSpec",
     "LOCAL_BUNDLE_SPECS",
     "MODEL_METADATA",
     "MODEL_STORAGE_GB",
+    "BundleRoleModel",
+    "LocalBundleRecommendation",
+    "LocalBundleSpec",
     "bundle_spec",
     "capacity_bucket_for_machine",
     "local_multi_llm_fit_from_probe",

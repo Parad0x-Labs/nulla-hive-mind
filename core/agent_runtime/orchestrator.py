@@ -111,6 +111,45 @@ def action_workflow_summary(
     return "\n".join(lines)
 
 
+def _git_summary_observation_message(step: dict[str, Any]) -> str:
+    observation = step.get("observation")
+    if not isinstance(observation, dict):
+        return ""
+    intent = str(observation.get("intent") or step.get("tool_name") or "").strip()
+    if intent != "workspace.git_summary":
+        return ""
+    repo = str(observation.get("cwd") or "").strip()
+    branch = str(observation.get("branch") or "").strip() or "(detached HEAD)"
+    commit = str(observation.get("commit") or "").strip() or "unknown"
+    dirty = "yes" if bool(observation.get("dirty")) else "no"
+    local_branch_count = int(observation.get("local_branch_count") or 0)
+    remote_branch_count = int(observation.get("remote_branch_count") or 0)
+    total_branch_count = int(observation.get("total_branch_count") or (local_branch_count + remote_branch_count))
+    today_date = str(observation.get("today_date") or "").strip()
+    yesterday_date = str(observation.get("yesterday_date") or "").strip()
+    timezone_label = str(observation.get("timezone_label") or "").strip()
+    commit_count_scope = str(observation.get("commit_count_scope") or "").strip()
+    lines = [f"Git repo summary for `{repo}`:" if repo else "Git repo summary:"]
+    lines.append(f"- current branch: {branch}")
+    lines.append(f"- head commit: {commit}")
+    lines.append(f"- dirty: {dirty}")
+    lines.append(f"- visible branches: {total_branch_count} total ({local_branch_count} local, {remote_branch_count} remote tracking)")
+    if today_date:
+        lines.append(f"- commits on {today_date}: {int(observation.get('today_commit_count') or 0)}")
+    if yesterday_date:
+        lines.append(f"- commits on {yesterday_date}: {int(observation.get('yesterday_commit_count') or 0)}")
+    if commit_count_scope:
+        rendered_scope = (
+            "repo-wide unique commits across visible local and remote refs"
+            if commit_count_scope == "all_visible_refs_unique"
+            else commit_count_scope.replace("_", " ")
+        )
+        lines.append(f"- commit count scope: {rendered_scope}")
+    if timezone_label:
+        lines.append(f"- commit day boundary timezone: {timezone_label}")
+    return "\n".join(lines)
+
+
 def tool_loop_final_message(synthesis: Any, executed_steps: list[dict[str, Any]]) -> str:
     structured = getattr(synthesis, "structured_output", None)
     if isinstance(structured, dict):
@@ -126,6 +165,9 @@ def tool_loop_final_message(synthesis: Any, executed_steps: list[dict[str, Any]]
         return output_text
     if executed_steps:
         last_step = executed_steps[-1]
+        observation_message = _git_summary_observation_message(last_step)
+        if observation_message:
+            return observation_message
         return (
             f"Completed {len(executed_steps)} real tool step{'s' if len(executed_steps) != 1 else ''}. "
             f"Last result: {str(last_step.get('summary') or 'tool execution finished').strip()}"

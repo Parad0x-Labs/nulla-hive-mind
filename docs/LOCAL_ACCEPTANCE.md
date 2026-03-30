@@ -1,16 +1,16 @@
 # Local Acceptance
 
-This is the locked local acceptance bar for NULLA on `qwen2.5:7b`.
+This is the locked local acceptance bar for NULLA on the hardware-aware local Ollama bundle.
 
 Canonical profile:
-- [`config/acceptance/local_qwen25_7b_profile.json`](../config/acceptance/local_qwen25_7b_profile.json)
+- [`config/acceptance/local_ollama_bundle_profile.json`](../config/acceptance/local_ollama_bundle_profile.json)
 
 Canonical command:
 
 ```bash
 python3 ops/run_local_acceptance.py full \
-  --run-root artifacts/acceptance_runs/$(date -u +%Y-%m-%d)-qwen25-7b \
-  --profile config/acceptance/local_qwen25_7b_profile.json
+  --run-root artifacts/acceptance_runs/$(date -u +%Y-%m-%d)-local-ollama-bundle \
+  --profile config/acceptance/local_ollama_bundle_profile.json
 ```
 
 What `full` does:
@@ -78,7 +78,24 @@ What only the live gate proves:
 - real latency numbers for the locked local profile
 - live lookup/manual verification and offline honesty on the same runtime
 
-## Latest Measured Checkpoint
+## Current Branch Truth
+
+Current working head: `467e739` (`codex/honest-ollama-prewarm-bootstrap`).
+
+Freshly verified on this head:
+
+- `python3 ops/cumulative_stabilization.py --through G` passed on 2026-03-30
+- targeted cumulative packs: `193 passed, 2 skipped, 1 warning in 22.32s`
+- appended full suite: `1811 passed, 11 skipped, 13 xfailed, 15 xpassed, 3 warnings in 89.10s`
+
+What has not been rerun on this head:
+
+- `python3 ops/run_local_acceptance.py full --run-root ... --profile config/acceptance/local_ollama_bundle_profile.json`
+- live `python3 ops/llm_eval.py ... --docs-report-path docs/LLM_ACCEPTANCE_REPORT.md`
+
+Do not treat the archived latency numbers below as current-head proof until those commands are rerun.
+
+## Latest Archived Live Checkpoint
 
 Greenloop rerun on `15948c7`:
 
@@ -88,7 +105,7 @@ Greenloop rerun on `15948c7`:
 - live lookup median: `0.173s`
 - chained task median: `0.635s`
 
-Measured concurrency on the same local `qwen2.5:7b` lane:
+Measured concurrency on the same archived local `qwen2.5:7b` lane:
 
 - worker `1`: success `1.0`, throughput `0.26 req/s`
 - worker `2`: success `1.0`, throughput `0.242 req/s`

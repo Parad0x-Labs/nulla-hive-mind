@@ -12,6 +12,8 @@ PROFILE_NAME = "NULLA local acceptance for the hardware-aware local Ollama bundl
 PRIMARY_MODEL = "qwen3:8b"
 RUNTIME_ALT_MODEL = "qwen3:14b"
 BUNDLE_MODELS = ("qwen3:8b", "deepseek-r1:8b")
+CANONICAL_PROFILE_FILENAME = "local_ollama_bundle_profile.json"
+LEGACY_PROFILE_FILENAME = "local_qwen25_7b_profile.json"
 
 
 def _fake_online_payload(
@@ -97,6 +99,18 @@ def test_load_profile_reads_locked_local_bundle_profile() -> None:
     assert profile.cold_start_max_seconds == 30.0
     assert profile.simple_prompt_hard_max_seconds == 20.0
     assert profile.consistency_min_passes == 2
+
+
+def test_default_profile_path_uses_canonical_bundle_profile_name() -> None:
+    assert acceptance.DEFAULT_PROFILE_PATH.name == CANONICAL_PROFILE_FILENAME
+
+
+def test_load_profile_accepts_legacy_repo_profile_alias() -> None:
+    profile = acceptance.load_profile(acceptance.LEGACY_PROFILE_PATH)
+
+    assert acceptance.LEGACY_PROFILE_PATH.name == LEGACY_PROFILE_FILENAME
+    assert profile.profile_id == PROFILE_ID
+    assert profile.model == PRIMARY_MODEL
 
 
 def test_run_local_acceptance_bootstraps_repo_root_on_sys_path() -> None:

@@ -26,7 +26,7 @@ from ops import run_local_acceptance as local_acceptance
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "reports" / "llm_eval" / "latest"
 DEFAULT_BASELINE_ROOT = REPO_ROOT / "reports" / "llm_eval" / "baselines"
 DEFAULT_LIVE_RUN_ROOT = REPO_ROOT / "artifacts" / "acceptance_runs" / "llm_eval_live"
-DEFAULT_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_qwen25_7b_profile.json"
+DEFAULT_PROFILE_PATH = local_acceptance.DEFAULT_PROFILE_PATH
 DEFAULT_BASE_URL = "http://127.0.0.1:18080"
 DEFAULT_DOCS_REPORT_PATH = REPO_ROOT / "docs" / "LLM_ACCEPTANCE_REPORT.md"
 

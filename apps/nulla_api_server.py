@@ -31,8 +31,8 @@ if __package__ in {None, ""}:
     _prioritize_project_root_on_sys_path()
 
 from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
-from core.runtime_provider_defaults import default_runtime_model_tag
 from core.runtime_capabilities import runtime_capability_snapshot
+from core.runtime_provider_defaults import default_runtime_model_tag
 from core.web.api.app import create_api_app
 from core.web.api.runtime import (
     MODEL_NAME,
