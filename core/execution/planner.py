@@ -300,7 +300,17 @@ def _extract_workspace_bootstrap_path(text: str) -> str:
     raw = str(text or "").strip()
     if not raw:
         return ""
-    for pattern in (_NAMED_PATH_RE, _VERB_NAME_FOLDER_RE, _FOLDER_PATH_RE, _CREATE_PATH_RE, _INTO_PATH_RE):
+    lowered = " ".join(raw.lower().split())
+    file_like_prompt = (
+        any(marker in lowered for marker in (" file ", " files ", " text file ", ".txt", ".md", ".json", ".yaml", ".yml", ".toml", ".py", ".ts", ".js"))
+        and not any(marker in lowered for marker in _START_CODE_MARKERS)
+    )
+    patterns = (
+        (_NAMED_PATH_RE, _VERB_NAME_FOLDER_RE, _INTO_PATH_RE)
+        if file_like_prompt
+        else (_NAMED_PATH_RE, _VERB_NAME_FOLDER_RE, _FOLDER_PATH_RE, _CREATE_PATH_RE, _INTO_PATH_RE)
+    )
+    for pattern in patterns:
         match = pattern.search(raw)
         if not match:
             continue
@@ -447,6 +457,11 @@ def _extract_machine_specs_request(text: str) -> dict[str, Any] | None:
 def _looks_like_workspace_bootstrap_request(text: str) -> bool:
     lowered = " ".join(str(text or "").strip().lower().split())
     if not lowered:
+        return False
+    if (
+        any(marker in lowered for marker in (" file ", " files ", " text file ", ".txt", ".md", ".json", ".yaml", ".yml", ".toml", ".py", ".ts", ".js"))
+        and not any(marker in lowered for marker in _START_CODE_MARKERS)
+    ):
         return False
     creates_folder = any(marker in lowered for marker in _DIRECTORY_CREATE_MARKERS)
     starts_code = any(marker in lowered for marker in _START_CODE_MARKERS)

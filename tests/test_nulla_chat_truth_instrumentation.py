@@ -746,13 +746,13 @@ def test_greeting_evaluative_and_help_emit_model_wording_metrics(
         )
 
     events = _chat_truth_events(audit_log)
-    model_wording_events = [event for event in events if event.get("rendered_via") == "model_final_wording"]
+    fast_path_events = [event for event in events if event.get("rendered_via") == "fast_path"]
 
-    assert len(model_wording_events) == 4
-    for event in model_wording_events:
-        assert event["fast_path_hit"] is False
-        assert event["model_inference_used"] is True
-        assert event["model_final_answer_hit"] is True
+    assert len(fast_path_events) == 4
+    for event in fast_path_events:
+        assert event["fast_path_hit"] is True
+        assert event["model_inference_used"] is False
+        assert event["model_final_answer_hit"] is False
         assert event["template_renderer_hit"] is False
 
 

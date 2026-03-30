@@ -49,6 +49,8 @@ def fast_path_response_class(
     response_class = agent.ResponseClass
     if reason in {"smalltalk_fast_path", "startup_sequence_fast_path"}:
         return response_class.SMALLTALK
+    if reason == "heartbeat_poll_fast_path":
+        return response_class.GENERIC_CONVERSATION
     if reason in {
         "date_time_fast_path",
         "direct_math_fast_path",
@@ -67,7 +69,7 @@ def fast_path_response_class(
     if reason == "machine_write_guard":
         return response_class.TASK_FAILED_USER_SAFE
     if reason == "help_fast_path":
-        return response_class.TASK_SELECTION_CLARIFICATION
+        return response_class.UTILITY_ANSWER
     if reason == "evaluative_conversation_fast_path":
         return response_class.GENERIC_CONVERSATION
     if reason == "runtime_resume_missing":

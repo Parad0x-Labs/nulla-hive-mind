@@ -114,6 +114,17 @@ class FastPathFacadeMixin:
     def _startup_sequence_fast_path(self, user_input: str) -> str | None:
         return agent_fast_paths.startup_sequence_fast_path(user_input)
 
+    def _heartbeat_poll_fast_path(
+        self,
+        user_input: str,
+        *,
+        source_context: dict[str, object] | None,
+    ) -> str | None:
+        return agent_fast_paths.heartbeat_poll_fast_path(
+            user_input,
+            source_context=source_context,
+        )
+
     def _credit_status_fast_path(self, normalized_input: str, *, source_surface: str) -> str | None:
         return agent_fast_paths.credit_status_fast_path(
             self,

@@ -166,6 +166,11 @@ def _augment_history_from_session_log(
     return [*hydrated_history, {"role": "user", "content": normalized_user}]
 
 
+def _inbound_source_context(body: dict[str, Any]) -> dict[str, Any]:
+    payload = body.get("source_context")
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
 def _runtime_model_catalog(
     *,
     capability_snapshot: dict[str, Any],
@@ -378,13 +383,23 @@ def dispatch_post(
             session_id=session_id,
             user_text=user_text,
         )
+        inbound_source_context = _inbound_source_context(body)
         requested_workspace = str(
-            body.get("workspace") or body.get("workspace_root") or body.get("cwd") or body.get("projectRoot") or ""
+            body.get("workspace")
+            or body.get("workspace_root")
+            or body.get("cwd")
+            or body.get("projectRoot")
+            or inbound_source_context.get("workspace")
+            or inbound_source_context.get("workspace_root")
+            or inbound_source_context.get("cwd")
+            or inbound_source_context.get("projectRoot")
+            or ""
         ).strip()
         default_workspace = workspace_root_provider()
         source_context = {
-            "surface": "api",
-            "platform": "api",
+            **inbound_source_context,
+            "surface": str(inbound_source_context.get("surface") or body.get("surface") or "api").strip() or "api",
+            "platform": str(inbound_source_context.get("platform") or body.get("platform") or "api").strip() or "api",
             "client_conversation_history": client_history,
             "client_history_message_count": len(client_history),
             "conversation_history": history,

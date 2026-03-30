@@ -26,7 +26,7 @@ FORBIDDEN_PLANNER_LEAKS = (
 )
 
 ALPHA_SHIP_THRESHOLDS = {
-    "model_final_hit_rate": 0.85,
+    "primary_chat_surface_hit_rate": 1.0,
     "planner_wrapper_regression": 1.0,
     "capability_truth_regression": 1.0,
     "hive_truth_label_regression": 1.0,
@@ -35,10 +35,13 @@ ALPHA_SHIP_THRESHOLDS = {
     "honest_degradation": 1.0,
 }
 
+FAST_PATH_CHAT_CASES = (
+    ("hey", "smalltalk", "what do you need?"),
+    ("hello", "smalltalk", "what do you need?"),
+    ("how are you", "smalltalk", "running stable. memory online, mesh ready."),
+)
+
 MODEL_FINAL_CHAT_CASES = (
-    ("hey", "Fresh greeting reply."),
-    ("hello", "Fresh hello reply."),
-    ("how are you", "Stable enough. What do you need?"),
     ("do you think boredom is useful?", "Boredom is useful when it exposes shallow defaults."),
     ("how should i position my b2b analytics product?", "Position it around the painful decision it makes faster."),
     ("what should i eat after lifting?", "Prioritize protein, carbs, and something you will actually repeat."),
@@ -50,6 +53,24 @@ MODEL_FINAL_CHAT_CASES = (
     ("my react dev server keeps reloading on save; where would you look first?", "Start with the file watcher, symlinks, and editor temp-file behavior."),
     ("postgres vs sqlite for a local-first app?", "Start with SQLite unless your actual concurrency or replication needs already exceed it."),
     ("what makes a good research question?", "A good research question is specific enough to test and open enough to learn from."),
+)
+
+FAST_PATH_LIVE_INFO_CASES = (
+    (
+        "what is the weather in London today?",
+        "search_query",
+        [
+            {
+                "summary": "Cloudy with light rain, around 11C, with breezy afternoon conditions.",
+                "source_label": "duckduckgo.com",
+                "origin_domain": "bbc.com",
+                "result_title": "BBC Weather - London",
+                "result_url": "https://www.bbc.com/weather/2643743",
+                "used_browser": False,
+            }
+        ],
+        ("weather in london:", "[bbc.com](https://www.bbc.com/weather/2643743)"),
+    ),
 )
 
 MODEL_FINAL_LIVE_INFO_CASES = (
@@ -68,21 +89,6 @@ MODEL_FINAL_LIVE_INFO_CASES = (
             }
         ],
         "Telegram Bot API docs are still the canonical source for these updates.",
-    ),
-    (
-        "what is the weather in London today?",
-        "search_query",
-        [
-            {
-                "summary": "Cloudy with light rain, around 11C, with breezy afternoon conditions.",
-                "source_label": "duckduckgo.com",
-                "origin_domain": "bbc.com",
-                "result_title": "BBC Weather - London",
-                "result_url": "https://www.bbc.com/weather/2643743",
-                "used_browser": False,
-            }
-        ],
-        "London looks cloudy with light rain around 11C based on BBC Weather.",
     ),
 )
 
@@ -466,6 +472,42 @@ def _run_plain_chat_case(make_agent, context_result_factory, prompt: str, reply:
     return ok, f"{prompt}: metrics={event} response={result['response']!r}"
 
 
+def _run_fast_path_chat_case(
+    make_agent,
+    context_result_factory,
+    prompt: str,
+    expected_class: str,
+    expected_snippet: str,
+) -> tuple[bool, str]:
+    agent = make_agent()
+    _configure_model_chat_path(
+        agent,
+        context_result_factory,
+        decision=_provider_decision(task_hash=f"alpha-fast-chat-{uuid.uuid4().hex}", output_text="stale provider text"),
+    )
+    with mock.patch("apps.nulla_agent.audit_logger.log") as audit_log, _common_runtime_patch_stack():
+        result = agent.run_once(
+            prompt,
+            session_id_override=_session_id("fast-chat"),
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+    events = _chat_truth_events(audit_log)
+    if len(events) != 1:
+        return False, f"{prompt}: expected 1 metric event, got {len(events)}"
+    event = events[0]
+    ok = (
+        event.get("fast_path_hit") is True
+        and event.get("model_inference_used") is False
+        and event.get("model_final_answer_hit") is False
+        and event.get("template_renderer_hit") is False
+        and result["response_class"] == expected_class
+        and expected_snippet in _normalized(result["response"])
+        and result["model_execution"]["used_model"] is False
+        and agent.memory_router.resolve.call_count == 0
+    )
+    return ok, f"{prompt}: metrics={event} response={result['response']!r}"
+
+
 def _run_live_info_case(
     make_agent,
     context_result_factory,
@@ -506,6 +548,54 @@ def _run_live_info_case(
         and event.get("template_renderer_hit") is False
         and event.get("tool_backing_sources") == ["web_lookup"]
         and result["response"] == reply
+    )
+    return ok, f"{prompt}: metrics={event} response={result['response']!r}"
+
+
+def _run_fast_path_live_info_case(
+    make_agent,
+    context_result_factory,
+    prompt: str,
+    search_method: str,
+    search_results: list[dict[str, object]],
+    expected_snippets: tuple[str, ...],
+) -> tuple[bool, str]:
+    agent = make_agent()
+    _configure_model_chat_path(
+        agent,
+        context_result_factory,
+        decision=_provider_decision(task_hash=f"alpha-fast-live-{uuid.uuid4().hex}", output_text="stale provider text"),
+        disable_research=False,
+    )
+    planned_search_return = search_results if search_method == "planned_search_query" else mock.DEFAULT
+    search_return = search_results if search_method == "search_query" else mock.DEFAULT
+    with mock.patch("apps.nulla_agent.audit_logger.log") as audit_log, mock.patch(
+        "apps.nulla_agent.WebAdapter.planned_search_query",
+        return_value=planned_search_return,
+    ), mock.patch(
+        "apps.nulla_agent.WebAdapter.search_query",
+        return_value=search_return,
+    ), _common_runtime_patch_stack():
+        result = agent.run_once(
+            prompt,
+            session_id_override=_session_id("fast-live-info"),
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+    events = _chat_truth_events(audit_log)
+    if len(events) != 1:
+        return False, f"{prompt}: expected 1 metric event, got {len(events)}"
+    event = events[0]
+    response_text = _normalized(result["response"])
+    ok = (
+        event.get("fast_path_hit") is True
+        and event.get("model_inference_used") is False
+        and event.get("model_final_answer_hit") is False
+        and event.get("template_renderer_hit") is False
+        and event.get("tool_backing_sources") == ["web_lookup"]
+        and result["response_class"] == "utility_answer"
+        and all(snippet in response_text for snippet in expected_snippets)
+        and result["model_execution"]["used_model"] is False
+        and agent.memory_router.resolve.call_count == 0
     )
     return ok, f"{prompt}: metrics={event} response={result['response']!r}"
 
@@ -1051,7 +1141,7 @@ def _run_degradation_case(make_agent, context_result_factory, case) -> tuple[boo
 
 def test_alpha_hardening_definition_is_complete() -> None:
     assert set(ALPHA_SHIP_THRESHOLDS) == {
-        "model_final_hit_rate",
+        "primary_chat_surface_hit_rate",
         "planner_wrapper_regression",
         "capability_truth_regression",
         "hive_truth_label_regression",
@@ -1059,7 +1149,7 @@ def test_alpha_hardening_definition_is_complete() -> None:
         "builder_bounded_truth",
         "honest_degradation",
     }
-    assert len(MODEL_FINAL_CHAT_CASES) + len(MODEL_FINAL_LIVE_INFO_CASES) + 2 == 18
+    assert len(FAST_PATH_CHAT_CASES) + len(MODEL_FINAL_CHAT_CASES) + len(FAST_PATH_LIVE_INFO_CASES) + len(MODEL_FINAL_LIVE_INFO_CASES) + 2 == 18
     assert len(PLANNER_LEAK_CORPUS) == 12
     assert len(CAPABILITY_TRUTH_CASES) == 5
     assert len(HIVE_TRUTH_CASES) == 5
@@ -1067,12 +1157,31 @@ def test_alpha_hardening_definition_is_complete() -> None:
     assert len(HONEST_DEGRADATION_CASES) == 5
 
 
-def test_alpha_model_final_hit_rate_broader_non_command_corpus(make_agent, context_result_factory) -> None:
+def test_alpha_primary_chat_surface_hit_rate_broader_non_command_corpus(make_agent, context_result_factory) -> None:
     passed = 0
     failures: list[str] = []
 
+    for prompt, expected_class, expected_snippet in FAST_PATH_CHAT_CASES:
+        ok, detail = _run_fast_path_chat_case(make_agent, context_result_factory, prompt, expected_class, expected_snippet)
+        passed += int(ok)
+        if not ok:
+            failures.append(detail)
+
     for prompt, reply in MODEL_FINAL_CHAT_CASES:
         ok, detail = _run_plain_chat_case(make_agent, context_result_factory, prompt, reply)
+        passed += int(ok)
+        if not ok:
+            failures.append(detail)
+
+    for prompt, search_method, search_results, expected_snippets in FAST_PATH_LIVE_INFO_CASES:
+        ok, detail = _run_fast_path_live_info_case(
+            make_agent,
+            context_result_factory,
+            prompt,
+            search_method,
+            search_results,
+            expected_snippets,
+        )
         passed += int(ok)
         if not ok:
             failures.append(detail)
@@ -1089,12 +1198,12 @@ def test_alpha_model_final_hit_rate_broader_non_command_corpus(make_agent, conte
         if not ok:
             failures.append(detail)
 
-    total = len(MODEL_FINAL_CHAT_CASES) + len(MODEL_FINAL_LIVE_INFO_CASES) + 2
+    total = len(FAST_PATH_CHAT_CASES) + len(MODEL_FINAL_CHAT_CASES) + len(FAST_PATH_LIVE_INFO_CASES) + len(MODEL_FINAL_LIVE_INFO_CASES) + 2
     _assert_threshold(
-        name="model_final_hit_rate",
+        name="primary_chat_surface_hit_rate",
         passed=passed,
         total=total,
-        threshold=ALPHA_SHIP_THRESHOLDS["model_final_hit_rate"],
+        threshold=ALPHA_SHIP_THRESHOLDS["primary_chat_surface_hit_rate"],
         failures=failures,
     )
 

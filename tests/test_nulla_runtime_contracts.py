@@ -195,17 +195,7 @@ def test_evaluative_turns_stay_conversational_and_do_not_carry_hive_footer(
     expected,
 ):
     agent = make_agent()
-    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
-        return_value=ModelExecutionDecision(
-            source="provider",
-            task_hash="evaluative",
-            provider_id="ollama:qwen",
-            used_model=True,
-            output_text=expected,
-            confidence=0.82,
-            trust_score=0.82,
-        )
-    )
+    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("evaluative turns should stay deterministic"))  # type: ignore[assignment]
     result = agent.run_once(
         prompt,
         source_context={"surface": "openclaw", "platform": "openclaw"},
@@ -214,31 +204,20 @@ def test_evaluative_turns_stay_conversational_and_do_not_carry_hive_footer(
     assert result["response_class"] == ResponseClass.GENERIC_CONVERSATION.value
     assert expected in result["response"].lower()
     assert "hive:" not in result["response"].lower()
-    assert result["model_execution"]["used_model"] is True
+    assert result["model_execution"]["used_model"] is False
 
 
 @pytest.mark.parametrize(
-    ("prompt", "reply"),
+    ("prompt", "marker"),
     [
-        ("hey", "Hey. What are we solving?"),
-        ("hello", "Hello. Point me at the problem."),
-        ("how are you", "Stable enough. What do you need me to handle?"),
-        ("help", "I can help think, research, write code, and sanity-check real outputs."),
+        ("hey", "what do you need"),
+        ("hello", "what do you need"),
+        ("how are you", "memory online"),
     ],
 )
-def test_chat_surface_smalltalk_and_help_use_model_for_final_wording(make_agent, prompt, reply):
+def test_chat_surface_smalltalk_uses_deterministic_fast_path(make_agent, prompt, marker):
     agent = make_agent()
-    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
-        return_value=ModelExecutionDecision(
-            source="provider",
-            task_hash=f"chat-{prompt}",
-            provider_id="ollama:qwen",
-            used_model=True,
-            output_text=reply,
-            confidence=0.8,
-            trust_score=0.8,
-        )
-    )
+    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("smalltalk should not hit model wording"))  # type: ignore[assignment]
 
     result = agent.run_once(
         prompt,
@@ -246,44 +225,30 @@ def test_chat_surface_smalltalk_and_help_use_model_for_final_wording(make_agent,
         source_context={"surface": "openclaw", "platform": "openclaw"},
     )
 
-    assert result["response"] == reply
-    assert result["model_execution"]["used_model"] is True
-    assert result["model_execution"]["source"] == "provider"
+    assert marker in result["response"].lower()
+    assert result["model_execution"]["used_model"] is False
+    assert result["model_execution"]["source"] == "fast_path"
 
 
-def test_repeated_chat_greetings_use_model_each_turn(make_agent):
+def test_chat_surface_help_uses_deterministic_fast_path(make_agent):
     agent = make_agent()
-    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
-        side_effect=[
-            ModelExecutionDecision(
-                source="provider",
-                task_hash="chat-hey",
-                provider_id="ollama:qwen",
-                used_model=True,
-                output_text="Hey. What are we building?",
-                confidence=0.8,
-                trust_score=0.8,
-            ),
-            ModelExecutionDecision(
-                source="provider",
-                task_hash="chat-yo",
-                provider_id="ollama:qwen",
-                used_model=True,
-                output_text="Yo. What needs fixing?",
-                confidence=0.8,
-                trust_score=0.8,
-            ),
-            ModelExecutionDecision(
-                source="provider",
-                task_hash="chat-hello",
-                provider_id="ollama:qwen",
-                used_model=True,
-                output_text="Hello. Give me the target.",
-                confidence=0.8,
-                trust_score=0.8,
-            ),
-        ]
+    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("help should not hit model wording"))  # type: ignore[assignment]
+    agent._help_capabilities_text = mock.Mock(return_value="deterministic help lane")  # type: ignore[method-assign]
+
+    result = agent.run_once(
+        "help",
+        session_id_override="openclaw:help-fast-path",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
     )
+
+    assert result["response"] == "deterministic help lane"
+    assert result["model_execution"]["used_model"] is False
+    assert result["model_execution"]["source"] == "fast_path"
+
+
+def test_repeated_chat_greetings_stay_on_deterministic_fast_path(make_agent):
+    agent = make_agent()
+    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("greetings should not hit model wording"))  # type: ignore[assignment]
 
     first = agent.run_once(
         "hey",
@@ -301,27 +266,17 @@ def test_repeated_chat_greetings_use_model_each_turn(make_agent):
         source_context={"surface": "openclaw", "platform": "openclaw"},
     )
 
-    assert first["response"] == "Hey. What are we building?"
-    assert second["response"] == "Yo. What needs fixing?"
-    assert third["response"] == "Hello. Give me the target."
-    assert first["model_execution"]["used_model"] is True
-    assert second["model_execution"]["used_model"] is True
-    assert third["model_execution"]["used_model"] is True
+    assert "what do you need" in first["response"].lower()
+    assert "what do you want me to do" in second["response"].lower()
+    assert "skip the greeting" in third["response"].lower()
+    assert first["model_execution"]["used_model"] is False
+    assert second["model_execution"]["used_model"] is False
+    assert third["model_execution"]["used_model"] is False
 
 
-def test_api_surface_smalltalk_uses_model_for_final_wording(make_agent):
+def test_api_surface_smalltalk_uses_deterministic_fast_path(make_agent):
     agent = make_agent()
-    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
-        return_value=ModelExecutionDecision(
-            source="provider",
-            task_hash="api-hey",
-            provider_id="ollama:qwen",
-            used_model=True,
-            output_text="Hey. What are we solving?",
-            confidence=0.8,
-            trust_score=0.8,
-        )
-    )
+    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("api smalltalk should not hit model wording"))  # type: ignore[assignment]
 
     result = agent.run_once(
         "hey",
@@ -329,9 +284,9 @@ def test_api_surface_smalltalk_uses_model_for_final_wording(make_agent):
         source_context={"surface": "api", "platform": "api"},
     )
 
-    assert result["response"] == "Hey. What are we solving?"
-    assert result["model_execution"]["used_model"] is True
-    assert result["model_execution"]["source"] == "provider"
+    assert "what do you need" in result["response"].lower()
+    assert result["model_execution"]["used_model"] is False
+    assert result["model_execution"]["source"] == "fast_path"
 
 
 def test_low_verbosity_persona_wrapper_does_not_clip_to_first_paragraph():

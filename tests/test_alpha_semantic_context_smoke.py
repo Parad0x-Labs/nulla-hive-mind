@@ -50,6 +50,11 @@ ORDINARY_CHAT_SMOKE_CASES = (
         "It stops when a base case returns without recursing again.",
     ),
 )
+ORDINARY_CHAT_FAST_PATH_PROMPTS = {"hi", "yo"}
+ORDINARY_CHAT_FAST_PATH_SNIPPETS = {
+    "hi": "what do you need?",
+    "yo": "what do you need?",
+}
 
 
 def _provider_decision(*, task_hash: str, output_text: str, confidence: float = 0.84) -> ModelExecutionDecision:
@@ -682,7 +687,15 @@ def test_smoke_ordinary_chat_cases_hit_model_final_answer(make_agent, context_re
     events = _chat_truth_events(audit_log)
     assert len(events) == 1
     event = events[0]
-    if prompt == "17 * 19":
+    if prompt in ORDINARY_CHAT_FAST_PATH_PROMPTS:
+        assert event.get("fast_path_hit") is True
+        assert event.get("model_inference_used") is False
+        assert event.get("model_final_answer_hit") is False
+        assert result["response_class"] == ResponseClass.SMALLTALK.value
+        assert result["model_execution"]["used_model"] is False
+        assert agent.memory_router.resolve.call_count == 0
+        assert ORDINARY_CHAT_FAST_PATH_SNIPPETS[prompt] in result["response"].lower()
+    elif prompt == "17 * 19":
         assert event.get("fast_path_hit") is True
         assert event.get("model_inference_used") is False
         assert event.get("model_final_answer_hit") is False
@@ -692,8 +705,8 @@ def test_smoke_ordinary_chat_cases_hit_model_final_answer(make_agent, context_re
         assert event.get("model_inference_used") is True
         assert event.get("model_final_answer_hit") is True
         assert event.get("template_renderer_hit") is False
-    assert result["response"] == reply
-    if prompt == "17 * 19":
+        assert result["response"] == reply
+    if prompt in ORDINARY_CHAT_FAST_PATH_PROMPTS or prompt == "17 * 19":
         assert result["model_execution"]["used_model"] is False
     else:
         assert result["model_execution"]["used_model"] is True

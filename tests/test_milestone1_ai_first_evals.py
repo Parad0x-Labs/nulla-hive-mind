@@ -19,11 +19,11 @@ FORBIDDEN_PLANNER_LEAKS = (
     "action_plan",
 )
 
-GREETING_MODEL_HIT_CASES = (
-    ("hey", "Fresh greeting reply."),
-    ("hello", "Fresh hello reply."),
-    ("how are you", "Fresh evaluative reply."),
-    ("help", "Fresh help reply."),
+TRIVIAL_CHAT_FAST_PATH_CASES = (
+    ("hey", "smalltalk", "what do you need?"),
+    ("hello", "smalltalk", "what do you need?"),
+    ("how are you", "smalltalk", "running stable. memory online, mesh ready."),
+    ("help", "utility_answer", "wired on this runtime:"),
 )
 
 PLAIN_TEXT_ROUTING_CASES = (
@@ -105,7 +105,7 @@ HONEST_DEGRADATION_CASES = (
 )
 
 M1_EVAL_MATRIX = {
-    "greeting_model_hit": GREETING_MODEL_HIT_CASES,
+    "trivial_chat_fast_path": TRIVIAL_CHAT_FAST_PATH_CASES,
     "plain_text_routing": PLAIN_TEXT_ROUTING_CASES,
     "live_info_synthesis": LIVE_INFO_SYNTHESIS_CASES,
     "hive_synthesis": HIVE_SYNTHESIS_CASES,
@@ -168,7 +168,7 @@ def _common_runtime_patch_stack():
 
 def test_milestone1_eval_matrix_covers_required_ai_first_behaviors() -> None:
     assert set(M1_EVAL_MATRIX) == {
-        "greeting_model_hit",
+        "trivial_chat_fast_path",
         "plain_text_routing",
         "live_info_synthesis",
         "hive_synthesis",
@@ -178,13 +178,19 @@ def test_milestone1_eval_matrix_covers_required_ai_first_behaviors() -> None:
     assert all(M1_EVAL_MATRIX.values())
 
 
-@pytest.mark.parametrize(("prompt", "reply"), GREETING_MODEL_HIT_CASES)
-def test_eval_greeting_model_hit(make_agent, context_result_factory, prompt: str, reply: str) -> None:
+@pytest.mark.parametrize(("prompt", "expected_class", "expected_snippet"), TRIVIAL_CHAT_FAST_PATH_CASES)
+def test_eval_trivial_chat_fast_path(
+    make_agent,
+    context_result_factory,
+    prompt: str,
+    expected_class: str,
+    expected_snippet: str,
+) -> None:
     agent = make_agent()
     _configure_model_chat_path(
         agent,
         context_result_factory,
-        decision=_provider_decision(task_hash=f"greeting-{prompt}", output_text=reply),
+        decision=_provider_decision(task_hash=f"greeting-{prompt}", output_text="stale provider text"),
     )
 
     with mock.patch("apps.nulla_agent.audit_logger.log") as audit_log, _common_runtime_patch_stack():
@@ -194,12 +200,15 @@ def test_eval_greeting_model_hit(make_agent, context_result_factory, prompt: str
         )
 
     events = _chat_truth_events(audit_log)
-    assert result["response"] == reply
+    assert expected_snippet in result["response"].lower()
+    assert result["response_class"] == expected_class
     assert len(events) == 1
-    assert events[0]["fast_path_hit"] is False
-    assert events[0]["model_inference_used"] is True
-    assert events[0]["model_final_answer_hit"] is True
+    assert events[0]["fast_path_hit"] is True
+    assert events[0]["model_inference_used"] is False
+    assert events[0]["model_final_answer_hit"] is False
     assert events[0]["template_renderer_hit"] is False
+    assert result["model_execution"]["used_model"] is False
+    assert agent.memory_router.resolve.call_count == 0
 
 
 @pytest.mark.parametrize(("prompt", "expected_task_class"), PLAIN_TEXT_ROUTING_CASES)

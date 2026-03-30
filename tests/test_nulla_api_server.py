@@ -137,6 +137,46 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
             self.assertEqual(source_context["platform"], "api")
             self.assertEqual(source_context["requested_model"], "openai-compatible-remote:gpt-mock")
 
+    def test_dispatch_post_preserves_inbound_source_context_and_nested_workspace(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+        seen_contexts: list[dict[str, Any]] = []
+
+        def fake_run_agent(
+            user_text: str,
+            *,
+            session_id: str | None = None,
+            source_context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            seen_contexts.append(dict(source_context or {}))
+            return {"response": "ok", "confidence": 1.0}
+
+        with mock.patch("apps.nulla_api_server._run_agent", side_effect=fake_run_agent):
+            response = _dispatch_post(
+                path="/api/chat",
+                body={
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "source_context": {
+                        "surface": "openclaw",
+                        "platform": "openclaw",
+                        "workspace": "/tmp/nested-workspace",
+                        "subject": "openclaw integration",
+                    },
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp/default-workspace",
+            )
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(len(seen_contexts), 1)
+        source_context = seen_contexts[0]
+        self.assertEqual(source_context["surface"], "openclaw")
+        self.assertEqual(source_context["platform"], "openclaw")
+        self.assertEqual(source_context["workspace"], "/tmp/nested-workspace")
+        self.assertEqual(source_context["workspace_root"], "/tmp/nested-workspace")
+        self.assertEqual(source_context["subject"], "openclaw integration")
+
     def test_dispatch_post_rehydrates_history_from_session_log_when_client_history_is_sparse(self) -> None:
         runtime = RuntimeServices(display_name="NULLA")
         seen_contexts: list[dict[str, Any]] = []

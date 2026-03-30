@@ -265,11 +265,11 @@ def test_evaluative_turn_does_not_hit_web_lookup(make_agent):
     assert "routing is still too stitched together" in result["response"].lower()
     search_query.assert_not_called()
     planned_search.assert_not_called()
-    assert agent.memory_router.resolve.call_args.kwargs["allow_provider_inference"] is False
+    agent.memory_router.resolve.assert_not_called()
     assert result["model_execution"]["used_model"] is False
 
 
-def test_help_turn_does_not_force_live_model_wording_when_no_cached_answer(make_agent):
+def test_help_turn_uses_deterministic_fast_path_when_no_cached_answer(make_agent):
     agent = make_agent()
     agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
         return_value=ModelExecutionDecision(
@@ -284,9 +284,9 @@ def test_help_turn_does_not_force_live_model_wording_when_no_cached_answer(make_
         source_context={"surface": "openclaw", "platform": "openclaw"},
     )
 
-    assert result["response_class"] == "generic_conversation"
+    assert result["response_class"] == "utility_answer"
     assert "wired on this runtime" in result["response"].lower()
-    assert agent.memory_router.resolve.call_args.kwargs["allow_provider_inference"] is False
+    agent.memory_router.resolve.assert_not_called()
     assert result["model_execution"]["used_model"] is False
 
 

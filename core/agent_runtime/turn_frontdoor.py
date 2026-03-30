@@ -30,6 +30,22 @@ def handle_turn_frontdoor(
             )
         }
 
+    heartbeat_reply = agent._heartbeat_poll_fast_path(
+        raw_user_input,
+        source_context=source_context,
+    )
+    if heartbeat_reply:
+        return {
+            "result": agent._fast_path_result(
+                session_id=session_id,
+                user_input=effective_input,
+                response=heartbeat_reply,
+                confidence=0.99,
+                source_context=source_context,
+                reason="heartbeat_poll_fast_path",
+            )
+        }
+
     handled, response = maybe_handle_preference_command_fn(effective_input)
     if handled:
         agent._sync_public_presence(
@@ -238,22 +254,6 @@ def handle_turn_frontdoor(
 
     evaluative = agent._evaluative_conversation_fast_path(normalized_input, source_surface=source_surface)
     if evaluative:
-        if agent._is_chat_truth_surface(source_context):
-            return {
-                "result": agent._chat_surface_model_wording_result(
-                    session_id=session_id,
-                    user_input=effective_input,
-                    source_context=source_context,
-                    persona=persona,
-                    interpretation=interpreted,
-                    task_class="unknown",
-                    response_class=agent.ResponseClass.GENERIC_CONVERSATION,
-                    reason="evaluative_conversation_model_wording",
-                    model_input=effective_input,
-                    fallback_response=evaluative,
-                    allow_provider_inference=False,
-                )
-            }
         return {
             "result": agent._fast_path_result(
                 session_id=session_id,
@@ -272,26 +272,6 @@ def handle_turn_frontdoor(
     )
     if smalltalk:
         smalltalk_phrase = normalized_input.lower().strip(" \t\r\n?!.,")
-        if agent._is_chat_truth_surface(source_context):
-            is_help_prompt = smalltalk_phrase in {"what can you do", "help"}
-            return {
-                "result": agent._chat_surface_model_wording_result(
-                    session_id=session_id,
-                    user_input=effective_input,
-                    source_context=source_context,
-                    persona=persona,
-                    interpretation=interpreted,
-                    task_class="unknown",
-                    response_class=agent.ResponseClass.GENERIC_CONVERSATION if is_help_prompt else agent.ResponseClass.SMALLTALK,
-                    reason="help_model_wording" if is_help_prompt else "smalltalk_model_wording",
-                    model_input=agent._chat_surface_smalltalk_model_input(
-                        user_input=effective_input,
-                        phrase=smalltalk_phrase,
-                    ),
-                    fallback_response=smalltalk,
-                    allow_provider_inference=False,
-                )
-            }
         return {
             "result": agent._fast_path_result(
                 session_id=session_id,

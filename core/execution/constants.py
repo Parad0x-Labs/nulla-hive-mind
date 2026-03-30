@@ -81,8 +81,12 @@ _SELF_TOOL_REQUEST_MARKERS = (
 _DIRECTORY_CREATE_MARKERS = (
     "create folder",
     "create a folder",
+    "create new folder",
+    "create a new folder",
     "create directory",
     "create a directory",
+    "create new directory",
+    "create a new directory",
     "make folder",
     "make a folder",
     "set up folder",
@@ -173,6 +177,8 @@ _PATH_STOP_WORDS = {
     "machine",
     "computer",
     "desktop",
+    "please",
+    "pls",
 }
 _BUILDER_RESEARCH_MARKERS = (
     "build",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -38,6 +39,7 @@ _TIME_FOLLOWUP_EXCLUSION_MARKERS = (
     "queue",
     "work",
 )
+_STATUS_CHECK_RE = re.compile(r"\bhow\s+are\s+(?:you(?:\s+doing)?|u|r\s+u)\b")
 
 
 def smalltalk_fast_path(agent: Any, normalized_input: str, *, source_surface: str, session_id: str) -> str | None:
@@ -61,7 +63,27 @@ def smalltalk_fast_path(agent: Any, normalized_input: str, *, source_surface: st
         if with_joke:
             msg += " Keep it sharp and I’ll keep it fast."
         return msg
-    if phrase in {"how are you", "how are you doing", "how are u", "how r u"}:
+    if phrase in {"how are you", "how are you doing", "how are u", "how r u"} or (
+        _STATUS_CHECK_RE.search(phrase)
+        and not any(
+            marker in phrase
+            for marker in (
+                "create ",
+                "make ",
+                "write ",
+                "file ",
+                "folder ",
+                "directory ",
+                "fix ",
+                "check ",
+                "read ",
+                "look up ",
+                "price ",
+                "weather ",
+                "news ",
+            )
+        )
+    ):
         repeat_count = note_smalltalk_turn(session_id, key="status_check")
         if repeat_count >= 2:
             return "Still stable. Memory online, mesh ready. Give me the task."
@@ -82,6 +104,64 @@ def smalltalk_fast_path(agent: Any, normalized_input: str, *, source_surface: st
     if phrase in {"kill me lol", "omfg just kill me", "omfg just kill me lol", "kms lol"}:
         return "You're frustrated. Let's fix the thing instead. If you want me to go by a different name, I'll use it."
     return None
+
+
+def heartbeat_poll_fast_path(user_input: str, *, source_context: dict[str, object] | None) -> str | None:
+    normalized = " ".join(str(user_input or "").split()).strip()
+    lowered = normalized.lower()
+    if not normalized:
+        return None
+    if "heartbeat_ok" not in lowered:
+        return None
+    if "heartbeat" not in lowered or "heartbeat.md" not in lowered.replace(" ", ""):
+        return None
+
+    heartbeat_path = _resolve_heartbeat_poll_path(normalized, source_context=source_context)
+    if heartbeat_path is None or not heartbeat_path.exists():
+        return "HEARTBEAT_OK"
+
+    try:
+        content = heartbeat_path.read_text(encoding="utf-8")
+    except OSError:
+        return "HEARTBEAT_OK"
+    if _heartbeat_file_has_actions(content):
+        return None
+    return "HEARTBEAT_OK"
+
+
+def _resolve_heartbeat_poll_path(
+    user_input: str,
+    *,
+    source_context: dict[str, object] | None,
+) -> Path | None:
+    explicit = _extract_explicit_heartbeat_path(user_input)
+    if explicit is not None:
+        return explicit
+    workspace_root = str((source_context or {}).get("workspace") or (source_context or {}).get("workspace_root") or "").strip()
+    if not workspace_root:
+        return None
+    return Path(workspace_root).expanduser() / "HEARTBEAT.md"
+
+
+def _extract_explicit_heartbeat_path(user_input: str) -> Path | None:
+    normalized = re.sub(r"\s*/\s*", "/", str(user_input or "").strip())
+    normalized = re.sub(r"\s*\.\s*", ".", normalized)
+    match = re.search(r"(?P<path>(?:~|/)[^\n`\"']*HEARTBEAT\.md)", normalized, re.IGNORECASE)
+    if match is None:
+        return None
+    raw_path = str(match.group("path") or "").strip().strip("`\"'")
+    if not raw_path:
+        return None
+    return Path(raw_path).expanduser()
+
+
+def _heartbeat_file_has_actions(content: str) -> bool:
+    for raw_line in str(content or "").splitlines():
+        line = str(raw_line or "").strip()
+        if not line or line.startswith("#"):
+            continue
+        return True
+    return False
 
 
 def evaluative_conversation_fast_path(agent: Any, normalized_input: str, *, source_surface: str) -> str | None:

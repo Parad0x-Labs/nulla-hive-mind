@@ -417,6 +417,10 @@ def _extract_machine_text_file_write_target(
 
 def _extract_machine_text_file_content(raw: str) -> str:
     patterns = (
+        re.compile(
+            r"\bcreate\s+(?:a\s+)?(?P<content>[A-Za-z0-9][A-Za-z0-9 _-]{0,120}?)\s+(?:text|txt)\s+file(?=\s+(?:in|into|inside|under|to|place|put|save|write|store)\b|$)",
+            re.IGNORECASE | re.DOTALL,
+        ),
         re.compile(r"\bwith(?: exactly)?(?: this)?(?: file)?(?: content| text)?\s*:\s*(?P<content>.+)$", re.IGNORECASE | re.DOTALL),
         re.compile(r"\bthat says\s+(?P<content>.+?)(?=\s+(?:and\s+)?(?:place|put|save|write|store)\b|\s+(?:in|into|inside|under|to)\b|$)", re.IGNORECASE | re.DOTALL),
         re.compile(r"\bthat reads\s+(?P<content>.+?)(?=\s+(?:and\s+)?(?:place|put|save|write|store)\b|\s+(?:in|into|inside|under|to)\b|$)", re.IGNORECASE | re.DOTALL),
@@ -429,6 +433,7 @@ def _extract_machine_text_file_content(raw: str) -> str:
             continue
         content = str(match.group("content") or "").strip().strip("`")
         if content:
+            content = re.sub(r"^(?:a|an|the)\s+", "", content, flags=re.IGNORECASE)
             return content
     return ""
 
@@ -453,7 +458,7 @@ def _extract_machine_text_extension(raw: str, *, explicit_filename: str) -> str:
         re.IGNORECASE,
     )
     if not match:
-        return ""
+        return "txt" if re.search(r"\b(?:text|txt)\s+file\b", raw, re.IGNORECASE) else ""
     return str(match.group("ext") or "").strip().lstrip(".").lower()
 
 
@@ -492,18 +497,20 @@ def _resolve_safe_machine_root_directory(*, folder: str, root_label: str) -> Pat
         if not folder:
             return root
         if root.exists():
+            normalized_folder = _normalized_safe_machine_segment(folder)
             for child in root.iterdir():
-                if child.is_dir() and child.name.lower() == folder.lower():
+                if child.is_dir() and _normalized_safe_machine_segment(child.name) == normalized_folder:
                     return child
         return root / folder
     if not folder:
         return None
+    normalized_folder = _normalized_safe_machine_segment(folder)
     matches: list[Path] = []
     for root in root_options:
         if not root.exists():
             continue
         for child in root.iterdir():
-            if child.is_dir() and child.name.lower() == folder.lower():
+            if child.is_dir() and _normalized_safe_machine_segment(child.name) == normalized_folder:
                 matches.append(child)
                 break
     if len(matches) == 1:
@@ -543,6 +550,10 @@ def _sanitize_safe_machine_segment(value: str) -> str:
     if "/" in cleaned or "\\" in cleaned:
         return ""
     return cleaned
+
+
+def _normalized_safe_machine_segment(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
 
 
 def _render_plaintext_transcript(history: list[dict[str, str]], *, agent_name: str) -> str:

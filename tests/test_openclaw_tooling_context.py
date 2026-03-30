@@ -373,6 +373,22 @@ class OpenClawToolingContextTests(unittest.TestCase):
         self.assertNotIn("noisy footer", result["response"])
         self.assertNotIn("open tasks", result["response"].lower())
 
+    def test_openclaw_empty_heartbeat_prompt_returns_heartbeat_ok_without_hive_noise(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch.object(
+            agent.hive_activity_tracker, "build_chat_footer", return_value="Hive:\nnoisy footer"
+        ):
+            Path(tmpdir, "HEARTBEAT.md").write_text("", encoding="utf-8")
+            result = agent.run_once(
+                "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.",
+                session_id_override="openclaw:heartbeat-empty",
+                source_context={"surface": "api", "platform": "api", "workspace": tmpdir},
+            )
+
+        self.assertEqual(result["response"], "HEARTBEAT_OK")
+        self.assertNotIn("Hive", result["response"])
+        self.assertEqual(result["model_execution"]["used_model"], False)
+
     def test_openclaw_frustration_fast_path_avoids_generic_fallback(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
         with mock.patch.object(agent.hive_activity_tracker, "build_chat_footer", return_value="Hive:\nnoisy footer"):
@@ -3396,6 +3412,57 @@ class OpenClawToolingContextTests(unittest.TestCase):
         self.assertIn("~/Desktop/MarchTest/hello_world.txt", result["response"])
         self.assertNotIn("workspace_stop_after_directory_bootstrap", result["response"])
         self.assertNotIn("bounded builder step", result["response"])
+
+    def test_openclaw_spaced_named_safe_folder_txt_write_beats_workspace_bootstrap_garbage(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            desktop = Path(tmpdir) / "Desktop"
+            marchtest = desktop / "MarchTest"
+            marchtest.mkdir(parents=True, exist_ok=True)
+            workspace = Path(tmpdir) / "workspace"
+            workspace.mkdir(parents=True, exist_ok=True)
+
+            result = agent.run_once(
+                "create hELLO WORLD TEXT file in march test folder please",
+                session_id_override="openclaw:spaced-safe-folder-txt-write",
+                source_context={"surface": "api", "platform": "api", "workspace": str(workspace)},
+            )
+
+            target = marchtest / "hello_world.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8").lower(), "hello world")
+            self.assertFalse((workspace / "please").exists())
+
+        self.assertIn("~/Desktop/MarchTest/hello_world.txt", result["response"])
+        self.assertNotIn("I created `please`", result["response"])
+        self.assertNotIn("bounded builder step", result["response"])
+
+    def test_openclaw_new_folder_on_desktop_phrase_uses_real_machine_directory_create(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            result = agent.run_once(
+                "create new folder on desktop - name it NULLATEST",
+                session_id_override="openclaw:new-folder-desktop",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            self.assertTrue((Path(tmpdir) / "Desktop" / "NULLATEST").is_dir())
+
+        self.assertIn("~/Desktop/NULLATEST", result["response"])
+        self.assertNotIn("can't create folders directly", result["response"].lower())
 
     def test_openclaw_price_followup_recovers_grounded_quote_in_api_surface(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
