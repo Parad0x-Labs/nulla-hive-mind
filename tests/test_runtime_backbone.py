@@ -13,8 +13,41 @@ from core.runtime_backbone import (
     build_runtime_backbone,
 )
 from core.runtime_bootstrap import BootstrappedRuntime, RuntimeBackendSelection
-from core.runtime_install_profiles import InstallProfileTruth
+from core.runtime_install_profiles import InstallProfileProvider, InstallProfileTruth
 from storage.model_provider_manifest import ModelProviderManifest
+
+
+def _install_profile_truth_with_provider_ids(*provider_ids: str) -> InstallProfileTruth:
+    provider_mix = tuple(
+        InstallProfileProvider(
+            provider_id=provider_id,
+            role="general" if index == 0 else "reasoning",
+            locality="local",
+            required=True,
+            configured=True,
+            availability_state="ready",
+        )
+        for index, provider_id in enumerate(provider_ids)
+    )
+    return InstallProfileTruth(
+        profile_id="local-only",
+        label="Local only",
+        summary="Single local Ollama lane with no remote provider dependency.",
+        selection_source="test",
+        selected_model="qwen3:8b",
+        provider_mix=provider_mix,
+        estimated_download_gb=0.0,
+        estimated_disk_footprint_gb=0.0,
+        minimum_free_space_gb=0.0,
+        ram_expectation_gb=0.0,
+        vram_expectation_gb=0.0,
+        ready=True,
+        degraded=False,
+        single_volume_ready=True,
+        reasons=tuple(),
+        volume_checks=tuple(),
+        selected_models=tuple(item.provider_id.split(":", 1)[1] for item in provider_mix),
+    )
 
 
 def test_build_provider_registry_snapshot_collects_rows_and_warnings_from_registry() -> None:
@@ -203,12 +236,19 @@ def test_build_provider_registry_snapshot_filters_legacy_enabled_manifests_to_ac
     registry.register_manifest.side_effect = _register_manifest
     registry.list_manifests.side_effect = _list_manifests
 
-    snapshot = build_provider_registry_snapshot(
-        registry,
-        requested_profile="local-only",
-        honor_install_profile=True,
-        env={},
-    )
+    with mock.patch(
+        "core.runtime_backbone.build_install_profile_truth",
+        return_value=_install_profile_truth_with_provider_ids(
+            "ollama-local:qwen3:8b",
+            "ollama-local:deepseek-r1:8b",
+        ),
+    ):
+        snapshot = build_provider_registry_snapshot(
+            registry,
+            requested_profile="local-only",
+            honor_install_profile=True,
+            env={},
+        )
 
     assert tuple(item.provider_id for item in snapshot.capability_truth) == (
         "ollama-local:qwen3:8b",
@@ -353,13 +393,20 @@ def test_build_provider_registry_snapshot_prewarms_only_active_profile_mix() -> 
         {"ok": True, "provider_id": "ollama-local:deepseek-r1:8b", "status": "prewarmed"},
     ]
 
-    snapshot = build_provider_registry_snapshot(
-        registry,
-        requested_profile="local-only",
-        honor_install_profile=True,
-        run_prewarm=True,
-        env={},
-    )
+    with mock.patch(
+        "core.runtime_backbone.build_install_profile_truth",
+        return_value=_install_profile_truth_with_provider_ids(
+            "ollama-local:qwen3:8b",
+            "ollama-local:deepseek-r1:8b",
+        ),
+    ):
+        snapshot = build_provider_registry_snapshot(
+            registry,
+            requested_profile="local-only",
+            honor_install_profile=True,
+            run_prewarm=True,
+            env={},
+        )
 
     registry.prewarm_enabled_providers.assert_called_once_with(
         provider_ids=("ollama-local:qwen3:8b", "ollama-local:deepseek-r1:8b")

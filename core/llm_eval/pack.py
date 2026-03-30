@@ -126,8 +126,13 @@ def compare_pytest_results(
     current_passed = int(current_summary.get("failed", 0)) == 0 and int(current.get("exit_code", 1)) == 0
     baseline_duration = float(baseline.get("duration_seconds") or 0.0)
     current_duration = float(current.get("duration_seconds") or 0.0)
+    baseline_targets = tuple(str(item).strip() for item in list(baseline.get("targets") or []) if str(item).strip())
+    current_targets = tuple(str(item).strip() for item in list(current.get("targets") or []) if str(item).strip())
+    duration_comparable = not baseline_targets or current_targets == baseline_targets
     duration_regressed = bool(
-        baseline_duration > 0.0 and current_duration > (baseline_duration * (1.0 + duration_tolerance_ratio))
+        duration_comparable
+        and baseline_duration > 0.0
+        and current_duration > (baseline_duration * (1.0 + duration_tolerance_ratio))
     )
     pass_regressed = bool(baseline_passed and not current_passed)
     if pass_regressed or duration_regressed:
@@ -143,6 +148,7 @@ def compare_pytest_results(
         "pass_regressed": pass_regressed,
         "baseline_duration_seconds": baseline_duration,
         "current_duration_seconds": current_duration,
+        "duration_comparable": duration_comparable,
         "duration_delta_seconds": round(current_duration - baseline_duration, 3),
         "summary_delta": {
             field: int(current_summary.get(field, 0)) - int(baseline_summary.get(field, 0))

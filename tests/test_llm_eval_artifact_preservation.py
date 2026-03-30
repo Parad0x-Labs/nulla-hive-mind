@@ -399,6 +399,49 @@ def test_main_accepts_runtime_home_and_workspace_root_args(monkeypatch, tmp_path
     }
 
 
+def test_compare_pytest_results_ignores_duration_regression_when_target_set_changes() -> None:
+    comparison = llm_eval.compare_pytest_results(
+        current={
+            "targets": ["tests/test_runtime_backbone.py", "tests/test_run_local_acceptance.py"],
+            "summary": {"passed": 2, "failed": 0, "skipped": 0, "xfailed": 0, "xpassed": 0},
+            "exit_code": 0,
+            "duration_seconds": 30.0,
+        },
+        baseline={
+            "targets": ["tests/test_runtime_backbone.py"],
+            "summary": {"passed": 1, "failed": 0, "skipped": 0, "xfailed": 0, "xpassed": 0},
+            "exit_code": 0,
+            "duration_seconds": 10.0,
+        },
+    )
+
+    assert comparison["status"] == "unchanged"
+    assert comparison["duration_comparable"] is False
+    assert comparison["duration_regressed"] is False
+    assert comparison["pass_regressed"] is False
+
+
+def test_compare_pytest_results_marks_duration_regression_when_target_set_matches() -> None:
+    comparison = llm_eval.compare_pytest_results(
+        current={
+            "targets": ["tests/test_runtime_backbone.py"],
+            "summary": {"passed": 1, "failed": 0, "skipped": 0, "xfailed": 0, "xpassed": 0},
+            "exit_code": 0,
+            "duration_seconds": 13.0,
+        },
+        baseline={
+            "targets": ["tests/test_runtime_backbone.py"],
+            "summary": {"passed": 1, "failed": 0, "skipped": 0, "xfailed": 0, "xpassed": 0},
+            "exit_code": 0,
+            "duration_seconds": 10.0,
+        },
+    )
+
+    assert comparison["status"] == "degraded"
+    assert comparison["duration_comparable"] is True
+    assert comparison["duration_regressed"] is True
+
+
 def test_run_skips_docs_report_write_by_default(monkeypatch, tmp_path: Path) -> None:
     docs_report_path = tmp_path / "docs" / "LLM_ACCEPTANCE_REPORT.md"
     output_root = tmp_path / "reports" / "llm_eval" / "latest"
