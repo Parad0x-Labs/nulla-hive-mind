@@ -3233,6 +3233,43 @@ class OpenClawToolingContextTests(unittest.TestCase):
             )
         )
 
+    def test_openclaw_absolute_workspace_subdir_create_and_write_use_real_workspace_targets(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = str(Path(tmpdir).resolve())
+
+            create_dir = agent.run_once(
+                f"Create a folder named alpha inside {workspace}.",
+                session_id_override="openclaw:absolute-workspace-subdir-flow",
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": workspace},
+            )
+            self.assertEqual(create_dir["mode"], "tool_executed")
+            self.assertTrue((Path(workspace) / "alpha").is_dir())
+
+            create_text = agent.run_once(
+                f"Inside {workspace}/alpha create hello.txt with exactly this content: HELLO-LOCAL-TRUTH",
+                session_id_override="openclaw:absolute-workspace-subdir-flow",
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": workspace},
+            )
+            self.assertEqual(create_text["mode"], "tool_executed")
+            self.assertEqual((Path(workspace) / "alpha" / "hello.txt").read_text(encoding="utf-8"), "HELLO-LOCAL-TRUTH")
+
+            create_code = agent.run_once(
+                (
+                    f"Inside {workspace}/alpha create adder.py with exactly this code:\n\n"
+                    "def add(a: int, b: int) -> int:\n"
+                    "    return a + b\n"
+                ),
+                session_id_override="openclaw:absolute-workspace-subdir-flow",
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": workspace},
+            )
+            self.assertEqual(create_code["mode"], "tool_executed")
+            self.assertEqual(
+                (Path(workspace) / "alpha" / "adder.py").read_text(encoding="utf-8"),
+                "def add(a: int, b: int) -> int:\n    return a + b",
+            )
+
     def test_openclaw_desktop_listing_request_uses_direct_machine_read_fast_path(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
         agent.start()

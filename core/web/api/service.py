@@ -9,6 +9,7 @@ from typing import Any
 from core.adaptation_autopilot import get_adaptation_autopilot_status, schedule_adaptation_autopilot_tick
 from core.control_plane_workspace import collect_control_plane_status
 from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
+from core.persistent_memory import recent_conversation_events
 from core.runtime_capabilities import runtime_capability_snapshot
 from core.runtime_task_events import list_runtime_session_events, list_runtime_sessions
 from core.runtime_task_rail import render_runtime_task_rail_html
@@ -124,6 +125,45 @@ def capability_snapshot_with_runtime(
     if capabilities:
         payload["capabilities"] = capabilities
     return payload
+
+
+def _augment_history_from_session_log(
+    history: list[dict[str, str]],
+    *,
+    session_id: str,
+    user_text: str,
+    limit: int = 6,
+) -> list[dict[str, str]]:
+    normalized_history = [dict(item) for item in list(history or []) if isinstance(item, dict)]
+    if len(normalized_history) > 1:
+        return normalized_history
+    normalized_session = str(session_id or "").strip()
+    normalized_user = str(user_text or "").strip()
+    if not normalized_session or not normalized_user:
+        return normalized_history
+
+    hydrated_history: list[dict[str, str]] = []
+    for event in recent_conversation_events(normalized_session, limit=max(1, int(limit))):
+        if not isinstance(event, dict):
+            continue
+        event_user = str(event.get("user") or "").strip()
+        event_assistant = str(event.get("assistant") or "").strip()
+        if event_user:
+            hydrated_history.append({"role": "user", "content": event_user})
+        if event_assistant:
+            hydrated_history.append({"role": "assistant", "content": event_assistant})
+
+    if not hydrated_history:
+        return normalized_history
+
+    if normalized_history:
+        last_message = normalized_history[-1]
+        if (
+            str(last_message.get("role") or "").strip().lower() == "user"
+            and str(last_message.get("content") or "").strip() == normalized_user
+        ):
+            return [*hydrated_history, *normalized_history]
+    return [*hydrated_history, {"role": "user", "content": normalized_user}]
 
 
 def _runtime_model_catalog(
@@ -324,7 +364,7 @@ def dispatch_post(
 
     if normalized_path in {"/api/chat", "/v1/chat/completions"}:
         messages = list(body.get("messages", []) or [])
-        history = normalize_chat_history_provider(messages)
+        client_history = normalize_chat_history_provider(messages)
         user_text = extract_user_message_provider(messages)
         if not user_text:
             return apply_runtime_headers(json_response(400, {"error": "no user message found"}), runtime)
@@ -332,7 +372,12 @@ def dispatch_post(
         model = body.get("model", model_name)
         stream = body.get("stream", False)
         include_runtime_events = bool(body.get("stream_runtime_events") or body.get("include_runtime_events"))
-        session_id = stable_openclaw_session_id_provider(body=body, history=history, headers=headers)
+        session_id = stable_openclaw_session_id_provider(body=body, history=client_history, headers=headers)
+        history = _augment_history_from_session_log(
+            client_history,
+            session_id=session_id,
+            user_text=user_text,
+        )
         requested_workspace = str(
             body.get("workspace") or body.get("workspace_root") or body.get("cwd") or body.get("projectRoot") or ""
         ).strip()
@@ -340,8 +385,8 @@ def dispatch_post(
         source_context = {
             "surface": "api",
             "platform": "api",
-            "client_conversation_history": history,
-            "client_history_message_count": len(history),
+            "client_conversation_history": client_history,
+            "client_history_message_count": len(client_history),
             "conversation_history": history,
             "history_message_count": len(history),
             "workspace": requested_workspace or default_workspace,

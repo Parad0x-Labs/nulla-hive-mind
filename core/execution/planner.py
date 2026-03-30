@@ -238,6 +238,26 @@ def _clean_workspace_path(candidate: str) -> str:
     return clean
 
 
+def _clean_workspace_directory_path(candidate: str, *, workspace_root: str = "") -> str:
+    raw = str(candidate or "").strip().strip("`\"'")
+    clean = ""
+    if raw and workspace_root:
+        try:
+            resolved_workspace_root = Path(workspace_root).expanduser().resolve()
+            resolved_candidate = Path(raw).expanduser().resolve()
+            if resolved_candidate == resolved_workspace_root:
+                return ""
+            if resolved_workspace_root in resolved_candidate.parents:
+                clean = str(resolved_candidate.relative_to(resolved_workspace_root))
+        except Exception:
+            clean = ""
+    if not clean:
+        clean = _clean_workspace_path(candidate)
+    if clean in {"", "."}:
+        return ""
+    return clean.rstrip("/")
+
+
 def _extract_workspace_bootstrap_path(text: str) -> str:
     raw = str(text or "").strip()
     if not raw:
@@ -250,6 +270,19 @@ def _extract_workspace_bootstrap_path(text: str) -> str:
         if clean:
             return clean
     return ""
+
+
+def _extract_workspace_parent_directory(text: str, *, workspace_root: str = "") -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    match = _INTO_PATH_RE.search(raw)
+    if not match:
+        return ""
+    return _clean_workspace_directory_path(
+        str(match.group("path") or "").strip(),
+        workspace_root=workspace_root,
+    )
 
 
 def _extract_safe_machine_directory_listing(text: str) -> dict[str, Any] | None:
@@ -429,22 +462,31 @@ def _extract_history_observation_payload(message: dict[str, Any]) -> dict[str, A
 
 def _recover_last_workspace_path_from_history(source_context: dict[str, Any] | None) -> str:
     history = _history_messages(source_context)
+    workspace_root = str((source_context or {}).get("workspace") or (source_context or {}).get("workspace_root") or "").strip()
     for message in reversed(history[-12:]):
         observation = _extract_history_observation_payload(message)
         if observation is not None:
             intent = str(observation.get("intent") or "").strip()
             if intent in {"workspace.write_file", "workspace.read_file", "workspace.replace_in_file"}:
-                path = _clean_workspace_file_path(str(observation.get("path") or "").strip())
+                path = _clean_workspace_file_path(
+                    str(observation.get("path") or "").strip(),
+                    workspace_root=workspace_root,
+                )
                 if path:
                     return path
         if str(message.get("role") or "").strip().lower() != "user":
             continue
         content = str(message.get("content") or "")
+        base_dir = _extract_workspace_parent_directory(content, workspace_root=workspace_root)
         for pattern in (_APPEND_FILE_RE, _OVERWRITE_FILE_RE, _CREATE_NAMED_FILE_WITH_CONTENT_RE, _INLINE_CREATE_FILE_RE):
             match = pattern.search(content)
             if not match:
                 continue
-            path = _clean_workspace_file_path(str(match.group("path") or "").strip())
+            path = _clean_workspace_file_path(
+                str(match.group("path") or "").strip(),
+                base_dir=base_dir,
+                workspace_root=workspace_root,
+            )
             if path:
                 return path
     return ""
@@ -455,20 +497,21 @@ def _extract_workspace_file_plan(
     *,
     source_context: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    raw = " ".join(str(text or "").split()).strip()
-    if not raw:
+    original = str(text or "").strip()
+    if not original:
         return None
     raw = re.sub(
         r"(?P<stem>[A-Za-z0-9_./-]+)\.\s+(?P<ext>py|js|ts|tsx|jsx|txt|md|json|yaml|yml|toml)\b",
         r"\g<stem>.\g<ext>",
-        raw,
+        original,
     )
+    compact = " ".join(raw.split()).strip()
     workspace_root = str((source_context or {}).get("workspace") or (source_context or {}).get("workspace_root") or "").strip()
-    base_dir = ""
-    if any(marker in raw.lower() for marker in _DIRECTORY_CREATE_MARKERS):
-        base_dir = _extract_workspace_bootstrap_path(raw)
+    base_dir = _extract_workspace_parent_directory(compact, workspace_root=workspace_root)
+    if not base_dir and any(marker in compact.lower() for marker in _DIRECTORY_CREATE_MARKERS):
+        base_dir = _extract_workspace_bootstrap_path(compact)
     list_requested = any(
-        marker in raw.lower()
+        marker in compact.lower()
         for marker in (
             "list the folder contents",
             "list the directory contents",
@@ -1603,7 +1646,7 @@ def plan_tool_workflow(
     machine_specs_request = _extract_machine_specs_request(text)
     workspace_bootstrap_path = _extract_workspace_bootstrap_path(text)
     workspace_bootstrap_request = _looks_like_workspace_bootstrap_request(text)
-    workspace_file_plan = _extract_workspace_file_plan(text, source_context=source_context)
+    workspace_file_plan = _extract_workspace_file_plan(raw_text, source_context=source_context)
     entity_query, entity_retry_query = _entity_lookup_query_variants(research_text)
     last_step = dict(steps[-1] or {}) if steps else {}
     last_intent = str(last_step.get("tool_name") or "").strip()

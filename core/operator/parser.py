@@ -55,6 +55,7 @@ _MOVE_WORD_RE = re.compile(r"\b(?:move|relocate|archive)\b", re.IGNORECASE)
 _QUOTED_PATH_RE = re.compile(r"""["']([^"']+)["']""")
 _WINDOWS_PATH_RE = re.compile(r"\b([A-Za-z]:\\[^\n\r\"']*)")
 _POSIX_PATH_RE = re.compile(r"\b(?:in|on|under|at)\s+(/[^?\n\r]+)")
+_SPACE_WORD_RE = re.compile(r"\bspace\b")
 
 
 def parse_operator_action_intent(user_text: str) -> OperatorActionIntent | None:
@@ -111,7 +112,7 @@ def parse_operator_action_intent(user_text: str) -> OperatorActionIntent | None:
         )
 
     if any(hint in lowered for hint in _INSPECT_HINTS) or (
-        "space" in lowered and any(token in lowered for token in ("disk", "drive", "folder", "storage"))
+        _SPACE_WORD_RE.search(lowered) and any(re.search(rf"\b{token}\b", lowered) for token in ("disk", "drive", "folder", "storage"))
     ):
         return OperatorActionIntent(kind="inspect_disk_usage", target_path=target_path, raw_text=text)
 

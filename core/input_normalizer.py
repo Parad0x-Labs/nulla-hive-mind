@@ -4,6 +4,8 @@ import difflib
 import re
 from dataclasses import dataclass, field
 
+from core.structured_literal_input import looks_like_structured_literal_input
+
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_'\-]+|[^\w\s]")
 
 _DEFAULT_REWRITES = {
@@ -142,6 +144,18 @@ def normalize_user_text(text: str, *, session_lexicon: dict[str, str] | None = N
     value = raw_text.strip()
     value = re.sub(r"[\u2018\u2019]", "'", value)
     value = re.sub(r"[\u201c\u201d]", '"', value)
+    if looks_like_structured_literal_input(value):
+        quality_flags: list[str] = []
+        if len(value.split()) <= 5:
+            quality_flags.append("short_input")
+        if value and not re.search(r"[.?!]$", value):
+            quality_flags.append("fragmented")
+        return NormalizationResult(
+            raw_text=raw_text,
+            normalized_text=value,
+            replacements={},
+            quality_flags=quality_flags,
+        )
     value = re.sub(r"\s+", " ", value)
     value = re.sub(r"[!?]{2,}", "?", value)
     value = re.sub(r"\.{3,}", ".", value)

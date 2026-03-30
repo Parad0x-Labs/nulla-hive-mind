@@ -136,6 +136,53 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
             self.assertEqual(source_context["platform"], "api")
             self.assertEqual(source_context["requested_model"], "openai-compatible-remote:gpt-mock")
 
+    def test_dispatch_post_rehydrates_history_from_session_log_when_client_history_is_sparse(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+        seen_contexts: list[dict[str, Any]] = []
+
+        def fake_run_agent(
+            user_text: str,
+            *,
+            session_id: str | None = None,
+            source_context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            seen_contexts.append(dict(source_context or {}))
+            return {"response": "ok", "confidence": 1.0}
+
+        with mock.patch("apps.nulla_api_server._run_agent", side_effect=fake_run_agent), mock.patch(
+            "core.web.api.service.recent_conversation_events",
+            return_value=[
+                {
+                    "user": "Create a folder named alpha inside /tmp/work.",
+                    "assistant": "I completed 1 bounded builder step under `alpha`.",
+                },
+                {
+                    "user": "Inside /tmp/work/alpha create adder.py with exactly this code: def add(a: int, b: int) -> int: return a + b",
+                    "assistant": "I completed 3 bounded builder steps under `tmp/work/alpha`.",
+                },
+            ],
+        ):
+            response = _dispatch_post(
+                path="/api/chat",
+                body={
+                    "conversationId": "launcher-proof",
+                    "messages": [{"role": "user", "content": "Now read the whole file back exactly."}],
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp/work",
+            )
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(len(seen_contexts), 1)
+        source_context = seen_contexts[0]
+        self.assertEqual(source_context["client_history_message_count"], 1)
+        self.assertEqual(len(source_context["client_conversation_history"]), 1)
+        self.assertGreater(source_context["history_message_count"], 1)
+        self.assertEqual(source_context["conversation_history"][-1]["content"], "Now read the whole file back exactly.")
+        self.assertEqual(source_context["conversation_history"][0]["content"], "Create a folder named alpha inside /tmp/work.")
+
     def test_create_app_keeps_health_responsive_while_post_dispatch_blocks(self) -> None:
         runtime = RuntimeServices(display_name="NULLA", runtime_version_stamp={"release_version": "0.4.0"})
         app = create_app(runtime)
@@ -724,6 +771,34 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                 {"role": "user", "content": "first turn"},
                 {"role": "assistant", "content": "reply one"},
                 {"role": "user", "content": "second turn"},
+            ],
+        )
+
+    def test_normalize_chat_history_preserves_multiline_code_blocks(self) -> None:
+        history = _normalize_chat_history(
+            [
+                {
+                    "role": "user",
+                    "content": (
+                        "Inside /tmp/workspace/alpha create adder.py with exactly this code:\n\n"
+                        "def add(a: int, b: int) -> int:\n"
+                        "    return a + b\n"
+                    ),
+                }
+            ]
+        )
+
+        self.assertEqual(
+            history,
+            [
+                {
+                    "role": "user",
+                    "content": (
+                        "Inside /tmp/workspace/alpha create adder.py with exactly this code:\n\n"
+                        "def add(a: int, b: int) -> int:\n"
+                        "    return a + b"
+                    ),
+                }
             ],
         )
 

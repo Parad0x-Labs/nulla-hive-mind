@@ -437,7 +437,7 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
 
 def message_text(content: Any) -> str:
     if isinstance(content, str):
-        return strip_openclaw_sender_wrapper(" ".join(content.split()).strip())
+        return strip_openclaw_sender_wrapper(str(content).strip())
     if isinstance(content, list):
         parts: list[str] = []
         for part in content:
@@ -447,7 +447,7 @@ def message_text(content: Any) -> str:
                 text = str(part.get("text") or "").strip()
                 if text:
                     parts.append(text)
-        return strip_openclaw_sender_wrapper(" ".join(parts).strip())
+        return strip_openclaw_sender_wrapper("\n".join(parts).strip())
     return strip_openclaw_sender_wrapper(str(content or "").strip())
 
 

@@ -50,6 +50,57 @@ class HumanInputAdaptationTests(unittest.TestCase):
         classification = classify(interpreted.reconstructed_text, context=interpreted.as_context())
         self.assertEqual(classification["task_class"], "system_design")
 
+    def test_normalizer_preserves_structured_workspace_file_prompt(self) -> None:
+        prompt = "Inside /tmp/nulla_local_tooling_truth/alpha create hello.txt with exactly this content: HELLO-LOCAL-TRUTH"
+        result = normalize_user_text(prompt)
+
+        self.assertEqual(result.normalized_text, prompt)
+        self.assertEqual(result.replacements, {})
+
+    def test_normalizer_preserves_multiline_code_prompt(self) -> None:
+        prompt = (
+            "Inside /tmp/nulla_local_tooling_truth/alpha create adder.py with exactly this code:\n\n"
+            "def add(a: int, b: int) -> int:\n"
+            "    return a + b\n"
+        )
+        result = normalize_user_text(prompt)
+
+        self.assertEqual(result.normalized_text, prompt.strip())
+        self.assertIn("adder.py", result.normalized_text)
+        self.assertIn("->", result.normalized_text)
+
+    def test_adapt_user_input_preserves_multiline_code_prompt(self) -> None:
+        prompt = (
+            "Inside /tmp/nulla_local_tooling_truth/alpha create adder.py with exactly this code:\n\n"
+            "def add(a: int, b: int) -> int:\n"
+            "    return a + b\n"
+        )
+        interpreted = adapt_user_input(prompt, session_id=f"session-{uuid.uuid4().hex}")
+
+        self.assertEqual(interpreted.normalized_text, prompt.strip())
+        self.assertEqual(interpreted.reconstructed_text, prompt.strip())
+
+    def test_structured_workspace_prompts_do_not_infer_semantic_topics_from_paths(self) -> None:
+        session_id = f"session-{uuid.uuid4().hex}"
+        first = adapt_user_input(
+            "Create a folder named alpha inside /tmp/openclaw_workspace_truth.",
+            session_id=session_id,
+        )
+        second = adapt_user_input(
+            "Inside /tmp/openclaw_workspace_truth/alpha create hello.txt with exactly this content: HELLO-LOCAL-TRUTH",
+            session_id=session_id,
+        )
+
+        self.assertEqual(first.topic_hints, [])
+        self.assertEqual(first.reference_targets, [])
+        self.assertNotIn("Context subject:", first.reconstructed_text)
+        self.assertEqual(second.topic_hints, [])
+        self.assertEqual(second.reference_targets, [])
+        self.assertEqual(
+            second.reconstructed_text,
+            "Inside /tmp/openclaw_workspace_truth/alpha create hello.txt with exactly this content: HELLO-LOCAL-TRUTH",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

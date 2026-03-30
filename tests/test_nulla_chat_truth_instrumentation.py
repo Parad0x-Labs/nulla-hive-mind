@@ -951,7 +951,7 @@ def test_builder_controller_chat_surface_uses_model_wording_over_structured_obse
     assert "executed_steps" in model_input
     assert "step_count" in model_input
     assert "artifacts" in model_input
-    assert "generated / telegram-bot" in model_input
+    assert "generated/telegram-bot" in model_input
     assert "compileall" in model_input
     assert "wrote a telegram python scaffold" not in model_input
     assert "files written:" not in model_input

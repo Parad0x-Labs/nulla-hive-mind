@@ -60,6 +60,8 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert 'export NULLA_OPENCLAW_API_PORT="\\${NULLA_OPENCLAW_API_PORT:-11435}"' in script
     assert 'export NULLA_OPENCLAW_API_URL="\\${NULLA_OPENCLAW_API_URL:-http://127.0.0.1:\\${NULLA_OPENCLAW_API_PORT}}"' in script
     assert 'export PATH="${SCRIPT_DIR}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"' in script
+    assert 'VENV_RESOLVER="${PROJECT_ROOT}/scripts/ensure_workspace_runtime.sh"' in script
+    assert 'VENV_PY="$(bash "${VENV_RESOLVER}")"' in script
     assert 'export NULLA_OPENCLAW_API_URL="\\${NULLA_OPENCLAW_API_URL:-http://127.0.0.1:\\${NULLA_OPENCLAW_API_PORT}}"' in script
     assert 'if [[ "\\${NULLA_LAUNCHD_SUPERVISOR:-0}" == "1" ]]; then' in script
     assert 'API_LOG_PATH="\\${NULLA_API_LOG_PATH:-\\${NULLA_HOME}/logs/api-supervised.log}"' in script
@@ -127,6 +129,18 @@ def test_public_hive_auth_helper_is_tracked() -> None:
     content = helper.read_text(encoding="utf-8")
     assert 'default=""' in content
     assert "from core.public_hive_bridge import ensure_public_hive_auth" in content
+
+
+def test_workspace_runtime_bootstrap_helper_is_tracked() -> None:
+    helper = PROJECT_ROOT / "scripts" / "ensure_workspace_runtime.sh"
+
+    assert helper.exists()
+    content = helper.read_text(encoding="utf-8")
+    assert "runtime_python_ready()" in content
+    assert "ensure_pip()" in content
+    assert '"${VENV_DIR}/bin/python" -m ensurepip --upgrade' in content
+    assert 'required = ("starlette", "uvicorn")' in content
+    assert 'pip install -e "${PROJECT_ROOT}[runtime,proof]"' in content
 
 
 def test_install_script_runs_public_hive_auth_helper_from_project_root() -> None:

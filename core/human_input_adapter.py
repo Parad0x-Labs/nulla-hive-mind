@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from core.context_understanding import WorkingInterpretation, expand_unfinished_for_self
 from core.input_normalizer import NormalizationResult, normalize_user_text
+from core.structured_literal_input import looks_like_structured_literal_input
 from storage.dialogue_memory import (
     get_dialogue_session,
     recent_dialogue_turns,
@@ -416,13 +417,19 @@ def adapt_user_input(user_input: str, *, session_id: str) -> HumanInputInterpret
     normalized = normalize_user_text(user_input, session_lexicon=lexicon)
     turns = recent_dialogue_turns(session_id, limit=3)
     continuity_turns = recent_dialogue_turns(session_id, limit=8, speaker_roles=("user", "assistant"))
-    current_topics = _extract_topic_hints(normalized.normalized_text)
-    reference_targets, reference_flags = _resolve_reference_targets(
-        normalized.normalized_text,
-        current_topics=current_topics,
-        session_state=session,
-        recent_turns=turns,
-    )
+    structured_literal = looks_like_structured_literal_input(normalized.normalized_text)
+    if structured_literal:
+        current_topics = []
+        reference_targets = []
+        reference_flags = []
+    else:
+        current_topics = _extract_topic_hints(normalized.normalized_text)
+        reference_targets, reference_flags = _resolve_reference_targets(
+            normalized.normalized_text,
+            current_topics=current_topics,
+            session_state=session,
+            recent_turns=turns,
+        )
     intent_mode = _infer_intent_mode(normalized.normalized_text)
     quality_flags = list(dict.fromkeys(list(normalized.quality_flags) + reference_flags))
     confidence = _score_understanding(
