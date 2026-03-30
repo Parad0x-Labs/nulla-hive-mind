@@ -9,7 +9,7 @@ from core.hardware_tier import probe_machine, select_qwen_tier
 from core.install_recommendations import build_install_recommendation_truth
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_context import RuntimeContext, build_runtime_context
-from core.runtime_install_profiles import build_install_profile_truth
+from core.runtime_install_profiles import build_install_profile_truth, install_profile_runs_local_only
 
 
 @dataclass(frozen=True)
@@ -131,9 +131,16 @@ def runtime_capability_snapshot(context: RuntimeContext | None = None) -> dict[s
         selected_model=install_profile.selected_model,
         runtime_home=runtime.paths.runtime_home,
     )
+    effective_local_only_mode = bool(runtime.feature_flags.local_only_mode) or install_profile_runs_local_only(
+        install_profile.profile_id
+    )
     statuses = runtime_capability_statuses(runtime)
-    active_remote_fallback_available = bool(runtime.feature_flags.allow_remote_only_without_backend) and any(
+    active_remote_fallback_available = (
+        bool(runtime.feature_flags.allow_remote_only_without_backend)
+        and not effective_local_only_mode
+        and any(
         item.locality == "remote" for item in provider_snapshot.capability_truth
+        )
     )
     capabilities_payload = [asdict(item) for item in statuses]
     if not active_remote_fallback_available:
@@ -150,7 +157,7 @@ def runtime_capability_snapshot(context: RuntimeContext | None = None) -> dict[s
         "runtime_home": str(runtime.paths.runtime_home),
         "workspace_root": str(runtime.paths.workspace_root),
         "feature_flags": {
-            "local_only_mode": runtime.feature_flags.local_only_mode,
+            "local_only_mode": effective_local_only_mode,
             "public_hive_enabled": runtime.feature_flags.public_hive_enabled,
             "helper_mesh_enabled": runtime.feature_flags.helper_mesh_enabled,
             "allow_workspace_writes": runtime.feature_flags.allow_workspace_writes,

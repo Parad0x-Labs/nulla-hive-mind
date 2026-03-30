@@ -14,6 +14,7 @@ from core.runtime_paths import (
     configure_runtime_home,
     resolve_workspace_root,
 )
+from core.runtime_install_profiles import active_install_profile_id, install_profile_runs_local_only
 from storage.db import configure_default_db_path
 
 
@@ -71,13 +72,15 @@ def build_runtime_context(
     # the same capability truth and logging policy.
     log_level = str(policy_engine.get("observability.log_level", "INFO"))
     json_logs = bool(policy_engine.get("observability.json_logs", True))
+    active_profile = active_install_profile_id(runtime_home=runtime_home, env=env_map)
+    profile_local_only = install_profile_runs_local_only(active_profile)
     feature_flags = RuntimeFeatureFlags(
-        local_only_mode=bool(policy_engine.local_only_mode()),
+        local_only_mode=bool(policy_engine.local_only_mode()) or profile_local_only,
         public_hive_enabled=str(env_map.get("NULLA_PUBLIC_HIVE_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"},
         helper_mesh_enabled=bool(policy_engine.get("assist_mesh.enabled", True)),
         allow_workspace_writes=bool(policy_engine.get("filesystem.allow_write_workspace", False)),
         allow_sandbox_execution=bool(policy_engine.get("execution.allow_sandbox_execution", False)),
-        allow_remote_only_without_backend=bool(policy_engine.allow_remote_only_without_backend()),
+        allow_remote_only_without_backend=bool(policy_engine.allow_remote_only_without_backend()) and not profile_local_only,
     )
     env_overrides = {
         key: str(env_map.get(key) or "").strip()

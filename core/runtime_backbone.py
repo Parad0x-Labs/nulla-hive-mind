@@ -67,23 +67,27 @@ def build_provider_registry_snapshot(
         manifests = tuple()
     warnings = tuple(active_registry.startup_warnings())
     audit_rows = tuple(active_registry.provider_audit_rows())
-    prewarm_results: tuple[dict[str, Any], ...] = tuple()
-    if run_prewarm:
-        try:
-            prewarm_results = tuple(active_registry.prewarm_enabled_providers())
-        except Exception:
-            prewarm_results = tuple()
     capability_truth = tuple(provider_capability_truth_for_manifest(manifest) for manifest in manifests)
+    visible_provider_ids: tuple[str, ...] = tuple()
     if honor_install_profile:
-        manifests, audit_rows, capability_truth, prewarm_results = _filter_snapshot_to_install_profile(
-            manifests=manifests,
-            audit_rows=audit_rows,
+        visible_provider_ids = _visible_provider_ids_for_install_profile(
             capability_truth=capability_truth,
-            prewarm_results=prewarm_results,
             requested_profile=install_profile or None,
             runtime_home=runtime_home,
             env=env_map,
         )
+        manifests, audit_rows, capability_truth = _filter_snapshot_to_provider_ids(
+            manifests=manifests,
+            audit_rows=audit_rows,
+            capability_truth=capability_truth,
+            provider_ids=visible_provider_ids,
+        )
+    prewarm_results: tuple[dict[str, Any], ...] = tuple()
+    if run_prewarm:
+        try:
+            prewarm_results = tuple(active_registry.prewarm_enabled_providers(provider_ids=visible_provider_ids or None))
+        except Exception:
+            prewarm_results = tuple()
     return ProviderRegistrySnapshot(
         warnings=warnings,
         audit_rows=audit_rows,
@@ -92,38 +96,42 @@ def build_provider_registry_snapshot(
     )
 
 
-def _filter_snapshot_to_install_profile(
+def _visible_provider_ids_for_install_profile(
     *,
-    manifests: tuple[Any, ...],
-    audit_rows: tuple[ProviderAuditRow, ...],
     capability_truth: tuple[ProviderCapabilityTruth, ...],
-    prewarm_results: tuple[dict[str, Any], ...],
     requested_profile: str | None,
     runtime_home: str | None,
     env: dict[str, str],
-) -> tuple[tuple[Any, ...], tuple[ProviderAuditRow, ...], tuple[ProviderCapabilityTruth, ...], tuple[dict[str, Any], ...]]:
+) -> tuple[str, ...]:
     if not capability_truth:
-        return manifests, audit_rows, capability_truth, prewarm_results
+        return tuple()
     install_profile = build_install_profile_truth(
         requested_profile=requested_profile,
         provider_capability_truth=capability_truth,
         runtime_home=runtime_home,
         env=env,
     )
-    visible_provider_ids = {
+    return tuple(
         str(item.provider_id or "").strip()
         for item in install_profile.provider_mix
         if str(item.provider_id or "").strip()
-    }
+    )
+
+
+def _filter_snapshot_to_provider_ids(
+    *,
+    manifests: tuple[Any, ...],
+    audit_rows: tuple[ProviderAuditRow, ...],
+    capability_truth: tuple[ProviderCapabilityTruth, ...],
+    provider_ids: tuple[str, ...],
+) -> tuple[tuple[Any, ...], tuple[ProviderAuditRow, ...], tuple[ProviderCapabilityTruth, ...]]:
+    visible_provider_ids = {str(provider_id or "").strip() for provider_id in provider_ids if str(provider_id or "").strip()}
     if not visible_provider_ids:
-        return manifests, audit_rows, capability_truth, prewarm_results
+        return manifests, audit_rows, capability_truth
     filtered_manifests = tuple(item for item in manifests if str(getattr(item, "provider_id", "") or "").strip() in visible_provider_ids)
     filtered_audit_rows = tuple(item for item in audit_rows if str(item.provider_id or "").strip() in visible_provider_ids)
     filtered_capability_truth = tuple(item for item in capability_truth if str(item.provider_id or "").strip() in visible_provider_ids)
-    filtered_prewarm_results = tuple(
-        item for item in prewarm_results if str((item or {}).get("provider_id") or "").strip() in visible_provider_ids
-    )
-    return filtered_manifests, filtered_audit_rows, filtered_capability_truth, filtered_prewarm_results
+    return filtered_manifests, filtered_audit_rows, filtered_capability_truth
 
 
 def build_runtime_backbone(

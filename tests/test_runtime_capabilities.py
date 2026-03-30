@@ -114,6 +114,7 @@ def test_runtime_capability_snapshot_exposes_feature_flags_and_capability_rows()
         )
 
     assert snapshot["mode"] == "test"
+    assert snapshot["feature_flags"]["local_only_mode"] is True
     assert snapshot["feature_flags"]["allow_workspace_writes"] is True
     assert snapshot["feature_flags"]["allow_sandbox_execution"] is True
     assert snapshot["feature_flags"]["allow_remote_only_without_backend"] is False
@@ -188,6 +189,7 @@ def test_runtime_capability_snapshot_disables_remote_fallback_when_profile_has_n
     ):
         snapshot = runtime_capability_snapshot(_context(allow_remote_only_without_backend=True))
 
+    assert snapshot["feature_flags"]["local_only_mode"] is True
     assert snapshot["feature_flags"]["allow_remote_only_without_backend"] is False
     capabilities = {item["name"]: item for item in snapshot["capabilities"]}
     assert capabilities["remote_only_backend_fallback"]["state"] == "disabled_by_profile"

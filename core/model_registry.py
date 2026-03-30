@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Iterable
 from typing import Any
 
 from adapters.base_adapter import ModelAdapter
@@ -78,9 +79,16 @@ class ModelRegistry:
             warnings.extend(adapter.validate_runtime())
         return warnings
 
-    def prewarm_enabled_providers(self) -> list[dict[str, Any]]:
+    def prewarm_enabled_providers(self, *, provider_ids: Iterable[str] | None = None) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
+        allowed_provider_ids = {
+            str(provider_id or "").strip()
+            for provider_id in list(provider_ids or ())
+            if str(provider_id or "").strip()
+        }
         for manifest in self.list_manifests(enabled_only=True):
+            if allowed_provider_ids and manifest.provider_id not in allowed_provider_ids:
+                continue
             if not dict(manifest.runtime_config.get("prewarm") or {}):
                 continue
             adapter = self.build_adapter(manifest)

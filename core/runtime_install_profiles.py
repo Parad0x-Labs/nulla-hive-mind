@@ -68,6 +68,7 @@ _PROFILE_DISPLAY_IDS = {
     "hybrid-kimi": "ollama+kimi",
     "hybrid-tether": "ollama+tether",
 }
+_LOCAL_ONLY_PROFILE_IDS = frozenset({"local-only", "local-max"})
 
 _MODEL_SIZE_GB = {
     "qwen2.5:0.5b": 1.0,
@@ -365,6 +366,11 @@ def active_install_profile_id(
     if requested:
         return requested
     return normalize_install_profile_id(_installed_profile_id(runtime_home), allow_auto=allow_auto)
+
+
+def install_profile_runs_local_only(profile_id: str | None) -> bool:
+    normalized = normalize_install_profile_id(profile_id, allow_auto=False)
+    return normalized in _LOCAL_ONLY_PROFILE_IDS
 
 
 def persist_install_profile_record(
@@ -1211,6 +1217,7 @@ __all__ = [
     "default_ollama_models_path",
     "format_install_profile_id",
     "install_profile_display_choices",
+    "install_profile_runs_local_only",
     "installed_profile_id",
     "normalize_install_profile_id",
     "persist_install_profile_record",

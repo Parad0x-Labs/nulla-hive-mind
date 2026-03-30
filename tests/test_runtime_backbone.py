@@ -288,6 +288,88 @@ def test_build_provider_registry_snapshot_includes_local_ollama_prewarm_config()
     )
 
 
+def test_build_provider_registry_snapshot_prewarms_only_active_profile_mix() -> None:
+    manifests: dict[tuple[str, str], ModelProviderManifest] = {
+        ("ollama-local", "qwen3:8b"): ModelProviderManifest(
+            provider_name="ollama-local",
+            model_name="qwen3:8b",
+            source_type="http",
+            adapter_type="local_qwen_provider",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            license_url_or_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="ollama",
+            runtime_config={"base_url": "http://127.0.0.1:11434", "prewarm": {"strategy": "ollama_chat"}},
+            metadata={"deployment_class": "local", "orchestration_role": "drone"},
+            enabled=True,
+        ),
+        ("ollama-local", "deepseek-r1:8b"): ModelProviderManifest(
+            provider_name="ollama-local",
+            model_name="deepseek-r1:8b",
+            source_type="http",
+            adapter_type="openai_compatible",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            license_url_or_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="ollama",
+            runtime_config={"base_url": "http://127.0.0.1:11434", "prewarm": {"strategy": "ollama_chat"}},
+            metadata={"deployment_class": "local", "orchestration_role": "queen"},
+            enabled=True,
+        ),
+        ("ollama-local", "qwen2.5:7b"): ModelProviderManifest(
+            provider_name="ollama-local",
+            model_name="qwen2.5:7b",
+            source_type="http",
+            adapter_type="local_qwen_provider",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            license_url_or_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="ollama",
+            runtime_config={"base_url": "http://127.0.0.1:11434", "prewarm": {"strategy": "ollama_chat"}},
+            metadata={"deployment_class": "local", "orchestration_role": "drone"},
+            enabled=True,
+        ),
+    }
+
+    def _get_manifest(provider_name: str, model_name: str):
+        return manifests.get((provider_name, model_name))
+
+    def _register_manifest(manifest):
+        manifests[(manifest.provider_name, manifest.model_name)] = manifest
+        return manifest
+
+    def _list_manifests(*, enabled_only: bool = False, limit: int = 256):
+        rows = [item for item in manifests.values() if item.enabled or not enabled_only]
+        return rows[:limit]
+
+    registry = mock.Mock()
+    registry.startup_warnings.return_value = []
+    registry.provider_audit_rows.return_value = []
+    registry.get_manifest.side_effect = _get_manifest
+    registry.register_manifest.side_effect = _register_manifest
+    registry.list_manifests.side_effect = _list_manifests
+    registry.prewarm_enabled_providers.return_value = [
+        {"ok": True, "provider_id": "ollama-local:qwen3:8b", "status": "prewarmed"},
+        {"ok": True, "provider_id": "ollama-local:deepseek-r1:8b", "status": "prewarmed"},
+    ]
+
+    snapshot = build_provider_registry_snapshot(
+        registry,
+        requested_profile="local-only",
+        honor_install_profile=True,
+        run_prewarm=True,
+        env={},
+    )
+
+    registry.prewarm_enabled_providers.assert_called_once_with(
+        provider_ids=("ollama-local:qwen3:8b", "ollama-local:deepseek-r1:8b")
+    )
+    assert tuple(item["provider_id"] for item in snapshot.prewarm_results) == (
+        "ollama-local:qwen3:8b",
+        "ollama-local:deepseek-r1:8b",
+    )
+
+
 def test_build_provider_registry_snapshot_accepts_moonshot_aliases_for_kimi() -> None:
     manifests = {}
 

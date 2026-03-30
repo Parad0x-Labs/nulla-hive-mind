@@ -31,6 +31,8 @@ from core.onboarding import (
 from core.public_hive_bridge import ensure_public_hive_auth
 from core.release_channel import release_manifest_snapshot
 from core.runtime_bootstrap import bootstrap_runtime_mode
+from core.runtime_backbone import build_provider_registry_snapshot
+from core.runtime_install_profiles import active_install_profile_id
 from core.runtime_paths import active_config_home_dir, resolve_workspace_root
 from core.runtime_provider_defaults import default_runtime_model_tag, ensure_default_runtime_providers
 from core.runtime_task_events import (
@@ -244,9 +246,21 @@ def ensure_default_provider(registry: ModelRegistry, model_tag: str) -> None:
         logger.info("Auto-registered default provider: %s", provider_id)
 
 
-def log_prewarm_results(registry: ModelRegistry) -> None:
+def log_prewarm_results(
+    registry: ModelRegistry,
+    *,
+    runtime_home: str | None = None,
+    requested_profile: str | None = None,
+) -> None:
     try:
-        raw_results = registry.prewarm_enabled_providers()
+        snapshot = build_provider_registry_snapshot(
+            registry,
+            runtime_home=runtime_home,
+            requested_profile=requested_profile,
+            honor_install_profile=bool(requested_profile or runtime_home),
+            run_prewarm=True,
+        )
+        raw_results = snapshot.prewarm_results
     except Exception as exc:
         logger.warning("Provider prewarm enumeration failed: %s", exc)
         return
@@ -386,7 +400,16 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
     ensure_default_provider(model_registry, runtime_model_tag)
     for warning in model_registry.startup_warnings():
         logger.warning("Model warning: %s", warning)
-    log_prewarm_results(model_registry)
+    runtime_home = (
+        str(boot.context.paths.runtime_home)
+        if getattr(getattr(boot, "context", None), "paths", None) is not None
+        else None
+    )
+    log_prewarm_results(
+        model_registry,
+        runtime_home=runtime_home,
+        requested_profile=active_install_profile_id(runtime_home=runtime_home) if runtime_home else None,
+    )
 
     selection = boot.backend_selection
     if selection is None:

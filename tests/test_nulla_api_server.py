@@ -11,6 +11,7 @@ import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 from urllib import request
@@ -611,8 +612,15 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         compute_daemon = mock.Mock()
         model_registry = mock.Mock()
         model_registry.startup_warnings.return_value = []
+        runtime_home = "/tmp/runtime-home"
 
-        with mock.patch("core.web.api.runtime.bootstrap_runtime_mode", return_value=mock.Mock(backend_selection=mock.Mock(backend_name="mlx", device="mps"))), mock.patch(
+        with mock.patch(
+            "core.web.api.runtime.bootstrap_runtime_mode",
+            return_value=mock.Mock(
+                backend_selection=mock.Mock(backend_name="mlx", device="mps"),
+                context=SimpleNamespace(paths=SimpleNamespace(runtime_home=runtime_home)),
+            ),
+        ), mock.patch(
             "core.web.api.runtime.is_first_boot",
             return_value=False,
         ), mock.patch("core.credit_ledger.ensure_starter_credits", return_value=False), mock.patch(
@@ -637,6 +645,9 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
             return_value=model_registry,
         ), mock.patch(
             "core.web.api.runtime.ensure_default_provider",
+        ), mock.patch(
+            "core.web.api.runtime.active_install_profile_id",
+            return_value="local-only",
         ), mock.patch(
             "core.web.api.runtime.log_prewarm_results",
         ) as log_prewarm, mock.patch(
@@ -663,7 +674,11 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                 workstation_version="test-workstation",
             )
 
-        log_prewarm.assert_called_once_with(model_registry)
+        log_prewarm.assert_called_once_with(
+            model_registry,
+            runtime_home=runtime_home,
+            requested_profile="local-only",
+        )
 
     def test_bootstrap_runtime_services_uses_env_selected_model_for_live_boot(self) -> None:
         persona = mock.Mock(persona_id="default")
@@ -736,18 +751,22 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
 
     def test_log_prewarm_results_treats_timeout_without_background_as_info(self) -> None:
         registry = mock.Mock()
-        registry.prewarm_enabled_providers.return_value = [
-            {
-                "ok": True,
-                "provider_id": "ollama-local:qwen2.5:14b",
-                "status": "timed_out",
-                "reason": "cold_start_timeout",
-                "keep_alive": "15m",
-                "timeout_seconds": 45.0,
-            }
-        ]
+        snapshot = mock.Mock(
+            prewarm_results=[
+                {
+                    "ok": True,
+                    "provider_id": "ollama-local:qwen2.5:14b",
+                    "status": "timed_out",
+                    "reason": "cold_start_timeout",
+                    "keep_alive": "15m",
+                    "timeout_seconds": 45.0,
+                }
+            ]
+        )
 
-        with self.assertLogs("nulla.api", level="INFO") as captured:
+        with mock.patch("core.web.api.runtime.build_provider_registry_snapshot", return_value=snapshot), self.assertLogs(
+            "nulla.api", level="INFO"
+        ) as captured:
             log_prewarm_results(registry)
 
         self.assertEqual(len(captured.records), 1)
