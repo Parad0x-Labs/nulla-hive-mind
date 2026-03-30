@@ -43,6 +43,7 @@ _ENVELOPE_ROLE_MARKERS = (
     "memory_clerk envelope",
     "narrator envelope",
 )
+_TRACEBACK_LINE_RE = re.compile(r'^\s*File\s+"[^"]+",\s+line\s+\d+', re.IGNORECASE | re.MULTILINE)
 
 
 def turn_result(
@@ -104,6 +105,15 @@ def shape_user_facing_text(agent: Any, result: Any) -> str:
         allow_planner_style=result.allow_planner_style,
     )
     if result.response_class == agent.ResponseClass.TASK_STARTED:
+        started_research_match = re.match(
+            r"^Started research on\s+`?([^`]+?)`?\.?$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if started_research_match:
+            title = " ".join(str(started_research_match.group(1) or "").split()).strip()
+            if title:
+                text = f"Started Hive research on `{title}`."
         text = re.sub(
             r"^Autonomous research on\s+`?([^`]+)`?\s+packed\s+\d+\s+research queries,\s*\d+\s+candidate notes,\s*and\s*\d+\s+gate decisions\.?",
             r"Started Hive research on `\1`. First bounded pass is underway.",
@@ -181,12 +191,19 @@ def sanitize_user_chat_text(
         "invalid tool payload",
         "missing_intent",
         "i won't fake it",
+        "tool_failed",
+        '"mode": "tool_failed"',
+        '"status": "missing_intent"',
     )
     if any(marker in lowered for marker in forbidden):
         if response_class == agent.ResponseClass.UTILITY_ANSWER:
             return "I couldn't answer that utility request cleanly."
         if response_class in {agent.ResponseClass.TASK_FAILED_USER_SAFE, agent.ResponseClass.SYSTEM_ERROR_USER_SAFE}:
             return "I couldn't map that cleanly to a real action."
+        return "I couldn't resolve that cleanly."
+    if looks_like_runtime_traceback(sanitized):
+        if response_class in {agent.ResponseClass.TASK_FAILED_USER_SAFE, agent.ResponseClass.SYSTEM_ERROR_USER_SAFE}:
+            return "I hit an internal failure while handling that request."
         return "I couldn't resolve that cleanly."
     degraded_fallback_markers = (
         "couldn't produce a clean final synthesis in this run",
@@ -220,6 +237,15 @@ def strip_runtime_preamble(text: str, *, allow_planner_style: bool = False) -> s
     if len(parts) == 2 and parts[1].strip():
         return parts[1].strip()
     return "I couldn't resolve that cleanly."
+
+
+def looks_like_runtime_traceback(text: str) -> bool:
+    lowered = str(text or "").lower()
+    if "traceback (most recent call last)" in lowered:
+        return True
+    if _TRACEBACK_LINE_RE.search(str(text or "")):
+        return True
+    return lowered.count("\n") >= 2 and "error:" in lowered and ("line " in lowered or "exception" in lowered)
 
 
 def strip_planner_leakage(agent: Any, text: str) -> str:

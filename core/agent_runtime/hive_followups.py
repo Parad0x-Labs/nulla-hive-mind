@@ -67,13 +67,14 @@ def maybe_handle_hive_frontdoor(
             ]
             if topic_rows:
                 agent._store_hive_topic_selection_state(session_id, topic_rows)
+            response_class = agent._classify_hive_command_details(hive_command_details or {}, response=response)
             if model_wording_candidate and agent._is_chat_truth_surface(source_context):
                 return (
                     agent._chat_surface_hive_wording_result(
                         session_id=session_id,
                         user_input=effective_input,
                         source_context=source_context,
-                        response_class=agent._classify_hive_text_response(response),
+                        response_class=response_class,
                         reason="hive_activity_model_wording",
                         observations=agent._chat_surface_hive_command_observations(hive_command_details or {}),
                         fallback_response=agent._chat_surface_hive_degraded_response(hive_command_details or {}),
@@ -89,6 +90,7 @@ def maybe_handle_hive_frontdoor(
                     confidence=0.89,
                     source_context=source_context,
                     reason="hive_activity_command",
+                    classification_details=hive_command_details,
                 ),
                 effective_hive_create_draft,
                 pending_hive_create_confirmation,

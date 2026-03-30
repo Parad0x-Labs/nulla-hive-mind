@@ -120,6 +120,7 @@ class HiveActivityTracker:
                 message = "Hive watcher is not configured on this runtime, so I can't report real live Hive state. Hive truth: future/unsupported."
                 return True, {
                     "command_kind": "watcher_unavailable",
+                    "response_class_hint": "task_failed_user_safe",
                     "watcher_status": "not_configured",
                     "response_text": message,
                     "topics": [],
@@ -133,6 +134,7 @@ class HiveActivityTracker:
                 message = "I couldn't reach the Hive watcher right now. Hive truth: watcher-derived unavailable; presence freshness unknown."
                 return True, {
                     "command_kind": "watcher_unavailable",
+                    "response_class_hint": "task_failed_user_safe",
                     "watcher_status": "unreachable",
                     "response_text": message,
                     "topics": [],
@@ -144,6 +146,7 @@ class HiveActivityTracker:
             truth = _watcher_hive_truth_details(dashboard=dashboard, online_agents=online_agents)
             return True, {
                 "command_kind": "overview",
+                "response_class_hint": "task_list",
                 "watcher_status": "ok",
                 "response_text": self._render_hive_overview(
                     online_agents=online_agents,
@@ -168,6 +171,7 @@ class HiveActivityTracker:
                 message = "Hive watcher is not configured on this runtime, so I can't report real live Hive tasks. Hive truth: future/unsupported."
                 return True, {
                     "command_kind": "watcher_unavailable",
+                    "response_class_hint": "task_failed_user_safe",
                     "watcher_status": "not_configured",
                     "response_text": message,
                     "topics": [],
@@ -193,6 +197,7 @@ class HiveActivityTracker:
                     )
                     return True, {
                         "command_kind": "task_list_session_fallback",
+                        "response_class_hint": "task_list",
                         "watcher_status": "unreachable",
                         "lead": lead,
                         "response_text": response_text,
@@ -204,6 +209,7 @@ class HiveActivityTracker:
                 message = "I couldn't reach the Hive watcher right now. Hive truth: watcher-derived unavailable; presence freshness unknown."
                 return True, {
                     "command_kind": "watcher_unavailable",
+                    "response_class_hint": "task_failed_user_safe",
                     "watcher_status": "unreachable",
                     "response_text": message,
                     "topics": [],
@@ -220,6 +226,7 @@ class HiveActivityTracker:
                 )
                 return True, {
                     "command_kind": "task_list_empty",
+                    "response_class_hint": "task_status",
                     "watcher_status": "ok",
                     "response_text": message,
                     "topics": [],
@@ -237,6 +244,7 @@ class HiveActivityTracker:
             )
             return True, {
                 "command_kind": "task_list",
+                "response_class_hint": "task_list",
                 "watcher_status": "ok",
                 "response_text": self._render_hive_task_list(topics, truth=truth),
                 "topics": topics,
@@ -250,6 +258,7 @@ class HiveActivityTracker:
             snooze_hive_prompts(session_id, minutes=minutes)
             return True, {
                 "command_kind": "prompt_control",
+                "response_class_hint": "generic_conversation",
                 "watcher_status": "",
                 "response_text": f"Okay. I’ll quiet Hive task nudges for {minutes} minutes and remind you later.",
                 "topics": [],
@@ -259,6 +268,7 @@ class HiveActivityTracker:
             snooze_hive_prompts(session_id, minutes=_DEFAULT_REMINDER_MINUTES)
             return True, {
                 "command_kind": "prompt_control",
+                "response_class_hint": "generic_conversation",
                 "watcher_status": "",
                 "response_text": "Okay. I’ll ignore Hive task nudges for now and remind you in about 1 hour.",
                 "topics": [],

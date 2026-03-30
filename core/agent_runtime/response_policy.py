@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from core.agent_runtime.response_policy_classification import (
     action_response_class,
+    classify_hive_command_details,
     classify_hive_text_response,
     fast_path_response_class,
     grounded_response_class,
@@ -25,6 +26,7 @@ __all__ = [
     "action_response_class",
     "append_footer",
     "append_tool_result_to_source_context",
+    "classify_hive_command_details",
     "classify_hive_text_response",
     "fast_path_response_class",
     "grounded_response_class",

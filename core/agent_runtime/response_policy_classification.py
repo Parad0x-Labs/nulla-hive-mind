@@ -3,7 +3,49 @@ from __future__ import annotations
 from typing import Any
 
 
-def fast_path_response_class(agent: Any, *, reason: str, response: str) -> Any:
+def classify_hive_command_details(
+    agent: Any,
+    details: dict[str, Any] | None,
+    *,
+    response: str = "",
+) -> Any:
+    payload = dict(details or {})
+    response_class = agent.ResponseClass
+    hint = str(payload.get("response_class_hint") or "").strip().lower()
+    hint_map = {
+        "task_failed_user_safe": response_class.TASK_FAILED_USER_SAFE,
+        "task_list": response_class.TASK_LIST,
+        "task_selection_clarification": response_class.TASK_SELECTION_CLARIFICATION,
+        "task_status": response_class.TASK_STATUS,
+        "generic_conversation": response_class.GENERIC_CONVERSATION,
+    }
+    if hint in hint_map:
+        return hint_map[hint]
+
+    command_kind = str(payload.get("command_kind") or "").strip().lower()
+    if command_kind in {
+        "overview",
+        "task_list",
+        "task_list_session_fallback",
+        "task_list_bridge_fallback",
+    }:
+        return response_class.TASK_LIST
+    if command_kind == "task_list_empty":
+        return response_class.TASK_STATUS
+    if command_kind == "watcher_unavailable":
+        return response_class.TASK_FAILED_USER_SAFE
+    if command_kind == "prompt_control":
+        return response_class.GENERIC_CONVERSATION
+    return classify_hive_text_response(agent, response)
+
+
+def fast_path_response_class(
+    agent: Any,
+    *,
+    reason: str,
+    response: str,
+    details: dict[str, Any] | None = None,
+) -> Any:
     response_class = agent.ResponseClass
     if reason in {"smalltalk_fast_path", "startup_sequence_fast_path"}:
         return response_class.SMALLTALK
@@ -31,7 +73,7 @@ def fast_path_response_class(agent: Any, *, reason: str, response: str) -> Any:
     if reason == "runtime_resume_missing":
         return response_class.SYSTEM_ERROR_USER_SAFE
     if reason == "hive_activity_command":
-        return classify_hive_text_response(agent, response)
+        return classify_hive_command_details(agent, details, response=response)
     if reason == "hive_research_followup":
         lowered = str(response or "").lower()
         if lowered.startswith("started hive research on") or lowered.startswith("autonomous research on"):

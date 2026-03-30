@@ -116,13 +116,14 @@ def fast_path_result(
     confidence: float,
     source_context: dict[str, object] | None,
     reason: str,
+    classification_details: dict[str, Any] | None = None,
     append_conversation_event_fn: Any,
     audit_logger_module: Any,
 ) -> dict[str, Any]:
     pseudo_task_id = f"fast-{uuid.uuid4().hex[:12]}"
     turn_result = agent._turn_result(
         response,
-        agent._fast_path_response_class(reason=reason, response=response),
+        agent._fast_path_response_class(reason=reason, response=response, details=classification_details),
         debug_origin=reason,
     )
     agent._apply_interaction_transition(session_id, turn_result)

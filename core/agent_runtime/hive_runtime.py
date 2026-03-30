@@ -38,7 +38,14 @@ def maybe_handle_hive_runtime_command(
     command_kind = str((details or {}).get("command_kind") or "").strip().lower()
     if not handled:
         return False, "", False, None
-    allow_model_wording = not agent._looks_like_hive_prompt_control_command(user_input) and command_kind != "watcher_unavailable"
+    deterministic_command_kinds = {
+        "prompt_control",
+        "watcher_unavailable",
+    }
+    allow_model_wording = (
+        not agent._looks_like_hive_prompt_control_command(user_input)
+        and command_kind not in deterministic_command_kinds
+    )
     if not agent._hive_tracker_needs_bridge_fallback(response):
         return True, response, allow_model_wording, details
     bridge_details = agent._maybe_handle_hive_bridge_fallback(

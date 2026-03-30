@@ -249,6 +249,8 @@ class NullaAgent(
         session_id_override: str | None = None,
         source_context: dict[str, object] | None = None,
     ) -> dict:
+        # Keep frontdoor precedence explicit: safety/resume -> utility/direct fast paths ->
+        # task-bound follow-ups -> Hive/task interactions -> grounded answer -> generic fallback.
         persona = load_active_persona(self.persona_id)
         session_id = session_id_override or runtime_session_id(device=self.device, persona_id=self.persona_id)
         self._mark_user_activity()
@@ -510,17 +512,23 @@ class NullaAgent(
         confidence: float,
         source_context: dict[str, object] | None,
         reason: str,
+        classification_details: dict[str, Any] | None = None,
     ) -> dict:
+        kwargs: dict[str, Any] = {
+            "session_id": session_id,
+            "user_input": user_input,
+            "response": response,
+            "confidence": confidence,
+            "source_context": source_context,
+            "reason": reason,
+            "append_conversation_event_fn": append_conversation_event,
+            "audit_logger_module": audit_logger,
+        }
+        if classification_details is not None:
+            kwargs["classification_details"] = classification_details
         return agent_fast_command_surface.fast_path_result(
             self,
-            session_id=session_id,
-            user_input=user_input,
-            response=response,
-            confidence=confidence,
-            source_context=source_context,
-            reason=reason,
-            append_conversation_event_fn=append_conversation_event,
-            audit_logger_module=audit_logger,
+            **kwargs,
         )
 
     def _action_fast_path_result(

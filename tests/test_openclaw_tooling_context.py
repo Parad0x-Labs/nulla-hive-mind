@@ -510,6 +510,20 @@ class OpenClawToolingContextTests(unittest.TestCase):
         self.assertNotIn("noisy footer", result["response"])
         self.assertEqual(result.get("response_class"), "task_list")
 
+    def test_task_selection_clarification_keeps_footer_contract(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        with mock.patch.object(agent.hive_activity_tracker, "build_chat_footer", return_value="Hive:\nnoisy footer"):
+            decorated = agent._decorate_chat_response(
+                ChatTurnResult(
+                    text="I can see two real Hive tasks open right now. Pick one by name or short `#id`.",
+                    response_class=ResponseClass.TASK_SELECTION_CLARIFICATION,
+                ),
+                session_id="openclaw:task-selection",
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertIn("noisy footer", decorated)
+
     def test_task_started_reply_is_shaped_like_chat_not_trace(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
         decorated = agent._decorate_chat_response(
@@ -525,6 +539,20 @@ class OpenClawToolingContextTests(unittest.TestCase):
         self.assertIn("First bounded pass is underway.", decorated)
         self.assertNotIn("candidate notes", decorated.lower())
         self.assertNotIn("gate decisions", decorated.lower())
+        self.assertNotIn("Workflow:\n", decorated)
+
+    def test_plain_started_research_reply_is_normalized_to_hive_chat_language(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        decorated = agent._decorate_chat_response(
+            ChatTurnResult(
+                text="Started research on OpenClaw integration audit.",
+                response_class=ResponseClass.TASK_STARTED,
+            ),
+            session_id="openclaw:task-start-short",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertIn("Started Hive research on `OpenClaw integration audit`.", decorated)
         self.assertNotIn("Workflow:\n", decorated)
 
     def test_research_progress_reply_is_shaped_like_chat_not_trace(self) -> None:
@@ -630,6 +658,40 @@ class OpenClawToolingContextTests(unittest.TestCase):
         self.assertNotIn("Real steps completed", decorated)
         self.assertNotIn("I won't fake it", decorated)
         self.assertIn("couldn't map that cleanly", decorated)
+
+    def test_user_chat_sanitization_hides_runtime_traceback_dump(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        decorated = agent._decorate_chat_response(
+            ChatTurnResult(
+                text=(
+                    "Traceback (most recent call last):\n"
+                    '  File "/tmp/app.py", line 12, in <module>\n'
+                    "    raise RuntimeError('boom')\n"
+                    "RuntimeError: boom"
+                ),
+                response_class=ResponseClass.SYSTEM_ERROR_USER_SAFE,
+            ),
+            session_id="openclaw:traceback-safe",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertNotIn("Traceback", decorated)
+        self.assertNotIn("RuntimeError", decorated)
+        self.assertIn("internal failure", decorated.lower())
+
+    def test_structured_hive_command_details_override_phrase_based_classification(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        response_class = agent._fast_path_response_class(
+            reason="hive_activity_command",
+            response="Pick one by name.",
+            details={
+                "command_kind": "task_list",
+                "response_class_hint": "task_list",
+                "topics": [{"topic_id": "abc12345", "title": "test task", "status": "open"}],
+            },
+        )
+
+        self.assertEqual(response_class, ResponseClass.TASK_LIST)
 
     def test_credit_status_fast_path_answers_in_plain_language(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")

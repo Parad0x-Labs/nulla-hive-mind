@@ -57,9 +57,10 @@ def should_attach_hive_footer(
     surface = str((source_context or {}).get("surface", "") or "").strip().lower()
     if surface not in _CHAT_WORKFLOW_SURFACES:
         return False
-    if result.response_class == agent.ResponseClass.TASK_SELECTION_CLARIFICATION:
-        return True
-    if result.response_class != agent.ResponseClass.APPROVAL_REQUIRED:
+    if result.response_class not in {
+        agent.ResponseClass.TASK_SELECTION_CLARIFICATION,
+        agent.ResponseClass.APPROVAL_REQUIRED,
+    }:
         return False
     lowered = str(result.text or "").strip().lower()
     if "ready to post this to the public hive" in lowered or "confirm? (yes / no)" in lowered:

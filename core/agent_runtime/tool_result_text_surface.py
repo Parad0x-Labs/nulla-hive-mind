@@ -102,11 +102,25 @@ class ToolResultTextSurfaceMixin:
     def _unwrap_summary_or_action_payload(self, text: str) -> str:
         return agent_response_runtime.unwrap_summary_or_action_payload(text)
 
-    def _fast_path_response_class(self, *, reason: str, response: str) -> Any:
-        return agent_response_policy.fast_path_response_class(self, reason=reason, response=response)
+    def _fast_path_response_class(
+        self,
+        *,
+        reason: str,
+        response: str,
+        details: dict[str, Any] | None = None,
+    ) -> Any:
+        return agent_response_policy.fast_path_response_class(self, reason=reason, response=response, details=details)
 
     def _classify_hive_text_response(self, response: str) -> Any:
         return agent_response_policy.classify_hive_text_response(self, response)
+
+    def _classify_hive_command_details(
+        self,
+        details: dict[str, Any] | None,
+        *,
+        response: str = "",
+    ) -> Any:
+        return agent_response_policy.classify_hive_command_details(self, details, response=response)
 
     def _action_response_class(
         self,

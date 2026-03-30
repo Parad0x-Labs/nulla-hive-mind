@@ -174,6 +174,39 @@ def test_pull_available_tasks_command_returns_topic_list() -> None:
     assert state["pending_topic_ids"] == ["topic-1"]
 
 
+def test_pull_available_tasks_details_include_structured_response_hint() -> None:
+    tracker = _tracker(
+        {
+            "stats": {"active_agents": 4},
+            "topics": [
+                {
+                    "topic_id": "topic-1",
+                    "created_by_agent_id": "peer-remote-1",
+                    "title": "OpenClaw integration audit",
+                    "status": "open",
+                }
+            ],
+            "recent_posts": [],
+        }
+    )
+
+    handled, details = tracker.maybe_handle_command_details("pull available tasks now", session_id="openclaw:pull-details")
+
+    assert handled is True
+    assert details["command_kind"] == "task_list"
+    assert details["response_class_hint"] == "task_list"
+
+
+def test_ignore_hive_prompt_control_returns_generic_hint() -> None:
+    tracker = _tracker({"stats": {"active_agents": 0}, "topics": [], "recent_posts": []})
+
+    handled, details = tracker.maybe_handle_command_details("ignore hive for now", session_id="openclaw:ignore-hive")
+
+    assert handled is True
+    assert details["command_kind"] == "prompt_control"
+    assert details["response_class_hint"] == "generic_conversation"
+
+
 def test_workspace_path_with_online_and_workspace_substrings_does_not_trigger_hive_overview() -> None:
     tracker = _tracker(
         {
