@@ -3288,6 +3288,53 @@ class OpenClawToolingContextTests(unittest.TestCase):
         self.assertIn("MarchTest/", result["response"])
         self.assertIn("todo.txt", result["response"])
 
+    def test_openclaw_desktop_listing_request_handles_can_you_see_phrasing(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)):
+            home = Path(tmpdir)
+            desktop = home / "Desktop"
+            desktop.mkdir(parents=True, exist_ok=True)
+            (desktop / "Marchtest").mkdir()
+            result = agent.run_once(
+                "can you see folders on my desktop?",
+                session_id_override="openclaw:desktop-list-can-you-see",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+        self.assertIn("Marchtest/", result["response"])
+        self.assertNotIn("Search results for", result["response"])
+        self.assertNotIn("Completed 1 real tool step", result["response"])
+
+    def test_openclaw_named_safe_folder_txt_write_uses_real_machine_write_lane(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            desktop = Path(tmpdir) / "Desktop"
+            marchtest = desktop / "MarchTest"
+            marchtest.mkdir(parents=True, exist_ok=True)
+
+            result = agent.run_once(
+                "can you create .txt with hello world text and place it in Marchtest folder?",
+                session_id_override="openclaw:named-safe-folder-txt-write",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = marchtest / "hello_world.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "hello world")
+
+        self.assertIn("~/Desktop/MarchTest/hello_world.txt", result["response"])
+        self.assertNotIn("workspace_stop_after_directory_bootstrap", result["response"])
+        self.assertNotIn("bounded builder step", result["response"])
+
     def test_openclaw_price_followup_recovers_grounded_quote_in_api_surface(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
         agent.start()

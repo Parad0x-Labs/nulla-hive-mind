@@ -302,6 +302,7 @@ def _extract_safe_machine_directory_listing(text: str) -> dict[str, Any] | None:
             "contents of",
             "what do we have on",
             "tell me what",
+            "can you see",
         )
     )
     if not wants_listing:

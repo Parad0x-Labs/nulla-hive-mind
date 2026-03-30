@@ -84,6 +84,7 @@ _MACHINE_SPEC_MARKERS = (
 )
 _TRANSCRIPT_EXPORT_VERBS = (" export ", " save ", " write ", " dump ")
 _TRANSCRIPT_EXPORT_SUBJECTS = (" chat ", " conversation ", " transcript ", " session ")
+_SAFE_MACHINE_TEXT_EXTENSIONS = ("txt", "md", "json", "yaml", "yml", "toml")
 _MACHINE_SPEC_HISTORY_MARKERS = (
     "machine specs for this host",
     "screen size:",
@@ -137,7 +138,17 @@ def looks_like_supported_machine_read_request(user_input: str) -> bool:
     )
     asks_for_listing = any(
         _contains_phrase(normalized, marker)
-        for marker in (" list ", " show ", " what are ", " what's on ", " what is on ", " contents of ", " what do we have on ", " tell me what ")
+        for marker in (
+            " list ",
+            " show ",
+            " what are ",
+            " what's on ",
+            " what is on ",
+            " contents of ",
+            " what do we have on ",
+            " tell me what ",
+            " can you see ",
+        )
     )
     asks_for_listing = asks_for_listing or any(
         phrase in normalized
@@ -218,8 +229,8 @@ def maybe_handle_safe_machine_write_guard(
         session_id=session_id,
         user_input=user_input,
         response=(
-            "I have a bounded local write lane for safe directory creation and specific text-file exports inside Desktop, Downloads, and Documents, "
-            "but I do not support arbitrary non-workspace file mutations there yet. I won't pretend I created or changed files I did not really write."
+            "I have a bounded local write lane for safe directory creation and plain-text file writes inside Desktop, Downloads, and Documents, "
+            "but this request did not resolve to a safe local target I could prove. I won't pretend I created or changed files I did not really write."
         ),
         confidence=0.95,
         source_context=source_context,
@@ -236,6 +247,11 @@ def maybe_handle_direct_machine_write_request(
     source_context: dict[str, object] | None,
 ) -> dict[str, Any] | None:
     if source_surface not in {"channel", "openclaw", "api"}:
+        return None
+    if safe_machine_write_targets_workspace(
+        user_input=user_input,
+        source_context=source_context,
+    ):
         return None
     transcript_export_target = _extract_machine_transcript_export_target(user_input)
     if transcript_export_target:
@@ -267,6 +283,26 @@ def maybe_handle_direct_machine_write_request(
                     agent_name=get_agent_display_name(),
                 ),
             },
+            source_context=dict(source_context or {}),
+        )
+        if execution is None:
+            return None
+        return agent._fast_path_result(
+            session_id=session_id,
+            user_input=user_input,
+            response=str(execution.response_text or "").strip(),
+            confidence=0.98 if execution.ok else 0.9,
+            source_context=source_context,
+            reason="machine_write_fast_path",
+        )
+    machine_file_write = _extract_machine_text_file_write_target(
+        user_input,
+        source_context=source_context,
+    )
+    if machine_file_write is not None:
+        execution = execute_runtime_tool(
+            "machine.write_file",
+            machine_file_write,
             source_context=dict(source_context or {}),
         )
         if execution is None:
@@ -337,6 +373,166 @@ def _extract_machine_transcript_export_target(user_input: str) -> str:
     if folder:
         return f"{root}/{folder}/{filename}".replace("//", "/")
     return f"{root}/{filename}"
+
+
+def _extract_machine_text_file_write_target(
+    user_input: str,
+    *,
+    source_context: dict[str, object] | None,
+) -> dict[str, str] | None:
+    raw = " ".join(str(user_input or "").split()).strip()
+    lowered = f" {raw.lower()} "
+    if not raw:
+        return None
+    if not any(marker in lowered for marker in _SAFE_MACHINE_WRITE_VERBS):
+        return None
+    if any(marker in lowered for marker in _WORKSPACE_TARGET_MARKERS):
+        return None
+
+    content = _extract_machine_text_file_content(raw)
+    if not content:
+        return None
+
+    explicit_filename = _extract_machine_text_filename(raw)
+    extension = _extract_machine_text_extension(raw, explicit_filename=explicit_filename)
+    if not extension:
+        return None
+
+    folder = _extract_machine_folder_target(raw)
+    root_label = _explicit_safe_machine_root_label(lowered)
+    root_dir = _resolve_safe_machine_root_directory(folder=folder, root_label=root_label)
+    if root_dir is None:
+        return None
+
+    filename = explicit_filename or _infer_machine_text_filename(content=content, extension=extension)
+    if not filename:
+        return None
+
+    target = root_dir / filename
+    return {
+        "path": _home_relative_safe_machine_path(target),
+        "content": content,
+    }
+
+
+def _extract_machine_text_file_content(raw: str) -> str:
+    patterns = (
+        re.compile(r"\bwith(?: exactly)?(?: this)?(?: file)?(?: content| text)?\s*:\s*(?P<content>.+)$", re.IGNORECASE | re.DOTALL),
+        re.compile(r"\bthat says\s+(?P<content>.+?)(?=\s+(?:and\s+)?(?:place|put|save|write|store)\b|\s+(?:in|into|inside|under|to)\b|$)", re.IGNORECASE | re.DOTALL),
+        re.compile(r"\bthat reads\s+(?P<content>.+?)(?=\s+(?:and\s+)?(?:place|put|save|write|store)\b|\s+(?:in|into|inside|under|to)\b|$)", re.IGNORECASE | re.DOTALL),
+        re.compile(r"\bwith\s+(?P<content>.+?)\s+text(?=\s+(?:and\s+)?(?:place|put|save|write|store)\b|\s+(?:in|into|inside|under|to)\b|$)", re.IGNORECASE | re.DOTALL),
+        re.compile(r"\bwith\s+(?P<content>.+?)(?=\s+(?:and\s+)?(?:place|put|save|write|store)\b|\s+(?:in|into|inside|under|to)\b|$)", re.IGNORECASE | re.DOTALL),
+    )
+    for pattern in patterns:
+        match = pattern.search(raw)
+        if not match:
+            continue
+        content = str(match.group("content") or "").strip().strip("`")
+        if content:
+            return content
+    return ""
+
+
+def _extract_machine_text_filename(raw: str) -> str:
+    match = re.search(
+        rf"\b(?P<name>[A-Za-z0-9_.-]+(?:\.({'|'.join(_SAFE_MACHINE_TEXT_EXTENSIONS)})))\b",
+        raw,
+        re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    return str(match.group("name") or "").strip()
+
+
+def _extract_machine_text_extension(raw: str, *, explicit_filename: str) -> str:
+    if explicit_filename and "." in explicit_filename:
+        return explicit_filename.rsplit(".", 1)[-1].lower()
+    match = re.search(
+        rf"(?P<ext>\.({'|'.join(_SAFE_MACHINE_TEXT_EXTENSIONS)}))\b",
+        raw,
+        re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    return str(match.group("ext") or "").strip().lstrip(".").lower()
+
+
+def _extract_machine_folder_target(raw: str) -> str:
+    match = re.search(
+        r"\b(?:in|into|inside|under|to|place it in|put it in|save it in|write it in|place it under|put it under|save it under|write it under)\s+(?:the\s+)?(?P<folder>[A-Za-z0-9 _.-]+?)\s+folder\b",
+        raw,
+        re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    return _sanitize_safe_machine_segment(str(match.group("folder") or "").strip())
+
+
+def _explicit_safe_machine_root_label(lowered: str) -> str:
+    if " desktop " in lowered or " on desktop" in lowered or "on my desktop" in lowered or "~/desktop" in lowered:
+        return "Desktop"
+    if " downloads " in lowered or " on downloads" in lowered or "on my downloads" in lowered or "~/downloads" in lowered:
+        return "Downloads"
+    if (
+        " documents " in lowered
+        or " docs " in lowered
+        or " on documents" in lowered
+        or "on my documents" in lowered
+        or "~/documents" in lowered
+    ):
+        return "Documents"
+    return ""
+
+
+def _resolve_safe_machine_root_directory(*, folder: str, root_label: str) -> Path | None:
+    home = Path.home()
+    root_options = [home / "Desktop", home / "Downloads", home / "Documents"]
+    if root_label:
+        root = home / root_label
+        if not folder:
+            return root
+        if root.exists():
+            for child in root.iterdir():
+                if child.is_dir() and child.name.lower() == folder.lower():
+                    return child
+        return root / folder
+    if not folder:
+        return None
+    matches: list[Path] = []
+    for root in root_options:
+        if not root.exists():
+            continue
+        for child in root.iterdir():
+            if child.is_dir() and child.name.lower() == folder.lower():
+                matches.append(child)
+                break
+    if len(matches) == 1:
+        return matches[0]
+    for match in matches:
+        if match.parent.name == "Desktop":
+            return match
+    return None
+
+
+def _infer_machine_text_filename(*, content: str, extension: str) -> str:
+    tokens = re.findall(r"[A-Za-z0-9]+", str(content or "").lower())
+    stem = "_".join(tokens[:3]).strip("_")
+    if not stem:
+        stem = "note"
+    return f"{stem[:48]}.{extension}"
+
+
+def _home_relative_safe_machine_path(target: Path) -> str:
+    try:
+        home = Path.home().resolve()
+        resolved = target.expanduser().resolve()
+        if resolved == home:
+            return "~"
+        if home in resolved.parents:
+            return f"~/{resolved.relative_to(home)}".replace("//", "/")
+    except Exception:
+        pass
+    return str(target)
 
 
 def _sanitize_safe_machine_segment(value: str) -> str:

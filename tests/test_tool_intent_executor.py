@@ -359,6 +359,20 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(first.next_payload["arguments"]["path"], "~/Desktop")
         self.assertTrue(first.next_payload["arguments"]["directories_only"])
 
+    def test_workflow_planner_routes_can_you_see_desktop_folders_to_machine_read(self) -> None:
+        first = plan_tool_workflow(
+            user_text="can you see folders on my desktop?",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-tools"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_safe_machine_directory_list")
+        self.assertEqual(first.next_payload["intent"], "machine.list_directory")
+        self.assertEqual(first.next_payload["arguments"]["path"], "~/Desktop")
+        self.assertTrue(first.next_payload["arguments"]["directories_only"])
+
     def test_workflow_planner_routes_desktop_folders_and_files_to_machine_read_without_folder_only_mode(self) -> None:
         first = plan_tool_workflow(
             user_text="what are the folders and files on my desktop?",
