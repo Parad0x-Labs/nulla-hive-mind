@@ -202,15 +202,18 @@ def load_pending_operator_actions(
 
 
 def load_pending_runtime_checkpoints(conn: Any, *, limit: int, table_exists_fn: Any) -> list[dict[str, Any]]:
-    if not table_exists_fn(conn, "runtime_checkpoints"):
+    if not table_exists_fn(conn, "runtime_checkpoints") or not table_exists_fn(conn, "runtime_sessions"):
         return []
     rows = conn.execute(
         """
-        SELECT checkpoint_id, session_id, task_id, task_class, status, step_count, last_tool_name,
-               created_at, updated_at
-        FROM runtime_checkpoints
-        WHERE status = 'pending_approval'
-        ORDER BY updated_at DESC
+        SELECT c.checkpoint_id, c.session_id, c.task_id, c.task_class, c.status, c.step_count, c.last_tool_name,
+               c.created_at, c.updated_at
+        FROM runtime_checkpoints c
+        JOIN runtime_sessions s
+          ON s.last_checkpoint_id = c.checkpoint_id
+        WHERE c.status = 'pending_approval'
+          AND s.status = 'pending_approval'
+        ORDER BY c.updated_at DESC
         LIMIT ?
         """,
         (max(1, int(limit)),),

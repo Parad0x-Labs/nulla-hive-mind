@@ -92,6 +92,10 @@ def sync_control_plane_workspace(
 
     reviewer_policy = _reviewer_lane_policy()
     archivist_policy = _archivist_lane_policy()
+    runtime_truth = summarize_runtime_surface(runtime_sessions)
+    pending_operator_action_count = len(pending_actions)
+    pending_runtime_checkpoint_count = len(pending_runtime)
+    approval_backlog_count = pending_operator_action_count + pending_runtime_checkpoint_count
     overview = {
         "generated_at": _utcnow(),
         "workspace_root": str(target_root),
@@ -99,7 +103,15 @@ def sync_control_plane_workspace(
         "active_assignment_count": len(active_assignments),
         "active_hive_claim_count": len(active_hive_claims),
         "runtime_session_count": len(runtime_sessions),
-        "pending_approval_count": len(pending_actions) + len(pending_runtime),
+        "pending_approval_count": approval_backlog_count,
+        "approval_backlog_count": approval_backlog_count,
+        "pending_operator_action_count": pending_operator_action_count,
+        "pending_runtime_checkpoint_count": pending_runtime_checkpoint_count,
+        "runtime_pending_approval_count": int(runtime_truth.get("session_pending_approval_count") or 0),
+        "active_execution_count": int(runtime_truth.get("active_execution_count") or 0),
+        "verifier_pending_count": int(runtime_truth.get("verifier_pending_count") or 0),
+        "rollback_pending_count": int(runtime_truth.get("rollback_pending_count") or 0),
+        "recovery_pending_count": int(runtime_truth.get("recovery_pending_count") or 0),
         "failed_runtime_count": len(failed_runs),
         "review_pending_count": len(reviewer_lane.get("items") or []),
         "archive_candidate_count": len(archivist_lane.get("items") or []),
@@ -111,7 +123,7 @@ def sync_control_plane_workspace(
         "proof_of_useful_work": proof_of_useful_work,
         "adaptation": adaptation_status,
         "adaptation_proof": adaptation_proof,
-        "runtime_truth": summarize_runtime_surface(runtime_sessions),
+        "runtime_truth": runtime_truth,
     }
 
     writes = 0
@@ -147,7 +159,7 @@ def sync_control_plane_workspace(
     writes += _write_json(control_root / "budgets" / "public_hive_quota_today.json", public_hive_budget)
     writes += _write_json(control_root / "metrics" / "proof_of_useful_work.json", proof_of_useful_work)
     writes += _write_json(control_root / "metrics" / "adaptation_proof.json", adaptation_proof)
-    writes += _write_json(control_root / "metrics" / "runtime_truth.json", summarize_runtime_surface(runtime_sessions))
+    writes += _write_json(control_root / "metrics" / "runtime_truth.json", runtime_truth)
     writes += _write_json(control_root / "approvals" / "pending_operator_actions.json", {"generated_at": _utcnow(), "items": pending_actions})
     writes += _write_json(control_root / "approvals" / "pending_runtime_checkpoints.json", {"generated_at": _utcnow(), "items": pending_runtime})
     writes += _write_json(control_root / "deadletters" / "failed_runtime_sessions.json", {"generated_at": _utcnow(), "items": failed_runs})
@@ -180,7 +192,15 @@ def sync_control_plane_workspace(
         "writes": writes,
         "open_task_count": len(open_offers),
         "runtime_session_count": len(runtime_sessions),
-        "pending_approval_count": len(pending_actions) + len(pending_runtime),
+        "pending_approval_count": approval_backlog_count,
+        "approval_backlog_count": approval_backlog_count,
+        "pending_operator_action_count": pending_operator_action_count,
+        "pending_runtime_checkpoint_count": pending_runtime_checkpoint_count,
+        "runtime_pending_approval_count": int(runtime_truth.get("session_pending_approval_count") or 0),
+        "active_execution_count": int(runtime_truth.get("active_execution_count") or 0),
+        "verifier_pending_count": int(runtime_truth.get("verifier_pending_count") or 0),
+        "rollback_pending_count": int(runtime_truth.get("rollback_pending_count") or 0),
+        "recovery_pending_count": int(runtime_truth.get("recovery_pending_count") or 0),
         "template_count": len(TEMPLATE_NAMES),
     }
 
@@ -217,13 +237,25 @@ def collect_control_plane_status(
         adaptation_proof = _load_adaptation_proof_summary(conn, db_path=db_target)
     finally:
         conn.close()
+    runtime_truth = summarize_runtime_surface(runtime_sessions)
+    pending_operator_action_count = len(pending_actions)
+    pending_runtime_checkpoint_count = len(pending_runtime)
+    approval_backlog_count = pending_operator_action_count + pending_runtime_checkpoint_count
     return {
         "generated_at": _utcnow(),
         "open_task_count": len(open_offers),
         "active_assignment_count": len(active_assignments),
         "active_hive_claim_count": len(active_hive_claims),
         "runtime_session_count": len(runtime_sessions),
-        "pending_approval_count": len(pending_actions) + len(pending_runtime),
+        "pending_approval_count": approval_backlog_count,
+        "approval_backlog_count": approval_backlog_count,
+        "pending_operator_action_count": pending_operator_action_count,
+        "pending_runtime_checkpoint_count": pending_runtime_checkpoint_count,
+        "runtime_pending_approval_count": int(runtime_truth.get("session_pending_approval_count") or 0),
+        "active_execution_count": int(runtime_truth.get("active_execution_count") or 0),
+        "verifier_pending_count": int(runtime_truth.get("verifier_pending_count") or 0),
+        "rollback_pending_count": int(runtime_truth.get("rollback_pending_count") or 0),
+        "recovery_pending_count": int(runtime_truth.get("recovery_pending_count") or 0),
         "review_pending_count": len(reviewer_lane.get("items") or []),
         "archive_candidate_count": len(archivist_lane.get("items") or []),
         "commons_candidate_count": len(commons_queue.get("items") or []),
@@ -234,7 +266,7 @@ def collect_control_plane_status(
         "proof_of_useful_work": proof_of_useful_work,
         "adaptation": adaptation_status,
         "adaptation_proof": adaptation_proof,
-        "runtime_truth": summarize_runtime_surface(runtime_sessions),
+        "runtime_truth": runtime_truth,
     }
 
 

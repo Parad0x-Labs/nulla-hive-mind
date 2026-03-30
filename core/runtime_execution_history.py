@@ -247,10 +247,11 @@ def build_runtime_execution_history(
     artifact_count = max(artifact_count, len(artifact_ids))
     candidate_count = max(candidate_count, len(candidate_ids))
 
-    if approval_seen and approval_state != "pending":
-        approval_state = "cleared"
-    if request_status == "pending_approval":
+    checkpoint_status = _string(checkpoint_row.get("status") or session_row.get("checkpoint_status")).lower()
+    if request_status == "pending_approval" or checkpoint_status == "pending_approval":
         approval_state = "pending"
+    elif approval_seen:
+        approval_state = "cleared"
     if rollback_state == "not_triggered" and checkpoint_row.get("last_tool_name") == "workspace.rollback_last_change":
         rollback_state = "running" if request_status == "running" else rollback_state
     if restore_state == "not_triggered" and any(item.get("restore_session_id") for item in normalized_events):
@@ -258,7 +259,6 @@ def build_runtime_execution_history(
     if verifier_seen and verifier_state == "not_run":
         verifier_state = "running"
 
-    checkpoint_status = _string(checkpoint_row.get("status") or session_row.get("checkpoint_status")).lower()
     checkpoint_step_count = _safe_int(checkpoint_row.get("step_count") or session_row.get("checkpoint_step_count"))
     checkpoint_resume_count = _safe_int(checkpoint_row.get("resume_count"))
     pending_intent = dict(checkpoint_row.get("pending_intent") or {})
@@ -394,17 +394,33 @@ def summarize_runtime_surface(sessions: list[dict[str, Any]] | tuple[dict[str, A
     status_counts: dict[str, int] = {}
     resume_ready_count = 0
     approval_pending_count = 0
+    active_execution_count = 0
+    verifier_pending_count = 0
+    rollback_pending_count = 0
+    recovery_pending_count = 0
     failure_count = 0
     latest_session: dict[str, Any] | None = None
     for item in items:
         history = dict(item.get("execution_history") or {})
         status = _string(history.get("status") or item.get("status") or "unknown").lower() or "unknown"
+        request_status = _string(history.get("request_status") or item.get("status") or status).lower() or status
         status_counts[status] = int(status_counts.get(status) or 0) + 1
         bounded = dict(history.get("bounded_execution") or {})
+        verifier_state = _string(bounded.get("verifier_state")).lower()
+        rollback_state = _string(bounded.get("rollback_state")).lower()
+        restore_state = _string(bounded.get("restore_state")).lower()
         if bool(bounded.get("resume_available") or item.get("resume_available")):
             resume_ready_count += 1
         if _string(bounded.get("approval_state")) == "pending":
             approval_pending_count += 1
+        if request_status in {"running", "researching"} or verifier_state == "running" or rollback_state == "running" or restore_state == "running":
+            active_execution_count += 1
+        if verifier_state == "running":
+            verifier_pending_count += 1
+        if rollback_state == "running":
+            rollback_pending_count += 1
+        if rollback_state == "running" or restore_state == "running":
+            recovery_pending_count += 1
         if status == "failed" or _safe_int(bounded.get("failure_count")) > 0:
             failure_count += 1
         if latest_session is None:
@@ -419,8 +435,13 @@ def summarize_runtime_surface(sessions: list[dict[str, Any]] | tuple[dict[str, A
         "history_version": "nulla.runtime.surface_summary.v1",
         "session_count": len(items),
         "status_counts": status_counts,
+        "active_execution_count": active_execution_count,
         "resume_ready_count": resume_ready_count,
+        "session_pending_approval_count": approval_pending_count,
         "approval_pending_count": approval_pending_count,
+        "verifier_pending_count": verifier_pending_count,
+        "rollback_pending_count": rollback_pending_count,
+        "recovery_pending_count": recovery_pending_count,
         "failure_count": failure_count,
         "latest_session": latest_session or {},
     }

@@ -141,10 +141,14 @@ def test_runtime_surface_summary_counts_resume_and_failures() -> None:
                 "execution_history": {
                     "title": "Finished request",
                     "status": "completed",
+                    "request_status": "completed",
                     "latest_tool": "workspace.write_file",
                     "bounded_execution": {
                         "resume_available": False,
                         "approval_state": "not_required",
+                        "verifier_state": "not_run",
+                        "rollback_state": "not_triggered",
+                        "restore_state": "not_triggered",
                         "failure_count": 0,
                     },
                 },
@@ -155,11 +159,15 @@ def test_runtime_surface_summary_counts_resume_and_failures() -> None:
                 "updated_at": "2026-03-30T12:11:00+00:00",
                 "execution_history": {
                     "title": "Broken request",
-                    "status": "failed",
+                    "status": "running",
+                    "request_status": "running",
                     "latest_tool": "workspace.run_tests",
                     "bounded_execution": {
                         "resume_available": True,
                         "approval_state": "pending",
+                        "verifier_state": "running",
+                        "rollback_state": "running",
+                        "restore_state": "not_triggered",
                         "failure_count": 1,
                     },
                 },
@@ -169,8 +177,50 @@ def test_runtime_surface_summary_counts_resume_and_failures() -> None:
 
     assert summary["session_count"] == 2
     assert summary["status_counts"]["completed"] == 1
-    assert summary["status_counts"]["failed"] == 1
+    assert summary["status_counts"]["running"] == 1
+    assert summary["active_execution_count"] == 1
     assert summary["resume_ready_count"] == 1
+    assert summary["session_pending_approval_count"] == 1
     assert summary["approval_pending_count"] == 1
+    assert summary["verifier_pending_count"] == 1
+    assert summary["rollback_pending_count"] == 1
+    assert summary["recovery_pending_count"] == 1
     assert summary["failure_count"] == 1
     assert summary["latest_session"]["session_id"] == "openclaw:one"
+
+
+def test_execution_history_clears_stale_approval_after_completion() -> None:
+    history = build_runtime_execution_history(
+        session={
+            "session_id": "openclaw:completed-after-approval",
+            "request_preview": "Post the result",
+            "task_class": "integration_orchestration",
+            "status": "completed",
+            "last_message": "Completed after confirmation moved on.",
+            "updated_at": "2026-03-30T12:15:00+00:00",
+            "resume_available": False,
+        },
+        checkpoint={
+            "checkpoint_id": "runtime-completed-after-approval",
+            "status": "completed",
+            "step_count": 2,
+            "resume_count": 0,
+            "last_tool_name": "",
+            "pending_intent": {},
+        },
+        events=[
+            {
+                "event_type": "task_pending_approval",
+                "message": "Awaiting approval to post.",
+                "status": "pending_approval",
+            },
+            {
+                "event_type": "task_completed",
+                "message": "Posted successfully.",
+                "status": "completed",
+            },
+        ],
+    )
+
+    assert history["bounded_execution"]["approval_state"] == "cleared"
+    assert history["timeline"][1]["value"] == "cleared"

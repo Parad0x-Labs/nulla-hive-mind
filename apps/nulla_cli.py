@@ -766,7 +766,8 @@ def cmd_control_plane_sync(*, json_mode: bool = False) -> int:
     print(f"Writes:       {payload['writes']}")
     print(f"Open tasks:   {payload['open_task_count']}")
     print(f"Runs:         {payload['runtime_session_count']}")
-    print(f"Approvals:    {payload['pending_approval_count']}")
+    print(f"Approvals:    {payload['pending_approval_count']} backlog")
+    print(f"Runtime wait: {payload.get('runtime_pending_approval_count', 0)} session(s)")
     return 0
 
 
