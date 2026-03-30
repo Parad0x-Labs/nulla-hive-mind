@@ -200,6 +200,32 @@ def test_build_provider_registry_snapshot_filters_legacy_enabled_manifests_to_ac
             metadata={"deployment_class": "local", "orchestration_role": "drone"},
             enabled=True,
         ),
+        ("ollama-local", "qwen3:8b"): ModelProviderManifest(
+            provider_name="ollama-local",
+            model_name="qwen3:8b",
+            source_type="http",
+            adapter_type="local_qwen_provider",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            license_url_or_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="ollama",
+            runtime_config={"base_url": "http://127.0.0.1:11434"},
+            metadata={"deployment_class": "local", "orchestration_role": "drone"},
+            enabled=True,
+        ),
+        ("ollama-local", "deepseek-r1:8b"): ModelProviderManifest(
+            provider_name="ollama-local",
+            model_name="deepseek-r1:8b",
+            source_type="http",
+            adapter_type="openai_compatible",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            license_url_or_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="ollama",
+            runtime_config={"base_url": "http://127.0.0.1:11434"},
+            metadata={"deployment_class": "local", "orchestration_role": "queen"},
+            enabled=True,
+        ),
     }
 
     def _get_manifest(provider_name: str, model_name: str):
