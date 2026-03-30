@@ -7,6 +7,7 @@ from typing import Any
 from core.backend_manager import BackendManager
 from core.hardware_tier import MachineProbe, QwenTier, probe_machine, select_qwen_tier, tier_summary
 from core.model_registry import ModelRegistry, ProviderAuditRow
+from core.provider_env import merge_provider_env
 from core.provider_routing import ProviderCapabilityTruth, provider_capability_truth_for_manifest
 from core.runtime_bootstrap import BootstrappedRuntime, bootstrap_runtime_mode
 from core.runtime_install_profiles import InstallProfileTruth, active_install_profile_id, build_install_profile_truth
@@ -18,6 +19,7 @@ class ProviderRegistrySnapshot:
     warnings: tuple[str, ...]
     audit_rows: tuple[ProviderAuditRow, ...]
     capability_truth: tuple[ProviderCapabilityTruth, ...]
+    prewarm_results: tuple[dict[str, Any], ...] = tuple()
 
 
 @dataclass(frozen=True)
@@ -41,10 +43,11 @@ def build_provider_registry_snapshot(
     runtime_home: str | None = None,
     requested_profile: str | None = None,
     honor_install_profile: bool = False,
+    run_prewarm: bool = False,
     env: dict[str, str] | None = None,
 ) -> ProviderRegistrySnapshot:
     active_registry = registry or ModelRegistry()
-    env_map = os.environ if env is None else env
+    env_map = merge_provider_env(runtime_home, env=os.environ if env is None else env)
     install_profile = ""
     if honor_install_profile:
         install_profile = (
@@ -55,17 +58,80 @@ def build_provider_registry_snapshot(
         active_registry,
         env=env_map,
         install_profile=install_profile,
+        runtime_home=runtime_home,
     )
     manifests: tuple[Any, ...]
     try:
         manifests = tuple(active_registry.list_manifests(enabled_only=True))
     except Exception:
         manifests = tuple()
+    warnings = tuple(active_registry.startup_warnings())
+    audit_rows = tuple(active_registry.provider_audit_rows())
+    capability_truth = tuple(provider_capability_truth_for_manifest(manifest) for manifest in manifests)
+    visible_provider_ids: tuple[str, ...] = tuple()
+    if honor_install_profile:
+        visible_provider_ids = _visible_provider_ids_for_install_profile(
+            capability_truth=capability_truth,
+            requested_profile=install_profile or None,
+            runtime_home=runtime_home,
+            env=env_map,
+        )
+        manifests, audit_rows, capability_truth = _filter_snapshot_to_provider_ids(
+            manifests=manifests,
+            audit_rows=audit_rows,
+            capability_truth=capability_truth,
+            provider_ids=visible_provider_ids,
+        )
+    prewarm_results: tuple[dict[str, Any], ...] = tuple()
+    if run_prewarm:
+        try:
+            prewarm_results = tuple(active_registry.prewarm_enabled_providers(provider_ids=visible_provider_ids or None))
+        except Exception:
+            prewarm_results = tuple()
     return ProviderRegistrySnapshot(
-        warnings=tuple(active_registry.startup_warnings()),
-        audit_rows=tuple(active_registry.provider_audit_rows()),
-        capability_truth=tuple(provider_capability_truth_for_manifest(manifest) for manifest in manifests),
+        warnings=warnings,
+        audit_rows=audit_rows,
+        capability_truth=capability_truth,
+        prewarm_results=prewarm_results,
     )
+
+
+def _visible_provider_ids_for_install_profile(
+    *,
+    capability_truth: tuple[ProviderCapabilityTruth, ...],
+    requested_profile: str | None,
+    runtime_home: str | None,
+    env: dict[str, str],
+) -> tuple[str, ...]:
+    if not capability_truth:
+        return tuple()
+    install_profile = build_install_profile_truth(
+        requested_profile=requested_profile,
+        provider_capability_truth=capability_truth,
+        runtime_home=runtime_home,
+        env=env,
+    )
+    return tuple(
+        str(item.provider_id or "").strip()
+        for item in install_profile.provider_mix
+        if str(item.provider_id or "").strip()
+    )
+
+
+def _filter_snapshot_to_provider_ids(
+    *,
+    manifests: tuple[Any, ...],
+    audit_rows: tuple[ProviderAuditRow, ...],
+    capability_truth: tuple[ProviderCapabilityTruth, ...],
+    provider_ids: tuple[str, ...],
+) -> tuple[tuple[Any, ...], tuple[ProviderAuditRow, ...], tuple[ProviderCapabilityTruth, ...]]:
+    visible_provider_ids = {str(provider_id or "").strip() for provider_id in provider_ids if str(provider_id or "").strip()}
+    if not visible_provider_ids:
+        return manifests, audit_rows, capability_truth
+    filtered_manifests = tuple(item for item in manifests if str(getattr(item, "provider_id", "") or "").strip() in visible_provider_ids)
+    filtered_audit_rows = tuple(item for item in audit_rows if str(item.provider_id or "").strip() in visible_provider_ids)
+    filtered_capability_truth = tuple(item for item in capability_truth if str(item.provider_id or "").strip() in visible_provider_ids)
+    return filtered_manifests, filtered_audit_rows, filtered_capability_truth
 
 
 def build_runtime_backbone(
@@ -104,6 +170,7 @@ def build_runtime_backbone(
         if getattr(getattr(boot, "context", None), "paths", None) is not None
         else None,
         honor_install_profile=True,
+        run_prewarm=True,
     )
     install_profile = build_install_profile_truth(
         probe=probe,

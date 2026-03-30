@@ -20,8 +20,10 @@ def test_wants_fresh_info_detects_live_queries_and_ignores_builder_language(make
     assert agent._wants_fresh_info("latest telegram bot api updates", interpretation=mock.Mock(topic_hints=["telegram"]))
     assert agent._wants_fresh_info("weather in London today", interpretation=mock.Mock(topic_hints=["weather"]))
     assert agent._wants_fresh_info("check Toly on X", interpretation=mock.Mock(topic_hints=["solana"]))
+    assert agent._wants_fresh_info("tell me about stoicism", interpretation=mock.Mock(topic_hints=[])) is False
     assert agent._live_info_mode("latest qwen release notes", interpretation=mock.Mock(topic_hints=["web"])) == "fresh_lookup"
     assert agent._live_info_mode("check Toly on X", interpretation=mock.Mock(topic_hints=["solana"])) == "fresh_lookup"
+    assert agent._live_info_mode("tell me about stoicism", interpretation=mock.Mock(topic_hints=[])) == ""
     assert agent._live_info_mode("What's the latest on Iran war?", interpretation=mock.Mock(topic_hints=[])) == "news"
     assert agent._live_info_mode("What happened five minutes ago in global markets?", interpretation=mock.Mock(topic_hints=[])) == "fresh_lookup"
     assert agent._live_info_mode("build a telegram bot from docs and github", interpretation=mock.Mock(topic_hints=["telegram", "github"])) == ""
@@ -243,6 +245,13 @@ def test_brent_quote_fast_path_returns_grounded_structured_answer(make_agent):
 
 def test_evaluative_turn_does_not_hit_web_lookup(make_agent):
     agent = make_agent()
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="no_cached_or_memory_answer",
+            task_hash="evaluative-fast",
+            used_model=False,
+        )
+    )
 
     with mock.patch("apps.nulla_agent.WebAdapter.search_query") as search_query, mock.patch(
         "apps.nulla_agent.WebAdapter.planned_search_query"
@@ -253,8 +262,32 @@ def test_evaluative_turn_does_not_hit_web_lookup(make_agent):
         )
 
     assert result["response_class"] == "generic_conversation"
+    assert "routing is still too stitched together" in result["response"].lower()
     search_query.assert_not_called()
     planned_search.assert_not_called()
+    assert agent.memory_router.resolve.call_args.kwargs["allow_provider_inference"] is False
+    assert result["model_execution"]["used_model"] is False
+
+
+def test_help_turn_does_not_force_live_model_wording_when_no_cached_answer(make_agent):
+    agent = make_agent()
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="no_cached_or_memory_answer",
+            task_hash="help-fast",
+            used_model=False,
+        )
+    )
+
+    result = agent.run_once(
+        "help",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert result["response_class"] == "generic_conversation"
+    assert "wired on this runtime" in result["response"].lower()
+    assert agent.memory_router.resolve.call_args.kwargs["allow_provider_inference"] is False
+    assert result["model_execution"]["used_model"] is False
 
 
 def test_conceptual_system_design_turn_does_not_hit_web_lookup_without_freshness_markers(make_agent, context_result_factory):

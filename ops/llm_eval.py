@@ -20,13 +20,15 @@ from core.llm_eval import (
     run_pytest_pack,
     summarize_latency_rows,
 )
+from core.proof_manifest import build_proof_manifest, write_proof_manifest
 from ops import run_local_acceptance as local_acceptance
 
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "reports" / "llm_eval" / "latest"
 DEFAULT_BASELINE_ROOT = REPO_ROOT / "reports" / "llm_eval" / "baselines"
 DEFAULT_LIVE_RUN_ROOT = REPO_ROOT / "artifacts" / "acceptance_runs" / "llm_eval_live"
-DEFAULT_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_qwen25_7b_profile.json"
+DEFAULT_PROFILE_PATH = local_acceptance.DEFAULT_PROFILE_PATH
 DEFAULT_BASE_URL = "http://127.0.0.1:18080"
+DEFAULT_DOCS_REPORT_PATH = REPO_ROOT / "docs" / "LLM_ACCEPTANCE_REPORT.md"
 
 RECENT_48H_BASELINE_TARGETS = [
     "tests/test_run_local_acceptance.py",
@@ -257,6 +259,10 @@ def _write_markdown(path: Path, text: str) -> None:
     path.write_text(text.rstrip() + "\n", encoding="utf-8")
 
 
+def _sanitize_output(value: Any) -> Any:
+    return local_acceptance._sanitize_data(value, repo_root=REPO_ROOT)
+
+
 def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -273,6 +279,16 @@ def _display_path(path: Path | None) -> str:
         return str(path.resolve().relative_to(REPO_ROOT))
     except ValueError:
         return str(path)
+
+
+def _resolve_optional_output_path(raw_value: str | None) -> Path | None:
+    value = str(raw_value or "").strip()
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    return path.resolve()
 
 
 def _write_latency_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -340,7 +356,7 @@ def _scenario_group_result(name: str, scenarios: list[dict[str, str]]) -> dict[s
                 "stderr": pack["stderr"],
             }
         )
-    return {
+    return _sanitize_output({
         "category": name,
         "status": "pass" if all(item["status"] == "pass" for item in results) else "fail",
         "scenarios": results,
@@ -349,7 +365,7 @@ def _scenario_group_result(name: str, scenarios: list[dict[str, str]]) -> dict[s
             "passed": sum(1 for item in results if item["status"] == "pass"),
             "failed": sum(1 for item in results if item["status"] != "pass"),
         },
-    }
+    })
 
 
 def _collect_latency_rows_from_acceptance(
@@ -428,7 +444,15 @@ def _run_live_acceptance(
     base_url: str,
     profile_path: Path,
     run_root: Path,
+    runtime_home: Path | None = None,
+    workspace_root: Path | None = None,
 ) -> dict[str, Any]:
+    if (runtime_home is None) ^ (workspace_root is None):
+        raise ValueError("runtime_home and workspace_root must be provided together, or neither.")
+    if runtime_home is None and workspace_root is None:
+        discovered_roots = local_acceptance._discover_active_runtime_roots(base_url.rstrip("/"))
+        if discovered_roots is not None:
+            runtime_home, workspace_root = discovered_roots
     preserved_run_root = _preserve_previous_live_run_artifacts(run_root=run_root, profile_path=profile_path)
     profile = local_acceptance.load_profile(profile_path)
     exit_code = local_acceptance.run_full_acceptance(
@@ -436,8 +460,8 @@ def _run_live_acceptance(
         repo_root=REPO_ROOT,
         run_root=run_root,
         profile=profile,
-        runtime_home=(run_root / "runtime_home").resolve(),
-        workspace_root=(run_root / "workspace").resolve(),
+        runtime_home=(runtime_home or (run_root / "runtime_home")).resolve(),
+        workspace_root=(workspace_root or (run_root / "workspace")).resolve(),
         start_script=local_acceptance.DEFAULT_START_SCRIPT,
     )
     online_payload = json.loads((run_root / "evidence" / "online_acceptance.json").read_text(encoding="utf-8"))
@@ -456,6 +480,9 @@ def _run_live_acceptance(
             "profile_id": profile.profile_id,
             "display_name": profile.display_name,
             "model": profile.model,
+            "bundle_models": list(profile.bundle_models),
+            "bundle_roles": [{"role": role, "model": model} for role, model in profile.bundle_roles],
+            "capacity_bucket": profile.capacity_bucket,
         },
         "summary": summary,
         "online": online_payload,
@@ -660,14 +687,15 @@ def _regression_payload(
     if baseline_path.exists():
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
     comparison = compare_pytest_results(current, baseline)
+    sanitized_current = _sanitize_output(current)
     if current["exit_code"] == 0:
-        _write_json(baseline_path, current)
+        _write_json(baseline_path, sanitized_current)
     return {
         "status": "pass" if current["exit_code"] == 0 and comparison["status"] != "degraded" else "fail",
         "baseline_path": _display_path(baseline_path) if baseline_path.exists() else "",
-        "inventory": inventory,
-        "current": current,
-        "comparison": comparison,
+        "inventory": _sanitize_output(inventory),
+        "current": sanitized_current,
+        "comparison": _sanitize_output(comparison),
     }
 
 
@@ -676,6 +704,7 @@ def run(args: argparse.Namespace) -> int:
     baseline_root = Path(args.baseline_root).expanduser().resolve()
     live_run_root = Path(args.live_run_root).expanduser().resolve()
     profile_path = Path(args.profile).expanduser().resolve()
+    docs_report_path = _resolve_optional_output_path(getattr(args, "docs_report_path", ""))
     output_root.mkdir(parents=True, exist_ok=True)
     baseline_root.mkdir(parents=True, exist_ok=True)
     preserved_output_root = _preserve_previous_output_bundle(output_root)
@@ -710,6 +739,8 @@ def run(args: argparse.Namespace) -> int:
             base_url=args.base_url,
             profile_path=profile_path,
             run_root=live_run_root,
+            runtime_home=Path(args.runtime_home).expanduser().resolve() if args.runtime_home else None,
+            workspace_root=Path(args.workspace_root).expanduser().resolve() if args.workspace_root else None,
         )
         latency_rows = _collect_latency_rows_from_acceptance(
             run_id=run_id,
@@ -745,6 +776,13 @@ def run(args: argparse.Namespace) -> int:
     if regression_48h["status"] != "pass":
         failing_targets.extend(regression_48h["current"]["targets"])
 
+    live_profile_meta = dict(live_acceptance.get("online", {}).get("profile") or {})
+    runtime_bundle_models = list(
+        live_profile_meta.get("runtime_selected_models")
+        or live_acceptance.get("online", {}).get("selected_models")
+        or profile.bundle_models
+        or ()
+    )
     payload = {
         "run_id": run_id,
         "timestamp_utc": timestamp_utc,
@@ -755,6 +793,13 @@ def run(args: argparse.Namespace) -> int:
             "profile_id": profile.profile_id,
             "profile_name": profile.display_name,
             "model": profile.model,
+            "bundle_models": runtime_bundle_models,
+            "bundle_roles": list(
+                live_profile_meta.get("runtime_selected_model_roles")
+                or [{"role": role, "model": model} for role, model in profile.bundle_roles]
+            ),
+            "capacity_bucket": str(live_profile_meta.get("capacity_bucket") or profile.capacity_bucket or ""),
+            "install_profile_id": str(live_profile_meta.get("install_profile_id") or ""),
             "base_url": args.base_url,
         },
         "regression_48h": regression_48h,
@@ -774,26 +819,42 @@ def run(args: argparse.Namespace) -> int:
         and hive_integrity["status"] == "pass"
         and nullabook_provenance["status"] == "pass",
     }
-
-    summary_md = _render_summary_markdown(payload)
-    regression_md = _render_regression_markdown(
-        inventory=inventory,
-        recent_pack=regression_48h["current"],
-        comparison=regression_48h["comparison"],
-        baseline_path=Path(regression_48h["baseline_path"]) if regression_48h["baseline_path"] else None,
+    proof_manifest = build_proof_manifest(
+        repo_root=REPO_ROOT,
+        generated_by="llm_eval",
+        runtime_health=dict(live_acceptance.get("online", {}).get("health") or {}),
+        runtime_capabilities=dict(live_acceptance.get("online", {}).get("capabilities") or {}),
+        acceptance_summary=dict(live_acceptance.get("summary") or {}),
+        llm_eval_summary=payload,
     )
-    failures_md = _failures_markdown(payload)
+    if not proof_manifest["overall_consistent"]:
+        payload["blockers"].append(
+            "Proof manifest detected mismatched commit/profile/model truth across repo, runtime, or install receipt."
+        )
+        payload["overall_full_green"] = False
 
-    _write_json(output_root / "summary.json", payload)
+    public_payload = _sanitize_output(payload)
+    summary_md = _render_summary_markdown(public_payload)
+    regression_md = _render_regression_markdown(
+        inventory=dict(public_payload["regression_48h"]["inventory"]),
+        recent_pack=dict(public_payload["regression_48h"]["current"]),
+        comparison=dict(public_payload["regression_48h"]["comparison"]),
+        baseline_path=Path(str(public_payload["regression_48h"]["baseline_path"])) if public_payload["regression_48h"]["baseline_path"] else None,
+    )
+    failures_md = _failures_markdown(public_payload)
+
+    _write_json(output_root / "summary.json", public_payload)
     _write_markdown(output_root / "summary.md", summary_md)
     _write_latency_csv(output_root / "latency.csv", latency_rows)
-    _write_json(output_root / "context_discipline.json", context_discipline)
-    _write_json(output_root / "research_quality.json", research_quality)
-    _write_json(output_root / "hive_integrity.json", hive_integrity)
-    _write_json(output_root / "nullabook_provenance.json", nullabook_provenance)
+    _write_json(output_root / "context_discipline.json", public_payload["context_discipline"])
+    _write_json(output_root / "research_quality.json", public_payload["research_quality"])
+    _write_json(output_root / "hive_integrity.json", public_payload["hive_integrity"])
+    _write_json(output_root / "nullabook_provenance.json", public_payload["nullabook_provenance"])
     _write_markdown(output_root / "regression_48h.md", regression_md)
     _write_markdown(output_root / "failures.md", failures_md)
-    _write_markdown(REPO_ROOT / "docs" / "LLM_ACCEPTANCE_REPORT.md", summary_md)
+    write_proof_manifest(output_root / "proof_manifest.json", proof_manifest)
+    if docs_report_path is not None:
+        _write_markdown(docs_report_path, summary_md)
 
     return 0 if payload["ci_fast_green"] and (args.skip_live_runtime or payload["overall_full_green"]) else 1
 
@@ -806,8 +867,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--branch-label", default="")
+    parser.add_argument("--docs-report-path", default="")
+    parser.add_argument("--runtime-home", default="")
+    parser.add_argument("--workspace-root", default="")
     parser.add_argument("--skip-live-runtime", action="store_true")
     args = parser.parse_args(argv)
+    if bool(args.runtime_home) ^ bool(args.workspace_root):
+        parser.error("`llm_eval` requires both `--runtime-home` and `--workspace-root`, or neither.")
     return run(args)
 
 

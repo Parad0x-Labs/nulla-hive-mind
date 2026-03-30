@@ -114,10 +114,15 @@ def test_runtime_capability_snapshot_exposes_feature_flags_and_capability_rows()
         )
 
     assert snapshot["mode"] == "test"
+    assert snapshot["feature_flags"]["local_only_mode"] is True
     assert snapshot["feature_flags"]["allow_workspace_writes"] is True
     assert snapshot["feature_flags"]["allow_sandbox_execution"] is True
     assert snapshot["feature_flags"]["allow_remote_only_without_backend"] is False
     assert snapshot["install_profile"]["profile_id"] == "local-only"
+    assert snapshot["install_recommendation"]["recommended_default_profile"] == "local-only"
+    assert snapshot["install_recommendation"]["recommended_optional_profile"] == ""
+    assert snapshot["install_recommendation"]["primary_local_model"] == "qwen2.5:7b"
+    assert snapshot["install_recommendation"]["secondary_local_supported"] is False
     assert snapshot["provider_capability_truth"][0]["provider_id"] == "local-qwen-http:qwen2.5:7b"
     assert snapshot["provider_capability_truth"][0]["availability_state"] == "ready"
     assert snapshot["provider_capability_truth"][0]["circuit_open"] is False
@@ -125,3 +130,66 @@ def test_runtime_capability_snapshot_exposes_feature_flags_and_capability_rows()
     assert capabilities["workspace_write_tools"]["state"] == "implemented"
     assert capabilities["sandbox_execution"]["state"] == "implemented"
     assert capabilities["remote_only_backend_fallback"]["state"] == "disabled_by_policy"
+
+
+def test_runtime_capability_snapshot_disables_remote_fallback_when_profile_has_no_remote_lane() -> None:
+    install_profile = InstallProfileTruth(
+        profile_id="local-only",
+        label="Local only",
+        summary="Single local Ollama lane with no remote provider dependency.",
+        selection_source="auto",
+        selected_model="qwen2.5:7b",
+        provider_mix=tuple(),
+        estimated_download_gb=8.0,
+        estimated_disk_footprint_gb=12.0,
+        minimum_free_space_gb=11.0,
+        ram_expectation_gb=12.0,
+        vram_expectation_gb=4.0,
+        ready=True,
+        degraded=False,
+        single_volume_ready=True,
+        reasons=tuple(),
+        volume_checks=tuple(),
+    )
+    provider_snapshot = ProviderRegistrySnapshot(
+        warnings=tuple(),
+        audit_rows=tuple(),
+        capability_truth=(
+            ProviderCapabilityTruth(
+                provider_id="ollama-local:qwen2.5:7b",
+                model_id="qwen2.5:7b",
+                role_fit="drone",
+                context_window=32768,
+                tool_support=("structured_json",),
+                structured_output_support=True,
+                tokens_per_second=12.0,
+                ram_budget_gb=12.0,
+                vram_budget_gb=0.0,
+                quantization="Q4_K_M",
+                locality="local",
+                privacy_class="local_private",
+                queue_depth=0,
+                max_safe_concurrency=1,
+                availability_state="ready",
+                circuit_open=False,
+                last_error=None,
+            ),
+        ),
+    )
+
+    with mock.patch("core.runtime_capabilities.probe_machine", return_value=MachineProbe(8, 12.0, None, None, "cpu")), mock.patch(
+        "core.runtime_capabilities.select_qwen_tier",
+        return_value=QwenTier("base", "qwen2.5:7b", 7.0, 4.0, 12.0),
+    ), mock.patch(
+        "core.runtime_capabilities.build_provider_registry_snapshot",
+        return_value=provider_snapshot,
+    ), mock.patch(
+        "core.runtime_capabilities.build_install_profile_truth",
+        return_value=install_profile,
+    ):
+        snapshot = runtime_capability_snapshot(_context(allow_remote_only_without_backend=True))
+
+    assert snapshot["feature_flags"]["local_only_mode"] is True
+    assert snapshot["feature_flags"]["allow_remote_only_without_backend"] is False
+    capabilities = {item["name"]: item for item in snapshot["capabilities"]}
+    assert capabilities["remote_only_backend_fallback"]["state"] == "disabled_by_profile"

@@ -115,6 +115,13 @@ class OperatorActionTests(unittest.TestCase):
         self.assertIn("Safe temp cleanup preview", result["response"])
         self.assertGreaterEqual(_count_pending_actions(), 1)
 
+    def test_operator_parser_does_not_confuse_workspace_path_with_disk_space_request(self) -> None:
+        self.assertIsNone(
+            parse_operator_action_intent(
+                "Create a folder named alpha inside /tmp/openclaw_workspace_truth_live."
+            )
+        )
+
     def test_cleanup_temp_files_executes_and_promotes_learning_shard(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
         agent.start()

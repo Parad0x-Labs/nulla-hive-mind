@@ -103,16 +103,18 @@ _SEMANTIC_HIVE_PATTERNS = (
     re.compile(r"\bshow\s+(?:the\s+)?(?:hive|hive mind|brain hive|public hive)\s+(?:work|tasks?|queue)\b"),
     re.compile(r"\bwhat\s+(?:online\s+)?tasks?\s+(?:do\s+)?we\s+have\b"),
 )
-_ENTITY_LOOKUP_QUESTION_PATTERNS = (
+_HARD_ENTITY_LOOKUP_QUESTION_PATTERNS = (
     re.compile(r"\bwho(?:'s|\s+is)\b"),
-    re.compile(r"\btell\s+me\s+about\b"),
-    re.compile(r"\bwhat\s+do\s+you\s+know\s+about\b"),
     re.compile(r"\bis\s+(?:he|she|they)\s+(?:the\s+)?(?:owner|founder|ceo|cto|creator|co-founder)\b"),
     re.compile(r"\bwho\s+(?:is|are|was)\s+(?:behind|running|leading)\b"),
     re.compile(r"\bwhat\s+(?:is|are)\s+(?:his|her|their)\s+(?:role|position|title)\b"),
     re.compile(r"\bi\s+see\s+(?:him|her|them)\s+mentioned\b"),
     re.compile(r"\bwho\s+(?:runs?|owns?|founded|created|built|leads?)\b"),
     re.compile(r"\bfind\s+(?:me\s+)?who\b"),
+)
+_SOFT_ENTITY_LOOKUP_QUESTION_PATTERNS = (
+    re.compile(r"\btell\s+me\s+about\b"),
+    re.compile(r"\bwhat\s+do\s+you\s+know\s+about\b"),
 )
 _EXPLICIT_LOOKUP_MARKERS = (
     "find",
@@ -133,6 +135,9 @@ _WEB_SOCIAL_LOOKUP_MARKERS = (
     "online",
     "web",
 )
+
+_CHAT_TRUTH_SOURCE_SURFACES = {"openclaw", "api", "channel"}
+_CHAT_TRUTH_SOURCE_PLATFORMS = {"openclaw", "api"}
 
 
 def _contains_phrase_marker(text: str, markers: tuple[str, ...]) -> bool:
@@ -274,8 +279,9 @@ def looks_like_public_entity_lookup_request(text: str) -> bool:
         return False
     if any(marker in lowered for marker in _NON_WEB_LOOKUP_EXCLUSIONS):
         return False
-    if any(pattern.search(lowered) for pattern in _ENTITY_LOOKUP_QUESTION_PATTERNS):
+    if any(pattern.search(lowered) for pattern in _HARD_ENTITY_LOOKUP_QUESTION_PATTERNS):
         return True
+    soft_entity_prompt = any(pattern.search(lowered) for pattern in _SOFT_ENTITY_LOOKUP_QUESTION_PATTERNS)
     has_lookup_marker = any(marker in lowered for marker in _EXPLICIT_LOOKUP_MARKERS)
     has_web_or_social_cue = any(marker in lowered for marker in _WEB_SOCIAL_LOOKUP_MARKERS)
     has_public_context = any(marker in lowered for marker in (
@@ -284,6 +290,8 @@ def looks_like_public_entity_lookup_request(text: str) -> bool:
         "company", "startup", "project", "protocol", "influencer",
         "community", "developer", "engineer", "owner", "co-founder",
     ))
+    if soft_entity_prompt:
+        return bool(has_web_or_social_cue or has_public_context)
     return bool(has_lookup_marker and (has_web_or_social_cue or has_public_context))
 
 
@@ -699,7 +707,7 @@ def classify(user_input: str, context: dict[str, Any] | None = None) -> dict[str
         task_class = "shell_guidance"
         confidence_hint = 0.72
 
-    if task_class == "unknown":
+    if task_class == "unknown" and not _skip_model_classification_for_context(context):
         model_class = _classify_via_model(user_input)
         if model_class:
             task_class = model_class
@@ -718,6 +726,24 @@ def classify(user_input: str, context: dict[str, Any] | None = None) -> dict[str
         "confidence_hint": confidence_hint,
         "context_hints": list(context.keys()),
     }
+
+
+def _skip_model_classification_for_context(context: dict[str, Any]) -> bool:
+    if bool(context.get("skip_model_classification")) or bool(context.get("chat_surface")):
+        return True
+    source_context = context.get("source_context")
+    source_context_dict = source_context if isinstance(source_context, dict) else {}
+    source_surface = str(
+        context.get("source_surface")
+        or source_context_dict.get("surface")
+        or ""
+    ).strip().lower()
+    source_platform = str(
+        context.get("source_platform")
+        or source_context_dict.get("platform")
+        or ""
+    ).strip().lower()
+    return source_surface in _CHAT_TRUTH_SOURCE_SURFACES or source_platform in _CHAT_TRUTH_SOURCE_PLATFORMS
 
 
 _VALID_TASK_CLASSES = {
@@ -982,6 +1008,8 @@ def build_task_envelope_for_request(
     planner_style_requested: bool = False,
 ) -> TaskEnvelopeV1:
     context = dict(context or {})
+    if chat_surface:
+        context["chat_surface"] = True
     classification = classify(user_input, context)
     bounded_repo_repair = looks_like_bounded_repo_repair_request(user_input)
     if bounded_repo_repair and not classification.get("risk_flags"):

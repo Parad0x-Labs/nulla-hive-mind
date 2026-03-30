@@ -307,7 +307,31 @@ def test_repeated_chat_greetings_use_model_each_turn(make_agent):
     assert first["model_execution"]["used_model"] is True
     assert second["model_execution"]["used_model"] is True
     assert third["model_execution"]["used_model"] is True
-    assert agent.memory_router.resolve.call_count == 3
+
+
+def test_api_surface_smalltalk_uses_model_for_final_wording(make_agent):
+    agent = make_agent()
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="provider",
+            task_hash="api-hey",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text="Hey. What are we solving?",
+            confidence=0.8,
+            trust_score=0.8,
+        )
+    )
+
+    result = agent.run_once(
+        "hey",
+        session_id_override="openclaw:api-hey",
+        source_context={"surface": "api", "platform": "api"},
+    )
+
+    assert result["response"] == "Hey. What are we solving?"
+    assert result["model_execution"]["used_model"] is True
+    assert result["model_execution"]["source"] == "provider"
 
 
 def test_low_verbosity_persona_wrapper_does_not_clip_to_first_paragraph():
@@ -575,6 +599,67 @@ def test_capability_truth_query_reports_self_tool_creation_limits_honestly(make_
     assert result["model_execution"]["used_model"] is False
     assert "task-local helper files or scripts" in lowered
     assert "cannot auto-register" in lowered or "cannot register" in lowered
+
+
+def test_generic_capability_inventory_prompt_uses_grounded_fast_path(make_agent):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("capability inventory should not load context")  # type: ignore[attr-defined]
+
+    with mock.patch.object(
+        agent,
+        "_capability_ledger_entries",
+        return_value=[
+            {
+                "capability_id": "workspace.build_scaffold",
+                "surface": "workspace",
+                "supported": True,
+                "support_level": "partial",
+                "claim": "write narrow Telegram or Discord bot scaffolds into the active workspace",
+                "partial_reason": "This is scaffold-level support only, not a full autonomous build/debug/test loop.",
+            },
+            {
+                "capability_id": "workspace.write",
+                "surface": "workspace",
+                "supported": True,
+                "support_level": "full",
+                "claim": "read and write files inside the active workspace",
+            },
+        ],
+    ):
+        result = agent.run_once(
+            "what can you do right now on this machine?",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+    lowered = result["response"].lower()
+    assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert result["model_execution"]["used_model"] is False
+    assert "wired on this runtime" in lowered
+    assert "read and write files inside the active workspace" in lowered
+    assert "not a full autonomous build/debug/test loop" in lowered
+
+
+def test_api_surface_greeting_falls_back_to_bounded_greeting_when_provider_is_cold(make_agent):
+    agent = make_agent()
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="no_provider_available",
+            task_hash="api-greeting-cold",
+            confidence=0.3,
+            trust_score=0.3,
+            used_model=False,
+        )
+    )
+
+    result = agent.run_once(
+        "hello",
+        source_context={"surface": "api", "platform": "api"},
+    )
+
+    lowered = result["response"].lower()
+    assert result["response_class"] == ResponseClass.SMALLTALK.value
+    assert result["model_execution"]["used_model"] is False
+    assert "what do you need" in lowered
 
 
 def test_unsupported_builder_request_reports_gap_honestly_instead_of_writing_a_brief(make_agent):

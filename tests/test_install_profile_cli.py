@@ -135,7 +135,7 @@ def test_cmd_install_profile_persists_resolved_profile_when_auto_recommended_is_
         return_value=snapshot,
     ), mock.patch(
         "apps.nulla_cli.build_install_profile_truth",
-        return_value=_profile(profile_id="hybrid-kimi"),
+        return_value=_profile(profile_id="local-only"),
     ), mock.patch(
         "apps.nulla_cli.persist_install_profile_record",
         return_value=Path("/tmp/nulla-runtime/config/install-profile.json"),
@@ -144,12 +144,12 @@ def test_cmd_install_profile_persists_resolved_profile_when_auto_recommended_is_
 
     persist_record.assert_called_once_with(
         "/tmp/nulla-runtime",
-        "hybrid-kimi",
+        "local-only",
         selected_model="qwen2.5:7b",
     )
     out = capsys.readouterr().out
-    assert "Install profile saved: ollama+kimi (hybrid-kimi)" in out
-    assert "Resolved profile:     ollama+kimi (hybrid-kimi)" in out
+    assert "Install profile saved: ollama-only (local-only)" in out
+    assert "Resolved profile:     ollama-only (local-only)" in out
 
 
 def test_cmd_install_profile_blocks_unready_profile_switch(capsys) -> None:

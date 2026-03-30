@@ -277,7 +277,7 @@ if "%INSTALL_PROFILE_OVERRIDE%"=="" (
   if "%AUTO_YES%"=="1" (
     set "INSTALL_PROFILE_OVERRIDE=auto-recommended"
   ) else (
-    set /p "INSTALL_PROFILE_OVERRIDE=Install profile [auto-recommended/local-only/local-max/hybrid-kimi/hybrid-fallback/full-orchestrated] [auto-recommended]: "
+    set /p "INSTALL_PROFILE_OVERRIDE=Install profile [auto-recommended/local-only/local-max] [auto-recommended]: "
     if "%INSTALL_PROFILE_OVERRIDE%"=="" set "INSTALL_PROFILE_OVERRIDE=auto-recommended"
     call :validate_install_profile "%INSTALL_PROFILE_OVERRIDE%"
     if errorlevel 1 exit /b 2
@@ -595,10 +595,15 @@ exit /b 0
 set "PROFILE_TO_VALIDATE=%~1"
 if "%PROFILE_TO_VALIDATE%"=="" exit /b 0
 if /i "%PROFILE_TO_VALIDATE%"=="auto-recommended" exit /b 0
+if /i "%PROFILE_TO_VALIDATE%"=="ollama-only" exit /b 0
 if /i "%PROFILE_TO_VALIDATE%"=="local-only" exit /b 0
+if /i "%PROFILE_TO_VALIDATE%"=="ollama-max" exit /b 0
 if /i "%PROFILE_TO_VALIDATE%"=="local-max" exit /b 0
+if /i "%PROFILE_TO_VALIDATE%"=="ollama+kimi" exit /b 0
 if /i "%PROFILE_TO_VALIDATE%"=="hybrid-kimi" exit /b 0
+if /i "%PROFILE_TO_VALIDATE%"=="ollama+tether" exit /b 0
+if /i "%PROFILE_TO_VALIDATE%"=="hybrid-tether" exit /b 0
 if /i "%PROFILE_TO_VALIDATE%"=="hybrid-fallback" exit /b 0
 if /i "%PROFILE_TO_VALIDATE%"=="full-orchestrated" exit /b 0
-echo ERROR: /INSTALLPROFILE must be auto-recommended, local-only, local-max, hybrid-kimi, hybrid-fallback, or full-orchestrated.
+echo ERROR: /INSTALLPROFILE must be auto-recommended, local-only, or local-max.
 exit /b 1

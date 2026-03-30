@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import platform
 from dataclasses import dataclass
-from threading import Event, Thread
+from threading import Event, RLock, Thread
 
 
 @dataclass
@@ -26,6 +26,14 @@ class ComputeBudget:
 
 _POLL_INTERVAL_SECONDS = 15
 _IDLE_THRESHOLD_SECONDS = 120  # 2 min without input → idle
+_ACTIVE_BUDGET = ComputeBudget(
+    mode="balanced",
+    cpu_threads=max(1, (os.cpu_count() or 2) // 2),
+    gpu_memory_fraction=0.0,
+    worker_pool_cap=max(1, (os.cpu_count() or 2) // 4),
+    reason="Default balanced budget before daemon startup",
+)
+_ACTIVE_BUDGET_LOCK = RLock()
 
 
 def current_idle_seconds() -> float | None:
@@ -70,6 +78,24 @@ def compute_budget(
         )
 
 
+def set_active_compute_budget(budget: ComputeBudget) -> ComputeBudget:
+    with _ACTIVE_BUDGET_LOCK:
+        global _ACTIVE_BUDGET
+        _ACTIVE_BUDGET = budget
+        return _ACTIVE_BUDGET
+
+
+def get_active_compute_budget() -> ComputeBudget:
+    with _ACTIVE_BUDGET_LOCK:
+        return ComputeBudget(
+            mode=_ACTIVE_BUDGET.mode,
+            cpu_threads=int(_ACTIVE_BUDGET.cpu_threads),
+            gpu_memory_fraction=float(_ACTIVE_BUDGET.gpu_memory_fraction),
+            worker_pool_cap=int(_ACTIVE_BUDGET.worker_pool_cap),
+            reason=str(_ACTIVE_BUDGET.reason),
+        )
+
+
 class ComputeModeDaemon:
     """Background thread that monitors idle state and exposes current budget."""
 
@@ -87,6 +113,7 @@ class ComputeModeDaemon:
         if self._thread is not None:
             return
         self._stop.clear()
+        set_active_compute_budget(self._budget)
         self._thread = Thread(target=self._poll_loop, daemon=True, name="compute-mode")
         self._thread.start()
 
@@ -103,6 +130,7 @@ class ComputeModeDaemon:
                 idle_seconds=idle,
                 has_gpu=self._has_gpu,
             )
+            set_active_compute_budget(self._budget)
             self._stop.wait(_POLL_INTERVAL_SECONDS)
 
 

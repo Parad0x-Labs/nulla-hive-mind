@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 from unittest import mock
 from urllib import request
 
@@ -15,6 +20,7 @@ from apps.nulla_api_server import (
     PROJECT_ROOT,
     NullaAPIHandler,
     _daemon_runtime_config,
+    _dispatch_post,
     _ensure_default_provider,
     _format_runtime_event_text,
     _normalize_chat_history,
@@ -28,7 +34,13 @@ from apps.nulla_api_server import (
 )
 from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
 from core.runtime_task_events import emit_runtime_event
-from core.web.api.runtime import RuntimeServices, bootstrap_runtime_services, build_runtime_version_stamp
+from core.web.api.runtime import (
+    RuntimeServices,
+    bootstrap_runtime_services,
+    build_runtime_version_stamp,
+    log_prewarm_results,
+)
+from core.web.api.service import json_response
 from tests.asgi_harness import asgi_request
 
 
@@ -66,6 +78,259 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(headers["x-request-id"])
         self.assertEqual(headers["x-correlation-id"], headers["x-request-id"])
+
+    def test_create_app_v1_models_returns_openai_shape_with_provider_models(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA", runtime_parameter_size="14B")
+        app = create_app(runtime)
+
+        with mock.patch(
+            "apps.nulla_api_server.runtime_capability_snapshot",
+            return_value={
+                "provider_capability_truth": [
+                    {"provider_id": "openai-compatible-remote:gpt-mock", "model_id": "gpt-mock"},
+                    {"provider_id": "kimi-remote:kimi-mock", "model_id": "kimi-mock"},
+                ]
+            },
+        ):
+            status, _, body = asgi_request(app, method="GET", path="/v1/models")
+
+        payload = json.loads(body.decode("utf-8"))
+        ids = [item["id"] for item in payload["data"]]
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["object"], "list")
+        self.assertIn("nulla", ids)
+        self.assertIn("gpt-mock", ids)
+        self.assertIn("kimi-mock", ids)
+        self.assertIn("openai-compatible-remote:gpt-mock", ids)
+
+    def test_dispatch_post_marks_chat_requests_as_api_surface_and_carries_requested_model(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+        seen_contexts: list[dict[str, Any]] = []
+
+        def fake_run_agent(
+            user_text: str,
+            *,
+            session_id: str | None = None,
+            source_context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            seen_contexts.append(dict(source_context or {}))
+            return {"response": "ok", "confidence": 1.0}
+
+        with mock.patch("apps.nulla_api_server._run_agent", side_effect=fake_run_agent):
+            for path in ("/v1/chat/completions", "/api/chat"):
+                response = _dispatch_post(
+                    path=path,
+                    body={
+                        "model": "openai-compatible-remote:gpt-mock",
+                        "messages": [{"role": "user", "content": "hello"}],
+                    },
+                    headers={"content-type": "application/json"},
+                    runtime=runtime,
+                    model_name="nulla",
+                    workspace_root_provider=lambda: "/tmp",
+                )
+                self.assertEqual(response.status, 200)
+
+        self.assertEqual(len(seen_contexts), 2)
+        for source_context in seen_contexts:
+            self.assertEqual(source_context["surface"], "api")
+            self.assertEqual(source_context["platform"], "api")
+            self.assertEqual(source_context["requested_model"], "openai-compatible-remote:gpt-mock")
+
+    def test_dispatch_post_rehydrates_history_from_session_log_when_client_history_is_sparse(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+        seen_contexts: list[dict[str, Any]] = []
+
+        def fake_run_agent(
+            user_text: str,
+            *,
+            session_id: str | None = None,
+            source_context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            seen_contexts.append(dict(source_context or {}))
+            return {"response": "ok", "confidence": 1.0}
+
+        with mock.patch("apps.nulla_api_server._run_agent", side_effect=fake_run_agent), mock.patch(
+            "core.web.api.service.recent_conversation_events",
+            return_value=[
+                {
+                    "user": "Create a folder named alpha inside /tmp/work.",
+                    "assistant": "I completed 1 bounded builder step under `alpha`.",
+                },
+                {
+                    "user": "Inside /tmp/work/alpha create adder.py with exactly this code: def add(a: int, b: int) -> int: return a + b",
+                    "assistant": "I completed 3 bounded builder steps under `tmp/work/alpha`.",
+                },
+            ],
+        ):
+            response = _dispatch_post(
+                path="/api/chat",
+                body={
+                    "conversationId": "launcher-proof",
+                    "messages": [{"role": "user", "content": "Now read the whole file back exactly."}],
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp/work",
+            )
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(len(seen_contexts), 1)
+        source_context = seen_contexts[0]
+        self.assertEqual(source_context["client_history_message_count"], 1)
+        self.assertEqual(len(source_context["client_conversation_history"]), 1)
+        self.assertGreater(source_context["history_message_count"], 1)
+        self.assertEqual(source_context["conversation_history"][-1]["content"], "Now read the whole file back exactly.")
+        self.assertEqual(source_context["conversation_history"][0]["content"], "Create a folder named alpha inside /tmp/work.")
+
+    def test_create_app_keeps_health_responsive_while_post_dispatch_blocks(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA", runtime_version_stamp={"release_version": "0.4.0"})
+        app = create_app(runtime)
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_post_dispatcher(**_: object):
+            entered.set()
+            release.wait(timeout=5)
+            return json_response(200, {"ok": True})
+
+        app.state.post_dispatcher = blocking_post_dispatcher
+
+        import uvicorn
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = int(probe.getsockname()[1])
+
+        server = uvicorn.Server(
+            uvicorn.Config(
+                app,
+                host="127.0.0.1",
+                port=port,
+                access_log=False,
+                log_level="warning",
+            )
+        )
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        post_thread: threading.Thread | None = None
+        try:
+            deadline = time.time() + 5.0
+            while time.time() < deadline:
+                try:
+                    with request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=0.5) as response:
+                        if response.status == 200:
+                            break
+                except Exception:
+                    time.sleep(0.05)
+            else:
+                self.fail("uvicorn test server did not become healthy")
+
+            post_result: dict[str, object] = {}
+
+            def send_blocking_post() -> None:
+                req = request.Request(
+                    f"http://127.0.0.1:{port}/v1/chat/completions",
+                    data=json.dumps(
+                        {
+                            "model": "nulla",
+                            "messages": [{"role": "user", "content": "hello"}],
+                        }
+                    ).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
+                with request.urlopen(req, timeout=5) as response:
+                    post_result["status"] = response.status
+                    post_result["body"] = response.read().decode("utf-8")
+
+            post_thread = threading.Thread(target=send_blocking_post, daemon=True)
+            post_thread.start()
+            self.assertTrue(entered.wait(timeout=2.0))
+
+            started = time.perf_counter()
+            with request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=1.0) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            latency = time.perf_counter() - started
+
+            self.assertEqual(response.status, 200)
+            self.assertTrue(payload["ok"])
+            self.assertLess(latency, 0.5)
+
+            release.set()
+            post_thread.join(timeout=3.0)
+            self.assertEqual(post_result["status"], 200)
+        finally:
+            release.set()
+            server.should_exit = True
+            if post_thread is not None:
+                post_thread.join(timeout=1.0)
+            thread.join(timeout=2.0)
+
+    def test_create_app_streaming_v1_chat_completions_uses_openai_sse(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+        stream_chunks = iter(
+            (
+                b'{"model":"nulla","created_at":"2026-03-28T00:00:00.000000Z","message":{"role":"assistant","content":"stream"},"done":false}\n',
+                b'{"model":"nulla","created_at":"2026-03-28T00:00:00.000000Z","message":{"role":"assistant","content":" ok"},"done":false}\n',
+                b'{"model":"nulla","created_at":"2026-03-28T00:00:00.000000Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","eval_count":2}\n',
+            )
+        )
+
+        with mock.patch("apps.nulla_api_server._stream_agent_with_events", return_value=stream_chunks):
+            response = _dispatch_post(
+                path="/v1/chat/completions",
+                body={
+                    "model": "nulla",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": True,
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp",
+            )
+
+        status = response.status
+        body = b"".join(response.stream or ())
+        text = body.decode("utf-8")
+        self.assertEqual(status, 200)
+        self.assertIn("text/event-stream", response.content_type)
+        self.assertIn('data: {"id":"chatcmpl-', text)
+        self.assertIn('"object":"chat.completion.chunk"', text)
+        self.assertIn('"content":"stream"', text)
+        self.assertIn('"content":" ok"', text)
+        self.assertIn("data: [DONE]", text)
+
+    def test_create_app_streaming_api_chat_preserves_ollama_ndjson(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+        stream_chunks = iter(
+            (
+                b'{"model":"nulla","created_at":"2026-03-28T00:00:00.000000Z","message":{"role":"assistant","content":"stream"},"done":false}\n',
+                b'{"model":"nulla","created_at":"2026-03-28T00:00:00.000000Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","eval_count":1}\n',
+            )
+        )
+
+        with mock.patch("apps.nulla_api_server._stream_agent_with_events", return_value=stream_chunks):
+            response = _dispatch_post(
+                path="/api/chat",
+                body={
+                    "model": "nulla",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": True,
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp",
+            )
+
+        status = response.status
+        body = b"".join(response.stream or ())
+        self.assertEqual(status, 200)
+        self.assertIn("application/x-ndjson", response.content_type)
+        self.assertIn(b'"content":"stream"', body)
+        self.assertNotIn(b"data: [DONE]", body)
 
     def test_daemon_runtime_config_uses_env_overrides_for_isolated_acceptance(self) -> None:
         with mock.patch.dict(
@@ -130,6 +395,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                         "branch": "main",
                         "ref": "main",
                         "commit": "1234567890abcdef1234567890abcdef12345678",
+                        "dirty_state": True,
                         "source_url": "https://github.com/Parad0x-Labs/nulla-hive-mind/archive/refs/heads/main.tar.gz",
                     }
                 ),
@@ -144,6 +410,36 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
 
         self.assertEqual(stamp["branch"], "main")
         self.assertEqual(stamp["commit"], "1234567890ab")
+        self.assertEqual(stamp["dirty"], True)
+        self.assertTrue(str(stamp["build_id"]).endswith(".dirty"))
+
+    def test_runtime_version_stamp_ignores_unborn_git_repo_and_uses_build_source_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            config_dir = project_root / "config"
+            config_dir.mkdir(parents=True)
+            (config_dir / "build-source.json").write_text(
+                json.dumps(
+                    {
+                        "branch": "codex/honest-ollama-prewarm-bootstrap",
+                        "ref": "codex/honest-ollama-prewarm-bootstrap",
+                        "commit": "b7672501d12def8844d5d7f9c70bad87b005c28a",
+                        "dirty_state": False,
+                        "source_url": "https://github.com/Parad0x-Labs/nulla-hive-mind/archive/refs/heads/codex/honest-ollama-prewarm-bootstrap.tar.gz",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", str(project_root)], check=True, capture_output=True, text=True)
+
+            stamp = build_runtime_version_stamp(
+                project_root=project_root,
+                runtime_model_tag="qwen2.5:14b",
+                workstation_version="test-workstation",
+            )
+
+        self.assertEqual(stamp["branch"], "codex/honest-ollama-prewarm-bootstrap")
+        self.assertEqual(stamp["commit"], "b7672501d12d")
         self.assertEqual(stamp["dirty"], False)
 
     def test_bootstrap_runtime_services_hydrates_public_hive_auth_into_active_runtime_home(self) -> None:
@@ -151,7 +447,6 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         config_home = runtime_home / "config"
         auth_target = config_home / "agent-bootstrap.json"
         probe = mock.Mock(accelerator="cpu", gpu_name=None)
-        tier = mock.Mock(ollama_tag="qwen2.5:14b")
         boot = mock.Mock(backend_selection=mock.Mock(backend_name="TorchMPSBackend", device="mps"))
         agent = mock.Mock()
         daemon = mock.Mock(config=mock.Mock(bind_port=49152))
@@ -170,8 +465,8 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
             "core.web.api.runtime.ensure_public_hive_auth",
             return_value={"ok": False, "status": "missing_remote_config_path", "watch_host": "hive.example.test"},
         ) as ensure_auth, mock.patch("core.web.api.runtime.probe_machine", return_value=probe), mock.patch(
-            "core.web.api.runtime.select_qwen_tier",
-            return_value=tier,
+            "core.web.api.runtime.default_runtime_model_tag",
+            return_value="qwen3:8b",
         ), mock.patch("core.web.api.runtime.ensure_ollama_model"), mock.patch(
             "core.web.api.runtime.build_runtime_version_stamp",
             return_value={"started_at": "2026-03-27T00:00:00.000000Z", "build_id": "0.4.0+test"},
@@ -290,6 +585,194 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertEqual(manifests[("llamacpp-local", "qwen2.5:14b-gguf")].runtime_config["base_url"], "http://127.0.0.1:8090/v1")
         self.assertEqual(manifests[("llamacpp-local", "qwen2.5:14b-gguf")].metadata["context_window"], 16384)
 
+    def test_ensure_default_provider_adds_honest_ollama_prewarm_config(self) -> None:
+        manifests = {}
+        registry = mock.Mock()
+
+        def _get_manifest(provider_name: str, model_name: str):
+            return manifests.get((provider_name, model_name))
+
+        def _register_manifest(manifest):
+            manifests[(manifest.provider_name, manifest.model_name)] = manifest
+            return manifest
+
+        registry.get_manifest.side_effect = _get_manifest
+        registry.register_manifest.side_effect = _register_manifest
+
+        _ensure_default_provider(registry, "qwen2.5:14b")
+
+        manifest = manifests[("ollama-local", "qwen2.5:14b")]
+        self.assertEqual(manifest.runtime_config["prewarm"]["strategy"], "ollama_chat")
+        self.assertEqual(manifest.runtime_config["prewarm"]["keep_alive"], "15m")
+
+    def test_bootstrap_runtime_services_runs_provider_prewarm_logging(self) -> None:
+        persona = mock.Mock(persona_id="default")
+        agent = mock.Mock()
+        daemon = mock.Mock()
+        compute_daemon = mock.Mock()
+        model_registry = mock.Mock()
+        model_registry.startup_warnings.return_value = []
+        runtime_home = "/tmp/runtime-home"
+
+        with mock.patch(
+            "core.web.api.runtime.bootstrap_runtime_mode",
+            return_value=mock.Mock(
+                backend_selection=mock.Mock(backend_name="mlx", device="mps"),
+                context=SimpleNamespace(paths=SimpleNamespace(runtime_home=runtime_home)),
+            ),
+        ), mock.patch(
+            "core.web.api.runtime.is_first_boot",
+            return_value=False,
+        ), mock.patch("core.credit_ledger.ensure_starter_credits", return_value=False), mock.patch(
+            "core.web.api.runtime.ensure_public_hive_auth",
+            return_value={"ok": True, "status": "ok"},
+        ), mock.patch(
+            "core.web.api.runtime.probe_machine",
+            return_value=mock.Mock(accelerator="mps", gpu_name="Apple GPU"),
+        ), mock.patch(
+            "core.web.api.runtime.default_runtime_model_tag",
+            return_value="qwen3:8b",
+        ), mock.patch(
+            "core.web.api.runtime.ensure_ollama_model",
+        ), mock.patch(
+            "core.web.api.runtime.build_runtime_version_stamp",
+            return_value={"started_at": "2026-03-28T00:00:00.000000Z", "build_id": "test", "branch": "main", "commit": "abc123", "dirty": False},
+        ), mock.patch(
+            "core.web.api.runtime.ComputeModeDaemon",
+            return_value=compute_daemon,
+        ), mock.patch(
+            "core.web.api.runtime.ModelRegistry",
+            return_value=model_registry,
+        ), mock.patch(
+            "core.web.api.runtime.ensure_default_provider",
+        ), mock.patch(
+            "core.web.api.runtime.active_install_profile_id",
+            return_value="local-only",
+        ), mock.patch(
+            "core.web.api.runtime.log_prewarm_results",
+        ) as log_prewarm, mock.patch(
+            "core.web.api.runtime.load_active_persona",
+            return_value=persona,
+        ), mock.patch(
+            "core.web.api.runtime.get_agent_display_name",
+            return_value="NULLA",
+        ), mock.patch(
+            "core.web.api.runtime.ensure_openclaw_registration",
+            return_value=True,
+        ), mock.patch(
+            "core.web.api.runtime.NullaAgent",
+            return_value=agent,
+        ), mock.patch(
+            "core.web.api.runtime.resolve_local_worker_capacity",
+            return_value=(3, 3),
+        ), mock.patch(
+            "core.web.api.runtime.NullaDaemon",
+            return_value=daemon,
+        ):
+            bootstrap_runtime_services(
+                project_root=PROJECT_ROOT,
+                workstation_version="test-workstation",
+            )
+
+        log_prewarm.assert_called_once_with(
+            model_registry,
+            runtime_home=runtime_home,
+            requested_profile="local-only",
+        )
+
+    def test_bootstrap_runtime_services_uses_env_selected_model_for_live_boot(self) -> None:
+        persona = mock.Mock(persona_id="default")
+        agent = mock.Mock()
+        daemon = mock.Mock(config=mock.Mock(bind_port=49152))
+        compute_daemon = mock.Mock()
+        model_registry = mock.Mock()
+        model_registry.startup_warnings.return_value = []
+
+        with mock.patch.dict(os.environ, {"NULLA_OLLAMA_MODEL": "qwen3:8b"}, clear=False), mock.patch(
+            "core.web.api.runtime.bootstrap_runtime_mode",
+            return_value=mock.Mock(backend_selection=mock.Mock(backend_name="mlx", device="mps")),
+        ), mock.patch(
+            "core.web.api.runtime.is_first_boot",
+            return_value=False,
+        ), mock.patch(
+            "core.credit_ledger.ensure_starter_credits",
+            return_value=False,
+        ), mock.patch(
+            "core.web.api.runtime.ensure_public_hive_auth",
+            return_value={"ok": True, "status": "ok"},
+        ), mock.patch(
+            "core.web.api.runtime.probe_machine",
+            return_value=mock.Mock(accelerator="mps", gpu_name="Apple GPU"),
+        ), mock.patch(
+            "core.web.api.runtime.default_runtime_model_tag",
+            return_value="deepseek-r1:8b",
+        ), mock.patch(
+            "core.web.api.runtime.ensure_ollama_model",
+        ) as ensure_model, mock.patch(
+            "core.web.api.runtime.build_runtime_version_stamp",
+            return_value={"started_at": "2026-03-28T00:00:00.000000Z", "build_id": "test", "branch": "main", "commit": "abc123", "dirty": False},
+        ), mock.patch(
+            "core.web.api.runtime.ComputeModeDaemon",
+            return_value=compute_daemon,
+        ), mock.patch(
+            "core.web.api.runtime.ModelRegistry",
+            return_value=model_registry,
+        ), mock.patch(
+            "core.web.api.runtime.ensure_default_provider",
+        ) as ensure_provider, mock.patch(
+            "core.web.api.runtime.log_prewarm_results",
+        ), mock.patch(
+            "core.web.api.runtime.load_active_persona",
+            return_value=persona,
+        ), mock.patch(
+            "core.web.api.runtime.get_agent_display_name",
+            return_value="NULLA",
+        ), mock.patch(
+            "core.web.api.runtime.ensure_openclaw_registration",
+            return_value=True,
+        ), mock.patch(
+            "core.web.api.runtime.NullaAgent",
+            return_value=agent,
+        ), mock.patch(
+            "core.web.api.runtime.resolve_local_worker_capacity",
+            return_value=(3, 3),
+        ), mock.patch(
+            "core.web.api.runtime.NullaDaemon",
+            return_value=daemon,
+        ):
+            runtime = bootstrap_runtime_services(
+                project_root=PROJECT_ROOT,
+                workstation_version="test-workstation",
+            )
+
+        self.assertEqual(runtime.runtime_model_tag, "qwen3:8b")
+        ensure_model.assert_called_once_with("qwen3:8b")
+        ensure_provider.assert_called_once_with(model_registry, "qwen3:8b")
+
+    def test_log_prewarm_results_treats_timeout_without_background_as_info(self) -> None:
+        registry = mock.Mock()
+        snapshot = mock.Mock(
+            prewarm_results=[
+                {
+                    "ok": True,
+                    "provider_id": "ollama-local:qwen2.5:14b",
+                    "status": "timed_out",
+                    "reason": "cold_start_timeout",
+                    "keep_alive": "15m",
+                    "timeout_seconds": 45.0,
+                }
+            ]
+        )
+
+        with mock.patch("core.web.api.runtime.build_provider_registry_snapshot", return_value=snapshot), self.assertLogs(
+            "nulla.api", level="INFO"
+        ) as captured:
+            log_prewarm_results(registry)
+
+        self.assertEqual(len(captured.records), 1)
+        self.assertEqual(captured.records[0].levelname, "INFO")
+        self.assertIn("Provider prewarm timed out; continuing without background warming", captured.output[0])
+
     def test_normalize_chat_history_keeps_full_user_assistant_sequence(self) -> None:
         history = _normalize_chat_history(
             [
@@ -307,6 +790,34 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                 {"role": "user", "content": "first turn"},
                 {"role": "assistant", "content": "reply one"},
                 {"role": "user", "content": "second turn"},
+            ],
+        )
+
+    def test_normalize_chat_history_preserves_multiline_code_blocks(self) -> None:
+        history = _normalize_chat_history(
+            [
+                {
+                    "role": "user",
+                    "content": (
+                        "Inside /tmp/workspace/alpha create adder.py with exactly this code:\n\n"
+                        "def add(a: int, b: int) -> int:\n"
+                        "    return a + b\n"
+                    ),
+                }
+            ]
+        )
+
+        self.assertEqual(
+            history,
+            [
+                {
+                    "role": "user",
+                    "content": (
+                        "Inside /tmp/workspace/alpha create adder.py with exactly this code:\n\n"
+                        "def add(a: int, b: int) -> int:\n"
+                        "    return a + b"
+                    ),
+                }
             ],
         )
 
@@ -330,6 +841,10 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertEqual(
             _format_runtime_event_text({"message": "Running real tool workspace.read_file."}),
             "Running real tool workspace.read_file.\n",
+        )
+        self.assertEqual(
+            _format_runtime_event_text({"event_type": "model_output_chunk", "message": "hello"}),
+            "hello",
         )
 
     def test_stream_agent_with_events_emits_progress_before_final_response(self) -> None:
@@ -405,6 +920,42 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertNotIn("Received request:", joined)
         self.assertNotIn("Running real tool workspace.search_text.", joined)
         self.assertIn("Clean final answer.", joined)
+
+    def test_stream_agent_with_events_prefers_live_model_chunks_over_fake_replay(self) -> None:
+        def fake_run_agent(
+            user_text: str,
+            *,
+            session_id: str | None = None,
+            source_context: dict | None = None,
+        ) -> dict:
+            emit_runtime_event(
+                {"runtime_event_stream_id": str((source_context or {}).get("runtime_event_stream_id") or "")},
+                event_type="model_output_chunk",
+                message="Hello",
+            )
+            emit_runtime_event(
+                {"runtime_event_stream_id": str((source_context or {}).get("runtime_event_stream_id") or "")},
+                event_type="model_output_chunk",
+                message=" world",
+            )
+            return {"response": "Hello world"}
+
+        with mock.patch("apps.nulla_api_server._run_agent", side_effect=fake_run_agent):
+            chunks = list(
+                _stream_agent_with_events(
+                    "say hello",
+                    session_id="openclaw:test",
+                    source_context={"conversation_history": []},
+                    model="nulla",
+                )
+            )
+
+        payloads = [json.loads(line) for line in b"".join(chunks).decode("utf-8").splitlines() if line.strip()]
+        contents = [payload["message"]["content"] for payload in payloads]
+        assert contents.count("Hello") == 1
+        assert contents.count(" world") == 1
+        assert "Hello world" not in contents
+        assert payloads[-1]["done"] is True
 
     def test_run_agent_injects_runtime_session_id_into_source_context(self) -> None:
         seen: dict[str, object] = {}

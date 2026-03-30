@@ -260,6 +260,7 @@ class ChatSurfaceFacadeMixin:
         reason: str,
         model_input: str,
         fallback_response: str,
+        allow_provider_inference: bool = True,
         tool_backing_sources: list[str] | None = None,
         response_postprocessor: Any | None = None,
     ) -> dict[str, Any]:
@@ -275,6 +276,7 @@ class ChatSurfaceFacadeMixin:
             reason=reason,
             model_input=model_input,
             fallback_response=fallback_response,
+            allow_provider_inference=allow_provider_inference,
             tool_backing_sources=tool_backing_sources,
             response_postprocessor=response_postprocessor,
         )

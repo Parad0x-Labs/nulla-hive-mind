@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -136,6 +138,68 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
             self.assertTrue(diff.ok)
             self.assertIn("-print('hello')", diff.response_text)
             self.assertIn("+print('goodbye')", diff.response_text)
+
+    def test_workspace_git_summary_reports_grounded_branch_and_commit_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch(
+            "core.execution.git_tools._local_commit_day_windows",
+            return_value=(
+                (
+                    "2026-03-30",
+                    datetime.fromisoformat("2026-03-30T00:00:00+00:00"),
+                    datetime.fromisoformat("2026-03-31T00:00:00+00:00"),
+                ),
+                (
+                    "2026-03-29",
+                    datetime.fromisoformat("2026-03-29T00:00:00+00:00"),
+                    datetime.fromisoformat("2026-03-30T00:00:00+00:00"),
+                ),
+                "UTC",
+            ),
+        ):
+            workspace = Path(tmpdir)
+            subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "tests@example.test"], cwd=workspace, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "Tests"], cwd=workspace, check=True, capture_output=True)
+
+            env_yesterday = {
+                **os.environ,
+                "GIT_AUTHOR_DATE": "2026-03-29T12:00:00+00:00",
+                "GIT_COMMITTER_DATE": "2026-03-29T12:00:00+00:00",
+            }
+            env_today = {
+                **os.environ,
+                "GIT_AUTHOR_DATE": "2026-03-30T12:00:00+00:00",
+                "GIT_COMMITTER_DATE": "2026-03-30T12:00:00+00:00",
+            }
+
+            (workspace / "tracked.py").write_text("print('one')\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked.py"], cwd=workspace, check=True, capture_output=True, env=env_yesterday)
+            subprocess.run(["git", "commit", "-m", "yesterday"], cwd=workspace, check=True, capture_output=True, env=env_yesterday)
+            subprocess.run(["git", "checkout", "-b", "feature-one"], cwd=workspace, check=True, capture_output=True)
+            (workspace / "tracked.py").write_text("print('two')\n", encoding="utf-8")
+            subprocess.run(["git", "commit", "-am", "today-one"], cwd=workspace, check=True, capture_output=True, env=env_today)
+            subprocess.run(["git", "checkout", "-b", "feature-two"], cwd=workspace, check=True, capture_output=True)
+            (workspace / "tracked.py").write_text("print('three')\n", encoding="utf-8")
+            subprocess.run(["git", "commit", "-am", "today-two"], cwd=workspace, check=True, capture_output=True, env=env_today)
+
+            summary = execute_runtime_tool(
+                "workspace.git_summary",
+                {},
+                source_context={"workspace": tmpdir},
+            )
+            assert summary is not None
+            self.assertTrue(summary.ok)
+            self.assertTrue(summary.response_text.splitlines()[0].startswith("Git summary: branch feature-two @"))
+            self.assertIn("local branches: 3", summary.response_text)
+            self.assertIn("remote tracking branches: 0", summary.response_text)
+            self.assertIn("commits on 2026-03-30: 2", summary.response_text)
+            self.assertIn("commits on 2026-03-29: 1", summary.response_text)
+            observation = summary.details["observation"]
+            self.assertEqual(observation["intent"], "workspace.git_summary")
+            self.assertEqual(observation["local_branch_count"], 3)
+            self.assertEqual(observation["remote_branch_count"], 0)
+            self.assertEqual(observation["today_commit_count"], 2)
+            self.assertEqual(observation["yesterday_commit_count"], 1)
 
     def test_workspace_run_tests_executes_validation_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

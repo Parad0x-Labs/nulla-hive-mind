@@ -371,6 +371,27 @@ class CuriosityRoamerTests(unittest.TestCase):
         self.assertGreaterEqual(len(result.source_domains), 2)
         self.assertFalse(result.admitted_uncertainty)
 
+    def test_adaptive_research_skips_generic_system_design_tradeoff_explanations(self) -> None:
+        roamer = CuriosityRoamer()
+        with mock.patch(
+            "retrieval.web_adapter.WebAdapter.planned_search_query",
+            side_effect=AssertionError("generic architecture explanation should not trigger live research"),
+        ):
+            result = roamer.adaptive_research(
+                task_id="task-generic-tradeoff",
+                user_input="Explain the event loop architecture tradeoffs.",
+                classification={"task_class": "system_design"},
+                interpretation=_interpretation(
+                    "Explain the event loop architecture tradeoffs.",
+                    topics=["architecture"],
+                ),
+                source_context={"surface": "openclaw", "platform": "openclaw"},
+            )
+
+        self.assertFalse(result.enabled)
+        self.assertEqual(result.reason, "research_not_needed")
+        self.assertEqual(result.strategy, "not_needed")
+
     def test_adaptive_research_verifies_claims_with_authoritative_sources(self) -> None:
         roamer = CuriosityRoamer()
         with mock.patch(

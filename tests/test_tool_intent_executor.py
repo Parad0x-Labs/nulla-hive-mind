@@ -359,6 +359,20 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(first.next_payload["arguments"]["path"], "~/Desktop")
         self.assertTrue(first.next_payload["arguments"]["directories_only"])
 
+    def test_workflow_planner_routes_can_you_see_desktop_folders_to_machine_read(self) -> None:
+        first = plan_tool_workflow(
+            user_text="can you see folders on my desktop?",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-tools"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_safe_machine_directory_list")
+        self.assertEqual(first.next_payload["intent"], "machine.list_directory")
+        self.assertEqual(first.next_payload["arguments"]["path"], "~/Desktop")
+        self.assertTrue(first.next_payload["arguments"]["directories_only"])
+
     def test_workflow_planner_routes_desktop_folders_and_files_to_machine_read_without_folder_only_mode(self) -> None:
         first = plan_tool_workflow(
             user_text="what are the folders and files on my desktop?",
@@ -396,6 +410,18 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(first.reason, "planned_machine_specs_inspection")
         self.assertEqual(first.next_payload["intent"], "machine.inspect_specs")
 
+    def test_workflow_planner_routes_screen_size_followup_to_grounded_machine_tool(self) -> None:
+        first = plan_tool_workflow(
+            user_text="you did not answered about screen size?",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "api", "platform": "api"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_machine_specs_inspection")
+        self.assertEqual(first.next_payload["intent"], "machine.inspect_specs")
+
     def test_workflow_planner_does_not_route_capability_question_to_machine_specs(self) -> None:
         first = plan_tool_workflow(
             user_text="what can you do right now on this machine?",
@@ -416,8 +442,34 @@ class ToolIntentExecutorTests(unittest.TestCase):
         )
 
         self.assertTrue(first.handled)
-        self.assertEqual(first.next_payload["intent"], "workspace.write_file")
-        self.assertEqual(first.next_payload["arguments"]["path"], "nulla_test_01.txt")
+        self.assertEqual(first.next_payload["intent"], "workspace.ensure_directory")
+        self.assertEqual(first.next_payload["arguments"]["path"], "artifacts/planner-desktop-path")
+
+        second = plan_tool_workflow(
+            user_text=f"Create a file named nulla_test_01.txt in {target} with exactly this content: ALPHA-LOCAL-FILE-01",
+            task_class="unknown",
+            executed_steps=[
+                {
+                    "tool_name": "workspace.ensure_directory",
+                    "arguments": {"path": "artifacts/planner-desktop-path"},
+                    "observation": {
+                        "intent": "workspace.ensure_directory",
+                        "tool_surface": "workspace",
+                        "ok": True,
+                        "status": "executed",
+                        "path": "artifacts/planner-desktop-path",
+                        "action": "confirmed",
+                        "already_present": True,
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": str(Path.cwd())},
+        )
+
+        self.assertTrue(second.handled)
+        self.assertEqual(second.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(second.next_payload["arguments"]["path"], "artifacts/planner-desktop-path/nulla_test_01.txt")
+        self.assertEqual(second.next_payload["arguments"]["content"], "ALPHA-LOCAL-FILE-01")
 
     def test_workflow_planner_routes_explicit_file_create_to_workspace_write(self) -> None:
         first = plan_tool_workflow(
@@ -432,6 +484,197 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(first.next_payload["intent"], "workspace.write_file")
         self.assertEqual(first.next_payload["arguments"]["path"], "nulla_test_01.txt")
         self.assertEqual(first.next_payload["arguments"]["content"], "ALPHA-LOCAL-FILE-01")
+
+    def test_workflow_planner_routes_exact_file_create_with_literal_modifiers(self) -> None:
+        first = plan_tool_workflow(
+            user_text=(
+                "Create a file named nulla_test_02.txt in the current workspace "
+                "with exactly this content, no extra characters and no newline: ALPHA-LOCAL-FILE-02"
+            ),
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_workspace_write_file")
+        self.assertEqual(first.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(first.next_payload["arguments"]["path"], "nulla_test_02.txt")
+        self.assertEqual(first.next_payload["arguments"]["content"], "ALPHA-LOCAL-FILE-02")
+
+    def test_workflow_planner_routes_inside_absolute_workspace_subdir_file_create(self) -> None:
+        prompt = "Inside /tmp/nulla_local_tooling_truth/alpha create hello.txt with exactly this content: HELLO-LOCAL-TRUTH"
+        first = plan_tool_workflow(
+            user_text=prompt,
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla_local_tooling_truth"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_workspace_directory_bootstrap")
+        self.assertEqual(first.next_payload["intent"], "workspace.ensure_directory")
+        self.assertEqual(first.next_payload["arguments"]["path"], "alpha")
+
+        second = plan_tool_workflow(
+            user_text=prompt,
+            task_class="unknown",
+            executed_steps=[
+                {
+                    "tool_name": "workspace.ensure_directory",
+                    "arguments": {"path": "alpha"},
+                    "observation": {
+                        "intent": "workspace.ensure_directory",
+                        "tool_surface": "workspace",
+                        "ok": True,
+                        "status": "executed",
+                        "path": "alpha",
+                        "action": "confirmed",
+                        "already_present": True,
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla_local_tooling_truth"},
+        )
+
+        self.assertTrue(second.handled)
+        self.assertEqual(second.reason, "planned_workspace_write_after_bootstrap")
+        self.assertEqual(second.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(second.next_payload["arguments"]["path"], "alpha/hello.txt")
+        self.assertEqual(second.next_payload["arguments"]["content"], "HELLO-LOCAL-TRUTH")
+
+    def test_workflow_planner_preserves_exact_content_after_literal_modifiers_inside_workspace_subdir(self) -> None:
+        prompt = (
+            "Inside /tmp/nulla_local_tooling_truth/alpha create hello.txt with exactly this content, "
+            "no extra characters and no newline: HELLO-LOCAL-TRUTH"
+        )
+        first = plan_tool_workflow(
+            user_text=prompt,
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla_local_tooling_truth"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_workspace_directory_bootstrap")
+        self.assertEqual(first.next_payload["intent"], "workspace.ensure_directory")
+        self.assertEqual(first.next_payload["arguments"]["path"], "alpha")
+
+        second = plan_tool_workflow(
+            user_text=prompt,
+            task_class="unknown",
+            executed_steps=[
+                {
+                    "tool_name": "workspace.ensure_directory",
+                    "arguments": {"path": "alpha"},
+                    "observation": {
+                        "intent": "workspace.ensure_directory",
+                        "tool_surface": "workspace",
+                        "ok": True,
+                        "status": "executed",
+                        "path": "alpha",
+                        "action": "confirmed",
+                        "already_present": True,
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla_local_tooling_truth"},
+        )
+
+        self.assertTrue(second.handled)
+        self.assertEqual(second.reason, "planned_workspace_write_after_bootstrap")
+        self.assertEqual(second.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(second.next_payload["arguments"]["path"], "alpha/hello.txt")
+        self.assertEqual(second.next_payload["arguments"]["content"], "HELLO-LOCAL-TRUTH")
+
+    def test_workflow_planner_preserves_multiline_code_for_inside_absolute_workspace_subdir(self) -> None:
+        prompt = (
+            "Inside /tmp/nulla_local_tooling_truth/alpha create adder.py with exactly this code:\n\n"
+            "def add(a: int, b: int) -> int:\n"
+            "    return a + b\n"
+        )
+        first = plan_tool_workflow(
+            user_text=prompt,
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla_local_tooling_truth"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_workspace_directory_bootstrap")
+        self.assertEqual(first.next_payload["intent"], "workspace.ensure_directory")
+        self.assertEqual(first.next_payload["arguments"]["path"], "alpha")
+
+        second = plan_tool_workflow(
+            user_text=prompt,
+            task_class="unknown",
+            executed_steps=[
+                {
+                    "tool_name": "workspace.ensure_directory",
+                    "arguments": {"path": "alpha"},
+                    "observation": {
+                        "intent": "workspace.ensure_directory",
+                        "tool_surface": "workspace",
+                        "ok": True,
+                        "status": "executed",
+                        "path": "alpha",
+                        "action": "confirmed",
+                        "already_present": True,
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla_local_tooling_truth"},
+        )
+
+        self.assertTrue(second.handled)
+        self.assertEqual(second.reason, "planned_workspace_write_after_bootstrap")
+        self.assertEqual(second.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(second.next_payload["arguments"]["path"], "alpha/adder.py")
+        self.assertEqual(
+            second.next_payload["arguments"]["content"],
+            "def add(a: int, b: int) -> int:\n    return a + b",
+        )
+
+    def test_workflow_planner_ignores_semantic_tokens_inside_workspace_paths(self) -> None:
+        prompt = "Inside /tmp/openclaw_workspace_truth/alpha create hello.txt with exactly this content: HELLO-LOCAL-TRUTH"
+        first = plan_tool_workflow(
+            user_text=prompt,
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/openclaw_workspace_truth"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_workspace_directory_bootstrap")
+        self.assertEqual(first.next_payload["intent"], "workspace.ensure_directory")
+        self.assertEqual(first.next_payload["arguments"]["path"], "alpha")
+
+        second = plan_tool_workflow(
+            user_text=prompt,
+            task_class="unknown",
+            executed_steps=[
+                {
+                    "tool_name": "workspace.ensure_directory",
+                    "arguments": {"path": "alpha"},
+                    "observation": {
+                        "intent": "workspace.ensure_directory",
+                        "tool_surface": "workspace",
+                        "ok": True,
+                        "status": "executed",
+                        "path": "alpha",
+                        "action": "created",
+                        "already_present": False,
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/openclaw_workspace_truth"},
+        )
+
+        self.assertTrue(second.handled)
+        self.assertEqual(second.reason, "planned_workspace_write_after_bootstrap")
+        self.assertEqual(second.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(second.next_payload["arguments"]["path"], "alpha/hello.txt")
+        self.assertEqual(second.next_payload["arguments"]["content"], "HELLO-LOCAL-TRUTH")
 
     def test_workflow_planner_continues_directory_bootstrap_into_file_writes(self) -> None:
         prompt = (
@@ -560,6 +803,34 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(decision.reason, "planned_read_before_append")
         self.assertEqual(decision.next_payload["intent"], "workspace.read_file")
         self.assertEqual(decision.next_payload["arguments"]["path"], "nulla_test_01.txt")
+
+    def test_workflow_planner_recovers_relative_readback_path_from_absolute_workspace_history(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="Now read the whole file back exactly.",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={
+                "surface": "openclaw",
+                "platform": "openclaw",
+                "workspace": "/tmp/openclaw_workspace_truth_live",
+                "conversation_history": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Inside /tmp/openclaw_workspace_truth_live/alpha create adder.py with exactly this code:\n\n"
+                            "def add(a: int, b: int) -> int:\n"
+                            "    return a + b\n"
+                        ),
+                    }
+                ],
+            },
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertEqual(decision.reason, "planned_workspace_readback")
+        self.assertEqual(decision.next_payload["intent"], "workspace.read_file")
+        self.assertEqual(decision.next_payload["arguments"]["path"], "alpha/adder.py")
+        self.assertTrue(decision.next_payload["arguments"]["verbatim"])
 
     def test_should_attempt_tool_intent_for_live_recency_lookup(self) -> None:
         should_run = should_attempt_tool_intent(
@@ -952,6 +1223,60 @@ class ToolIntentExecutorTests(unittest.TestCase):
         )
         self.assertTrue(fourth.handled)
         self.assertEqual(fourth.next_payload["intent"], "sandbox.run_command")
+
+    def test_workflow_planner_routes_git_status_requests_into_runtime_git_status(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="git status for this repo",
+            task_class="file_inspection",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertEqual(decision.reason, "planned_workspace_git_status")
+        self.assertEqual(decision.next_payload["intent"], "workspace.git_status")
+
+    def test_workflow_planner_routes_git_activity_requests_into_runtime_git_summary(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="check this git repo and tell me how many branches there are, how many commits happened today, and how many happened yesterday. Use tools and be exact.",
+            task_class="file_inspection",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertEqual(decision.reason, "planned_workspace_git_summary")
+        self.assertEqual(decision.next_payload["intent"], "workspace.git_summary")
+
+    def test_workflow_planner_stops_after_git_inspection(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="check this git repo and tell me how many branches there are, how many commits happened today, and how many happened yesterday. Use tools and be exact.",
+            task_class="file_inspection",
+            executed_steps=[
+                {
+                    "tool_name": "workspace.git_summary",
+                    "arguments": {},
+                    "observation": {
+                        "intent": "workspace.git_summary",
+                        "tool_surface": "workspace",
+                        "ok": True,
+                        "status": "executed",
+                        "local_branch_count": 12,
+                        "remote_branch_count": 4,
+                        "total_branch_count": 16,
+                        "today_date": "2026-03-30",
+                        "today_commit_count": 10,
+                        "yesterday_date": "2026-03-29",
+                        "yesterday_commit_count": 10,
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertTrue(decision.stop_after)
+        self.assertEqual(decision.reason, "workspace_stop_after_git_inspection")
 
     def test_workflow_planner_prefers_validation_intent_for_explicit_pytest_command(self) -> None:
         decision = plan_tool_workflow(

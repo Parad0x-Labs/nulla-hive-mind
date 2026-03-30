@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest import mock
 
 from core.runtime_context import apply_runtime_context, build_runtime_context
+from core.runtime_install_profiles import persist_install_profile_record
 
 
 def test_build_runtime_context_centralizes_runtime_and_workspace_paths(tmp_path: Path) -> None:
@@ -61,3 +62,16 @@ def test_build_runtime_context_uses_install_receipt_runtime_home_when_env_is_uns
 
     assert context.paths.runtime_home == runtime_home.resolve()
     assert context.paths.db_path == (runtime_home / "data" / "nulla_web0_v2.db").resolve()
+
+
+def test_build_runtime_context_marks_local_only_install_profiles_as_local_first(tmp_path: Path) -> None:
+    runtime_home = tmp_path / "runtime-home"
+    persist_install_profile_record(runtime_home, "local-only", selected_model="qwen3:8b")
+
+    context = build_runtime_context(
+        mode="api_server",
+        env={"NULLA_HOME": str(runtime_home)},
+    )
+
+    assert context.feature_flags.local_only_mode is True
+    assert context.feature_flags.allow_remote_only_without_backend is False

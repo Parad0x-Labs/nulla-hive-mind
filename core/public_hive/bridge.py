@@ -24,6 +24,7 @@ class PublicHiveBridge(
         self.config = config or _load_public_hive_bridge_config()
         self._urlopen = urlopen or urllib.request.urlopen
         self._nullabook_token: str | None = _UNSET_SENTINEL
+        self._preferred_topic_base_url: str | None = None
         self._client = public_hive_client.PublicHiveHttpClient(
             self.config,
             urlopen=self._urlopen,

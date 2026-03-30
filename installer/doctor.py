@@ -6,10 +6,12 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+from core.install_recommendations import build_install_recommendation_truth
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_install_profiles import InstallProfileTruth, build_install_profile_truth
 
@@ -120,6 +122,45 @@ def _public_hive_status(project: Path, runtime: Path) -> dict[str, Any]:
     )
 
 
+def _launch_agent_status(launch_agent_path: str) -> dict[str, Any]:
+    candidate = Path(str(launch_agent_path or "")).expanduser()
+    if not str(launch_agent_path or "").strip():
+        return _status(True, "launch agent skipped", path="")
+    if not candidate.exists():
+        return _status(False, "launch agent missing", path=str(candidate))
+    if sys.platform != "darwin":
+        return _status(True, "launch agent file present", path=str(candidate), loaded=None, running=None)
+
+    uid = os.getuid()
+    label = candidate.stem
+    try:
+        result = subprocess.run(
+            ["launchctl", "print", f"gui/{uid}/{label}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception as exc:  # pragma: no cover - system dependent
+        return _status(
+            False,
+            "launch agent status unavailable",
+            path=str(candidate),
+            error=str(exc),
+            loaded=False,
+            running=False,
+        )
+
+    loaded = result.returncode == 0
+    running = loaded and "state = running" in str(result.stdout or "")
+    if loaded and running:
+        detail = "launch agent loaded and running"
+    elif loaded:
+        detail = "launch agent loaded but not running"
+    else:
+        detail = "launch agent file present but not loaded"
+    return _status(loaded, detail, path=str(candidate), loaded=loaded, running=running)
+
+
 def build_report(
     *,
     project_root: str,
@@ -129,6 +170,7 @@ def build_report(
     openclaw_config_path: str,
     openclaw_agent_dir: str,
     ollama_binary: str,
+    launch_agent_path: str = "",
 ) -> dict[str, Any]:
     project = Path(project_root).resolve()
     runtime = Path(runtime_home).expanduser().resolve()
@@ -137,6 +179,10 @@ def build_report(
     liquefy_config = Path.home() / ".liquefy" / "config.json"
     provider_capability_truth, install_profile = _provider_snapshot_and_profile(
         model_tag=model_tag,
+        runtime_home=runtime,
+    )
+    install_recommendation = build_install_recommendation_truth(
+        selected_model=model_tag,
         runtime_home=runtime,
     )
     ollama_path = _resolve_binary(ollama_binary)
@@ -161,6 +207,14 @@ def build_report(
         staged_bases = list_staged_trainable_bases()
     except Exception as exc:  # pragma: no cover - best effort only
         staged_bases = [{"error": str(exc)}]
+    trainable_base_error = bool(staged_bases) and "error" in staged_bases[0]
+    trainable_base_ok = not trainable_base_error
+    if trainable_base_error:
+        trainable_base_detail = "trainable base status unavailable"
+    elif staged_bases:
+        trainable_base_detail = "staged trainable base found"
+    else:
+        trainable_base_detail = "no staged trainable base found yet"
 
     report = {
         "project_root": str(project),
@@ -168,6 +222,7 @@ def build_report(
         "selected_model": str(model_tag or "").strip(),
         "provider_capability_truth": provider_capability_truth,
         "install_profile": install_profile.to_dict(),
+        "install_recommendation": install_recommendation.to_dict(),
         "components": {
             "project_root": _status(project.exists(), "project root found" if project.exists() else "project root missing", path=str(project)),
             "runtime_home": _status(runtime.exists(), "runtime home found" if runtime.exists() else "runtime home missing", path=str(runtime)),
@@ -186,9 +241,10 @@ def build_report(
                 agent_dir_exists=bool(openclaw_agent_dir) and Path(openclaw_agent_dir).expanduser().exists(),
             ),
             "liquefy": _status(liquefy_config.exists(), "Liquefy config present" if liquefy_config.exists() else "Liquefy config missing", path=str(liquefy_config)),
-            "trainable_base": _status(bool(staged_bases), "staged trainable base found" if staged_bases else "no staged trainable base found", staged_bases=staged_bases),
+            "trainable_base": _status(trainable_base_ok, trainable_base_detail, staged_bases=staged_bases),
             "ollama": _status(bool(ollama_path), "Ollama binary found" if ollama_path else "Ollama binary missing", path=str(ollama_path or ollama_binary or "")),
             "trace_surface": _status((project / "OpenClaw_NULLA.sh").exists(), "trace launcher path available" if (project / "OpenClaw_NULLA.sh").exists() else "trace launcher path missing", url="http://127.0.0.1:11435/trace"),
+            "launch_agent": _launch_agent_status(launch_agent_path),
             "public_hive": _public_hive_status(project, runtime),
         },
     }
@@ -213,6 +269,7 @@ def main() -> int:
     parser.add_argument("openclaw_config_path")
     parser.add_argument("openclaw_agent_dir")
     parser.add_argument("ollama_binary")
+    parser.add_argument("launch_agent_path")
     args = parser.parse_args()
 
     report = build_report(
@@ -223,6 +280,7 @@ def main() -> int:
         openclaw_config_path=args.openclaw_config_path,
         openclaw_agent_dir=args.openclaw_agent_dir,
         ollama_binary=args.ollama_binary,
+        launch_agent_path=args.launch_agent_path,
     )
     target = Path(args.project_root).resolve() / "install_doctor.json"
     target.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

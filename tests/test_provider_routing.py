@@ -9,6 +9,7 @@ from core.provider_routing import (
 )
 from storage.db import get_connection
 from storage.migrations import run_migrations
+from storage.model_provider_manifest import ModelProviderManifest
 
 
 def _clear_manifests() -> None:
@@ -206,6 +207,46 @@ def test_queen_role_prefers_local_vllm_when_no_remote_queen_exists() -> None:
     assert plan.selected is not None
     assert plan.selected.provider_name == "vllm-local"
     assert plan.candidate_provider_ids[0] == "vllm-local:qwen2.5:32b-vllm"
+
+
+def test_provider_capability_truth_treats_exact_loopback_http_as_local() -> None:
+    capability = provider_capability_truth_for_manifest(
+        ModelProviderManifest(
+            provider_name="vllm-local",
+            model_name="qwen2.5:14b",
+            source_type="http",
+            adapter_type="openai_compatible",
+            license_name="User-managed",
+            license_reference="user-managed",
+            weight_location="external",
+            runtime_dependency="vllm",
+            runtime_config={"base_url": "http://127.0.0.1:8000/v1"},
+            metadata={"orchestration_role": "queen"},
+            enabled=True,
+        )
+    )
+
+    assert capability.locality == "local"
+
+
+def test_provider_capability_truth_treats_loopback_named_remote_host_as_remote() -> None:
+    capability = provider_capability_truth_for_manifest(
+        ModelProviderManifest(
+            provider_name="kimi-remote",
+            model_name="kimi-mock",
+            source_type="http",
+            adapter_type="openai_compatible",
+            license_name="Provider",
+            license_reference="user-managed",
+            weight_location="external",
+            runtime_dependency="remote-openai-compatible-provider",
+            runtime_config={"base_url": "http://127.0.0.1.nip.io:8011/v1"},
+            metadata={"deployment_class": "cloud", "orchestration_role": "queen"},
+            enabled=True,
+        )
+    )
+
+    assert capability.locality == "remote"
 
 
 def test_drone_role_can_use_local_llamacpp_lane_when_qwen_is_absent() -> None:

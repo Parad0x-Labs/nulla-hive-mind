@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import fnmatch
+import json
 import platform
 import re
 import subprocess
@@ -19,7 +20,7 @@ from core.execution.artifacts import (
     record_workspace_mutation,
     rollback_last_workspace_mutation,
 )
-from core.execution.git_tools import git_diff_workspace, git_status_workspace
+from core.execution.git_tools import git_diff_workspace, git_status_workspace, git_summary_workspace
 from core.execution.validation_tools import render_validation_result, runtime_validation_command, validation_command
 from core.execution.workspace_tools import (
     apply_unified_diff_workspace,
@@ -34,7 +35,8 @@ from core.execution.workspace_tools import (
     resolve_workspace_path as resolve_workspace_path_impl,
 )
 from core.execution_gate import ExecutionGate
-from core.hardware_tier import probe_machine, select_qwen_tier
+from core.hardware_tier import probe_machine
+from core.install_recommendations import install_recommendation_machine_summary
 from core.learning import promote_verified_procedure
 from core.runtime_paths import resolve_workspace_root
 from core.runtime_tool_contracts import runtime_tool_contract_map, runtime_tool_contracts
@@ -255,6 +257,17 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
             "vram_gb": float(payload.get("vram_gb") or 0.0) if payload.get("vram_gb") is not None else None,
             "accelerator": str(payload.get("accelerator") or "").strip(),
             "recommended_model": str(payload.get("recommended_model") or "").strip(),
+            "selected_tier": str(payload.get("selected_tier") or "").strip(),
+            "capacity_bucket": str(payload.get("capacity_bucket") or "").strip(),
+            "recommended_bundle_models": [
+                str(item).strip()
+                for item in list(payload.get("recommended_bundle_models") or [])
+                if str(item).strip()
+            ],
+            "display_name": str(payload.get("display_name") or "").strip(),
+            "display_native_resolution": str(payload.get("display_native_resolution") or "").strip(),
+            "display_current_resolution": str(payload.get("display_current_resolution") or "").strip(),
+            "screen_size": str(payload.get("screen_size") or "").strip(),
         }
     if intent == "machine.ensure_directory":
         return {
@@ -262,6 +275,13 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
             "path": str(payload.get("path") or "").strip(),
             "action": str(payload.get("action") or "").strip(),
             "already_present": bool(payload.get("already_present", False)),
+        }
+    if intent == "machine.write_file":
+        return {
+            "intent": intent,
+            "path": str(payload.get("path") or "").strip(),
+            "line_count": int(payload.get("line_count") or 0),
+            "action": str(payload.get("action") or "").strip(),
         }
     if intent == "workspace.search_text":
         matches = [dict(item) for item in list(payload.get("matches") or []) if isinstance(item, dict)]
@@ -351,6 +371,23 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
             "cwd": str(payload.get("cwd") or "").strip(),
             "returncode": int(payload.get("returncode") or 0),
             "success": bool(payload.get("success", False)),
+        }
+    if intent == "workspace.git_summary":
+        return {
+            "intent": intent,
+            "cwd": str(payload.get("cwd") or "").strip(),
+            "branch": str(payload.get("branch") or "").strip(),
+            "commit": str(payload.get("commit") or "").strip(),
+            "dirty": bool(payload.get("dirty", False)),
+            "local_branch_count": int(payload.get("local_branch_count") or 0),
+            "remote_branch_count": int(payload.get("remote_branch_count") or 0),
+            "total_branch_count": int(payload.get("total_branch_count") or 0),
+            "today_date": str(payload.get("today_date") or "").strip(),
+            "today_commit_count": int(payload.get("today_commit_count") or 0),
+            "yesterday_date": str(payload.get("yesterday_date") or "").strip(),
+            "yesterday_commit_count": int(payload.get("yesterday_commit_count") or 0),
+            "commit_count_scope": str(payload.get("commit_count_scope") or "").strip(),
+            "timezone_label": str(payload.get("timezone_label") or "").strip(),
         }
     if intent == "orchestration.execute_envelope":
         return {
@@ -446,6 +483,8 @@ def execute_runtime_tool(
             return _inspect_machine_specs()
         if intent == "machine.ensure_directory":
             return _ensure_machine_directory(arguments)
+        if intent == "machine.write_file":
+            return _write_machine_file(arguments)
         if intent == "workspace.list_tree":
             return _list_tree(arguments, workspace_root=workspace_root)
         if intent == "workspace.search_text":
@@ -466,6 +505,8 @@ def execute_runtime_tool(
             return _git_status(arguments, workspace_root=workspace_root)
         if intent == "workspace.git_diff":
             return _git_diff(arguments, workspace_root=workspace_root)
+        if intent == "workspace.git_summary":
+            return _git_summary(arguments, workspace_root=workspace_root)
         if intent == "workspace.rollback_last_change":
             return _rollback_last_change(arguments, workspace_root=workspace_root, session_id=_runtime_session_id(source_context))
         if intent == "workspace.run_tests":
@@ -850,9 +891,18 @@ def _machine_chip_name() -> str:
 
 def _inspect_machine_specs() -> RuntimeExecutionResult:
     probe = probe_machine()
-    selected_tier = select_qwen_tier(probe)
+    recommendation_summary = install_recommendation_machine_summary(probe=probe)
+    recommended_model = str(recommendation_summary.get("ollama_model") or "").strip() or "qwen3:8b"
+    recommended_bundle_models = tuple(
+        str(item).strip()
+        for item in recommendation_summary.get("recommended_bundle_models") or ()
+        if str(item).strip()
+    )
+    selected_tier = str(recommendation_summary.get("selected_tier") or "").strip()
+    capacity_bucket = str(recommendation_summary.get("capacity_bucket") or "").strip()
     os_name, os_version = _machine_os_details()
     chip_name = _machine_chip_name()
+    display = _machine_display_details()
     response_lines = [
         "Machine specs for this host:",
         f"- OS: {os_name}{f' {os_version}' if os_version else ''}",
@@ -865,7 +915,17 @@ def _inspect_machine_specs() -> RuntimeExecutionResult:
     if probe.vram_gb is not None:
         label = "Unified memory" if str(probe.accelerator or "").strip().lower() == "mps" else "VRAM"
         response_lines.append(f"- {label}: {round(probe.vram_gb, 1)} GiB")
-    response_lines.append(f"- Recommended local model: {selected_tier.ollama_tag}")
+    if str(display.get("name") or "").strip():
+        response_lines.append(f"- Display: {display['name']}")
+    if str(display.get("native_resolution") or "").strip():
+        response_lines.append(f"- Native display resolution: {display['native_resolution']}")
+    if str(display.get("current_resolution") or "").strip():
+        response_lines.append(f"- Current display mode: {display['current_resolution']}")
+    if str(display.get("screen_size") or "").strip():
+        response_lines.append(f"- Screen size: {display['screen_size']}")
+    response_lines.append(f"- Recommended local model: {recommended_model}")
+    if recommended_bundle_models:
+        response_lines.append(f"- Recommended local bundle: {', '.join(recommended_bundle_models)}")
     observation = _tool_observation(
         intent="machine.inspect_specs",
         tool_surface="machine",
@@ -879,8 +939,14 @@ def _inspect_machine_specs() -> RuntimeExecutionResult:
         gpu_name=probe.gpu_name or "",
         vram_gb=round(probe.vram_gb, 1) if probe.vram_gb is not None else None,
         accelerator=probe.accelerator,
-        recommended_model=selected_tier.ollama_tag,
-        selected_tier=selected_tier.tier_name,
+        recommended_model=recommended_model,
+        selected_tier=selected_tier,
+        capacity_bucket=capacity_bucket,
+        recommended_bundle_models=list(recommended_bundle_models),
+        display_name=str(display.get("name") or "").strip(),
+        display_native_resolution=str(display.get("native_resolution") or "").strip(),
+        display_current_resolution=str(display.get("current_resolution") or "").strip(),
+        screen_size=str(display.get("screen_size") or "").strip(),
     )
     return RuntimeExecutionResult(
         handled=True,
@@ -896,11 +962,56 @@ def _inspect_machine_specs() -> RuntimeExecutionResult:
             "gpu_name": probe.gpu_name or "",
             "vram_gb": round(probe.vram_gb, 1) if probe.vram_gb is not None else None,
             "accelerator": probe.accelerator,
-            "recommended_model": selected_tier.ollama_tag,
-            "selected_tier": selected_tier.tier_name,
+            "recommended_model": recommended_model,
+            "selected_tier": selected_tier,
+            "capacity_bucket": capacity_bucket,
+            "recommended_bundle_models": list(recommended_bundle_models),
+            "display_name": str(display.get("name") or "").strip(),
+            "display_native_resolution": str(display.get("native_resolution") or "").strip(),
+            "display_current_resolution": str(display.get("current_resolution") or "").strip(),
+            "screen_size": str(display.get("screen_size") or "").strip(),
             "observation": observation,
         },
     )
+
+
+def _machine_display_details() -> dict[str, str]:
+    if str(platform.system() or "").strip().lower() != "darwin":
+        return {}
+    try:
+        completed = subprocess.run(
+            ["system_profiler", "SPDisplaysDataType", "-json"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        if int(completed.returncode or 0) != 0:
+            return {}
+        payload = json.loads(str(completed.stdout or "").strip() or "{}")
+    except Exception:
+        return {}
+    for gpu in list(payload.get("SPDisplaysDataType") or []):
+        for display in list((gpu or {}).get("spdisplays_ndrvs") or []):
+            if not isinstance(display, dict):
+                continue
+            name = str(display.get("_name") or "").strip()
+            native_resolution = str(
+                display.get("_spdisplays_pixels")
+                or display.get("spdisplays_pixelresolution")
+                or ""
+            ).strip()
+            current_resolution = str(display.get("spdisplays_resolution") or "").strip()
+            screen_size = ""
+            if name.lower() == "imac" and native_resolution == "4480 x 2520":
+                screen_size = "24-inch (inferred from Apple 4.5K iMac panel)"
+            return {
+                "name": name,
+                "native_resolution": native_resolution,
+                "current_resolution": current_resolution,
+                "screen_size": screen_size,
+            }
+    return {}
 
 
 def _ensure_machine_directory(arguments: dict[str, Any]) -> RuntimeExecutionResult:
@@ -962,6 +1073,73 @@ def _ensure_machine_directory(arguments: dict[str, Any]) -> RuntimeExecutionResu
                 path=_home_relative_label(target),
                 action=action,
                 already_present=already_present,
+            ),
+        },
+    )
+
+
+def _write_machine_file(arguments: dict[str, Any]) -> RuntimeExecutionResult:
+    if not policy_engine.get("filesystem.allow_write_workspace", False):
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="disabled",
+            response_text="Safe local machine writes are disabled by policy.",
+            details={
+                "observation": _tool_observation(
+                    intent="machine.write_file",
+                    tool_surface="machine",
+                    ok=False,
+                    status="disabled",
+                ),
+            },
+        )
+    try:
+        target = _resolve_machine_directory(arguments.get("path"))
+    except ValueError as exc:
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="not_allowed",
+            response_text=str(exc).replace("inspect safe local directories in", "write inside"),
+            details={
+                "observation": _tool_observation(
+                    intent="machine.write_file",
+                    tool_surface="machine",
+                    ok=False,
+                    status="not_allowed",
+                    allowed_roots=[_home_relative_label(root) for root in _safe_machine_roots()],
+                ),
+            },
+        )
+    content = str(arguments.get("content") or "")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    already_present = target.exists()
+    target.write_text(content, encoding="utf-8")
+    action = "updated" if already_present else "created"
+    status = "updated" if already_present else "executed"
+    line_count = len(content.splitlines()) if content else 0
+    return RuntimeExecutionResult(
+        handled=True,
+        ok=True,
+        status=status,
+        response_text=(
+            f"Updated file `{_home_relative_label(target)}`."
+            if already_present
+            else f"Created file `{_home_relative_label(target)}`."
+        ),
+        details={
+            "path": _home_relative_label(target),
+            "line_count": line_count,
+            "action": action,
+            "observation": _tool_observation(
+                intent="machine.write_file",
+                tool_surface="machine",
+                ok=True,
+                status=status,
+                path=_home_relative_label(target),
+                line_count=line_count,
+                action=action,
             ),
         },
     )
@@ -1525,6 +1703,36 @@ def _git_diff(arguments: dict[str, Any], *, workspace_root: Path) -> RuntimeExec
         stdout=str(details.get("stdout") or ""),
         stderr=str(details.get("stderr") or ""),
         returncode=int(details.get("returncode") or 0),
+    )
+    return _result_from_payload(
+        ok=bool(payload.get("ok")),
+        status=str(payload.get("status") or ""),
+        response_text=str(payload.get("response_text") or ""),
+        details=details,
+    )
+
+
+def _git_summary(arguments: dict[str, Any], *, workspace_root: Path) -> RuntimeExecutionResult:
+    payload = git_summary_workspace(arguments, workspace_root=workspace_root)
+    details = dict(payload.get("details") or {})
+    details["observation"] = _tool_observation(
+        intent="workspace.git_summary",
+        tool_surface="workspace",
+        ok=bool(payload.get("ok")),
+        status=str(payload.get("status") or ""),
+        cwd=str(details.get("cwd") or ""),
+        branch=str(details.get("branch") or ""),
+        commit=str(details.get("commit") or ""),
+        dirty=bool(details.get("dirty", False)),
+        local_branch_count=int(details.get("local_branch_count") or 0),
+        remote_branch_count=int(details.get("remote_branch_count") or 0),
+        total_branch_count=int(details.get("total_branch_count") or 0),
+        today_date=str(details.get("today_date") or ""),
+        today_commit_count=int(details.get("today_commit_count") or 0),
+        yesterday_date=str(details.get("yesterday_date") or ""),
+        yesterday_commit_count=int(details.get("yesterday_commit_count") or 0),
+        commit_count_scope=str(details.get("commit_count_scope") or ""),
+        timezone_label=str(details.get("timezone_label") or ""),
     )
     return _result_from_payload(
         ok=bool(payload.get("ok")),

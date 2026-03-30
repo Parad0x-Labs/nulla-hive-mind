@@ -43,9 +43,6 @@ _ADAPTIVE_RESEARCH_MARKERS: tuple[str, ...] = (
     "versus",
     "vs",
     "difference",
-    "tradeoff",
-    "tradeoffs",
-    "pros and cons",
     "verify",
     "confirm",
     "is it true",
@@ -65,9 +62,6 @@ _COMPARE_MARKERS: tuple[str, ...] = (
     "versus",
     " vs ",
     "difference",
-    "tradeoff",
-    "tradeoffs",
-    "pros and cons",
 )
 _VERIFY_MARKERS: tuple[str, ...] = (
     "verify",
@@ -836,8 +830,10 @@ def _adaptive_research_decision(
         }
 
     has_compare = any(marker in lowered for marker in _COMPARE_MARKERS)
+    has_tradeoff_compare = _looks_like_concrete_tradeoff_query(text=text, topic_hints=topic_hints)
     has_verify = any(marker in lowered for marker in _VERIFY_MARKERS)
-    has_research_marker = any(marker in lowered for marker in _ADAPTIVE_RESEARCH_MARKERS)
+    has_research_marker = any(marker in lowered for marker in _ADAPTIVE_RESEARCH_MARKERS) or has_tradeoff_compare
+    has_compare = bool(has_compare or has_tradeoff_compare)
     has_specific_issue = any(marker in lowered for marker in _SPECIFIC_TROUBLESHOOTING_MARKERS) or bool(re.search(r"`[^`]+`|[A-Z][A-Za-z]+Error|\b\d+\.\d+(?:\.\d+)?\b", text))
     explicit_lookup = looks_like_explicit_lookup_request(text)
     public_entity_lookup = looks_like_public_entity_lookup_request(text)
@@ -851,7 +847,7 @@ def _adaptive_research_decision(
     chat_escalation = task_class not in {"research", "chat_research", "system_design", "debugging", "dependency_resolution", "config"} and (
         has_research_marker or has_compare or has_verify or has_specific_issue or explicit_lookup or public_entity_lookup
     )
-    always_research_classes = {"research", "chat_research", "system_design", "debugging", "dependency_resolution", "config"}
+    always_research_classes = {"research", "chat_research"}
     enabled = bool(
         (task_class in always_research_classes)
         or explicit_lookup
@@ -880,6 +876,8 @@ def _adaptive_research_decision(
         strategy = "narrow"
     elif has_research_marker:
         strategy = "broaden"
+    if not enabled:
+        strategy = "not_needed"
     return {
         "enabled": enabled,
         "reason": "chat_escalation" if chat_escalation else "research_task" if enabled else "research_not_needed",
@@ -894,6 +892,30 @@ def _adaptive_research_decision(
         "entity_seed": entity_seed,
         "entity_retry_query": entity_retry_query,
     }
+
+
+def _looks_like_concrete_tradeoff_query(*, text: str, topic_hints: list[str]) -> bool:
+    lowered = f" {' '.join(str(text or '').split()).lower()} "
+    if not any(marker in lowered for marker in ("tradeoff", "tradeoffs", "pros and cons")):
+        return False
+    if " between " in lowered and " and " in lowered:
+        return True
+    if " vs " in lowered or " versus " in lowered:
+        return True
+    generic_hints = {
+        "architecture",
+        "design",
+        "system design",
+        "integration",
+        "technical",
+        "general",
+    }
+    concrete_hints = {
+        hint
+        for hint in (str(item or "").strip().lower() for item in topic_hints)
+        if hint and hint not in generic_hints
+    }
+    return len(concrete_hints) >= 2
 
 
 def _adaptive_query_seed(user_input: str, *, interpretation: Any, decision: dict[str, Any] | None = None) -> str:

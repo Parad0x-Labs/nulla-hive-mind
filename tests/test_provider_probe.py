@@ -9,13 +9,13 @@ from core.provider_routing import ProviderCapabilityTruth
 from installer.provider_probe import build_probe_report, list_ollama_models, remote_env_statuses, render_probe_report
 
 
-def test_probe_report_prefers_dual_local_stack_on_24gb_host_with_required_models() -> None:
+def test_probe_report_prefers_bundle_local_stack_on_24gb_mps_host_with_required_models() -> None:
     report = build_probe_report(
         machine=MachineProbe(cpu_cores=10, ram_gb=24.0, gpu_name="Apple Silicon", vram_gb=24.0, accelerator="mps"),
         ollama_binary="/usr/local/bin/ollama",
         ollama_models=[
-            {"name": "qwen2.5:14b", "id": "a", "size": "9.0 GB", "modified": "today"},
-            {"name": "qwen2.5:7b", "id": "b", "size": "4.7 GB", "modified": "today"},
+            {"name": "qwen3:8b", "id": "a", "size": "5.2 GB", "modified": "today"},
+            {"name": "deepseek-r1:8b", "id": "b", "size": "5.2 GB", "modified": "today"},
         ],
         env_statuses={
             "kimi": {"configured": False},
@@ -25,17 +25,39 @@ def test_probe_report_prefers_dual_local_stack_on_24gb_host_with_required_models
         },
     )
 
-    assert report["recommended_stack_id"] == "local_dual_ollama"
-    assert report["recommended_install_profile_id"] == "local-max"
-    assert report["recommended_install_profile_display_id"] == "ollama-max (local-max)"
+    assert report["recommended_stack_id"] == "local_only"
+    assert report["recommended_install_profile_id"] == "local-only"
+    assert report["recommended_install_profile_display_id"] == "ollama-only (local-only)"
     assert report["local_multi_llm_fit"] == "pressure_sensitive"
-    dual = next(item for item in report["stacks"] if item["stack_id"] == "local_dual_ollama")
+    assert report["capacity_bucket"] == "C"
+    assert report["machine"]["ollama_model"] == "qwen3:8b"
+    assert report["machine"]["selected_tier"] == "capacity-C"
+    assert report["machine"]["param_billions"] == 8.0
+    assert report["machine"]["recommended_bundle_models"] == ["qwen3:8b", "deepseek-r1:8b"]
+    local_only = next(item for item in report["stacks"] if item["stack_id"] == "local_only")
+    assert local_only["install_profile_id"] == "local-only"
+    assert local_only["install_profile_display_id"] == "ollama-only (local-only)"
+    assert local_only["status"] == "ready"
+    assert local_only["recommended"] is True
+    assert local_only["bundle_id"] == "dual_qwen3_8b_deepseek_r1_8b"
+    recommendation = report["install_recommendation"]
+    assert recommendation["recommended_default_profile"] == "local-only"
+    assert recommendation["recommended_optional_profile"] == "local-max"
+    assert recommendation["primary_local_model"] == "qwen3:8b"
+    assert recommendation["recommended_bundle_id"] == "dual_qwen3_8b_deepseek_r1_8b"
+    assert recommendation["recommended_bundle_models"] == ["qwen3:8b", "deepseek-r1:8b"]
+    assert recommendation["secondary_local_model"] == "qwen2.5:14b-gguf"
+    assert recommendation["secondary_local_supported"] is True
+    dual = next(item for item in report["stacks"] if item["stack_id"] == "local_plus_llamacpp")
     assert dual["install_profile_id"] == "local-max"
     assert dual["install_profile_display_id"] == "ollama-max (local-max)"
-    assert dual["status"] == "ready"
+    assert dual["status"] == "needs_setup"
+    assert dual["recommended"] is False
+    assert dual["secondary_backend"] == "llama.cpp"
+    assert dual["secondary_model"] == "qwen2.5:14b-gguf"
 
 
-def test_probe_report_marks_kimi_lane_real_but_unwired_remote_lanes_honestly() -> None:
+def test_probe_report_hides_remote_lanes_but_keeps_remote_env_truth_and_qvac_honest() -> None:
     report = build_probe_report(
         machine=MachineProbe(cpu_cores=10, ram_gb=24.0, gpu_name="Apple Silicon", vram_gb=24.0, accelerator="mps"),
         ollama_binary="/usr/local/bin/ollama",
@@ -68,17 +90,57 @@ def test_probe_report_marks_kimi_lane_real_but_unwired_remote_lanes_honestly() -
         show_unsupported=True,
     )
 
-    kimi = next(item for item in report["stacks"] if item["stack_id"] == "local_plus_kimi")
-    tether = next(item for item in report["unsupported_stacks"] if item["stack_id"] == "local_plus_tether")
     qvac = next(item for item in report["unsupported_stacks"] if item["stack_id"] == "local_plus_qvac")
 
-    assert kimi["status"] == "ready"
-    assert "real remote kimi queen lane" in kimi["reason"].lower()
-    assert tether["status"] == "not_implemented"
+    assert all(item["stack_id"] != "local_plus_kimi" for item in report["stacks"])
+    assert all(item["stack_id"] != "local_plus_tether" for item in report["stacks"])
+    assert report["remote_env"]["kimi"]["configured"] is True
+    assert report["remote_env"]["tether"]["configured"] is True
     assert qvac["status"] == "not_implemented"
 
 
-def test_probe_report_prefers_kimi_on_smaller_host_when_configured_and_ready() -> None:
+def test_probe_report_keeps_local_only_default_when_smaller_host_has_real_remote_lane() -> None:
+    report = build_probe_report(
+        machine=MachineProbe(cpu_cores=8, ram_gb=12.0, gpu_name=None, vram_gb=None, accelerator="cpu"),
+        ollama_binary="/usr/local/bin/ollama",
+        ollama_models=[{"name": "qwen2.5:7b", "id": "b", "size": "4.7 GB", "modified": "today"}],
+        env_statuses={
+            "kimi": {"configured": False},
+            "generic_remote": {"configured": True},
+            "tether": {"configured": False},
+            "qvac": {"configured": False},
+        },
+        provider_capability_truth=(
+            ProviderCapabilityTruth(
+                provider_id="openai-compatible-remote:gpt-4.1-mini",
+                model_id="gpt-4.1-mini",
+                role_fit="queen",
+                context_window=131072,
+                tool_support=("tool_calls", "structured_json"),
+                structured_output_support=True,
+                tokens_per_second=0.0,
+                ram_budget_gb=0.0,
+                vram_budget_gb=0.0,
+                quantization="provider",
+                locality="remote",
+                privacy_class="remote_provider",
+                queue_depth=0,
+                max_safe_concurrency=2,
+                availability_state="ready",
+            ),
+        ),
+    )
+
+    assert report["recommended_stack_id"] == "local_only"
+    assert report["recommended_install_profile_id"] == "local-only"
+    assert report["install_recommendation"]["recommended_default_profile"] == "local-only"
+    assert report["install_recommendation"]["recommended_optional_profile"] == ""
+    assert report["install_recommendation"]["secondary_local_supported"] is False
+    assert report["remote_env"]["generic_remote"]["configured"] is True
+    assert all(item["stack_id"] != "local_plus_remote_openai_compatible" for item in report["stacks"])
+
+
+def test_probe_report_keeps_local_only_default_when_kimi_is_configured_and_ready() -> None:
     report = build_probe_report(
         machine=MachineProbe(cpu_cores=8, ram_gb=12.0, gpu_name=None, vram_gb=None, accelerator="cpu"),
         ollama_binary="/usr/local/bin/ollama",
@@ -110,12 +172,13 @@ def test_probe_report_prefers_kimi_on_smaller_host_when_configured_and_ready() -
         ),
     )
 
-    assert report["recommended_stack_id"] == "local_plus_kimi"
-    assert report["recommended_install_profile_id"] == "hybrid-kimi"
-    assert report["recommended_install_profile_display_id"] == "ollama+kimi (hybrid-kimi)"
-    kimi = next(item for item in report["stacks"] if item["stack_id"] == "local_plus_kimi")
-    assert kimi["recommended"] is True
-    assert kimi["status"] == "ready"
+    assert report["recommended_stack_id"] == "local_only"
+    assert report["recommended_install_profile_id"] == "local-only"
+    assert report["recommended_install_profile_display_id"] == "ollama-only (local-only)"
+    assert report["install_recommendation"]["recommended_default_profile"] == "local-only"
+    assert report["install_recommendation"]["secondary_local_supported"] is False
+    assert report["remote_env"]["kimi"]["configured"] is True
+    assert all(item["stack_id"] != "local_plus_kimi" for item in report["stacks"])
 
 
 def test_render_probe_report_surfaces_installed_models_and_recommendation() -> None:
@@ -134,9 +197,12 @@ def test_render_probe_report_surfaces_installed_models_and_recommendation() -> N
     rendered = render_probe_report(report)
     assert "recommended install profile" in rendered.lower()
     assert "recommended stack" in rendered.lower()
-    assert "qwen2.5:7b" in rendered
+    assert "gemma3:4b" in rendered
     assert "ollama-only (local-only)" in rendered
+    assert "local_plus_llamacpp" in rendered
+    assert "local_plus_remote_openai_compatible" not in rendered
     assert "local_plus_tether" not in rendered
+    assert "ollama+tether (hybrid-tether)" not in rendered
 
 
 def test_default_probe_report_hides_unsupported_remote_ideas() -> None:
@@ -153,7 +219,8 @@ def test_default_probe_report_hides_unsupported_remote_ideas() -> None:
     )
 
     assert "unsupported_stacks" not in report
-    assert all(item["stack_id"] not in {"local_plus_tether", "local_plus_qvac"} for item in report["stacks"])
+    assert all(item["stack_id"] != "local_plus_tether" for item in report["stacks"])
+    assert all(item["stack_id"] != "local_plus_qvac" for item in report["stacks"])
 
 
 def test_list_ollama_models_preserves_size_and_modified_columns(monkeypatch) -> None:

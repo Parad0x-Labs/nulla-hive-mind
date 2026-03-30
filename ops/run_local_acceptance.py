@@ -13,19 +13,27 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 from urllib import request
 from urllib.parse import urlparse
-
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
 REPO_ROOT = _repo_root()
-DEFAULT_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_qwen25_7b_profile.json"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.proof_manifest import build_proof_manifest, write_proof_manifest
+
+DEFAULT_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_ollama_bundle_profile.json"
+LEGACY_PROFILE_PATH = REPO_ROOT / "config" / "acceptance" / "local_qwen25_7b_profile.json"
 DEFAULT_START_SCRIPT = REPO_ROOT / "run.sh"
+DEFAULT_RUNTIME_LAUNCH_AGENT_LABEL = "ai.nulla.runtime"
+DEFAULT_BASE_URL = "http://127.0.0.1:11435"
 
 
 @dataclass(frozen=True)
@@ -35,12 +43,18 @@ class AcceptanceProfile:
     model: str
     cold_start_max_seconds: float
     simple_prompt_median_max_seconds: float
+    simple_prompt_hard_max_seconds: float
     file_task_median_max_seconds: float
     live_lookup_median_max_seconds: float
     chained_task_median_max_seconds: float
     consistency_min_passes: int
     manual_btc_source_label: str
     manual_btc_source_url: str
+    bundle_models: tuple[str, ...] = ()
+    bundle_roles: tuple[tuple[str, str], ...] = ()
+    capacity_bucket: str = ""
+    fallback_bundle_models: tuple[str, ...] = ()
+    advanced_optional_profile: str = ""
 
 
 def _sanitize_text(value: str, *, repo_root: Path) -> str:
@@ -64,6 +78,38 @@ def _read_json(url: str, *, data: dict[str, Any] | None = None, timeout: float =
     req = request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     with request.urlopen(req, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _discover_active_runtime_roots(base_url: str) -> tuple[Path, Path] | None:
+    try:
+        health = _read_json(f"{base_url.rstrip('/')}/healthz", timeout=5.0)
+    except Exception:
+        return None
+    capabilities = dict(health.get("capabilities") or {})
+    runtime_home = str(capabilities.get("runtime_home") or "").strip()
+    workspace_root = str(capabilities.get("workspace_root") or "").strip()
+    if not runtime_home or not workspace_root:
+        return None
+    return Path(runtime_home).expanduser().resolve(), Path(workspace_root).expanduser().resolve()
+
+
+def _startup_reply_is_coherent(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return False
+    if re.search(r"\b(hello|hi|hey|yo|gm|good morning|good afternoon|good evening|morning)\b", normalized):
+        return True
+    if "nulla" in normalized and any(
+        phrase in normalized
+        for phrase in (
+            "what do you need",
+            "what do you want me to do",
+            "how can i help",
+            "point me at the problem",
+        )
+    ):
+        return True
+    return False
 
 
 def _machine_info() -> dict[str, Any]:
@@ -112,6 +158,24 @@ def _median(values: list[float]) -> float | None:
     return round(float(statistics.median(values)), 3)
 
 
+def _runtime_dirty_state(
+    *,
+    runtime_version: dict[str, Any],
+    health_payload: dict[str, Any],
+) -> bool | None:
+    runtime_dirty = runtime_version.get("dirty")
+    if isinstance(runtime_dirty, bool):
+        return runtime_dirty
+    health_runtime = dict(health_payload.get("runtime") or {})
+    health_dirty = health_runtime.get("dirty")
+    if isinstance(health_dirty, bool):
+        return health_dirty
+    build_id = str(runtime_version.get("build_id") or health_runtime.get("build_id") or "").strip().lower()
+    if not build_id:
+        return None
+    return ".dirty" in build_id or build_id.endswith("dirty")
+
+
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -128,6 +192,106 @@ def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _install_receipt(repo_root: Path) -> dict[str, Any]:
+    payload = _read_json_if_exists(repo_root / "install_receipt.json")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _installed_launch_agent_path(repo_root: Path) -> Path | None:
+    launch_agent = dict(_install_receipt(repo_root).get("launch_agent") or {})
+    candidate = str(launch_agent.get("macos") or "").strip()
+    if not candidate:
+        return None
+    try:
+        return Path(candidate).expanduser().resolve()
+    except Exception:
+        return None
+
+
+def _installed_default_model(repo_root: Path) -> str:
+    receipt = _install_receipt(repo_root)
+    selected = str(receipt.get("selected_model") or "").strip()
+    if selected:
+        return selected
+    selected_models = tuple(str(item).strip() for item in receipt.get("selected_models") or () if str(item).strip())
+    if selected_models:
+        return selected_models[0]
+    install_profile = dict(receipt.get("install_profile") or {})
+    selected = str(install_profile.get("selected_model") or "").strip()
+    if selected:
+        return selected
+    selected_models = tuple(
+        str(item).strip() for item in install_profile.get("selected_models") or () if str(item).strip()
+    )
+    if selected_models:
+        return selected_models[0]
+    return "qwen3:8b"
+
+
+def _launch_agent_label(path: Path | None) -> str:
+    if path is None:
+        return DEFAULT_RUNTIME_LAUNCH_AGENT_LABEL
+    if path.suffix == ".plist":
+        return path.stem or DEFAULT_RUNTIME_LAUNCH_AGENT_LABEL
+    return path.name or DEFAULT_RUNTIME_LAUNCH_AGENT_LABEL
+
+
+def _launch_agent_loaded(path: Path) -> bool:
+    label = _launch_agent_label(path)
+    domain = f"gui/{os.getuid()}/{label}"
+    result = subprocess.run(
+        ["launchctl", "print", domain],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _suspend_installed_launch_agent(*, repo_root: Path, base_url: str) -> dict[str, str] | None:
+    if platform.system().lower() != "darwin":
+        return None
+    bind_host, bind_port = _runtime_endpoint_parts(base_url)
+    if bind_host != "127.0.0.1" or bind_port != 11435:
+        return None
+    launch_agent_path = _installed_launch_agent_path(repo_root)
+    if launch_agent_path is None or not launch_agent_path.exists():
+        return None
+    if not _launch_agent_loaded(launch_agent_path):
+        return None
+    subprocess.run(
+        ["launchctl", "bootout", f"gui/{os.getuid()}", str(launch_agent_path)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return {"path": str(launch_agent_path)}
+
+
+def _restore_installed_launch_agent(state: dict[str, str] | None) -> None:
+    if not state or platform.system().lower() != "darwin":
+        return
+    path_text = str(state.get("path") or "").strip()
+    if not path_text:
+        return
+    launch_agent_path = Path(path_text).expanduser().resolve()
+    if not launch_agent_path.exists():
+        return
+    result = subprocess.run(
+        ["launchctl", "bootstrap", f"gui/{os.getuid()}", str(launch_agent_path)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if result.returncode != 0:
+        subprocess.run(
+            ["launchctl", "load", "-w", str(launch_agent_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
 
 
 def _expected_repo_commit(repo_root: Path) -> str:
@@ -190,7 +354,15 @@ def _resolve_runtime_command(
     start_script: Path | None,
 ) -> list[str]:
     bind_host, bind_port = _runtime_endpoint_parts(base_url)
-    if start_script and start_script.exists() and bind_host == "127.0.0.1" and bind_port == 11435:
+    start_script_venv = start_script.parent / ".venv" / "bin" / "python" if start_script else None
+    if (
+        start_script
+        and start_script.exists()
+        and start_script_venv is not None
+        and start_script_venv.exists()
+        and bind_host == "127.0.0.1"
+        and bind_port == 11435
+    ):
         return ["sh", str(start_script)]
     return _default_runtime_command(repo_root=repo_root, base_url=base_url)
 
@@ -217,17 +389,38 @@ def _pick_isolated_daemon_bind_port(*, host: str = "127.0.0.1", attempts: int = 
     raise RuntimeError(f"Could not find an isolated daemon bind port for host {host!r}.")
 
 
-def load_profile(path: str | Path | None = None) -> AcceptanceProfile:
+def _resolve_profile_path(path: str | Path | None = None) -> Path:
     profile_path = Path(path or DEFAULT_PROFILE_PATH).expanduser().resolve()
+    if profile_path.exists():
+        return profile_path
+    if profile_path == LEGACY_PROFILE_PATH.resolve():
+        return DEFAULT_PROFILE_PATH
+    return profile_path
+
+
+def load_profile(path: str | Path | None = None) -> AcceptanceProfile:
+    profile_path = _resolve_profile_path(path)
     payload = json.loads(profile_path.read_text(encoding="utf-8"))
     thresholds = dict(payload.get("thresholds") or {})
     manual_btc = dict(payload.get("manual_btc_check") or {})
+    bundle_roles = tuple(
+        (
+            str(item.get("role") or "").strip(),
+            str(item.get("model") or "").strip(),
+        )
+        for item in payload.get("selected_model_roles") or ()
+        if str(item.get("role") or "").strip() and str(item.get("model") or "").strip()
+    )
+    bundle_models = tuple(
+        str(item).strip() for item in payload.get("selected_models") or () if str(item).strip()
+    )
     return AcceptanceProfile(
         profile_id=str(payload.get("profile_id") or profile_path.stem),
         display_name=str(payload.get("display_name") or "NULLA local acceptance"),
-        model=str(payload.get("model") or "qwen2.5:7b"),
+        model=str(payload.get("model") or "qwen3:8b"),
         cold_start_max_seconds=float(thresholds.get("cold_start_max_seconds", 120.0)),
         simple_prompt_median_max_seconds=float(thresholds.get("simple_prompt_median_max_seconds", 8.0)),
+        simple_prompt_hard_max_seconds=float(thresholds.get("simple_prompt_hard_max_seconds", 20.0)),
         file_task_median_max_seconds=float(thresholds.get("file_task_median_max_seconds", 15.0)),
         live_lookup_median_max_seconds=float(thresholds.get("live_lookup_median_max_seconds", 45.0)),
         chained_task_median_max_seconds=float(thresholds.get("chained_task_median_max_seconds", 60.0)),
@@ -236,6 +429,13 @@ def load_profile(path: str | Path | None = None) -> AcceptanceProfile:
         manual_btc_source_url=str(
             manual_btc.get("url") or "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
         ),
+        bundle_models=bundle_models or (str(payload.get("model") or "qwen3:8b"),),
+        bundle_roles=bundle_roles,
+        capacity_bucket=str(payload.get("capacity_bucket") or "").strip(),
+        fallback_bundle_models=tuple(
+            str(item).strip() for item in payload.get("fallback_bundle_models") or () if str(item).strip()
+        ),
+        advanced_optional_profile=str(payload.get("advanced_optional_profile") or "").strip(),
     )
 
 
@@ -248,6 +448,21 @@ def _first_currency_amount(text: str) -> float | None:
 
 def _format_usd(amount: float) -> str:
     return f"${amount:,.2f}"
+
+
+def _market_answer_is_not_future_dated(text: str) -> bool:
+    matches = re.findall(r"\b(20\d{2})-(\d{2})-(\d{2})\b", str(text or ""))
+    if not matches:
+        return True
+    allowed_latest = date.today() + timedelta(days=1)
+    for year, month, day in matches:
+        try:
+            observed = date(int(year), int(month), int(day))
+        except ValueError:
+            continue
+        if observed > allowed_latest:
+            return False
+    return True
 
 
 @dataclass
@@ -326,7 +541,7 @@ class AcceptanceRunner:
         prompt = "hello"
         payload, latency = self._chat(prompt, workspace=self.workspaces["main"])
         results["P0.1a_boot_hello"] = self._result_base(prompt=prompt, payload=payload, latency_seconds=latency)
-        results["P0.1a_boot_hello"]["pass"] = "hello" in results["P0.1a_boot_hello"]["assistant_text"].lower()
+        results["P0.1a_boot_hello"]["pass"] = _startup_reply_is_coherent(results["P0.1a_boot_hello"]["assistant_text"])
         results["P0.1a_boot_hello"]["why"] = "startup replied coherently" if results["P0.1a_boot_hello"]["pass"] else "startup reply was broken"
 
         prompt = "what can you do right now on this machine?"
@@ -397,8 +612,14 @@ class AcceptanceRunner:
         payload, latency = self._chat(prompt, workspace=self.workspaces["lookup"])
         result = self._result_base(prompt=prompt, payload=payload, latency_seconds=latency)
         text = result["assistant_text"]
-        result["pass"] = ("bitcoin" in text.lower() or "btc" in text.lower()) and "source:" in text.lower()
-        result["why"] = "live lookup returned a sourced price (manual verification still required)" if result["pass"] else "live lookup lacked freshness or source"
+        has_source = ("bitcoin" in text.lower() or "btc" in text.lower()) and "source:" in text.lower()
+        not_future_dated = _market_answer_is_not_future_dated(text)
+        result["pass"] = has_source and not_future_dated
+        result["why"] = (
+            "live lookup returned a sourced price without future-dated bluffing (manual verification still required)"
+            if result["pass"]
+            else "live lookup lacked freshness, source, or date sanity"
+        )
         results["P0.4_live_lookup"] = result
 
         prompt = "Create exactly three files: a.txt, b.txt, c.txt. Put ONE, TWO, THREE respectively. Do not create anything else."
@@ -470,12 +691,24 @@ class AcceptanceRunner:
                 "id": self.profile.profile_id,
                 "display_name": self.profile.display_name,
                 "benchmark_model": self.profile.model,
+                "benchmark_bundle_models": list(self.profile.bundle_models),
+                "benchmark_bundle_roles": [
+                    {"role": role, "model": model} for role, model in self.profile.bundle_roles
+                ],
+                "capacity_bucket": self.profile.capacity_bucket,
+                "fallback_bundle_models": list(self.profile.fallback_bundle_models),
+                "advanced_optional_profile": self.profile.advanced_optional_profile,
                 "runtime_model": runtime_model,
                 "install_profile_id": str(install_profile.get("profile_id") or ""),
                 "install_profile_label": str(install_profile.get("label") or ""),
+                "runtime_selected_models": list(install_profile.get("selected_models") or ()),
+                "runtime_selected_model_roles": list(install_profile.get("selected_model_roles") or ()),
+                "bundle_id": str(install_profile.get("bundle_id") or ""),
+                "bundle_kind": str(install_profile.get("bundle_kind") or ""),
             },
             "machine": _sanitize_data(_machine_info(), repo_root=self.repo_root),
             "model": runtime_model,
+            "selected_models": list(install_profile.get("selected_models") or ()),
             "workspaces": {
                 key: _sanitize_text(str(path.relative_to(self.run_root)), repo_root=self.repo_root)
                 for key, path in self.workspaces.items()
@@ -578,6 +811,11 @@ def build_acceptance_summary(
             "limit": profile.simple_prompt_median_max_seconds,
             "actual": _median(simple_latencies),
             "pass": (_median(simple_latencies) or float("inf")) <= profile.simple_prompt_median_max_seconds,
+        },
+        "simple_prompt_hard_max_seconds": {
+            "limit": profile.simple_prompt_hard_max_seconds,
+            "actual": round(max(simple_latencies), 3) if simple_latencies else None,
+            "pass": (max(simple_latencies) if simple_latencies else float("inf")) <= profile.simple_prompt_hard_max_seconds,
         },
         "file_task_median_max_seconds": {
             "limit": profile.file_task_median_max_seconds,
@@ -700,18 +938,33 @@ def _current_health(base_url: str) -> dict[str, Any] | None:
 
 
 def _stop_runtime(base_url: str) -> None:
+    deadline = time.time() + 30.0
+    last_pid = 0
+    while time.time() < deadline:
+        health = _current_health(base_url)
+        if health is None:
+            return
+        pid = int(dict(health.get("runtime") or {}).get("pid") or 0) if isinstance(health, dict) else 0
+        if pid > 0 and pid != last_pid:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            last_pid = pid
+        time.sleep(0.5)
     health = _current_health(base_url)
     pid = int(dict(health.get("runtime") or {}).get("pid") or 0) if isinstance(health, dict) else 0
-    if pid > 0:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
+    if pid <= 0:
+        return
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    kill_deadline = time.time() + 5.0
+    while time.time() < kill_deadline:
+        if _current_health(base_url) is None:
             return
-        deadline = time.time() + 30.0
-        while time.time() < deadline:
-            if _current_health(base_url) is None:
-                return
-            time.sleep(0.5)
+        time.sleep(0.5)
 
 
 def _wait_for_runtime(base_url: str, *, expected_commit: str, expected_model: str, timeout: float = 120.0) -> dict[str, Any]:
@@ -768,8 +1021,8 @@ def _start_runtime(
         stderr=subprocess.STDOUT,
         start_new_session=True,
     )
-    _wait_for_runtime(base_url, expected_commit=expected_commit, expected_model=model)
-    return process
+    health = _wait_for_runtime(base_url, expected_commit=expected_commit, expected_model=model)
+    return process, health
 
 
 def run_full_acceptance(
@@ -785,6 +1038,8 @@ def run_full_acceptance(
     _preserve_previous_run_artifacts(run_root=run_root, profile=profile)
     expected_commit = _expected_repo_commit(repo_root)
     daemon_bind_port = _pick_isolated_daemon_bind_port(host="127.0.0.1")
+    restored_health: dict[str, Any] = {}
+    suspended_launch_agent = _suspend_installed_launch_agent(repo_root=repo_root, base_url=base_url)
     _stop_runtime(base_url)
     _start_runtime(
         repo_root=repo_root,
@@ -827,17 +1082,32 @@ def run_full_acceptance(
     finally:
         _clear_offline_policy_override(runtime_home)
         _stop_runtime(base_url)
-        _start_runtime(
-            repo_root=repo_root,
-            base_url=base_url,
-            run_root=run_root,
-            runtime_home=runtime_home,
-            workspace_root=workspace_root,
-            model=profile.model,
-            start_script=start_script,
-            expected_commit=expected_commit,
-            daemon_bind_port=daemon_bind_port,
-        )
+        if suspended_launch_agent is not None:
+            _restore_installed_launch_agent(suspended_launch_agent)
+            restored_health = _wait_for_runtime(
+                base_url,
+                expected_commit=expected_commit,
+                expected_model=_installed_default_model(repo_root),
+                timeout=180.0,
+            )
+        else:
+            restore_result = _start_runtime(
+                repo_root=repo_root,
+                base_url=base_url,
+                run_root=run_root,
+                runtime_home=runtime_home,
+                workspace_root=workspace_root,
+                model=profile.model,
+                start_script=start_script,
+                expected_commit=expected_commit,
+                daemon_bind_port=daemon_bind_port,
+            )
+            if (
+                isinstance(restore_result, tuple)
+                and len(restore_result) >= 2
+                and isinstance(restore_result[1], dict)
+            ):
+                restored_health = dict(restore_result[1])
     render_report(
         repo_root=repo_root,
         online_payload=online_payload,
@@ -852,7 +1122,16 @@ def run_full_acceptance(
         manual_btc_check=manual,
         profile=profile,
     )
-    return 0 if summary["overall_green"] else 1
+    restored_health = dict(restored_health or {})
+    proof_manifest = build_proof_manifest(
+        repo_root=repo_root,
+        generated_by="run_local_acceptance",
+        runtime_health=restored_health,
+        runtime_capabilities=dict(restored_health.get("capabilities") or {}),
+        acceptance_summary=summary,
+    )
+    write_proof_manifest(run_root / "evidence" / "proof_manifest.json", proof_manifest)
+    return 0 if summary["overall_green"] and proof_manifest["overall_consistent"] else 1
 
 
 def render_report(
@@ -912,11 +1191,25 @@ def render_report(
     profile_meta = online_payload.get("profile", {})
     capabilities = online_payload.get("capabilities", {})
     install_profile = capabilities.get("install_profile", {}) if isinstance(capabilities, dict) else {}
+    runtime_dirty = _runtime_dirty_state(runtime_version=runtime, health_payload=online_payload.get("health", {}))
     benchmark_model = (
         str(profile_meta.get("benchmark_model") or profile.model or "").strip() or profile.model
     )
+    benchmark_bundle_models = tuple(
+        str(item).strip() for item in profile_meta.get("benchmark_bundle_models") or profile.bundle_models if str(item).strip()
+    )
     runtime_model = (
         str(online_payload.get("model") or runtime.get("model_tag") or benchmark_model).strip() or benchmark_model
+    )
+    runtime_selected_models = tuple(
+        str(item).strip()
+        for item in (
+            profile_meta.get("runtime_selected_models")
+            or online_payload.get("selected_models")
+            or install_profile.get("selected_models")
+            or ()
+        )
+        if str(item).strip()
     )
     install_profile_id = str(
         profile_meta.get("install_profile_id") or install_profile.get("profile_id") or ""
@@ -934,13 +1227,31 @@ def render_report(
             f"- manual observed value: {manual_btc_check.get('observed', 'n/a')}",
             f"- drift assessment: {manual_btc_check.get('assessment', 'n/a')}",
         ]
+    if runtime_dirty is True:
+        runtime_build_note = (
+            "- Runtime build was dirty for this acceptance run, so this proves only the exact dirty tree under test."
+        )
+    elif runtime_dirty is False:
+        runtime_build_note = "- Runtime build was clean for this acceptance run."
+    else:
+        runtime_build_note = "- Runtime dirty-state could not be verified from the live runtime metadata."
 
     report_lines = [
         "# NULLA LOCAL ACCEPTANCE REPORT",
         "",
         f"Profile: {profile.profile_id} ({profile.display_name})",
         f"Benchmark profile model: {benchmark_model}",
+        (
+            f"Benchmark bundle models: {', '.join(benchmark_bundle_models)}"
+            if benchmark_bundle_models
+            else "Benchmark bundle models: unknown"
+        ),
         f"Runtime model: {runtime_model}",
+        (
+            f"Runtime bundle models: {', '.join(runtime_selected_models)}"
+            if runtime_selected_models
+            else "Runtime bundle models: unknown"
+        ),
         (
             f"Runtime install profile: {install_profile_id} ({install_profile_label})"
             if install_profile_id
@@ -973,6 +1284,7 @@ def render_report(
         "Threshold gates:",
         f"- cold start <= {profile.cold_start_max_seconds}s: {'PASS' if threshold_checks['cold_start_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['cold_start_max_seconds']['actual']}s)",
         f"- simple prompt median <= {profile.simple_prompt_median_max_seconds}s: {'PASS' if threshold_checks['simple_prompt_median_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['simple_prompt_median_max_seconds']['actual']}s)",
+        f"- simple prompt hard max <= {profile.simple_prompt_hard_max_seconds}s: {'PASS' if threshold_checks['simple_prompt_hard_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['simple_prompt_hard_max_seconds']['actual']}s)",
         f"- file task median <= {profile.file_task_median_max_seconds}s: {'PASS' if threshold_checks['file_task_median_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['file_task_median_max_seconds']['actual']}s)",
         f"- live lookup median <= {profile.live_lookup_median_max_seconds}s: {'PASS' if threshold_checks['live_lookup_median_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['live_lookup_median_max_seconds']['actual']}s)",
         f"- chained task median <= {profile.chained_task_median_max_seconds}s: {'PASS' if threshold_checks['chained_task_median_max_seconds']['pass'] else 'FAIL'} (actual {threshold_checks['chained_task_median_max_seconds']['actual']}s)",
@@ -983,7 +1295,7 @@ def render_report(
         *wrong_before_green,
         "",
         "Notes:",
-        "- Runtime build is still dirty because the local worktree still has unrelated modifications outside this acceptance pass.",
+        runtime_build_note,
         "- Live lookup passed locally, but it only counts as final because the manual spot-check was performed separately.",
         "- Helper mesh and public Hive remain alpha surfaces; this acceptance only certifies the local runtime profile tested here.",
         "",
@@ -1007,13 +1319,13 @@ def main(argv: list[str]) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     online = subparsers.add_parser("online")
-    online.add_argument("--base-url", default="http://127.0.0.1:11435")
+    online.add_argument("--base-url", default=DEFAULT_BASE_URL)
     online.add_argument("--run-root", required=True)
     online.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
     online.add_argument("--model", default="")
 
     offline = subparsers.add_parser("offline")
-    offline.add_argument("--base-url", default="http://127.0.0.1:11435")
+    offline.add_argument("--base-url", default=DEFAULT_BASE_URL)
     offline.add_argument("--run-root", required=True)
 
     report = subparsers.add_parser("report")
@@ -1022,7 +1334,7 @@ def main(argv: list[str]) -> int:
     report.add_argument("--manual-btc-json", default="")
 
     full = subparsers.add_parser("full")
-    full.add_argument("--base-url", default="http://127.0.0.1:11435")
+    full.add_argument("--base-url", default=DEFAULT_BASE_URL)
     full.add_argument("--run-root", required=True)
     full.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
     full.add_argument("--runtime-home", default="")
@@ -1068,8 +1380,18 @@ def main(argv: list[str]) -> int:
         return 0 if payload["result"]["pass"] else 1
 
     if args.command == "full":
-        runtime_home = Path(args.runtime_home).expanduser().resolve() if args.runtime_home else (run_root / "runtime_home").resolve()
-        workspace_root = Path(args.workspace_root).expanduser().resolve() if args.workspace_root else (run_root / "workspace").resolve()
+        if bool(args.runtime_home) ^ bool(args.workspace_root):
+            parser.error("`full` requires both `--runtime-home` and `--workspace-root`, or neither.")
+        if args.runtime_home and args.workspace_root:
+            runtime_home = Path(args.runtime_home).expanduser().resolve()
+            workspace_root = Path(args.workspace_root).expanduser().resolve()
+        else:
+            discovered_roots = _discover_active_runtime_roots(args.base_url.rstrip("/"))
+            if discovered_roots is not None:
+                runtime_home, workspace_root = discovered_roots
+            else:
+                runtime_home = (run_root / "runtime_home").resolve()
+                workspace_root = (run_root / "workspace").resolve()
         return run_full_acceptance(
             base_url=args.base_url.rstrip("/"),
             repo_root=REPO_ROOT,

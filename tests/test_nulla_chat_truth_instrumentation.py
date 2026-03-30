@@ -127,6 +127,9 @@ def test_renderer_path_emits_chat_truth_metrics(make_agent, context_result_facto
     with mock.patch("apps.nulla_agent.audit_logger.log") as audit_log, mock.patch(
         "apps.nulla_agent.classify",
         return_value={"task_class": "system_design", "risk_flags": [], "confidence_hint": 0.74},
+    ), mock.patch(
+        "apps.nulla_agent.WebAdapter.planned_search_query",
+        side_effect=AssertionError("conceptual architecture chat should not trigger live adaptive research"),
     ), mock.patch("apps.nulla_agent.ingest_media_evidence", return_value=[]), mock.patch(
         "apps.nulla_agent.orchestrate_parent_task", return_value=None
     ), mock.patch("apps.nulla_agent.request_relevant_holders", return_value=[]), mock.patch(
@@ -193,6 +196,9 @@ def test_plain_text_chat_paths_use_model_as_final_speaker(
     with mock.patch("apps.nulla_agent.audit_logger.log") as audit_log, mock.patch(
         "apps.nulla_agent.ingest_media_evidence",
         return_value=[],
+    ), mock.patch(
+        "apps.nulla_agent.WebAdapter.planned_search_query",
+        side_effect=AssertionError("plain conversational chat should not trigger live lookup"),
     ), mock.patch("apps.nulla_agent.orchestrate_parent_task", return_value=None), mock.patch(
         "apps.nulla_agent.request_relevant_holders",
         return_value=[],
@@ -945,7 +951,7 @@ def test_builder_controller_chat_surface_uses_model_wording_over_structured_obse
     assert "executed_steps" in model_input
     assert "step_count" in model_input
     assert "artifacts" in model_input
-    assert "generated / telegram-bot" in model_input
+    assert "generated/telegram-bot" in model_input
     assert "compileall" in model_input
     assert "wrote a telegram python scaffold" not in model_input
     assert "files written:" not in model_input

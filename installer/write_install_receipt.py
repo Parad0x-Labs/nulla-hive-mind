@@ -8,6 +8,8 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core.install_recommendations import build_install_recommendation_truth
+from core.proof_manifest import repo_source_snapshot
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_install_profiles import InstallProfileTruth, build_install_profile_truth
 
@@ -40,19 +42,30 @@ def build_receipt(
     openclaw_config_path: str,
     openclaw_agent_dir: str,
     ollama_binary: str,
+    launch_agent_path: str = "",
 ) -> dict:
     project = Path(project_root).resolve()
     provider_capability_truth, install_profile = _provider_snapshot_and_profile(
         model_tag=model_tag,
         runtime_home=runtime_home,
     )
+    install_recommendation = build_install_recommendation_truth(
+        selected_model=model_tag,
+        runtime_home=runtime_home,
+    )
+    source_truth = repo_source_snapshot(project)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "project_root": str(project),
         "runtime_home": runtime_home,
+        "branch": str(source_truth.get("branch") or ""),
+        "commit": str(source_truth.get("commit") or ""),
+        "dirty_state": source_truth.get("dirty_state"),
+        "source_kind": str(source_truth.get("source_kind") or ""),
         "selected_model": model_tag,
         "provider_capability_truth": provider_capability_truth,
         "install_profile": install_profile.to_dict(),
+        "install_recommendation": install_recommendation.to_dict(),
         "api_url": "http://127.0.0.1:11435",
         "openclaw_url": "http://127.0.0.1:18789",
         "trace_url": "http://127.0.0.1:11435/trace",
@@ -61,6 +74,10 @@ def build_receipt(
         "openclaw_config_path": openclaw_config_path,
         "openclaw_agent_dir": openclaw_agent_dir,
         "ollama_binary": ollama_binary,
+        "launch_agent": {
+            "macos": str(launch_agent_path or ""),
+            "enabled": bool(str(launch_agent_path or "").strip()),
+        },
         "web_stack": {
             "provider_order": ["searxng", "ddg_instant", "duckduckgo_html"],
             "searxng_url": "http://127.0.0.1:8080",
@@ -108,6 +125,7 @@ def main() -> int:
     parser.add_argument("openclaw_config_path")
     parser.add_argument("openclaw_agent_dir")
     parser.add_argument("ollama_binary")
+    parser.add_argument("launch_agent_path")
     args = parser.parse_args()
 
     receipt = build_receipt(
@@ -118,6 +136,7 @@ def main() -> int:
         openclaw_config_path=args.openclaw_config_path,
         openclaw_agent_dir=args.openclaw_agent_dir,
         ollama_binary=args.ollama_binary,
+        launch_agent_path=args.launch_agent_path,
     )
     target_path = Path(args.project_root).resolve() / "install_receipt.json"
     target_path.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

@@ -222,6 +222,44 @@ def _looks_like_tool_inventory_request(text: str) -> bool:
     return any(marker in lowered for marker in _TOOL_INVENTORY_MARKERS)
 
 
+def _planned_git_payload(text: str) -> tuple[str, dict[str, Any]] | None:
+    lowered = f" {' '.join(str(text or '').strip().lower().split())} "
+    if not lowered.strip():
+        return None
+    if any(
+        marker in lowered
+        for marker in (" create ", " write ", " edit ", " change ", " patch ", " delete ", " remove ", " push ", " pull ", " merge ", " checkout ", " rebase ")
+    ):
+        if not any(marker in lowered for marker in (" git status ", " git diff ")):
+            return None
+    mentions_repo = any(marker in lowered for marker in (" git ", " repo ", " repository ", " branch ", " branches ", " commit ", " commits "))
+    if not mentions_repo:
+        return None
+    if any(marker in lowered for marker in (" git diff ", " show diff ", " unstaged diff ", " staged diff ", " git patch ")):
+        return ("planned_workspace_git_diff", {"intent": "workspace.git_diff", "arguments": {}})
+    if any(marker in lowered for marker in (" git status ", " working tree ", " dirty ", " clean repo ", " clean working tree ", " untracked ", " staged ", " unstaged ")):
+        return ("planned_workspace_git_status", {"intent": "workspace.git_status", "arguments": {}})
+    if any(
+        marker in lowered
+        for marker in (
+            " how many branches ",
+            " how many commits ",
+            " branch count ",
+            " commit count ",
+            " commits today ",
+            " commits yesterday ",
+            " branch inventory ",
+            " recent commits ",
+            " git summary ",
+            " git activity ",
+            " current branch ",
+            " head commit ",
+        )
+    ):
+        return ("planned_workspace_git_summary", {"intent": "workspace.git_summary", "arguments": {}})
+    return None
+
+
 def _clean_workspace_path(candidate: str) -> str:
     clean = str(candidate or "").strip().strip("`\"'").strip().rstrip(".,!?")
     if not clean:
@@ -238,6 +276,26 @@ def _clean_workspace_path(candidate: str) -> str:
     return clean
 
 
+def _clean_workspace_directory_path(candidate: str, *, workspace_root: str = "") -> str:
+    raw = str(candidate or "").strip().strip("`\"'")
+    clean = ""
+    if raw and workspace_root:
+        try:
+            resolved_workspace_root = Path(workspace_root).expanduser().resolve()
+            resolved_candidate = Path(raw).expanduser().resolve()
+            if resolved_candidate == resolved_workspace_root:
+                return ""
+            if resolved_workspace_root in resolved_candidate.parents:
+                clean = str(resolved_candidate.relative_to(resolved_workspace_root))
+        except Exception:
+            clean = ""
+    if not clean:
+        clean = _clean_workspace_path(candidate)
+    if clean in {"", "."}:
+        return ""
+    return clean.rstrip("/")
+
+
 def _extract_workspace_bootstrap_path(text: str) -> str:
     raw = str(text or "").strip()
     if not raw:
@@ -250,6 +308,19 @@ def _extract_workspace_bootstrap_path(text: str) -> str:
         if clean:
             return clean
     return ""
+
+
+def _extract_workspace_parent_directory(text: str, *, workspace_root: str = "") -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    match = _INTO_PATH_RE.search(raw)
+    if not match:
+        return ""
+    return _clean_workspace_directory_path(
+        str(match.group("path") or "").strip(),
+        workspace_root=workspace_root,
+    )
 
 
 def _extract_safe_machine_directory_listing(text: str) -> dict[str, Any] | None:
@@ -269,6 +340,7 @@ def _extract_safe_machine_directory_listing(text: str) -> dict[str, Any] | None:
             "contents of",
             "what do we have on",
             "tell me what",
+            "can you see",
         )
     )
     if not wants_listing:
@@ -344,6 +416,11 @@ def _extract_machine_specs_request(text: str) -> dict[str, Any] | None:
         "vram",
         "chip",
         "cores",
+        "screen size",
+        "display size",
+        "display resolution",
+        "screen resolution",
+        "monitor resolution",
     )
     mentions_machine_shape = any(marker in lowered for marker in spec_markers)
     mentions_running_host = "running on" in lowered and "machine" in lowered
@@ -362,6 +439,8 @@ def _extract_machine_specs_request(text: str) -> dict[str, Any] | None:
             "running on",
         )
     )
+    if any(marker in lowered for marker in ("screen size", "display size", "display resolution", "screen resolution", "monitor resolution")):
+        wants_inspection = True
     return {} if wants_inspection else None
 
 
@@ -422,22 +501,31 @@ def _extract_history_observation_payload(message: dict[str, Any]) -> dict[str, A
 
 def _recover_last_workspace_path_from_history(source_context: dict[str, Any] | None) -> str:
     history = _history_messages(source_context)
+    workspace_root = str((source_context or {}).get("workspace") or (source_context or {}).get("workspace_root") or "").strip()
     for message in reversed(history[-12:]):
         observation = _extract_history_observation_payload(message)
         if observation is not None:
             intent = str(observation.get("intent") or "").strip()
             if intent in {"workspace.write_file", "workspace.read_file", "workspace.replace_in_file"}:
-                path = _clean_workspace_file_path(str(observation.get("path") or "").strip())
+                path = _clean_workspace_file_path(
+                    str(observation.get("path") or "").strip(),
+                    workspace_root=workspace_root,
+                )
                 if path:
                     return path
         if str(message.get("role") or "").strip().lower() != "user":
             continue
         content = str(message.get("content") or "")
+        base_dir = _extract_workspace_parent_directory(content, workspace_root=workspace_root)
         for pattern in (_APPEND_FILE_RE, _OVERWRITE_FILE_RE, _CREATE_NAMED_FILE_WITH_CONTENT_RE, _INLINE_CREATE_FILE_RE):
             match = pattern.search(content)
             if not match:
                 continue
-            path = _clean_workspace_file_path(str(match.group("path") or "").strip())
+            path = _clean_workspace_file_path(
+                str(match.group("path") or "").strip(),
+                base_dir=base_dir,
+                workspace_root=workspace_root,
+            )
             if path:
                 return path
     return ""
@@ -448,20 +536,21 @@ def _extract_workspace_file_plan(
     *,
     source_context: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    raw = " ".join(str(text or "").split()).strip()
-    if not raw:
+    original = str(text or "").strip()
+    if not original:
         return None
     raw = re.sub(
         r"(?P<stem>[A-Za-z0-9_./-]+)\.\s+(?P<ext>py|js|ts|tsx|jsx|txt|md|json|yaml|yml|toml)\b",
         r"\g<stem>.\g<ext>",
-        raw,
+        original,
     )
+    compact = " ".join(raw.split()).strip()
     workspace_root = str((source_context or {}).get("workspace") or (source_context or {}).get("workspace_root") or "").strip()
-    base_dir = ""
-    if any(marker in raw.lower() for marker in _DIRECTORY_CREATE_MARKERS):
-        base_dir = _extract_workspace_bootstrap_path(raw)
+    base_dir = _extract_workspace_parent_directory(compact, workspace_root=workspace_root)
+    if not base_dir and any(marker in compact.lower() for marker in _DIRECTORY_CREATE_MARKERS):
+        base_dir = _extract_workspace_bootstrap_path(compact)
     list_requested = any(
-        marker in raw.lower()
+        marker in compact.lower()
         for marker in (
             "list the folder contents",
             "list the directory contents",
@@ -1594,9 +1683,10 @@ def plan_tool_workflow(
     machine_directory_list = _extract_safe_machine_directory_listing(text)
     machine_directory_create = _extract_safe_machine_directory_create(text)
     machine_specs_request = _extract_machine_specs_request(text)
+    git_payload = _planned_git_payload(text)
     workspace_bootstrap_path = _extract_workspace_bootstrap_path(text)
     workspace_bootstrap_request = _looks_like_workspace_bootstrap_request(text)
-    workspace_file_plan = _extract_workspace_file_plan(text, source_context=source_context)
+    workspace_file_plan = _extract_workspace_file_plan(raw_text, source_context=source_context)
     entity_query, entity_retry_query = _entity_lookup_query_variants(research_text)
     last_step = dict(steps[-1] or {}) if steps else {}
     last_intent = str(last_step.get("tool_name") or "").strip()
@@ -1658,6 +1748,13 @@ def plan_tool_workflow(
                 handled=True,
                 reason="planned_safe_machine_directory_create",
                 next_payload={"intent": "machine.ensure_directory", "arguments": machine_directory_create},
+            )
+        if git_payload is not None:
+            reason, next_payload = git_payload
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason=reason,
+                next_payload=next_payload,
             )
         if workspace_file_plan is not None:
             pending_writes = _pending_workspace_writes(workspace_file_plan, steps)
@@ -2097,6 +2194,9 @@ def plan_tool_workflow(
 
     if last_intent == "machine.inspect_specs":
         return WorkflowPlannerDecision(handled=True, reason="machine_stop_after_specs", stop_after=True)
+
+    if last_intent in {"workspace.git_status", "workspace.git_diff", "workspace.git_summary"}:
+        return WorkflowPlannerDecision(handled=True, reason="workspace_stop_after_git_inspection", stop_after=True)
 
     if last_intent == "workspace.replace_in_file":
         retry_command = _last_command_from_steps(steps) or explicit_command

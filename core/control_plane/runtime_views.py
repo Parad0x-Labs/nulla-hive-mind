@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from core.runtime_execution_history import build_runtime_execution_history
 from storage.db import DEFAULT_DB_PATH, get_connection
 
 
@@ -34,10 +35,29 @@ def load_runtime_sessions(
         item = dict(row)
         checkpoint_id = str(item.get("last_checkpoint_id") or "").strip()
         item["checkpoint"] = runtime_checkpoint_fn(conn, checkpoint_id) if checkpoint_id else None
+        if item["checkpoint"]:
+            item["resume_available"] = bool(str(item["checkpoint"].get("status") or "") in {"running", "interrupted", "pending_approval"})
+            item["checkpoint_status"] = str(item["checkpoint"].get("status") or "")
+            item["checkpoint_step_count"] = int(item["checkpoint"].get("step_count") or 0)
+        else:
+            item["resume_available"] = False
+            item["checkpoint_status"] = ""
+            item["checkpoint_step_count"] = 0
         item["recent_events"] = runtime_events_fn(conn, str(item["session_id"]), limit=event_limit)
         receipts = runtime_receipts_fn(conn, str(item["session_id"]), limit=12)
         item["tool_receipts"] = receipts
-        item["touched_paths"] = sorted({path for receipt in receipts for path in paths_from_payload_fn(receipt)})
+        item["execution_history"] = build_runtime_execution_history(
+            session=item,
+            checkpoint=item["checkpoint"],
+            events=item["recent_events"],
+            receipts=receipts,
+        )
+        item["touched_paths"] = sorted(
+            {
+                *[path for receipt in receipts for path in paths_from_payload_fn(receipt)],
+                *list(item["execution_history"].get("touched_paths") or []),
+            }
+        )
         out.append(item)
     return out
 

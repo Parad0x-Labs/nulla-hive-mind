@@ -388,9 +388,11 @@ def artifact_citation_block(agent: Any, artifacts: dict[str, Any]) -> str:
                 retry_bits.append(f"`{command}` x{attempts}")
         if retry_bits:
             lines.append(f"- retries: {', '.join(retry_bits)}")
-    stop_reason = str(payload.get("stop_reason") or "").strip()
-    if stop_reason:
-        lines.append(f"- stop reason: `{stop_reason}`")
+    humanized_stop = _humanize_builder_stop_reason(str(payload.get("stop_reason") or "").strip())
+    if humanized_stop and len(lines) > 1:
+        lines.append(f"- completion state: {humanized_stop}")
+    if len(lines) == 1:
+        return ""
     return "\n".join(lines)
 
 
@@ -402,6 +404,30 @@ def append_artifact_citations(agent: Any, text: str, *, artifacts: dict[str, Any
     if not message:
         return citation_block
     return f"{message}\n\n{citation_block}".strip()
+
+
+def _humanize_builder_stop_reason(stop_reason: str) -> str:
+    normalized = str(stop_reason or "").strip()
+    if normalized == "workspace_stop_after_directory_bootstrap":
+        return "stopped after the directory was created"
+    if normalized == "workspace_stop_after_write":
+        return "stopped after the file write completed"
+    if normalized == "workspace_stop_after_read":
+        return "stopped after the file read completed"
+    if normalized == "workspace_stop_after_list":
+        return "stopped after the path listing completed"
+    if normalized == "command_stop_after_success":
+        return "stopped after the command completed"
+    return ""
+
+
+def _last_builder_step_path(executed_steps: list[dict[str, Any]]) -> str:
+    if not executed_steps:
+        return ""
+    last_step = dict(executed_steps[-1] or {})
+    observation = dict(last_step.get("observation") or {})
+    path = str(observation.get("path") or dict(last_step.get("arguments") or {}).get("path") or "").strip()
+    return path
 
 
 def controller_degraded_response(
@@ -429,9 +455,22 @@ def controller_degraded_response(
             ).strip()
         return failure_text
     if executed_steps:
+        last_step = dict(executed_steps[-1] or {})
+        last_tool_name = str(last_step.get("tool_name") or "").strip()
+        last_path = _last_builder_step_path(executed_steps)
+        if last_tool_name == "workspace.ensure_directory" and last_path:
+            return f"I created `{last_path}`.".strip()
+        if last_tool_name == "workspace.write_file" and last_path:
+            return f"I wrote `{last_path}`.".strip()
+        humanized_stop = _humanize_builder_stop_reason(stop_reason)
+        if humanized_stop:
+            return (
+                f"I completed {len(executed_steps)} bounded builder step"
+                f"{'' if len(executed_steps) == 1 else 's'} under `{root_dir}` and {humanized_stop}."
+            ).strip()
         return (
             f"I completed {len(executed_steps)} bounded builder step"
-            f"{'' if len(executed_steps) == 1 else 's'} under `{root_dir}` and stopped with `{stop_reason}`."
+            f"{'' if len(executed_steps) == 1 else 's'} under `{root_dir}` and stopped after the last safe local action."
         ).strip()
     return f"I could not start a bounded builder loop for `{root_dir}` on this run.".strip()
 

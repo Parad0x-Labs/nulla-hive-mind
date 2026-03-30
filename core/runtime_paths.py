@@ -76,6 +76,13 @@ def active_config_home_dir() -> Path:
 
 
 def active_workspace_dir() -> Path:
+    override = str(
+        os.environ.get("NULLA_WORKSPACE_ROOT")
+        or os.environ.get("NULLA_PROJECT_ROOT")
+        or ""
+    ).strip()
+    if override:
+        return Path(override).expanduser().resolve()
     return WORKSPACE_DIR.resolve()
 
 

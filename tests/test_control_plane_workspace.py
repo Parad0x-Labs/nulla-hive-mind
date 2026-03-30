@@ -237,13 +237,25 @@ class ControlPlaneWorkspaceTests(unittest.TestCase):
             self.assertTrue((workspace_root / "control" / "approvals" / "pending_operator_actions.json").exists())
             self.assertTrue((workspace_root / "control" / "runs" / "sessions" / "session-1.json").exists())
             self.assertTrue((workspace_root / "control" / "metrics" / "proof_of_useful_work.json").exists())
+            self.assertTrue((workspace_root / "control" / "metrics" / "runtime_truth.json").exists())
             self.assertTrue((workspace_root / "templates" / "reviewer" / "spawn.json").exists())
 
             overview = json.loads((workspace_root / "control" / "metrics" / "overview.json").read_text(encoding="utf-8"))
             self.assertEqual(overview["open_task_count"], 1)
             self.assertEqual(overview["pending_approval_count"], 1)
+            self.assertEqual(overview["approval_backlog_count"], 1)
+            self.assertEqual(overview["pending_operator_action_count"], 1)
+            self.assertEqual(overview["pending_runtime_checkpoint_count"], 0)
+            self.assertEqual(overview["runtime_pending_approval_count"], 0)
             self.assertEqual(overview["proof_of_useful_work"]["finalized_count"], 1)
             self.assertEqual(overview["proof_of_useful_work"]["recent_receipts"][0]["stage"], "finalized")
+            self.assertEqual(overview["runtime_truth"]["session_count"], 1)
+            self.assertEqual(overview["runtime_truth"]["status_counts"]["completed"], 1)
+            self.assertEqual(overview["runtime_truth"]["session_pending_approval_count"], 0)
+
+            session_payload = json.loads((workspace_root / "control" / "runs" / "sessions" / "session-1.json").read_text(encoding="utf-8"))
+            self.assertEqual(session_payload["execution_history"]["checkpoint"]["status"], "completed")
+            self.assertIn("/tmp/output.txt", session_payload["execution_history"]["touched_paths"])
 
             reviewer_lane = json.loads((workspace_root / "control" / "queue" / "reviewer_lane.json").read_text(encoding="utf-8"))
             self.assertEqual(len(reviewer_lane["items"]), 1)
@@ -402,6 +414,82 @@ class ControlPlaneWorkspaceTests(unittest.TestCase):
             self.assertEqual(payload["proof_of_useful_work"]["confirmed_count"], 1)
             self.assertEqual(payload["adaptation_proof"]["proof_state"], "candidate_beating_baseline")
             self.assertEqual(payload["adaptation_proof"]["promoted_job_count"], 1)
+            self.assertIn("runtime_truth", payload)
+            self.assertEqual(payload["runtime_truth"]["session_count"], 0)
+            self.assertEqual(payload["pending_approval_count"], 0)
+            self.assertEqual(payload["approval_backlog_count"], 0)
+
+    def test_collect_control_plane_status_deduplicates_stale_pending_checkpoints_from_backlog(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            db_path = tmp / "nulla.db"
+            run_migrations(db_path)
+            conn = get_connection(db_path)
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO runtime_sessions (
+                        session_id, started_at, updated_at, event_count, last_event_type,
+                        last_message, request_preview, task_class, status, last_checkpoint_id
+                    ) VALUES (?, ?, ?, 2, 'task_pending_approval', 'Awaiting approval.', 'write file', 'operator_action', 'pending_approval', ?)
+                    """,
+                    ("session-approval", "2026-03-10T10:00:00+00:00", "2026-03-10T10:02:00+00:00", "checkpoint-current"),
+                )
+                conn.executemany(
+                    """
+                    INSERT INTO runtime_checkpoints (
+                        checkpoint_id, session_id, task_id, task_class, request_text, source_context_json,
+                        status, step_count, last_tool_name, pending_intent_json, state_json, final_response,
+                        failure_text, resume_count, created_at, updated_at, completed_at, resumed_from_checkpoint_id
+                    ) VALUES (?, ?, ?, ?, ?, '{}', 'pending_approval', 1, 'workspace.write_file', '{}', '{}', '', '', 0, ?, ?, NULL, NULL)
+                    """,
+                    [
+                        (
+                            "checkpoint-stale",
+                            "session-approval",
+                            "task-1",
+                            "operator_action",
+                            "write file",
+                            "2026-03-10T10:00:00+00:00",
+                            "2026-03-10T10:01:00+00:00",
+                        ),
+                        (
+                            "checkpoint-current",
+                            "session-approval",
+                            "task-1",
+                            "operator_action",
+                            "write file",
+                            "2026-03-10T10:01:30+00:00",
+                            "2026-03-10T10:02:00+00:00",
+                        ),
+                    ],
+                )
+                conn.execute(
+                    """
+                    INSERT INTO runtime_session_events (
+                        session_id, seq, event_type, message, details_json, created_at
+                    ) VALUES
+                    (?, 1, 'task_received', 'Received request.', '{}', ?),
+                    (?, 2, 'task_pending_approval', 'Awaiting approval.', '{}', ?)
+                    """,
+                    (
+                        "session-approval",
+                        "2026-03-10T10:00:00+00:00",
+                        "session-approval",
+                        "2026-03-10T10:02:00+00:00",
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            payload = collect_control_plane_status(db_path=db_path)
+
+            self.assertEqual(payload["pending_approval_count"], 1)
+            self.assertEqual(payload["approval_backlog_count"], 1)
+            self.assertEqual(payload["pending_runtime_checkpoint_count"], 1)
+            self.assertEqual(payload["runtime_pending_approval_count"], 1)
+            self.assertEqual(payload["runtime_truth"]["session_pending_approval_count"], 1)
 
 
 if __name__ == "__main__":

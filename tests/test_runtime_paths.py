@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest import mock
 
-from core.runtime_paths import PROJECT_ROOT, active_nulla_home, discover_installed_runtime_home, resolve_workspace_root
+from core.runtime_paths import (
+    PROJECT_ROOT,
+    active_nulla_home,
+    active_workspace_dir,
+    discover_installed_runtime_home,
+    resolve_workspace_root,
+)
 
 
 def test_resolve_workspace_root_prefers_explicit_path(tmp_path: Path) -> None:
@@ -78,3 +85,12 @@ def test_active_nulla_home_prefers_environment_over_install_receipt(tmp_path: Pa
         resolved = active_nulla_home({"NULLA_HOME": str(env_runtime)})
 
     assert resolved == env_runtime.resolve()
+
+
+def test_active_workspace_dir_honors_environment_overrides(tmp_path: Path) -> None:
+    workspace = tmp_path / "runtime-workspace"
+    workspace.mkdir()
+    with mock.patch.dict(os.environ, {"NULLA_WORKSPACE_ROOT": str(workspace)}, clear=False):
+        resolved = active_workspace_dir()
+
+    assert resolved == workspace.resolve()

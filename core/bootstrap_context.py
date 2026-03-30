@@ -148,6 +148,12 @@ def canonical_runtime_transcript(
     max_messages: int = 10,
     max_chars: int = 5000,
 ) -> tuple[list[dict[str, str]], str]:
+    client_history = _client_conversation_history(
+        source_context,
+        current_user_text=current_user_text,
+        max_messages=max_messages,
+        max_chars=max_chars,
+    )
     normalized_session_id = str(session_id or "").strip()
     if normalized_session_id:
         turns = recent_dialogue_turns(
@@ -175,14 +181,9 @@ def canonical_runtime_transcript(
             max_chars=max_chars,
         )
         if transcript:
+            if client_history and len(client_history) > len(transcript):
+                return client_history, "client_conversation_history"
             return transcript, "structured_dialogue_memory"
-
-    client_history = _client_conversation_history(
-        source_context,
-        current_user_text=current_user_text,
-        max_messages=max_messages,
-        max_chars=max_chars,
-    )
     if client_history:
         return client_history, "client_conversation_history"
     return [], "none"

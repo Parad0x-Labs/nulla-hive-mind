@@ -54,6 +54,19 @@ def test_pyproject_runtime_extra_covers_installer_runtime_surface() -> None:
         assert marker in pyproject
 
 
+def test_pyproject_dev_extra_covers_build_and_test_tooling() -> None:
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    for marker in (
+        "dev = [",
+        '"build>=1.2"',
+        '"pytest>=7.0"',
+        '"ruff>=0.3"',
+        '"mypy>=1.8"',
+    ):
+        assert marker in pyproject
+
+
 def test_container_and_docs_share_api_healthz_contract() -> None:
     dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
     install_doc = (REPO_ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
@@ -166,17 +179,18 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     assert "--install-profile <profile>" in sh_installer
     assert "/INSTALLPROFILE=ID" in bat_installer
     assert "--install-profile <id>" in sh_bootstrap
-    assert '-InstallProfile hybrid-kimi' in install_doc
+    assert '-InstallProfile local-max' in install_doc
     assert '/INSTALLPROFILE=$InstallProfile' in ps_bootstrap
     assert "install-profile --set ollama-only" in sh_installer
-    assert "install-profile --set ollama+kimi" in sh_installer
+    assert "install-profile --set ollama-max" in sh_installer
     assert "install-profile --set ollama-only" in readme
-    assert "install-profile --set ollama+kimi" in readme
+    assert "install-profile --set ollama-max" in readme
     assert "install-profile --set ollama-only" in install_doc
-    assert "install-profile --set ollama+kimi" in install_doc
+    assert "install-profile --set ollama-max" in install_doc
     assert "ollama-only" in sh_bootstrap
+    assert "ollama-max" in sh_bootstrap
     assert "detect_install_profile_display" in sh_installer
     assert "Recommended profile: ${recommended_install_profile_display}" in sh_installer
     assert "Install profile: ${install_profile_display}" in sh_installer
-    assert "local_plus_kimi" in readme
+    assert "local_plus_llamacpp" in readme
     assert "first-class installer/runtime lane yet" not in readme

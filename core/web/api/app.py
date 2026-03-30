@@ -7,6 +7,7 @@ from collections.abc import Callable
 from urllib.parse import parse_qs
 
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
 from starlette.routing import Route
@@ -39,7 +40,8 @@ async def _dispatch(request: Request) -> Response:
     )
     response: ApiResponse
     if request.method == "GET":
-        response = get_dispatcher(
+        response = await run_in_threadpool(
+            get_dispatcher,
             path=request.url.path,
             query=parse_qs(request.url.query),
             runtime=runtime,
@@ -55,7 +57,8 @@ async def _dispatch(request: Request) -> Response:
             except json.JSONDecodeError:
                 response = json_response(400, {"error": "invalid JSON"})
             else:
-                response = post_dispatcher(
+                response = await run_in_threadpool(
+                    post_dispatcher,
                     path=request.url.path,
                     body=body,
                     headers=dict(request.headers.items()),

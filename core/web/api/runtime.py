@@ -8,7 +8,7 @@ import queue
 import re
 import subprocess
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +18,7 @@ from apps.nulla_agent import NullaAgent
 from apps.nulla_daemon import DaemonConfig, NullaDaemon
 from core import policy_engine
 from core.compute_mode import ComputeModeDaemon
-from core.hardware_tier import probe_machine, select_qwen_tier
+from core.hardware_tier import probe_machine
 from core.identity_manager import load_active_persona
 from core.local_worker_pool import resolve_local_worker_capacity
 from core.model_registry import ModelRegistry
@@ -30,9 +30,11 @@ from core.onboarding import (
 )
 from core.public_hive_bridge import ensure_public_hive_auth
 from core.release_channel import release_manifest_snapshot
+from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_bootstrap import bootstrap_runtime_mode
+from core.runtime_install_profiles import active_install_profile_id
 from core.runtime_paths import active_config_home_dir, resolve_workspace_root
-from core.runtime_provider_defaults import ensure_default_runtime_providers
+from core.runtime_provider_defaults import default_runtime_model_tag, ensure_default_runtime_providers
 from core.runtime_task_events import (
     new_runtime_event_stream_id,
     register_runtime_event_sink,
@@ -55,8 +57,10 @@ class RuntimeServices:
     agent: NullaAgent | None = None
     daemon: NullaDaemon | None = None
     display_name: str = "NULLA"
-    runtime_model_tag: str = "qwen2.5:7b"
-    runtime_parameter_size: str = "7B"
+    runtime_model_tag: str = field(default_factory=default_runtime_model_tag)
+    runtime_parameter_size: str = field(
+        default_factory=lambda: parameter_size_for_model(default_runtime_model_tag())
+    )
     runtime_started_at: str = ""
     runtime_version_stamp: dict[str, Any] = field(default_factory=dict)
     public_hive_auth: dict[str, Any] = field(default_factory=dict)
@@ -80,7 +84,18 @@ def git_output(project_root: Path, *args: str) -> str:
     return str(completed.stdout or "").strip()
 
 
-def build_source_metadata(project_root: Path) -> dict[str, str]:
+def _coerce_optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or "").strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def build_source_metadata(project_root: Path) -> dict[str, Any]:
     metadata_path = project_root / BUILD_SOURCE_PATH
     try:
         payload = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -88,12 +103,30 @@ def build_source_metadata(project_root: Path) -> dict[str, str]:
         return {}
     if not isinstance(payload, dict):
         return {}
-    metadata: dict[str, str] = {}
-    for key in ("ref", "branch", "commit", "source_url"):
+    metadata: dict[str, Any] = {}
+    for key in ("ref", "branch", "commit", "source_url", "source_kind"):
         value = str(payload.get(key) or "").strip()
         if value:
             metadata[key] = value
+    dirty_state = _coerce_optional_bool(payload.get("dirty_state"))
+    if dirty_state is not None:
+        metadata["dirty_state"] = dirty_state
     return metadata
+
+
+def git_checkout_state(project_root: Path) -> dict[str, Any]:
+    commit_full = git_output(project_root, "rev-parse", "HEAD")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit_full):
+        return {"valid": False, "branch": "", "commit": "", "dirty": False}
+    branch = git_output(project_root, "branch", "--show-current")
+    short_commit = git_output(project_root, "rev-parse", "--short=12", "HEAD") or commit_full[:12]
+    dirty = bool(git_output(project_root, "status", "--short"))
+    return {
+        "valid": True,
+        "branch": branch,
+        "commit": short_commit,
+        "dirty": dirty,
+    }
 
 
 def env_int(name: str, default: int) -> int:
@@ -142,9 +175,15 @@ def parameter_count_for_model(model_tag: str) -> int:
 def build_runtime_version_stamp(*, project_root: Path, runtime_model_tag: str, workstation_version: str) -> dict[str, Any]:
     release = dict(release_manifest_snapshot())
     build_source = build_source_metadata(project_root)
-    branch = git_output(project_root, "branch", "--show-current") or str(build_source.get("branch") or build_source.get("ref") or "")
-    commit = git_output(project_root, "rev-parse", "--short=12", "HEAD") or str(build_source.get("commit") or "").strip()[:12]
-    dirty = bool(git_output(project_root, "status", "--short"))
+    git_state = git_checkout_state(project_root)
+    if bool(git_state.get("valid")):
+        branch = str(git_state.get("branch") or build_source.get("branch") or build_source.get("ref") or "")
+        commit = str(git_state.get("commit") or "").strip()
+        dirty = bool(git_state.get("dirty"))
+    else:
+        branch = str(build_source.get("branch") or build_source.get("ref") or "")
+        commit = str(build_source.get("commit") or "").strip()[:12]
+        dirty = bool(build_source.get("dirty_state"))
     release_version = str(release.get("release_version") or "").strip() or "unknown-release"
     build_parts = [release_version]
     if commit:
@@ -170,7 +209,8 @@ def build_runtime_version_stamp(*, project_root: Path, runtime_model_tag: str, w
     }
 
 
-def ensure_ollama_model(model_tag: str = "qwen2.5:7b") -> None:
+def ensure_ollama_model(model_tag: str | None = None) -> None:
+    active_model = str(model_tag or "").strip() or default_runtime_model_tag()
     try:
         result = subprocess.run(
             ["ollama", "list"],
@@ -178,25 +218,89 @@ def ensure_ollama_model(model_tag: str = "qwen2.5:7b") -> None:
             text=True,
             timeout=10,
         )
-        if model_tag in result.stdout:
+        if active_model in result.stdout:
             return
     except Exception:
         pass
-    logger.info("Ollama model '%s' missing — pulling now (this may take a few minutes on first run)...", model_tag)
+    logger.info(
+        "Ollama model '%s' missing — pulling now (this may take a few minutes on first run)...",
+        active_model,
+    )
     try:
         subprocess.run(
-            ["ollama", "pull", model_tag],
+            ["ollama", "pull", active_model],
             timeout=1200,
             capture_output=True,
         )
-        logger.info("Ollama model '%s' pulled successfully.", model_tag)
+        logger.info("Ollama model '%s' pulled successfully.", active_model)
     except Exception as exc:
-        logger.warning("Failed to pull Ollama model '%s': %s — LLM responses will fall back to planning mode.", model_tag, exc)
+        logger.warning(
+            "Failed to pull Ollama model '%s': %s — LLM responses will fall back to planning mode.",
+            active_model,
+            exc,
+        )
 
 
 def ensure_default_provider(registry: ModelRegistry, model_tag: str) -> None:
     for provider_id in ensure_default_runtime_providers(registry, model_tag=model_tag):
         logger.info("Auto-registered default provider: %s", provider_id)
+
+
+def log_prewarm_results(
+    registry: ModelRegistry,
+    *,
+    runtime_home: str | None = None,
+    requested_profile: str | None = None,
+) -> None:
+    try:
+        snapshot = build_provider_registry_snapshot(
+            registry,
+            runtime_home=runtime_home,
+            requested_profile=requested_profile,
+            honor_install_profile=bool(requested_profile or runtime_home),
+            run_prewarm=True,
+        )
+        raw_results = snapshot.prewarm_results
+    except Exception as exc:
+        logger.warning("Provider prewarm enumeration failed: %s", exc)
+        return
+    if not isinstance(raw_results, (list, tuple)):
+        return
+    for result in raw_results:
+        provider_id = str(result.get("provider_id") or "unknown-provider")
+        status = str(result.get("status") or "unknown").strip() or "unknown"
+        if result.get("ok") and status == "prewarmed":
+            logger.info(
+                "Provider prewarmed: %s | keep_alive=%s | load_duration=%s | total_duration=%s",
+                provider_id,
+                result.get("keep_alive"),
+                result.get("load_duration"),
+                result.get("total_duration"),
+            )
+            continue
+        if result.get("ok") and status == "timed_out":
+            logger.info(
+                "Provider prewarm timed out; continuing without background warming: %s | reason=%s | keep_alive=%s | timeout_seconds=%s",
+                provider_id,
+                result.get("reason") or "unspecified",
+                result.get("keep_alive"),
+                result.get("timeout_seconds"),
+            )
+            continue
+        if result.get("ok"):
+            logger.info(
+                "Provider prewarm skipped: %s | status=%s | reason=%s",
+                provider_id,
+                status,
+                result.get("reason") or "unspecified",
+            )
+            continue
+        logger.warning(
+            "Provider prewarm failed: %s | status=%s | error=%s",
+            provider_id,
+            status,
+            result.get("error") or "unknown_error",
+        )
 
 
 def public_hive_auth_snapshot(auth_result: dict[str, Any] | None) -> dict[str, Any]:
@@ -266,11 +370,15 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
             logger.warning("Public Hive auth is not wired for writes: %s", auth_status)
 
     probe = probe_machine()
-    tier = select_qwen_tier(probe)
-    runtime_model_tag = tier.ollama_tag
+    runtime_model_tag = env_text("NULLA_OLLAMA_MODEL", default_runtime_model_tag())
     runtime_parameter_size = parameter_size_for_model(runtime_model_tag)
     ensure_ollama_model(runtime_model_tag)
-    logger.info("Hardware: %s | GPU: %s | Model tier: %s", probe.accelerator, probe.gpu_name or "none", tier.ollama_tag)
+    logger.info(
+        "Hardware: %s | GPU: %s | Primary local model: %s",
+        probe.accelerator,
+        probe.gpu_name or "none",
+        runtime_model_tag,
+    )
     runtime_version_stamp = build_runtime_version_stamp(
         project_root=project_root,
         runtime_model_tag=runtime_model_tag,
@@ -292,6 +400,16 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
     ensure_default_provider(model_registry, runtime_model_tag)
     for warning in model_registry.startup_warnings():
         logger.warning("Model warning: %s", warning)
+    runtime_home = (
+        str(boot.context.paths.runtime_home)
+        if getattr(getattr(boot, "context", None), "paths", None) is not None
+        else None
+    )
+    log_prewarm_results(
+        model_registry,
+        runtime_home=runtime_home,
+        requested_profile=active_install_profile_id(runtime_home=runtime_home) if runtime_home else None,
+    )
 
     selection = boot.backend_selection
     if selection is None:
@@ -342,7 +460,7 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
 
 def message_text(content: Any) -> str:
     if isinstance(content, str):
-        return strip_openclaw_sender_wrapper(" ".join(content.split()).strip())
+        return strip_openclaw_sender_wrapper(str(content).strip())
     if isinstance(content, list):
         parts: list[str] = []
         for part in content:
@@ -352,7 +470,7 @@ def message_text(content: Any) -> str:
                 text = str(part.get("text") or "").strip()
                 if text:
                     parts.append(text)
-        return strip_openclaw_sender_wrapper(" ".join(parts).strip())
+        return strip_openclaw_sender_wrapper("\n".join(parts).strip())
     return strip_openclaw_sender_wrapper(str(content or "").strip())
 
 
@@ -540,7 +658,46 @@ def ollama_stream_chunks(result: dict[str, Any], model: str) -> list[bytes]:
     return chunks
 
 
+def openai_sse_stream_from_ollama_chunks(stream: Iterable[bytes], model: str) -> Iterator[bytes]:
+    chunk_id = f"chatcmpl-{hashlib.sha256(f'{model}:{datetime.now(timezone.utc).timestamp()}'.encode()).hexdigest()[:12]}"
+    created = int(datetime.now(timezone.utc).timestamp())
+    emitted_role = False
+    for raw_chunk in stream:
+        raw_text = raw_chunk.decode("utf-8", errors="replace").strip()
+        if not raw_text:
+            continue
+        payload = json.loads(raw_text)
+        message = dict(payload.get("message") or {})
+        content = str(message.get("content") or "")
+        done = bool(payload.get("done"))
+        delta: dict[str, Any] = {}
+        if not emitted_role:
+            delta["role"] = "assistant"
+            emitted_role = True
+        if content:
+            delta["content"] = content
+        event = {
+            "id": chunk_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": delta,
+                    "finish_reason": "stop" if done else None,
+                }
+            ],
+        }
+        yield b"data: " + json.dumps(event, separators=(",", ":")).encode("utf-8") + b"\n\n"
+        if done:
+            yield b"data: [DONE]\n\n"
+            break
+
+
 def format_runtime_event_text(event: dict[str, Any]) -> str:
+    if str(event.get("event_type") or "").strip() == "model_output_chunk":
+        return str(event.get("message") or "")
     message = str(event.get("message") or "").strip()
     return message + "\n" if message else ""
 
@@ -558,9 +715,9 @@ def stream_agent_with_events(
     event_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
     stream_context = dict(source_context or {})
     stream_id = ""
-    if include_runtime_events:
-        stream_id = new_runtime_event_stream_id()
-        stream_context["runtime_event_stream_id"] = stream_id
+    saw_model_output = False
+    stream_id = new_runtime_event_stream_id()
+    stream_context["runtime_event_stream_id"] = stream_id
 
     def sink(event: dict[str, Any]) -> None:
         event_queue.put(("event", dict(event)))
@@ -573,7 +730,7 @@ def stream_agent_with_events(
         except Exception as exc:
             event_queue.put(("error", str(exc)))
 
-    if include_runtime_events and stream_id:
+    if stream_id:
         register_runtime_event_sink(stream_id, sink)
     thread = threading.Thread(target=worker, name="nulla-openclaw-stream", daemon=True)
     thread.start()
@@ -582,7 +739,12 @@ def stream_agent_with_events(
         while True:
             kind, payload = event_queue.get()
             if kind == "event":
-                content = format_runtime_event_text(dict(payload or {}))
+                event_payload = dict(payload or {})
+                if str(event_payload.get("event_type") or "").strip() == "model_output_chunk":
+                    saw_model_output = True
+                if not include_runtime_events and str(event_payload.get("event_type") or "").strip() != "model_output_chunk":
+                    continue
+                content = format_runtime_event_text(event_payload)
                 if content:
                     yield ollama_stream_chunk(
                         model=model,
@@ -596,10 +758,21 @@ def stream_agent_with_events(
                     yield chunk
                 break
             if kind == "result":
-                for chunk in ollama_stream_chunks(dict(payload or {}), model):
-                    yield chunk
+                if saw_model_output:
+                    response_text = str(dict(payload or {}).get("response") or "").strip()
+                    eval_count = len(response_text.split()) if response_text else 0
+                    yield ollama_stream_chunk(
+                        model=model,
+                        content="",
+                        created_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                        done=True,
+                        eval_count=eval_count,
+                    )
+                else:
+                    for chunk in ollama_stream_chunks(dict(payload or {}), model):
+                        yield chunk
                 break
     finally:
-        if include_runtime_events and stream_id:
+        if stream_id:
             unregister_runtime_event_sink(stream_id)
         thread.join(timeout=0.1)

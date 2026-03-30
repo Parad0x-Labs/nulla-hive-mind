@@ -13,7 +13,41 @@ from core.runtime_backbone import (
     build_runtime_backbone,
 )
 from core.runtime_bootstrap import BootstrappedRuntime, RuntimeBackendSelection
-from core.runtime_install_profiles import InstallProfileTruth
+from core.runtime_install_profiles import InstallProfileProvider, InstallProfileTruth
+from storage.model_provider_manifest import ModelProviderManifest
+
+
+def _install_profile_truth_with_provider_ids(*provider_ids: str) -> InstallProfileTruth:
+    provider_mix = tuple(
+        InstallProfileProvider(
+            provider_id=provider_id,
+            role="general" if index == 0 else "reasoning",
+            locality="local",
+            required=True,
+            configured=True,
+            availability_state="ready",
+        )
+        for index, provider_id in enumerate(provider_ids)
+    )
+    return InstallProfileTruth(
+        profile_id="local-only",
+        label="Local only",
+        summary="Single local Ollama lane with no remote provider dependency.",
+        selection_source="test",
+        selected_model="qwen3:8b",
+        provider_mix=provider_mix,
+        estimated_download_gb=0.0,
+        estimated_disk_footprint_gb=0.0,
+        minimum_free_space_gb=0.0,
+        ram_expectation_gb=0.0,
+        vram_expectation_gb=0.0,
+        ready=True,
+        degraded=False,
+        single_volume_ready=True,
+        reasons=tuple(),
+        volume_checks=tuple(),
+        selected_models=tuple(item.provider_id.split(":", 1)[1] for item in provider_mix),
+    )
 
 
 def test_build_provider_registry_snapshot_collects_rows_and_warnings_from_registry() -> None:
@@ -37,6 +71,7 @@ def test_build_provider_registry_snapshot_collects_rows_and_warnings_from_regist
 
     assert snapshot.warnings == ("missing health path",)
     assert snapshot.audit_rows == (row,)
+    assert snapshot.prewarm_results == tuple()
 
 
 def test_build_provider_registry_snapshot_auto_registers_kimi_when_configured() -> None:
@@ -111,7 +146,147 @@ def test_build_provider_registry_snapshot_honors_local_only_install_profile_for_
     assert not any(item.provider_id.startswith("kimi-remote:") for item in snapshot.capability_truth)
 
 
-def test_build_provider_registry_snapshot_registers_helper_ollama_lane_for_local_max() -> None:
+def test_build_provider_registry_snapshot_filters_legacy_enabled_manifests_to_active_profile_mix() -> None:
+    manifests: dict[tuple[str, str], ModelProviderManifest] = {
+        ("cloud-fallback-http", "cloud"): ModelProviderManifest(
+            provider_name="cloud-fallback-http",
+            model_name="cloud",
+            source_type="http",
+            adapter_type="cloud_fallback_provider",
+            license_name="Provider",
+            license_reference="user-managed",
+            license_url_or_reference="user-managed",
+            runtime_dependency="remote-openai-compatible-provider",
+            runtime_config={"base_url": "https://provider.example"},
+            metadata={"deployment_class": "cloud", "orchestration_role": "queen"},
+            enabled=True,
+        ),
+        ("local-qwen-http", "qwen-local"): ModelProviderManifest(
+            provider_name="local-qwen-http",
+            model_name="qwen-local",
+            source_type="http",
+            adapter_type="local_qwen_provider",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            license_url_or_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="openai-compatible-local-runtime",
+            runtime_config={"base_url": "http://127.0.0.1:1234"},
+            metadata={"deployment_class": "local", "orchestration_role": "drone"},
+            enabled=True,
+        ),
+        ("ollama-local", "qwen2.5:14b"): ModelProviderManifest(
+            provider_name="ollama-local",
+            model_name="qwen2.5:14b",
+            source_type="http",
+            adapter_type="local_qwen_provider",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            license_url_or_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="ollama",
+            runtime_config={"base_url": "http://127.0.0.1:11434"},
+            metadata={"deployment_class": "local", "orchestration_role": "drone"},
+            enabled=True,
+        ),
+        ("ollama-local", "qwen2.5:7b"): ModelProviderManifest(
+            provider_name="ollama-local",
+            model_name="qwen2.5:7b",
+            source_type="http",
+            adapter_type="local_qwen_provider",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            license_url_or_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="ollama",
+            runtime_config={"base_url": "http://127.0.0.1:11434"},
+            metadata={"deployment_class": "local", "orchestration_role": "drone"},
+            enabled=True,
+        ),
+        ("ollama-local", "qwen3:8b"): ModelProviderManifest(
+            provider_name="ollama-local",
+            model_name="qwen3:8b",
+            source_type="http",
+            adapter_type="local_qwen_provider",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            license_url_or_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="ollama",
+            runtime_config={"base_url": "http://127.0.0.1:11434"},
+            metadata={"deployment_class": "local", "orchestration_role": "drone"},
+            enabled=True,
+        ),
+        ("ollama-local", "deepseek-r1:8b"): ModelProviderManifest(
+            provider_name="ollama-local",
+            model_name="deepseek-r1:8b",
+            source_type="http",
+            adapter_type="openai_compatible",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            license_url_or_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="ollama",
+            runtime_config={"base_url": "http://127.0.0.1:11434"},
+            metadata={"deployment_class": "local", "orchestration_role": "queen"},
+            enabled=True,
+        ),
+    }
+
+    def _get_manifest(provider_name: str, model_name: str):
+        return manifests.get((provider_name, model_name))
+
+    def _register_manifest(manifest):
+        manifests[(manifest.provider_name, manifest.model_name)] = manifest
+        return manifest
+
+    def _list_manifests(*, enabled_only: bool = False, limit: int = 256):
+        rows = [item for item in manifests.values() if item.enabled or not enabled_only]
+        return rows[:limit]
+
+    def _provider_audit_rows():
+        return [
+            ProviderAuditRow(
+                provider_id=item.provider_id,
+                source_type=item.source_type,
+                license_name=item.license_name,
+                license_reference=item.license_reference,
+                runtime_dependency=item.runtime_dependency,
+                weight_location=item.weight_location,
+                weights_bundled=item.weights_are_bundled,
+                redistribution_allowed=item.redistribution_allowed,
+                warnings=[],
+            )
+            for item in manifests.values()
+        ]
+
+    registry = mock.Mock()
+    registry.startup_warnings.return_value = []
+    registry.provider_audit_rows.side_effect = _provider_audit_rows
+    registry.get_manifest.side_effect = _get_manifest
+    registry.register_manifest.side_effect = _register_manifest
+    registry.list_manifests.side_effect = _list_manifests
+
+    with mock.patch(
+        "core.runtime_backbone.build_install_profile_truth",
+        return_value=_install_profile_truth_with_provider_ids(
+            "ollama-local:qwen3:8b",
+            "ollama-local:deepseek-r1:8b",
+        ),
+    ):
+        snapshot = build_provider_registry_snapshot(
+            registry,
+            requested_profile="local-only",
+            honor_install_profile=True,
+            env={},
+        )
+
+    assert tuple(item.provider_id for item in snapshot.capability_truth) == (
+        "ollama-local:qwen3:8b",
+        "ollama-local:deepseek-r1:8b",
+    )
+    assert tuple(item.provider_id for item in snapshot.audit_rows) == (
+        "ollama-local:qwen3:8b",
+        "ollama-local:deepseek-r1:8b",
+    )
+
+
+def test_build_provider_registry_snapshot_keeps_local_max_on_primary_ollama_lane_until_llamacpp_is_configured() -> None:
     manifests = {}
 
     def _get_manifest(provider_name: str, model_name: str):
@@ -141,8 +316,131 @@ def test_build_provider_registry_snapshot_registers_helper_ollama_lane_for_local
         snapshot = build_provider_registry_snapshot(registry, honor_install_profile=True)
 
     assert ("ollama-local", "qwen2.5:14b") in manifests
-    assert ("ollama-local", "qwen2.5:7b") in manifests
-    assert any(item.provider_id == "ollama-local:qwen2.5:7b" for item in snapshot.capability_truth)
+    assert ("ollama-local", "qwen2.5:7b") not in manifests
+    assert not any(item.provider_id == "ollama-local:qwen2.5:7b" for item in snapshot.capability_truth)
+
+
+def test_build_provider_registry_snapshot_includes_local_ollama_prewarm_config() -> None:
+    manifests = {}
+
+    def _get_manifest(provider_name: str, model_name: str):
+        return manifests.get((provider_name, model_name))
+
+    def _register_manifest(manifest):
+        manifests[(manifest.provider_name, manifest.model_name)] = manifest
+        return manifest
+
+    def _list_manifests(*, enabled_only: bool = False, limit: int = 256):
+        return list(manifests.values())[:limit]
+
+    registry = mock.Mock()
+    registry.startup_warnings.return_value = []
+    registry.provider_audit_rows.return_value = []
+    registry.get_manifest.side_effect = _get_manifest
+    registry.register_manifest.side_effect = _register_manifest
+    registry.list_manifests.side_effect = _list_manifests
+    registry.prewarm_enabled_providers.return_value = [
+        {"ok": True, "provider_id": "ollama-local:qwen2.5:14b", "status": "prewarmed", "keep_alive": "15m"}
+    ]
+
+    with mock.patch("core.runtime_provider_defaults.default_runtime_model_tag", return_value="qwen2.5:14b"):
+        snapshot = build_provider_registry_snapshot(registry, run_prewarm=True)
+
+    manifest = manifests[("ollama-local", "qwen2.5:14b")]
+    assert manifest.runtime_config["prewarm"]["strategy"] == "ollama_chat"
+    assert manifest.runtime_config["prewarm"]["timeout_seconds"] == 45
+    assert snapshot.prewarm_results == (
+        {"ok": True, "provider_id": "ollama-local:qwen2.5:14b", "status": "prewarmed", "keep_alive": "15m"},
+    )
+
+
+def test_build_provider_registry_snapshot_prewarms_only_active_profile_mix() -> None:
+    manifests: dict[tuple[str, str], ModelProviderManifest] = {
+        ("ollama-local", "qwen3:8b"): ModelProviderManifest(
+            provider_name="ollama-local",
+            model_name="qwen3:8b",
+            source_type="http",
+            adapter_type="local_qwen_provider",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            license_url_or_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="ollama",
+            runtime_config={"base_url": "http://127.0.0.1:11434", "prewarm": {"strategy": "ollama_chat"}},
+            metadata={"deployment_class": "local", "orchestration_role": "drone"},
+            enabled=True,
+        ),
+        ("ollama-local", "deepseek-r1:8b"): ModelProviderManifest(
+            provider_name="ollama-local",
+            model_name="deepseek-r1:8b",
+            source_type="http",
+            adapter_type="openai_compatible",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            license_url_or_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="ollama",
+            runtime_config={"base_url": "http://127.0.0.1:11434", "prewarm": {"strategy": "ollama_chat"}},
+            metadata={"deployment_class": "local", "orchestration_role": "queen"},
+            enabled=True,
+        ),
+        ("ollama-local", "qwen2.5:7b"): ModelProviderManifest(
+            provider_name="ollama-local",
+            model_name="qwen2.5:7b",
+            source_type="http",
+            adapter_type="local_qwen_provider",
+            license_name="Apache-2.0",
+            license_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            license_url_or_reference="https://www.apache.org/licenses/LICENSE-2.0",
+            runtime_dependency="ollama",
+            runtime_config={"base_url": "http://127.0.0.1:11434", "prewarm": {"strategy": "ollama_chat"}},
+            metadata={"deployment_class": "local", "orchestration_role": "drone"},
+            enabled=True,
+        ),
+    }
+
+    def _get_manifest(provider_name: str, model_name: str):
+        return manifests.get((provider_name, model_name))
+
+    def _register_manifest(manifest):
+        manifests[(manifest.provider_name, manifest.model_name)] = manifest
+        return manifest
+
+    def _list_manifests(*, enabled_only: bool = False, limit: int = 256):
+        rows = [item for item in manifests.values() if item.enabled or not enabled_only]
+        return rows[:limit]
+
+    registry = mock.Mock()
+    registry.startup_warnings.return_value = []
+    registry.provider_audit_rows.return_value = []
+    registry.get_manifest.side_effect = _get_manifest
+    registry.register_manifest.side_effect = _register_manifest
+    registry.list_manifests.side_effect = _list_manifests
+    registry.prewarm_enabled_providers.return_value = [
+        {"ok": True, "provider_id": "ollama-local:qwen3:8b", "status": "prewarmed"},
+        {"ok": True, "provider_id": "ollama-local:deepseek-r1:8b", "status": "prewarmed"},
+    ]
+
+    with mock.patch(
+        "core.runtime_backbone.build_install_profile_truth",
+        return_value=_install_profile_truth_with_provider_ids(
+            "ollama-local:qwen3:8b",
+            "ollama-local:deepseek-r1:8b",
+        ),
+    ):
+        snapshot = build_provider_registry_snapshot(
+            registry,
+            requested_profile="local-only",
+            honor_install_profile=True,
+            run_prewarm=True,
+            env={},
+        )
+
+    registry.prewarm_enabled_providers.assert_called_once_with(
+        provider_ids=("ollama-local:qwen3:8b", "ollama-local:deepseek-r1:8b")
+    )
+    assert tuple(item["provider_id"] for item in snapshot.prewarm_results) == (
+        "ollama-local:qwen3:8b",
+        "ollama-local:deepseek-r1:8b",
+    )
 
 
 def test_build_provider_registry_snapshot_accepts_moonshot_aliases_for_kimi() -> None:
@@ -180,6 +478,81 @@ def test_build_provider_registry_snapshot_accepts_moonshot_aliases_for_kimi() ->
     assert kimi_manifest.runtime_config["base_url"] == "https://kimi.example/v1"
     assert kimi_manifest.runtime_config["api_key_env"] == "MOONSHOT_API_KEY"
     assert any(item.provider_id == "kimi-remote:kimi-moonshot" for item in snapshot.capability_truth)
+
+
+def test_build_provider_registry_snapshot_auto_registers_tether_when_configured() -> None:
+    manifests = {}
+
+    def _get_manifest(provider_name: str, model_name: str):
+        return manifests.get((provider_name, model_name))
+
+    def _register_manifest(manifest):
+        manifests[(manifest.provider_name, manifest.model_name)] = manifest
+        return manifest
+
+    def _list_manifests(*, enabled_only: bool = False, limit: int = 256):
+        return list(manifests.values())[:limit]
+
+    registry = mock.Mock()
+    registry.startup_warnings.return_value = []
+    registry.provider_audit_rows.return_value = []
+    registry.get_manifest.side_effect = _get_manifest
+    registry.register_manifest.side_effect = _register_manifest
+    registry.list_manifests.side_effect = _list_manifests
+
+    with mock.patch.dict(
+        os.environ,
+        {
+            "TETHER_API_KEY": "test-key",
+            "TETHER_BASE_URL": "https://tether.example/v1",
+            "NULLA_TETHER_MODEL": "tether-edge",
+        },
+        clear=False,
+    ):
+        snapshot = build_provider_registry_snapshot(registry)
+
+    tether_manifest = manifests[("tether-remote", "tether-edge")]
+    assert tether_manifest.adapter_type == "openai_compatible"
+    assert tether_manifest.runtime_config["base_url"] == "https://tether.example/v1"
+    assert tether_manifest.runtime_config["api_key_env"] == "TETHER_API_KEY"
+    assert any(item.provider_id == "tether-remote:tether-edge" for item in snapshot.capability_truth)
+
+
+def test_build_provider_registry_snapshot_auto_registers_generic_remote_when_openai_is_configured() -> None:
+    manifests = {}
+
+    def _get_manifest(provider_name: str, model_name: str):
+        return manifests.get((provider_name, model_name))
+
+    def _register_manifest(manifest):
+        manifests[(manifest.provider_name, manifest.model_name)] = manifest
+        return manifest
+
+    def _list_manifests(*, enabled_only: bool = False, limit: int = 256):
+        return list(manifests.values())[:limit]
+
+    registry = mock.Mock()
+    registry.startup_warnings.return_value = []
+    registry.provider_audit_rows.return_value = []
+    registry.get_manifest.side_effect = _get_manifest
+    registry.register_manifest.side_effect = _register_manifest
+    registry.list_manifests.side_effect = _list_manifests
+
+    with mock.patch.dict(
+        os.environ,
+        {
+            "OPENAI_API_KEY": "test-key",
+            "OPENAI_MODEL": "gpt-4.1-mini",
+        },
+        clear=False,
+    ):
+        snapshot = build_provider_registry_snapshot(registry)
+
+    remote_manifest = manifests[("openai-compatible-remote", "gpt-4.1-mini")]
+    assert remote_manifest.adapter_type == "cloud_fallback_provider"
+    assert remote_manifest.runtime_config["base_url"] == "https://api.openai.com/v1"
+    assert remote_manifest.runtime_config["api_key_env"] == "OPENAI_API_KEY"
+    assert any(item.provider_id == "openai-compatible-remote:gpt-4.1-mini" for item in snapshot.capability_truth)
 
 
 def test_build_provider_registry_snapshot_auto_registers_vllm_when_configured() -> None:
@@ -255,6 +628,48 @@ def test_build_provider_registry_snapshot_auto_registers_llamacpp_when_configure
     assert manifest.adapter_type == "openai_compatible"
     assert manifest.runtime_config["base_url"] == "http://127.0.0.1:8090/v1"
     assert manifest.metadata["orchestration_role"] == "drone"
+    assert any(item.provider_id == "llamacpp-local:qwen2.5:14b-gguf" for item in snapshot.capability_truth)
+
+
+def test_build_provider_registry_snapshot_reads_persisted_provider_env_from_runtime_home(tmp_path) -> None:
+    manifests = {}
+
+    def _get_manifest(provider_name: str, model_name: str):
+        return manifests.get((provider_name, model_name))
+
+    def _register_manifest(manifest):
+        manifests[(manifest.provider_name, manifest.model_name)] = manifest
+        return manifest
+
+    def _list_manifests(*, enabled_only: bool = False, limit: int = 256):
+        return list(manifests.values())[:limit]
+
+    registry = mock.Mock()
+    registry.startup_warnings.return_value = []
+    registry.provider_audit_rows.return_value = []
+    registry.get_manifest.side_effect = _get_manifest
+    registry.register_manifest.side_effect = _register_manifest
+    registry.list_manifests.side_effect = _list_manifests
+    provider_env = tmp_path / "config" / "provider-env.sh"
+    provider_env.parent.mkdir(parents=True)
+    provider_env.write_text(
+        "export LLAMACPP_BASE_URL=http://127.0.0.1:8090/v1\n"
+        "export NULLA_LLAMACPP_MODEL=qwen2.5:14b-gguf\n"
+        "export LLAMACPP_CONTEXT_WINDOW=16384\n",
+        encoding="utf-8",
+    )
+
+    snapshot = build_provider_registry_snapshot(
+        registry,
+        runtime_home=str(tmp_path),
+        honor_install_profile=True,
+        requested_profile="local-max",
+        env={},
+    )
+
+    manifest = manifests[("llamacpp-local", "qwen2.5:14b-gguf")]
+    assert manifest.runtime_config["base_url"] == "http://127.0.0.1:8090/v1"
+    assert manifest.metadata["context_window"] == 16384
     assert any(item.provider_id == "llamacpp-local:qwen2.5:14b-gguf" for item in snapshot.capability_truth)
 
 
@@ -338,6 +753,7 @@ def test_build_runtime_backbone_reuses_bootstrap_probe_and_provider_facades() ->
         None,
         runtime_home=None,
         honor_install_profile=True,
+        run_prewarm=True,
     )
     install_profile_fn.assert_called_once()
     assert backbone.boot is fake_boot

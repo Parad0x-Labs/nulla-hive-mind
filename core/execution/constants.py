@@ -123,11 +123,11 @@ _INTO_PATH_RE = re.compile(
 )
 _WORKSPACE_FILE_RE = r"[A-Za-z0-9_./-]+\.[A-Za-z0-9_+-]+"
 _CREATE_NAMED_FILE_WITH_CONTENT_RE = re.compile(
-    rf"\bcreate\s+(?:a\s+)?file(?:\s+named)?\s+[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?(?:\s+in\s+[^:]+?)?\s+with(?:\s+exactly)?(?:\s+this)?\s+content:?\s*(?P<content>.+)$",
+    rf"\bcreate\s+(?:a\s+)?file(?:\s+named)?\s+[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?(?:\s+in\s+[^:]+?)?\s+with(?:\s+exactly)?(?:\s+(?:this|the))?\s+(?:line|content|code)(?:(?:\s*,?\s*[^:\n.]+?)\s*:|:\s*|\s+)(?P<content>.+)$",
     re.IGNORECASE | re.DOTALL,
 )
 _INLINE_CREATE_FILE_RE = re.compile(
-    rf"\bcreate\s+[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?\s+(?:with(?:\s+the\s+line|\s+content)?|that\s+says:)\s*(?P<content>.+?)(?=(?:\.\s*(?:Then|Now|Inside it|Do not)\b)|$)",
+    rf"\bcreate\s+(?:a\s+file(?:\s+named)?\s+)?[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?\s+(?:with(?:\s+exactly)?(?:\s+(?:this|the))?(?:\s+(?:line|content|code))(?:(?:\s*,?\s*[^:\n.]+?)\s*:|:\s*|\s+)|that\s+says:)\s*(?P<content>.+?)(?=(?:\.\s*(?:Then|Now|Inside it|Do not)\b)|$)",
     re.IGNORECASE | re.DOTALL,
 )
 _APPEND_FILE_RE = re.compile(

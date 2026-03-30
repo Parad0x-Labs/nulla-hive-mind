@@ -14,7 +14,12 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from core.hardware_tier import MachineProbe, select_qwen_tier, tier_summary
+from core.hardware_tier import MachineProbe, select_qwen_tier
+from core.install_recommendations import (
+    build_install_recommendation_truth,
+    install_recommendation_machine_summary,
+    local_multi_llm_fit,
+)
 from core.provider_routing import ProviderCapabilityTruth
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_install_profiles import (
@@ -193,10 +198,11 @@ def remote_env_statuses() -> dict[str, dict[str, Any]]:
         "base_url_present": _present("KIMI_BASE_URL", "NULLA_KIMI_BASE_URL", "MOONSHOT_BASE_URL"),
         "model_present": _present("KIMI_MODEL", "NULLA_KIMI_MODEL", "MOONSHOT_MODEL"),
     }
+    generic_remote_api_key = _present("OPENAI_API_KEY", "NULLA_REMOTE_API_KEY", "NULLA_CLOUD_API_KEY")
     generic_remote = {
-        "api_key_present": bool(os.environ.get("NULLA_REMOTE_API_KEY")),
-        "base_url_present": bool(os.environ.get("NULLA_REMOTE_BASE_URL")),
-        "model_present": bool(os.environ.get("NULLA_REMOTE_MODEL")),
+        "api_key_present": generic_remote_api_key,
+        "base_url_present": _present("NULLA_REMOTE_BASE_URL", "OPENAI_BASE_URL") or generic_remote_api_key,
+        "model_present": _present("NULLA_REMOTE_MODEL", "OPENAI_MODEL") or generic_remote_api_key,
     }
     tether = {
         "api_key_present": bool(os.environ.get("TETHER_API_KEY")),
@@ -232,23 +238,6 @@ def _provider_state_for_prefix(
     return matches[0].availability_state, matches[0].provider_id
 
 
-def local_multi_llm_fit(summary: dict[str, Any]) -> str:
-    ram_gb = float(summary.get("ram_gb") or 0.0)
-    accelerator = str(summary.get("accelerator") or "").strip().lower()
-    vram_gb = float(summary.get("vram_gb") or 0.0) if summary.get("vram_gb") is not None else 0.0
-    if accelerator == "mps":
-        if ram_gb >= 48.0:
-            return "comfortable"
-        if ram_gb >= 24.0:
-            return "pressure_sensitive"
-        return "single_model_only"
-    if vram_gb >= 20.0 or ram_gb >= 48.0:
-        return "comfortable"
-    if vram_gb >= 10.0 or ram_gb >= 24.0:
-        return "pressure_sensitive"
-    return "single_model_only"
-
-
 def _probe_env_for_install_profile(env_statuses: dict[str, dict[str, Any]]) -> dict[str, str]:
     env = dict(os.environ)
     if env_statuses.get("kimi", {}).get("configured"):
@@ -267,103 +256,119 @@ def build_probe_report(
     provider_capability_truth: tuple[ProviderCapabilityTruth, ...] | None = None,
     show_unsupported: bool = False,
 ) -> dict[str, Any]:
-    summary = tier_summary(machine)
     probe = machine
     if probe is None:
         from core.hardware_tier import probe_machine
 
         probe = probe_machine()
     primary_tier = select_qwen_tier(probe)
-    helper_model = "qwen2.5:7b"
     binary = str(ollama_binary or "").strip() or detect_ollama_binary()
     models = list(ollama_models if ollama_models is not None else list_ollama_models(binary))
     model_names = {str(item.get("name") or "").strip() for item in models if str(item.get("name") or "").strip()}
     envs = dict(env_statuses or remote_env_statuses())
-    local_fit = local_multi_llm_fit(summary)
+    local_fit = local_multi_llm_fit(probe)
     capability_truth = tuple(provider_capability_truth or build_provider_registry_snapshot().capability_truth)
     profile_truth = build_install_profile_truth(
         requested_profile="auto-recommended",
         probe=probe,
         tier=primary_tier,
-        selected_model=primary_tier.ollama_tag,
         provider_capability_truth=capability_truth,
         env=_probe_env_for_install_profile(envs),
     )
-    kimi_state, kimi_provider_id = _provider_state_for_prefix(capability_truth, "kimi-remote:")
-    kimi_configured = bool(envs.get("kimi", {}).get("configured"))
+    recommendation = build_install_recommendation_truth(
+        probe=probe,
+        tier=primary_tier,
+    )
+    summary = install_recommendation_machine_summary(
+        probe=probe,
+        tier=primary_tier,
+        recommendation=recommendation,
+    )
+    secondary_local_state, secondary_local_provider_id = _provider_state_for_prefix(
+        capability_truth,
+        "llamacpp-local:",
+    )
 
     stacks: list[dict[str, Any]] = []
-    local_only_ready = bool(binary)
+    recommended_bundle_models = tuple(
+        str(item).strip()
+        for item in list(recommendation.recommended_bundle_models)
+        if str(item).strip()
+    )
+    local_only_ready = bool(binary) and all(model_name in model_names for model_name in recommended_bundle_models)
     stacks.append(
         {
             "stack_id": "local_only",
             "install_profile_id": "local-only",
-            "status": "ready" if local_only_ready else "needs_install",
+            "status": (
+                "ready"
+                if local_only_ready
+                else "needs_setup"
+                if binary
+                else "needs_install"
+            ),
             "recommended": False,
             "reason": (
-                "Local Ollama lane is ready."
+                "The recommended local Ollama bundle is installed and ready."
                 if local_only_ready
-                else "Ollama is missing; installer must provision it before this lane is usable."
+                else "Ollama is present, but the recommended local bundle is not fully pulled yet."
+                if binary
+                else "Ollama is missing; installer must provision it before the default local bundle is usable."
             ),
-            "primary_model": primary_tier.ollama_tag,
+            "primary_model": recommendation.primary_local_model,
+            "bundle_id": recommendation.recommended_bundle_id,
+            "bundle_kind": recommendation.recommended_bundle_kind,
+            "bundle_models": list(recommendation.recommended_bundle_models),
+            "bundle_roles": list(recommendation.recommended_bundle_roles),
             "helper_model": "",
         }
     )
 
-    dual_ready = bool(binary) and primary_tier.ollama_tag in model_names and helper_model in model_names
-    dual_status = (
-        "ready"
-        if dual_ready and local_fit != "single_model_only"
-        else "needs_model_pull"
-        if bool(binary) and local_fit != "single_model_only"
-        else "too_small"
-        if local_fit == "single_model_only"
-        else "needs_install"
-    )
-    dual_reason = {
-        "ready": "This machine can run a primary local model plus a lighter local helper lane, but 24 GiB unified memory is still pressure-sensitive under concurrency.",
-        "needs_model_pull": "The machine can support a dual local lane, but the required helper or primary model is not installed yet.",
-        "too_small": "This machine should stay on one local model at a time.",
-        "needs_install": "Ollama is missing, so no dual-local stack is ready yet.",
-    }[dual_status]
+    if recommendation.secondary_local_supported:
+        if not binary:
+            dual_status = "needs_install"
+            dual_reason = (
+                "Ollama is missing, so NULLA cannot bring up the default local lane or its optional llama.cpp specialist lane yet."
+            )
+        elif secondary_local_state == "ready":
+            dual_status = "ready"
+            dual_reason = (
+                "The optional llama.cpp verifier/coding lane is registered and healthy, so this host can run the stronger dual-local profile."
+            )
+        elif secondary_local_state == "degraded":
+            dual_status = "degraded"
+            dual_reason = (
+                "The optional llama.cpp verifier/coding lane is present, but it is currently degraded and should not be treated as fully healthy."
+            )
+        elif secondary_local_state == "blocked":
+            dual_status = "blocked"
+            dual_reason = (
+                "The optional llama.cpp verifier/coding lane is present, but current health state has it blocked."
+            )
+        else:
+            dual_status = "needs_setup"
+            dual_reason = (
+                "This machine can support the optional llama.cpp verifier/coding lane, but it is not provisioned or configured yet."
+            )
+    else:
+        dual_status = "too_small" if local_fit == "single_model_only" else "disk_constrained"
+        dual_reason = (
+            "This machine should stay on one local model at a time."
+            if dual_status == "too_small"
+            else "This machine could carry the optional llama.cpp verifier lane, but the active target volume does not have enough free space."
+        )
     stacks.append(
         {
-            "stack_id": "local_dual_ollama",
+            "stack_id": "local_plus_llamacpp",
             "install_profile_id": "local-max",
             "status": dual_status,
             "recommended": False,
             "reason": dual_reason,
-            "primary_model": primary_tier.ollama_tag,
-            "helper_model": helper_model,
-        }
-    )
-
-    if kimi_configured:
-        if kimi_state == "ready":
-            kimi_status = "ready"
-            kimi_reason = "Kimi credentials are present and runtime bootstrap exposes a real remote Kimi queen lane."
-        elif kimi_state == "degraded":
-            kimi_status = "degraded"
-            kimi_reason = "Kimi credentials are present and the remote Kimi queen lane exists, but it is currently degraded."
-        elif kimi_state == "blocked":
-            kimi_status = "blocked"
-            kimi_reason = "Kimi credentials are present, but the remote Kimi queen lane is blocked by current health state."
-        else:
-            kimi_status = "misconfigured"
-            kimi_reason = "Kimi credentials are present, but runtime bootstrap did not register a usable Kimi lane."
-    else:
-        kimi_status = "needs_config"
-        kimi_reason = "Kimi becomes a real remote queen lane when KIMI_API_KEY or MOONSHOT_API_KEY is configured."
-    stacks.append(
-        {
-            "stack_id": "local_plus_kimi",
-            "install_profile_id": "hybrid-kimi",
-            "status": kimi_status,
-            "recommended": False,
-            "reason": kimi_reason,
-            "primary_model": primary_tier.ollama_tag,
-            "helper_model": helper_model if local_fit != "single_model_only" else "",
-            "provider_id": kimi_provider_id,
+            "primary_model": recommendation.primary_local_model,
+            "secondary_model": recommendation.secondary_local_model,
+            "secondary_backend": recommendation.secondary_local_backend,
+            "helper_model": recommendation.secondary_local_model,
+            "provider_id": secondary_local_provider_id,
         }
     )
 
@@ -371,14 +376,6 @@ def build_probe_report(
     if show_unsupported:
         unsupported_stacks.extend(
             [
-                {
-                    "stack_id": "local_plus_tether",
-                    "status": "not_implemented",
-                    "recommended": False,
-                    "reason": "Tether does not have a real first-class installer/runtime lane in this repo yet.",
-                    "primary_model": primary_tier.ollama_tag,
-                    "helper_model": "",
-                },
                 {
                     "stack_id": "local_plus_qvac",
                     "status": "not_implemented",
@@ -407,10 +404,12 @@ def build_probe_report(
         },
         "remote_env": envs,
         "local_multi_llm_fit": local_fit,
+        "capacity_bucket": recommendation.capacity_bucket,
         "recommended_install_profile_id": profile_truth.profile_id,
         "recommended_install_profile_display_id": format_install_profile_id(profile_truth.profile_id, allow_auto=False),
         "recommended_install_profile_label": profile_truth.label,
         "recommended_install_profile_summary": profile_truth.summary,
+        "install_recommendation": recommendation.to_dict(),
         "recommended_stack_id": str(recommended.get("stack_id") or ""),
         "stacks": stacks,
     }
@@ -430,6 +429,7 @@ def render_probe_report(report: dict[str, Any]) -> str:
         f"- accelerator: {machine.get('accelerator') or 'unknown'}",
         f"- recommended local model: {machine.get('ollama_model') or 'unknown'}",
         f"- local multi-LLM fit: {report.get('local_multi_llm_fit') or 'unknown'}",
+        f"- capacity bucket: {report.get('capacity_bucket') or 'unknown'}",
         f"- ollama present: {'yes' if ollama.get('binary_present') else 'no'}",
     ]
     installed = [str(item.get("name") or "").strip() for item in list(ollama.get("installed_models") or []) if str(item.get("name") or "").strip()]
@@ -438,6 +438,22 @@ def render_probe_report(report: dict[str, Any]) -> str:
     lines.append(
         f"- recommended install profile: {display_profile_id or report.get('recommended_install_profile_id') or 'unknown'}"
     )
+    recommendation = dict(report.get("install_recommendation") or {})
+    if recommendation:
+        lines.append(f"- primary local model: {recommendation.get('primary_local_model') or 'unknown'}")
+        bundle_models = ", ".join(str(item).strip() for item in list(recommendation.get("recommended_bundle_models") or []) if str(item).strip())
+        if bundle_models:
+            lines.append(
+                f"- recommended bundle: {recommendation.get('recommended_bundle_id') or 'unknown'} "
+                f"({recommendation.get('recommended_bundle_kind') or 'unknown'}): {bundle_models}"
+            )
+        fallback_models = ", ".join(str(item).strip() for item in list(recommendation.get("fallback_bundle_models") or []) if str(item).strip())
+        if fallback_models:
+            lines.append(f"- lighter fallback: {recommendation.get('fallback_bundle_id') or 'unknown'}: {fallback_models}")
+        optional_profile = str(recommendation.get("recommended_optional_profile_display_id") or "").strip()
+        if optional_profile:
+            lines.append(f"- optional stronger profile: {optional_profile}")
+            lines.append(f"- optional secondary model: {recommendation.get('secondary_local_model') or 'unknown'}")
     lines.append(f"- recommended stack: {report.get('recommended_stack_id') or 'unknown'}")
     lines.append("- stack status:")
     for stack in stacks:

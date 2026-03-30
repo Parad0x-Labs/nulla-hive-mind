@@ -15,6 +15,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.structured_literal_input import looks_like_structured_literal_input
+
 _WORD_RE = re.compile(r"[a-z0-9_'\-]+")
 
 # Phrase expansions: (pattern_tokens, expansion) - only expand when ALL tokens present
@@ -143,6 +145,14 @@ def expand_unfinished_for_self(
     text = (normalized_text or raw_input or "").strip()
     if not text:
         return WorkingInterpretation(raw=raw_input or "", expanded=text, grounding_note="Empty input.")
+    if looks_like_structured_literal_input(text):
+        return WorkingInterpretation(
+            raw=raw_input or "",
+            expanded=text,
+            explicit_keywords=_extract_keywords(text),
+            context_topics=list(topic_hints or [])[:6],
+            grounding_note="",
+        )
 
     is_short = "short_input" in quality_flags or len(text.split()) <= 5
     is_fragmented = "fragmented" in quality_flags or not re.search(r"[.?!]$", text)

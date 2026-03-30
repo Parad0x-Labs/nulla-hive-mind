@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections import Counter
 from pathlib import Path
@@ -263,14 +264,15 @@ def derive_research_questions(
     ):
         return []
 
-    model_questions = _derive_questions_via_model(
-        title=normalized_title or title,
-        summary=normalized_summary or summary,
-        tags=tags,
-        trading_feature_export=trading_feature_export,
-    )
-    if model_questions:
-        return model_questions
+    if _live_question_derivation_enabled():
+        model_questions = _derive_questions_via_model(
+            title=normalized_title or title,
+            summary=normalized_summary or summary,
+            tags=tags,
+            trading_feature_export=trading_feature_export,
+        )
+        if model_questions:
+            return model_questions
 
     return _derive_questions_template(
         title=normalized_title or title,
@@ -394,13 +396,17 @@ def _derive_questions_via_model(
 
 def _ollama_base_url() -> str:
     """Resolve the local Ollama endpoint. Empty string if not reachable."""
-    import os
     url = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
     try:
         requests.get(f"{url}/api/tags", timeout=2)
         return url
     except Exception:
         return ""
+
+
+def _live_question_derivation_enabled() -> bool:
+    value = str(os.environ.get("NULLA_BRAIN_HIVE_LIVE_QUESTION_DERIVATION") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def _derive_questions_template(

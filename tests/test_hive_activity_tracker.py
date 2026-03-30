@@ -4,14 +4,18 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from apps.nulla_agent import NullaAgent
+from core.curiosity_roamer import AdaptiveResearchResult
 from core.hive_activity_tracker import (
     HiveActivityTracker,
     HiveActivityTrackerConfig,
+    load_hive_activity_tracker_config,
     prune_stale_hive_interaction_state,
     session_hive_state,
     snooze_hive_prompts,
     update_session_hive_state,
 )
+from core.media_analysis_pipeline import MediaAnalysisResult
+from core.memory_first_router import ModelExecutionDecision
 from storage.curiosity_state import queue_curiosity_topic, record_curiosity_run, update_curiosity_topic
 from storage.db import get_connection
 from storage.migrations import run_migrations
@@ -80,6 +84,19 @@ def test_build_chat_footer_surfaces_new_available_research_and_respects_snooze()
         idle_research_assist=True,
     )
     assert "want me to list them" not in footer.lower()
+
+
+def test_load_hive_activity_tracker_config_uses_live_default_timeout_budget(monkeypatch) -> None:
+    monkeypatch.delenv("NULLA_HIVE_WATCH_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("NULLA_HIVE_WATCHER_URL", raising=False)
+    monkeypatch.setattr("core.hive_activity_tracker._load_watcher_url_from_manifest", lambda: "https://watch.example.test")
+    monkeypatch.setattr("core.hive_activity_tracker._load_agent_bootstrap_tls", lambda: {})
+
+    cfg = load_hive_activity_tracker_config()
+
+    assert cfg.enabled is True
+    assert cfg.watcher_api_url == "https://watch.example.test/api/dashboard"
+    assert cfg.timeout_seconds == 8
 
 
 def test_build_chat_footer_reports_watched_topic_updates_once() -> None:
@@ -669,7 +686,45 @@ def test_agent_does_not_append_hive_footer_to_generic_research_chat_response() -
     agent.start()
     with mock.patch.object(agent.hive_activity_tracker, "build_chat_footer", return_value="I see 2 Hive research request(s) available."), mock.patch.object(
         agent.hive_activity_tracker, "maybe_handle_command", return_value=(False, "")
-    ), mock.patch.object(agent, "_sync_public_presence", return_value=None):
+    ), mock.patch.object(agent, "_sync_public_presence", return_value=None), mock.patch.object(
+        agent, "_collect_adaptive_research", return_value=AdaptiveResearchResult(enabled=False, reason="test")
+    ), mock.patch.object(
+        agent, "_collect_live_web_notes", return_value=[]
+    ), mock.patch.object(
+        agent, "_should_frontload_curiosity", return_value=False
+    ), mock.patch.object(
+        agent.memory_router,
+        "resolve",
+        return_value=ModelExecutionDecision(
+            source="provider",
+            task_hash="hive-footer-generic-research",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text="OpenClaw and Liquefy integration status is still being researched.",
+            confidence=0.84,
+            trust_score=0.84,
+            validation_state="not_run",
+        ),
+    ), mock.patch.object(
+        agent.media_pipeline,
+        "analyze",
+        return_value=MediaAnalysisResult(False, reason="no_external_media"),
+    ), mock.patch(
+        "apps.nulla_agent.ingest_media_evidence",
+        return_value=[],
+    ), mock.patch(
+        "apps.nulla_agent.orchestrate_parent_task",
+        return_value=None,
+    ), mock.patch(
+        "apps.nulla_agent.request_relevant_holders",
+        return_value=[],
+    ), mock.patch(
+        "apps.nulla_agent.dispatch_query_shard",
+        return_value=None,
+    ), mock.patch(
+        "apps.nulla_agent.render_response",
+        return_value="OpenClaw and Liquefy integration status is still being researched.",
+    ):
         result = agent.run_once(
             "Research OpenClaw and Liquefy integration status",
             source_context={"surface": "openclaw", "platform": "openclaw"},
@@ -685,14 +740,14 @@ def test_help_chat_response_does_not_append_hive_footer() -> None:
     ), mock.patch.object(
         agent.memory_router,
         "resolve",
-        return_value=mock.Mock(
+        return_value=ModelExecutionDecision(
             source="provider",
+            task_hash="hive-footer-help-chat",
             provider_id="ollama:qwen",
             used_model=True,
             output_text="I can help with coding, research, and grounded runtime tasks.",
             confidence=0.84,
             trust_score=0.84,
-            cache_hit=False,
             validation_state="not_run",
         ),
     ):

@@ -336,6 +336,23 @@ def maybe_handle_capability_truth_request(
         extra_entries=agent._capability_ledger_entries(),
     )
     if not report:
+        normalized = " ".join(str(user_input or "").strip().lower().split()).strip(" \t\r\n?!.,")
+        if normalized in {
+            "what can you do",
+            "what can you do right now",
+            "what can you do right now on this machine",
+            "what can you do on this machine",
+            "what are you able to do right now on this machine",
+            "what actions can you take right now on this machine",
+        }:
+            return agent._fast_path_result(
+                session_id=session_id,
+                user_input=user_input,
+                response=agent._help_capabilities_text(),
+                confidence=0.96,
+                source_context=source_context,
+                reason="capability_truth_query",
+            )
         return None
     return agent._fast_path_result(
         session_id=session_id,

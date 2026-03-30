@@ -23,10 +23,16 @@ def smalltalk_model_input(agent: Any, *, user_input: str, phrase: str) -> str:
         return (
             f"{user_input}\n\n"
             "Ground your reply in currently wired runtime capabilities only. "
-            "Do not imply unsupported abilities.\n\n"
+            "Do not imply unsupported abilities. "
+            "Keep it crisp and operator-facing. "
+            "Do not drift into generic customer-support phrasing.\n\n"
             f"{capability_summary}"
         )
-    return str(user_input or "").strip()
+    return (
+        f"{str(user_input or '').strip()}\n\n"
+        "Reply like a sharp local companion. Keep it brief, natural, and grounded in this runtime. "
+        "Do not use canned system-status slogans, generic assistant filler, or capability speeches."
+    ).strip()
 
 
 def observation_prompt(
@@ -645,6 +651,7 @@ def chat_surface_model_wording_result(
     reason: str,
     model_input: str,
     fallback_response: str,
+    allow_provider_inference: bool = True,
     tool_backing_sources: list[str] | None = None,
     response_postprocessor: Callable[[str], str] | None = None,
 ) -> dict[str, Any]:
@@ -688,6 +695,7 @@ def chat_surface_model_wording_result(
         context_result=context_result,
         persona=persona,
         force_model=True,
+        allow_provider_inference=allow_provider_inference,
         surface=str((source_context or {}).get("surface", "cli") or "cli"),
         source_context=dict(source_context or {}),
     )

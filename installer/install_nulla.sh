@@ -19,6 +19,7 @@ OPENCLAW_PATH_OVERRIDE=""
 OPENCLAW_GATEWAY_BIND="${NULLA_OPENCLAW_GATEWAY_BIND:-}"
 OPENCLAW_GATEWAY_CUSTOM_HOST="${NULLA_OPENCLAW_GATEWAY_CUSTOM_HOST:-}"
 DESKTOP_SHORTCUT_PATH=""
+LAUNCH_AGENT_PATH=""
 RUNTIME_REQUIREMENTS_FILE="${PROJECT_ROOT}/requirements-runtime.txt"
 WHEELHOUSE_DIR="${PROJECT_ROOT}/vendor/wheelhouse"
 BUNDLED_LIQUEFY_DIR="${PROJECT_ROOT}/vendor/liquefy-openclaw-integration"
@@ -64,7 +65,7 @@ Options:
   --yes, -y                    Non-interactive install using defaults
   --start                      Launch NULLA immediately after install
   --runtime-home <path>        Override NULLA_HOME path
-  --install-profile <profile>  auto-recommended | local-only (alias: ollama-only) | local-max (alias: ollama-max) | hybrid-kimi (alias: ollama+kimi) | hybrid-fallback | full-orchestrated
+  --install-profile <profile>  auto-recommended | local-only (alias: ollama-only) | local-max (alias: ollama-max)
   --agent-name <name>          Visible agent name for OpenClaw and chat
   --openclaw <mode-or-path>    skip | default | prompt | <custom-path>
   --gateway-bind <mode>        OpenClaw gateway bind: loopback | lan | custom
@@ -179,6 +180,9 @@ canonical_install_profile() {
     hybrid-kimi|hybrid_kimi|ollama+kimi|ollama-kimi|ollama_kimi)
       printf '%s' "hybrid-kimi"
       ;;
+    hybrid-tether|hybrid_tether|ollama+tether|ollama-tether|ollama_tether)
+      printf '%s' "hybrid-tether"
+      ;;
     hybrid-fallback|hybrid_fallback)
       printf '%s' "hybrid-fallback"
       ;;
@@ -198,7 +202,7 @@ validate_install_profile() {
     return
   fi
   if [[ -z "$(canonical_install_profile "${profile}")" ]]; then
-    say "ERROR: --install-profile must be auto-recommended, local-only/ollama-only, local-max/ollama-max, hybrid-kimi/ollama+kimi, hybrid-fallback, or full-orchestrated."
+    say "ERROR: --install-profile must be auto-recommended, local-only/ollama-only, or local-max/ollama-max."
     exit 2
   fi
 }
@@ -402,16 +406,23 @@ persist_install_profile_record() {
   local runtime_home="$1"
   local install_profile="$2"
   local model_tag="$3"
-  "${VENV_DIR}/bin/python" - "$runtime_home" "$install_profile" "$model_tag" <<'PY' >/dev/null 2>&1 || true
+  local selected_models_csv="${4:-}"
+  local bundle_id="${5:-}"
+  local bundle_kind="${6:-}"
+  "${VENV_DIR}/bin/python" - "$runtime_home" "$install_profile" "$model_tag" "$selected_models_csv" "$bundle_id" "$bundle_kind" <<'PY' >/dev/null 2>&1 || true
 from pathlib import Path
 import json
 import sys
 
 runtime_home = Path(sys.argv[1]).expanduser().resolve()
+selected_models = [item.strip() for item in str(sys.argv[4]).split(",") if item.strip()]
 payload = {
     "schema": "nulla.install_profile_record.v1",
     "profile_id": str(sys.argv[2]).strip(),
     "selected_model": str(sys.argv[3]).strip(),
+    "selected_models": selected_models,
+    "bundle_id": str(sys.argv[5]).strip(),
+    "bundle_kind": str(sys.argv[6]).strip(),
 }
 target = runtime_home / "config" / "install-profile.json"
 target.parent.mkdir(parents=True, exist_ok=True)
@@ -430,10 +441,14 @@ persist_provider_env_file() {
   printf '#!/usr/bin/env bash\n' >> "${provider_env_file}"
   for name in \
     KIMI_API_KEY MOONSHOT_API_KEY NULLA_KIMI_API_KEY KIMI_BASE_URL NULLA_KIMI_BASE_URL MOONSHOT_BASE_URL KIMI_MODEL NULLA_KIMI_MODEL MOONSHOT_MODEL \
-    OPENAI_API_KEY \
+    TETHER_API_KEY NULLA_TETHER_API_KEY TETHER_BASE_URL NULLA_TETHER_BASE_URL TETHER_MODEL NULLA_TETHER_MODEL \
+    OPENAI_API_KEY OPENAI_BASE_URL OPENAI_MODEL NULLA_REMOTE_API_KEY NULLA_REMOTE_BASE_URL NULLA_REMOTE_MODEL NULLA_CLOUD_API_KEY \
     VLLM_BASE_URL NULLA_VLLM_BASE_URL VLLM_MODEL NULLA_VLLM_MODEL VLLM_CONTEXT_WINDOW NULLA_VLLM_CONTEXT_WINDOW \
     LLAMACPP_BASE_URL NULLA_LLAMACPP_BASE_URL LLAMA_CPP_BASE_URL NULLA_LLAMA_CPP_BASE_URL \
-    LLAMACPP_MODEL NULLA_LLAMACPP_MODEL LLAMACPP_CONTEXT_WINDOW NULLA_LLAMACPP_CONTEXT_WINDOW; do
+    LLAMACPP_MODEL NULLA_LLAMACPP_MODEL LLAMACPP_CONTEXT_WINDOW NULLA_LLAMACPP_CONTEXT_WINDOW \
+    LLAMACPP_MODEL_PATH NULLA_LLAMACPP_MODEL_PATH LLAMA_CPP_MODEL_PATH NULLA_LLAMA_CPP_MODEL_PATH \
+    NULLA_LLAMACPP_HOST NULLA_LLAMACPP_PORT NULLA_LLAMACPP_CHAT_FORMAT NULLA_LLAMACPP_N_GPU_LAYERS \
+    NULLA_LLAMACPP_REPO_ID NULLA_LLAMACPP_FILENAME; do
     local value="${!name:-}"
     if [[ -n "${value}" ]]; then
       printf 'export %s=%q\n' "${name}" "${value}" >> "${provider_env_file}"
@@ -455,19 +470,18 @@ detect_model_tag() {
     return
   fi
   (cd "${PROJECT_ROOT}" && "${VENV_DIR}/bin/python" -c "
-from core.hardware_tier import probe_machine, select_qwen_tier, tier_summary
-summary = tier_summary()
-print(summary['ollama_model'])
-") 2>/dev/null || echo "qwen2.5:7b"
+from core.install_recommendations import build_install_recommendation_truth
+print(build_install_recommendation_truth().primary_local_model)
+") 2>/dev/null || echo "qwen3:8b"
 }
 
 
 detect_hardware_summary() {
   (cd "${PROJECT_ROOT}" && "${VENV_DIR}/bin/python" -c "
 import json
-from core.hardware_tier import tier_summary
-print(json.dumps(tier_summary(), ensure_ascii=False))
-") 2>/dev/null || echo '{"selected_tier":"base","ollama_model":"qwen2.5:7b"}'
+from core.install_recommendations import install_recommendation_machine_summary
+print(json.dumps(install_recommendation_machine_summary(), ensure_ascii=False))
+") 2>/dev/null || echo '{"selected_tier":"capacity-C","ollama_model":"qwen3:8b","recommended_bundle_models":["qwen3:8b","deepseek-r1:8b"]}'
 }
 
 
@@ -518,11 +532,65 @@ print(profile.display_summary())
 }
 
 
+detect_install_recommendation_exports() {
+  local runtime_home="$1"
+  local model_tag="$2"
+  (cd "${PROJECT_ROOT}" && NULLA_HOME="${runtime_home}" "${VENV_DIR}/bin/python" -c "
+import shlex
+from core.install_recommendations import build_install_recommendation_truth
+from core.runtime_install_profiles import format_install_profile_id
+
+recommendation = build_install_recommendation_truth(
+    runtime_home='${runtime_home}',
+)
+fields = {
+    'RECOMMENDED_DEFAULT_PROFILE': recommendation.recommended_default_profile,
+    'RECOMMENDED_DEFAULT_PROFILE_DISPLAY': format_install_profile_id(recommendation.recommended_default_profile, allow_auto=False),
+    'RECOMMENDED_OPTIONAL_PROFILE': recommendation.recommended_optional_profile,
+    'RECOMMENDED_OPTIONAL_PROFILE_DISPLAY': format_install_profile_id(recommendation.recommended_optional_profile, allow_auto=False),
+    'PRIMARY_LOCAL_MODEL': recommendation.primary_local_model,
+    'CAPACITY_BUCKET': recommendation.capacity_bucket,
+    'RECOMMENDED_BUNDLE_ID': recommendation.recommended_bundle_id,
+    'RECOMMENDED_BUNDLE_KIND': recommendation.recommended_bundle_kind,
+    'RECOMMENDED_BUNDLE_MODELS': ','.join(recommendation.recommended_bundle_models),
+    'FALLBACK_BUNDLE_ID': recommendation.fallback_bundle_id,
+    'FALLBACK_BUNDLE_MODELS': ','.join(recommendation.fallback_bundle_models),
+    'SECONDARY_LOCAL_MODEL': recommendation.secondary_local_model,
+    'SECONDARY_LOCAL_SUPPORTED': '1' if recommendation.secondary_local_supported else '0',
+    'SECONDARY_LOCAL_BACKEND': recommendation.secondary_local_backend,
+}
+for key, value in fields.items():
+    print(f'{key}={shlex.quote(str(value))}')
+") 2>/dev/null || cat <<'EOF'
+RECOMMENDED_DEFAULT_PROFILE=local-only
+RECOMMENDED_DEFAULT_PROFILE_DISPLAY='ollama-only (local-only)'
+RECOMMENDED_OPTIONAL_PROFILE=
+RECOMMENDED_OPTIONAL_PROFILE_DISPLAY=
+PRIMARY_LOCAL_MODEL=qwen3:8b
+CAPACITY_BUCKET=B
+RECOMMENDED_BUNDLE_ID=single_qwen3_8b
+RECOMMENDED_BUNDLE_KIND=single
+RECOMMENDED_BUNDLE_MODELS=qwen3:8b
+FALLBACK_BUNDLE_ID=single_gemma3_4b
+FALLBACK_BUNDLE_MODELS=gemma3:4b
+SECONDARY_LOCAL_MODEL=qwen2.5:14b-gguf
+SECONDARY_LOCAL_SUPPORTED=0
+SECONDARY_LOCAL_BACKEND=llama.cpp
+EOF
+}
+
+
+optional_localmax_followup_command() {
+  local runtime_home="$1"
+  printf '%s' "bash \"${PROJECT_ROOT}/installer/install_nulla.sh\" --runtime-home \"${runtime_home}\" --install-profile ollama-max --openclaw default"
+}
+
+
 prompt_install_profile() {
   local default_value="${1:-auto-recommended}"
   local profile=""
   local raw_profile=""
-  read -r -p "Install profile [auto-recommended/local-only(ollama-only)/local-max(ollama-max)/hybrid-kimi(ollama+kimi)/hybrid-fallback/full-orchestrated] [${default_value}]: " profile || true
+  read -r -p "Install profile [auto-recommended/local-only(ollama-only)/local-max(ollama-max)] [${default_value}]: " profile || true
   raw_profile="$(printf '%s' "${profile:-$default_value}" | tr '[:upper:]' '[:lower:]')"
   validate_install_profile "${raw_profile}"
   profile="$(canonical_install_profile "${raw_profile}")"
@@ -580,15 +648,124 @@ ensure_profile_remote_credentials() {
       say "Captured Kimi credential for this install session. It will be persisted into NULLA runtime config."
       ;;
   esac
+
+  case "${install_profile}" in
+    hybrid-tether)
+      if [[ -n "${TETHER_API_KEY:-${NULLA_TETHER_API_KEY:-}}" && -n "${TETHER_BASE_URL:-${NULLA_TETHER_BASE_URL:-}}" ]]; then
+        return
+      fi
+      if [[ "${AUTO_YES}" -eq 1 ]]; then
+        say "ERROR: ${install_profile} requires TETHER_API_KEY and TETHER_BASE_URL for the Tether lane."
+        say "Export both before running the one-line install, or rerun interactively so the installer can prompt and persist them."
+        exit 1
+      fi
+      local captured_tether_key=""
+      local captured_tether_base_url=""
+      captured_tether_key="$(read_secret_from_tty "Enter Tether API key (input hidden): ")" || true
+      if [[ -z "${captured_tether_key}" ]]; then
+        say "ERROR: ${install_profile} requires TETHER_API_KEY."
+        exit 1
+      fi
+      if [[ ! -r /dev/tty ]]; then
+        say "ERROR: ${install_profile} requires TETHER_BASE_URL."
+        exit 1
+      fi
+      printf '%s' "Enter Tether base URL: " > /dev/tty
+      IFS= read -r captured_tether_base_url < /dev/tty || true
+      printf '\n' > /dev/tty
+      if [[ -z "${captured_tether_base_url}" ]]; then
+        say "ERROR: ${install_profile} requires TETHER_BASE_URL."
+        exit 1
+      fi
+      export TETHER_API_KEY="${captured_tether_key}"
+      export TETHER_BASE_URL="${captured_tether_base_url}"
+      say "Captured Tether credentials for this install session. They will be persisted into NULLA runtime config."
+      ;;
+  esac
+
+  case "${install_profile}" in
+    hybrid-fallback|full-orchestrated)
+      if [[ -n "${OPENAI_API_KEY:-${NULLA_REMOTE_API_KEY:-${NULLA_CLOUD_API_KEY:-}}}" ]]; then
+        return
+      fi
+      if [[ "${AUTO_YES}" -eq 1 ]]; then
+        say "ERROR: ${install_profile} requires OPENAI_API_KEY, NULLA_REMOTE_API_KEY, or NULLA_CLOUD_API_KEY for the generic remote fallback lane."
+        say "Export one of those before running the one-line install, or rerun interactively so the installer can prompt and persist it."
+        exit 1
+      fi
+      local captured_remote_key=""
+      captured_remote_key="$(read_secret_from_tty "Enter OpenAI-compatible remote API key (input hidden): ")" || true
+      if [[ -z "${captured_remote_key}" ]]; then
+        say "ERROR: ${install_profile} requires OPENAI_API_KEY, NULLA_REMOTE_API_KEY, or NULLA_CLOUD_API_KEY."
+        exit 1
+      fi
+      export OPENAI_API_KEY="${captured_remote_key}"
+      say "Captured generic remote credential for this install session. It will default to OpenAI unless NULLA_REMOTE_BASE_URL or OPENAI_BASE_URL overrides it."
+      ;;
+  esac
+}
+
+
+install_llamacpp_runtime_package() {
+  if "${VENV_DIR}/bin/python" -c "import llama_cpp.server" >/dev/null 2>&1; then
+    say "Optional llama.cpp runtime already available in the NULLA virtualenv."
+    return
+  fi
+
+  say "Installing optional llama.cpp server runtime into the NULLA virtualenv..."
+  local python_minor
+  python_minor="$("${VENV_DIR}/bin/python" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")' 2>/dev/null || echo "")"
+  if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
+    if [[ "${python_minor}" == "3.10" || "${python_minor}" == "3.11" || "${python_minor}" == "3.12" ]]; then
+      if CMAKE_ARGS="" "${VENV_DIR}/bin/python" -m pip install "llama-cpp-python[server]>=0.3.0" \
+        --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/metal >/tmp/nulla_llamacpp_install.log 2>&1; then
+        say "Installed llama.cpp runtime from the Metal wheel index."
+      fi
+    fi
+    if ! "${VENV_DIR}/bin/python" -c "import llama_cpp.server" >/dev/null 2>&1; then
+      say "Falling back to source-build install for llama.cpp runtime."
+      CMAKE_ARGS="-DGGML_METAL=on -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_APPLE_SILICON_PROCESSOR=arm64" \
+        FORCE_CMAKE=1 \
+        "${VENV_DIR}/bin/python" -m pip install --upgrade --force-reinstall --no-cache-dir \
+        "llama-cpp-python[server]>=0.3.0" >/tmp/nulla_llamacpp_install.log 2>&1
+    fi
+  else
+    "${VENV_DIR}/bin/python" -m pip install --upgrade "llama-cpp-python[server]>=0.3.0" \
+      >/tmp/nulla_llamacpp_install.log 2>&1
+  fi
+
+  if ! "${VENV_DIR}/bin/python" -c "import llama_cpp.server" >/dev/null 2>&1; then
+    say "ERROR: llama.cpp server runtime did not install cleanly."
+    say "Check /tmp/nulla_llamacpp_install.log for the package build/install output."
+    exit 1
+  fi
+  say "Optional llama.cpp server runtime installed."
+}
+
+
+provision_optional_llamacpp_lane() {
+  local runtime_home="$1"
+  say "Provisioning optional llama.cpp local specialist lane..."
+  install_llamacpp_runtime_package
+  local provision_exports=""
+  if ! provision_exports="$("${VENV_DIR}/bin/python" "${SCRIPT_DIR}/provision_llamacpp_local.py" \
+    --runtime-home "${runtime_home}" --download --emit-shell-env 2>/tmp/nulla_llamacpp_provision.log)"; then
+    say "ERROR: Could not provision the optional llama.cpp local specialist lane."
+    say "Check /tmp/nulla_llamacpp_provision.log for details."
+    exit 1
+  fi
+  eval "${provision_exports}"
+  say "Optional llama.cpp specialist model ready: ${NULLA_LLAMACPP_MODEL:-qwen2.5:14b-gguf}"
 }
 
 
 detect_required_ollama_models() {
   local install_profile="$1"
   local model_tag="$2"
+  local runtime_home="$3"
   NULLA_INSTALL_PROFILE="${install_profile}" "${VENV_DIR}/bin/python" -c "
 from core.runtime_install_profiles import required_ollama_models_for_profile
-for item in required_ollama_models_for_profile(profile_id='${install_profile}', model_tag='${model_tag}'):
+for item in required_ollama_models_for_profile(profile_id='${install_profile}', model_tag='${model_tag}', runtime_home='${runtime_home}'):
     print(item)
 " 2>/dev/null || printf '%s\n' "${model_tag}"
 }
@@ -644,17 +821,169 @@ write_launcher() {
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}"
-VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
+export PATH="${SCRIPT_DIR}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+VENV_RESOLVER="${PROJECT_ROOT}/scripts/ensure_workspace_runtime.sh"
+VENV_PY="$(bash "${VENV_RESOLVER}")"
 cd "${PROJECT_ROOT}"
 LAUNCHER_HEAD
   cat >>"${target_path}" <<EOF
 export NULLA_HOME="\${NULLA_HOME:-${runtime_home}}"
+export NULLA_WORKSPACE_ROOT="\${NULLA_WORKSPACE_ROOT:-\${NULLA_HOME}/workspace}"
+export NULLA_OPENCLAW_API_PORT="\${NULLA_OPENCLAW_API_PORT:-11435}"
+export NULLA_OPENCLAW_API_URL="\${NULLA_OPENCLAW_API_URL:-http://127.0.0.1:\${NULLA_OPENCLAW_API_PORT}}"
 PROVIDER_ENV_FILE="\${NULLA_HOME}/config/provider-env.sh"
 if [[ -f "\${PROVIDER_ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
   . "\${PROVIDER_ENV_FILE}"
 fi
 $(web_runtime_exports)
+wait_for_http_ready() {
+  local url="\$1"
+  local max_attempts="\$2"
+  local pid="\${3:-}"
+  local consecutive_target="\${4:-2}"
+  local consecutive=0
+  for _ in \$(seq 1 "\${max_attempts}"); do
+    if [[ -n "\${pid}" ]] && ! kill -0 "\${pid}" >/dev/null 2>&1; then
+      return 1
+    fi
+    if curl -sf --max-time 2 "\${url}" >/dev/null 2>&1; then
+      consecutive=\$((consecutive + 1))
+      if [[ "\${consecutive}" -ge "\${consecutive_target}" ]]; then
+        return 0
+      fi
+    else
+      consecutive=0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+port_listening() {
+  local host="\$1"
+  local port="\$2"
+  "\${VENV_PY}" - "\${host}" "\${port}" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.settimeout(0.5)
+    raise SystemExit(0 if sock.connect_ex((host, port)) == 0 else 1)
+PY
+}
+
+spawn_detached() {
+  local log_path="\$1"
+  shift
+  "\${VENV_PY}" - "\${log_path}" "\$@" <<'PY'
+import subprocess
+import sys
+
+log_path = sys.argv[1]
+command = sys.argv[2:]
+with open(log_path, "ab", buffering=0) as log_stream:
+    child = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=log_stream,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+print(child.pid)
+PY
+}
+
+terminate_pid() {
+  local pid="\$1"
+  [[ -n "\${pid}" ]] || return 0
+  if ! kill -0 "\${pid}" >/dev/null 2>&1; then
+    return 0
+  fi
+  kill "\${pid}" >/dev/null 2>&1 || true
+  for _ in \$(seq 1 10); do
+    if ! kill -0 "\${pid}" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  kill -9 "\${pid}" >/dev/null 2>&1 || true
+}
+
+ensure_llamacpp_server() {
+  local base_url="\${LLAMACPP_BASE_URL:-\${NULLA_LLAMACPP_BASE_URL:-}}"
+  local model_path="\${NULLA_LLAMACPP_MODEL_PATH:-\${LLAMACPP_MODEL_PATH:-}}"
+  local model_alias="\${NULLA_LLAMACPP_MODEL:-\${LLAMACPP_MODEL:-}}"
+  local host="\${NULLA_LLAMACPP_HOST:-127.0.0.1}"
+  local port="\${NULLA_LLAMACPP_PORT:-8090}"
+  local context_window="\${LLAMACPP_CONTEXT_WINDOW:-\${NULLA_LLAMACPP_CONTEXT_WINDOW:-32768}}"
+  local chat_format="\${NULLA_LLAMACPP_CHAT_FORMAT:-chatml}"
+  local n_gpu_layers="\${NULLA_LLAMACPP_N_GPU_LAYERS:--1}"
+  [[ -n "\${base_url}" && -n "\${model_path}" ]] || return 0
+
+  local health_url="\${base_url%/}/models"
+  mkdir -p "\${NULLA_HOME}/logs"
+  if wait_for_http_ready "\${health_url}" 2 ""; then
+    return 0
+  fi
+  if port_listening "\${host}" "\${port}"; then
+    if wait_for_http_ready "\${health_url}" 45 "" 2; then
+      return 0
+    fi
+  fi
+  if [[ ! -f "\${model_path}" ]]; then
+    echo "ERROR: local-max selected but llama.cpp model file is missing at \${model_path}" >&2
+    return 1
+  fi
+  if ! "\${VENV_PY}" -c "import llama_cpp.server" >/dev/null 2>&1; then
+    echo "ERROR: local-max selected but llama.cpp server runtime is missing from the NULLA virtualenv." >&2
+    return 1
+  fi
+  local server_log="\${NULLA_HOME}/logs/llamacpp-local.log"
+  local server_pid
+  server_pid="\$(spawn_detached "\${server_log}" "\${VENV_PY}" -m llama_cpp.server --host "\${host}" --port "\${port}" --model "\${model_path}" --model_alias "\${model_alias}" --n_ctx "\${context_window}" --chat_format "\${chat_format}" --n_gpu_layers "\${n_gpu_layers}")"
+  if ! wait_for_http_ready "\${health_url}" 120 "\${server_pid}" 2; then
+    terminate_pid "\${server_pid}"
+    echo "ERROR: llama.cpp specialist lane failed to reach \${health_url}" >&2
+    return 1
+  fi
+  return 0
+}
+
+if [[ "\${NULLA_LAUNCHD_SUPERVISOR:-0}" == "1" ]]; then
+  API_LOG_PATH="\${NULLA_API_LOG_PATH:-\${NULLA_HOME}/logs/api-supervised.log}"
+  mkdir -p "\$(dirname "\${API_LOG_PATH}")"
+  while true; do
+    if ! ensure_llamacpp_server; then
+      sleep 3
+      continue
+    fi
+    api_pid="\$(spawn_detached "\${API_LOG_PATH}" "\${VENV_PY}" -m apps.nulla_api_server --port "\${NULLA_OPENCLAW_API_PORT}")"
+    if ! wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 240 "\${api_pid}" 5; then
+      terminate_pid "\${api_pid}"
+      sleep 3
+      continue
+    fi
+    unhealthy=0
+    while kill -0 "\${api_pid}" >/dev/null 2>&1; do
+      if curl -sf --max-time 2 "\${NULLA_OPENCLAW_API_URL}/healthz" >/dev/null 2>&1; then
+        unhealthy=0
+      else
+        unhealthy=\$((unhealthy + 1))
+        if [[ "\${unhealthy}" -ge 3 ]]; then
+          terminate_pid "\${api_pid}"
+          break
+        fi
+      fi
+      sleep 5
+    done
+    sleep 2
+  done
+fi
+ensure_llamacpp_server
 echo "Starting NULLA (API + mesh daemon)..."
 echo "OpenClaw connects to http://127.0.0.1:11435"
 exec "\${VENV_PY}" -m apps.nulla_api_server
@@ -672,11 +1001,14 @@ write_chat_launcher() {
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}"
-VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
+export PATH="${SCRIPT_DIR}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+VENV_RESOLVER="${PROJECT_ROOT}/scripts/ensure_workspace_runtime.sh"
+VENV_PY="$(bash "${VENV_RESOLVER}")"
 cd "${PROJECT_ROOT}"
 LAUNCHER_HEAD
   cat >>"${target_path}" <<EOF
 export NULLA_HOME="\${NULLA_HOME:-${runtime_home}}"
+export NULLA_WORKSPACE_ROOT="\${NULLA_WORKSPACE_ROOT:-\${NULLA_HOME}/workspace}"
 PROVIDER_ENV_FILE="\${NULLA_HOME}/config/provider-env.sh"
 if [[ -f "\${PROVIDER_ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -700,12 +1032,15 @@ write_openclaw_launcher() {
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}"
-VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
+export PATH="${SCRIPT_DIR}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+VENV_RESOLVER="${PROJECT_ROOT}/scripts/ensure_workspace_runtime.sh"
+VENV_PY="$(bash "${VENV_RESOLVER}")"
 cd "${PROJECT_ROOT}"
 LAUNCHER_HEAD
   cat >>"${target_path}" <<EOF
 MODEL_TAG="${model_tag}"
 export NULLA_HOME="\${NULLA_HOME:-${runtime_home}}"
+export NULLA_WORKSPACE_ROOT="\${NULLA_WORKSPACE_ROOT:-\${NULLA_HOME}/workspace}"
 PROVIDER_ENV_FILE="\${NULLA_HOME}/config/provider-env.sh"
 if [[ -f "\${PROVIDER_ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -748,6 +1083,21 @@ wait_for_http_ready() {
   return 1
 }
 
+port_listening() {
+  local host="\$1"
+  local port="\$2"
+  "\${VENV_PY}" - "\${host}" "\${port}" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.settimeout(0.5)
+    raise SystemExit(0 if sock.connect_ex((host, port)) == 0 else 1)
+PY
+}
+
 spawn_detached() {
   local log_path="\$1"
   shift
@@ -771,17 +1121,25 @@ PY
 }
 
 if ! wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 2 ""; then
-  api_pid="\$(spawn_detached /tmp/nulla_api_server.log "\${VENV_PY}" -m apps.nulla_api_server --port "\${NULLA_OPENCLAW_API_PORT}")"
-  wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 30 "\${api_pid}" 3
+  if port_listening "127.0.0.1" "\${NULLA_OPENCLAW_API_PORT}"; then
+    wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 30 "" 3
+  else
+    api_pid="\$(spawn_detached /tmp/nulla_api_server.log "\${PROJECT_ROOT}/Start_NULLA.sh")"
+    wait_for_http_ready "\${NULLA_OPENCLAW_API_URL}/healthz" 30 "\${api_pid}" 3
+  fi
 fi
 
 if ! curl -sf --max-time 2 "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" >/dev/null 2>&1; then
-  if command -v openclaw >/dev/null 2>&1; then
-    openclaw_pid="\$(spawn_detached /tmp/nulla_openclaw.log openclaw gateway run --force)"
-  elif command -v ollama >/dev/null 2>&1; then
-    openclaw_pid="\$(spawn_detached /tmp/nulla_openclaw.log ollama launch openclaw --yes --model "\${MODEL_TAG}")"
+  if port_listening "127.0.0.1" "\${NULLA_OPENCLAW_GATEWAY_PORT}"; then
+    wait_for_http_ready "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" 30 "" 2
+  else
+    if command -v openclaw >/dev/null 2>&1; then
+      openclaw_pid="\$(spawn_detached /tmp/nulla_openclaw.log openclaw gateway run --force)"
+    elif command -v ollama >/dev/null 2>&1; then
+      openclaw_pid="\$(spawn_detached /tmp/nulla_openclaw.log ollama launch openclaw --yes --model "\${MODEL_TAG}")"
+    fi
+    wait_for_http_ready "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" 30 "\${openclaw_pid:-}" 2
   fi
-  wait_for_http_ready "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" 30 "\${openclaw_pid:-}" 2
 fi
 
 if ! curl -sf --max-time 2 "http://127.0.0.1:\${NULLA_OPENCLAW_GATEWAY_PORT}" >/dev/null 2>&1 && command -v openclaw >/dev/null 2>&1; then
@@ -866,6 +1224,59 @@ Categories=Utility;Development;
 EOF
   chmod +x "${desktop_file}" || true
   DESKTOP_SHORTCUT_PATH="${desktop_file}"
+}
+
+
+install_macos_launch_agent() {
+  local runtime_home="$1"
+  [[ "$(uname)" == "Darwin" ]] || return 0
+
+  local launch_agents_dir="${HOME}/Library/LaunchAgents"
+  local launch_agent_path="${launch_agents_dir}/ai.nulla.runtime.plist"
+  local log_dir="${runtime_home}/logs"
+  mkdir -p "${launch_agents_dir}" "${log_dir}"
+  cat >"${launch_agent_path}" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.nulla.runtime</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${PROJECT_ROOT}/Start_NULLA.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${PROJECT_ROOT}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NULLA_HOME</key>
+    <string>${runtime_home}</string>
+    <key>NULLA_LAUNCHD_SUPERVISOR</key>
+    <string>1</string>
+    <key>NULLA_API_LOG_PATH</key>
+    <string>${log_dir}/api-supervised.log</string>
+    <key>PATH</key>
+    <string>${PROJECT_ROOT}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${log_dir}/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>${log_dir}/launchd.err.log</string>
+</dict>
+</plist>
+EOF
+  launchctl bootout "gui/$(id -u)" "${launch_agent_path}" >/dev/null 2>&1 || true
+  if ! launchctl bootstrap "gui/$(id -u)" "${launch_agent_path}" >/dev/null 2>&1; then
+    launchctl load -w "${launch_agent_path}" >/dev/null 2>&1 || true
+  fi
+  LAUNCH_AGENT_PATH="${launch_agent_path}"
+  say "macOS launch agent installed: ${launch_agent_path}"
 }
 
 
@@ -1098,6 +1509,7 @@ pull_models() {
   local ollama_exe="$1"
   local install_profile="$2"
   local model_tag="$3"
+  local runtime_home="$4"
   if [[ -z "${ollama_exe}" ]]; then
     say "Step 12/14: Model pull skipped because Ollama is unavailable."
     return
@@ -1113,7 +1525,7 @@ pull_models() {
     fi
     say "Downloading ${required_model}..."
     "${ollama_exe}" pull "${required_model}" || say "WARNING: Model pull failed. Run manually: ollama pull ${required_model}"
-  done < <(detect_required_ollama_models "${install_profile}" "${model_tag}")
+  done < <(detect_required_ollama_models "${install_profile}" "${model_tag}" "${runtime_home}")
 }
 
 
@@ -1138,6 +1550,7 @@ write_install_receipt() {
   local openclaw_enabled="$3"
   local ollama_exe="$4"
   local openclaw_agent_dir="$5"
+  local launch_agent_path="$6"
   local openclaw_config_path=""
   local actual_agent_dir=""
   local receipt_path=""
@@ -1158,7 +1571,8 @@ write_install_receipt() {
     "${openclaw_enabled}" \
     "${openclaw_config_path}" \
     "${actual_agent_dir}" \
-    "${ollama_exe:-}" 2>/dev/null || true)"
+    "${ollama_exe:-}" \
+    "${launch_agent_path:-}" 2>/dev/null || true)"
   if [[ -n "${receipt_path}" ]]; then
     say "Install receipt written to ${receipt_path}"
   else
@@ -1173,6 +1587,7 @@ run_install_doctor() {
   local openclaw_enabled="$3"
   local ollama_exe="$4"
   local openclaw_agent_dir="$5"
+  local launch_agent_path="$6"
   local openclaw_config_path=""
   local actual_agent_dir=""
   local report_path=""
@@ -1193,7 +1608,8 @@ run_install_doctor() {
     "${openclaw_enabled}" \
     "${openclaw_config_path}" \
     "${actual_agent_dir}" \
-    "${ollama_exe:-}" 2>/dev/null || true)"
+    "${ollama_exe:-}" \
+    "${launch_agent_path:-}" 2>/dev/null || true)"
   if [[ -n "${report_path}" ]]; then
     say "Doctor report written to ${report_path}"
   else
@@ -1238,6 +1654,19 @@ main() {
 
   local hardware_summary
   local model_tag
+  local primary_local_model
+  local capacity_bucket
+  local recommended_bundle_id
+  local recommended_bundle_kind
+  local recommended_bundle_models
+  local fallback_bundle_id
+  local fallback_bundle_models
+  local recommended_optional_profile
+  local recommended_optional_profile_display
+  local secondary_local_model
+  local secondary_local_supported
+  local secondary_local_backend
+  local optional_followup_command
   local recommended_install_profile
   local recommended_install_profile_display
   local requested_install_profile
@@ -1247,6 +1676,21 @@ main() {
   local openclaw_home_override
   hardware_summary="$(detect_hardware_summary)"
   model_tag="$(detect_model_tag)"
+  eval "$(detect_install_recommendation_exports "${runtime_home}" "${model_tag}")"
+  primary_local_model="${PRIMARY_LOCAL_MODEL:-${model_tag}}"
+  model_tag="${primary_local_model}"
+  capacity_bucket="${CAPACITY_BUCKET:-unknown}"
+  recommended_bundle_id="${RECOMMENDED_BUNDLE_ID:-}"
+  recommended_bundle_kind="${RECOMMENDED_BUNDLE_KIND:-}"
+  recommended_bundle_models="${RECOMMENDED_BUNDLE_MODELS:-${model_tag}}"
+  fallback_bundle_id="${FALLBACK_BUNDLE_ID:-}"
+  fallback_bundle_models="${FALLBACK_BUNDLE_MODELS:-}"
+  recommended_optional_profile="${RECOMMENDED_OPTIONAL_PROFILE:-}"
+  recommended_optional_profile_display="${RECOMMENDED_OPTIONAL_PROFILE_DISPLAY:-}"
+  secondary_local_model="${SECONDARY_LOCAL_MODEL:-qwen2.5:14b-gguf}"
+  secondary_local_supported="${SECONDARY_LOCAL_SUPPORTED:-0}"
+  secondary_local_backend="${SECONDARY_LOCAL_BACKEND:-llama.cpp}"
+  optional_followup_command="$(optional_localmax_followup_command "${runtime_home}")"
   recommended_install_profile="$(detect_install_profile "${runtime_home}" "${model_tag}" "")"
   requested_install_profile="${INSTALL_PROFILE_OVERRIDE}"
   if [[ -z "${requested_install_profile}" && "${AUTO_YES}" -eq 0 ]]; then
@@ -1259,16 +1703,30 @@ main() {
   recommended_install_profile_display="$(detect_install_profile_display "${recommended_install_profile}")"
   install_profile_display="$(detect_install_profile_display "${install_profile}")"
   ensure_profile_remote_credentials "${install_profile}"
+  if [[ "${install_profile}" == "local-max" || "${install_profile}" == "full-orchestrated" ]]; then
+    provision_optional_llamacpp_lane "${runtime_home}"
+  fi
   install_profile_summary="$(detect_install_profile_summary "${runtime_home}" "${model_tag}" "${requested_install_profile}")"
   openclaw_home_override="$(resolve_openclaw_home_override)"
   say "Step 6/14: Hardware probe complete."
   say "Detected: ${hardware_summary}"
-  say "Selected model: ${model_tag}"
+  say "Capacity bucket: ${capacity_bucket}"
+  say "Primary local model: ${primary_local_model}"
+  say "Recommended local bundle: ${recommended_bundle_id:-unknown} (${recommended_bundle_kind:-unknown}) -> ${recommended_bundle_models}"
+  if [[ -n "${fallback_bundle_models}" ]]; then
+    say "Lighter fallback bundle: ${fallback_bundle_id:-unknown} -> ${fallback_bundle_models}"
+  fi
   say "Recommended profile: ${recommended_install_profile_display}"
   say "Install profile: ${install_profile_display}"
+  if [[ "${secondary_local_supported}" == "1" && -n "${recommended_optional_profile_display}" ]]; then
+    say "Optional stronger lane: ${recommended_optional_profile_display} via ${secondary_local_backend} (${secondary_local_model})"
+    say "Optional switch command: ${optional_followup_command}"
+  else
+    say "Optional stronger lane: not recommended on this machine/runtime."
+  fi
   say "Profile summary: ${install_profile_summary}"
   validate_selected_install_profile "${runtime_home}" "${model_tag}" "${install_profile}"
-  persist_install_profile_record "${runtime_home}" "${install_profile}" "${model_tag}"
+  persist_install_profile_record "${runtime_home}" "${install_profile}" "${model_tag}" "${recommended_bundle_models}" "${recommended_bundle_id}" "${recommended_bundle_kind}"
   persist_provider_env_file "${runtime_home}"
 
   say "Step 7/14: Creating launchers..."
@@ -1298,10 +1756,30 @@ main() {
   start_ollama_server "${ollama_exe}"
   configure_openclaw_with_ollama "${ollama_exe}" "${model_tag}" "${openclaw_enabled}" "${openclaw_home_override}"
   register_openclaw "${runtime_home}" "${model_tag}" "${openclaw_agent_dir}" "${openclaw_enabled}" "${openclaw_home_override}" "${agent_name}"
-  pull_models "${ollama_exe}" "${install_profile}" "${model_tag}"
+  pull_models "${ollama_exe}" "${install_profile}" "${model_tag}" "${runtime_home}"
   configure_liquefy
-  write_install_receipt "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}"
-  run_install_doctor "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}"
+  install_macos_launch_agent "${runtime_home}"
+  write_install_receipt "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}" "${LAUNCH_AGENT_PATH}"
+  run_install_doctor "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}" "${LAUNCH_AGENT_PATH}"
+  if [[ "${AUTO_YES}" -eq 0 && "${install_profile}" == "local-only" && "${secondary_local_supported}" == "1" ]]; then
+    if prompt_yn "Install the optional stronger local coding/verifier lane now?" "N"; then
+      provision_optional_llamacpp_lane "${runtime_home}"
+      install_profile="local-max"
+      install_profile_display="$(detect_install_profile_display "${install_profile}")"
+      validate_selected_install_profile "${runtime_home}" "${model_tag}" "${install_profile}"
+      persist_install_profile_record "${runtime_home}" "${install_profile}" "${model_tag}" "${recommended_bundle_models}" "${recommended_bundle_id}" "${recommended_bundle_kind}"
+      persist_provider_env_file "${runtime_home}"
+      write_install_receipt "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}" "${LAUNCH_AGENT_PATH}"
+      run_install_doctor "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}" "${LAUNCH_AGENT_PATH}"
+      say "Optional stronger local lane activated: ${install_profile_display}"
+    else
+      say "Optional stronger local lane skipped. Add it later with:"
+      say "${optional_followup_command}"
+    fi
+  elif [[ "${AUTO_YES}" -eq 1 && "${install_profile}" == "local-only" && "${secondary_local_supported}" == "1" ]]; then
+    say "Optional stronger local lane available but not auto-installed in non-interactive mode."
+    say "Add it later with: ${optional_followup_command}"
+  fi
 
   say
   say "==============================================="
@@ -1310,17 +1788,21 @@ main() {
   say
   say "Visible agent name: ${agent_name}"
   say "Selected model: ${model_tag}"
+  say "Selected bundle: ${recommended_bundle_id:-unknown} -> ${recommended_bundle_models}"
   say "Profile: ${install_profile_display}"
   say "Start:   ${PROJECT_ROOT}/OpenClaw_NULLA.sh"
   if [[ -n "${DESKTOP_SHORTCUT_PATH}" ]]; then
     say "Desktop: ${DESKTOP_SHORTCUT_PATH}"
+  fi
+  if [[ -n "${LAUNCH_AGENT_PATH}" ]]; then
+    say "Launchd: ${LAUNCH_AGENT_PATH}"
   fi
   say "Chat:    ${PROJECT_ROOT}/Talk_To_NULLA.sh"
   say "Probe:   ${PROJECT_ROOT}/Probe_NULLA_Stack.sh"
   say "Credits: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli credits"
   say "Profiles: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile"
   say "Ollama only: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile --set ollama-only"
-  say "Ollama + Kimi: cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile --set ollama+kimi"
+  say "Ollama max:  cd '${PROJECT_ROOT}' && ${VENV_DIR}/bin/python -m apps.nulla_cli install-profile --set ollama-max"
   say
   say "NULLA is now wired for OpenClaw-friendly launch,"
   say "with Ollama checked, hardware-tier model selection applied,"
@@ -1333,6 +1815,29 @@ main() {
     say
     say "Launching NULLA now..."
     say "Verifying live launch through the shell launcher..."
+    if [[ -n "${LAUNCH_AGENT_PATH}" ]]; then
+      local launchd_runtime_ready=0
+      local launchd_runtime_consecutive=0
+      for _ in $(seq 1 240); do
+        if curl -sf --max-time 2 "http://127.0.0.1:11435/healthz" >/dev/null 2>&1 && \
+          curl -sf --max-time 2 "http://127.0.0.1:11435/v1/models" >/dev/null 2>&1; then
+          launchd_runtime_consecutive=$((launchd_runtime_consecutive + 1))
+          if [[ "${launchd_runtime_consecutive}" -ge 5 ]]; then
+            launchd_runtime_ready=1
+            break
+          fi
+        else
+          launchd_runtime_consecutive=0
+        fi
+        sleep 1
+      done
+      if [[ "${launchd_runtime_ready}" -eq 1 ]]; then
+        say "Launchd runtime verified at http://127.0.0.1:11435 (stable health + /v1/models)"
+        exit 0
+      fi
+      say "ERROR: launchd installed NULLA, but the API did not stay healthy long enough to verify /v1/models within 240 seconds."
+      exit 1
+    fi
     exec "${PROJECT_ROOT}/OpenClaw_NULLA.sh"
   fi
 }

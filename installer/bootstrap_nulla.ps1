@@ -6,6 +6,8 @@ param(
     [string]$InstallDir = $env:NULLA_INSTALL_DIR,
     [string]$ArchiveUrl = $env:NULLA_ARCHIVE_URL,
     [string]$ArchiveSha256 = $env:NULLA_ARCHIVE_SHA256,
+    [string]$SourceCommit = $env:NULLA_BUILD_COMMIT,
+    [string]$SourceDirtyState = $env:NULLA_BUILD_DIRTY_STATE,
     [string]$InstallProfile = $env:NULLA_INSTALL_PROFILE,
     [switch]$NoStart
 )
@@ -78,6 +80,9 @@ function Download-And-Extract {
 }
 
 function Resolve-ArchiveCommit {
+    if (-not [string]::IsNullOrWhiteSpace($SourceCommit)) {
+        return $SourceCommit
+    }
     if (($ArchiveUrl -notlike "https://github.com/$RepoOwner/$RepoName/archive/refs/*") -and
         ($ArchiveUrl -notlike "https://codeload.github.com/$RepoOwner/$RepoName/tar.gz/*")) {
         return ""
@@ -91,6 +96,23 @@ function Resolve-ArchiveCommit {
     }
 }
 
+function Resolve-DirtyState {
+    if ([string]::IsNullOrWhiteSpace($SourceDirtyState)) {
+        return $null
+    }
+    switch ($SourceDirtyState.Trim().ToLowerInvariant()) {
+        "1" { return $true }
+        "true" { return $true }
+        "yes" { return $true }
+        "on" { return $true }
+        "0" { return $false }
+        "false" { return $false }
+        "no" { return $false }
+        "off" { return $false }
+        default { return $null }
+    }
+}
+
 function Write-BuildMetadata {
     param([string]$Commit)
 
@@ -99,10 +121,13 @@ function Write-BuildMetadata {
         New-Item -ItemType Directory -Path $configDir | Out-Null
     }
     $metadataPath = Join-Path $configDir "build-source.json"
+    $dirtyState = Resolve-DirtyState
     @{
         ref = $Ref
         branch = $Ref
         commit = $Commit
+        dirty_state = $dirtyState
+        source_kind = "archive"
         source_url = $ArchiveUrl
     } | ConvertTo-Json | Set-Content -LiteralPath $metadataPath -Encoding UTF8
 }

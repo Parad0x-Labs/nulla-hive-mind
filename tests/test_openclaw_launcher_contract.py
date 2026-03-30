@@ -55,9 +55,18 @@ def test_openclaw_launcher_exports_project_root_and_health_waits(tmp_path: Path)
     script = _render_openclaw_launcher(tmp_path)
 
     assert 'cd "${PROJECT_ROOT}"' in script
+    assert 'VENV_RESOLVER="${PROJECT_ROOT}/scripts/ensure_workspace_runtime.sh"' in script
+    assert 'VENV_PY="$(bash "${VENV_RESOLVER}")"' in script
     assert 'spawn_detached() {' in script
     assert 'start_new_session=True' in script
-    assert 'api_pid="$(spawn_detached /tmp/nulla_api_server.log "${VENV_PY}" -m apps.nulla_api_server --port "${NULLA_OPENCLAW_API_PORT}")"' in script
+    assert 'api_pid="$(spawn_detached /tmp/nulla_api_server.log "${PROJECT_ROOT}/Start_NULLA.sh")"' in script
     assert 'wait_for_http_ready() {' in script
     assert 'export NULLA_OPENCLAW_API_URL="${NULLA_OPENCLAW_API_URL:-http://127.0.0.1:${NULLA_OPENCLAW_API_PORT}}"' in script
     assert 'wait_for_http_ready "${NULLA_OPENCLAW_API_URL}/healthz" 30 "${api_pid}" 3' in script
+
+
+def test_workspace_openclaw_launcher_does_not_expand_empty_profile_array_under_nounset(tmp_path: Path) -> None:
+    script = _render_openclaw_launcher(tmp_path)
+
+    assert 'PROFILE_ARGS' not in script
+    assert 'spawn_detached /tmp/nulla_openclaw.log openclaw gateway run --force' in script

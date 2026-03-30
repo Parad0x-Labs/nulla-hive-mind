@@ -45,6 +45,16 @@ class RepoHygieneCheckTests(unittest.TestCase):
             with mock.patch.object(repo_hygiene_check, "PROJECT_ROOT", root):
                 self.assertEqual(repo_hygiene_check._repo_key_artifacts(), ["network/fixtures/node_signing_key.keyring.json"])
 
+    def test_repo_key_artifacts_ignore_generated_greenloop_runtime_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            key_dir = root / "reports" / "greenloop" / "live_acceptance" / "runtime_home" / "data" / "keys"
+            key_dir.mkdir(parents=True)
+            (key_dir / "node_signing_key.b64").write_text("test-key", encoding="utf-8")
+
+            with mock.patch.object(repo_hygiene_check, "PROJECT_ROOT", root):
+                self.assertEqual(repo_hygiene_check._repo_key_artifacts(), [])
+
     def test_public_docs_do_not_embed_absolute_local_paths(self) -> None:
         public_docs = [
             "README.md",

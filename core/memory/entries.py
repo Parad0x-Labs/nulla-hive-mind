@@ -79,7 +79,9 @@ def load_memory_excerpt(*, max_chars: int = 2200) -> str:
     text = memory_path().read_text(encoding="utf-8", errors="replace").strip()
     if len(text) <= max_chars:
         return text
-    return text[-max_chars:]
+    head_chars = max(160, min(max_chars // 2, 800))
+    tail_chars = max(160, max_chars - head_chars - 7)
+    return text[:head_chars].rstrip() + "\n...\n" + text[-tail_chars:].lstrip()
 
 
 def add_memory_fact(
@@ -364,9 +366,6 @@ def replace_name_memory(new_name_fact: str) -> None:
         for line in kept:
             if line.strip().startswith("- **Owner's name**:"):
                 updated.append(f"- **Owner's name**: {extracted_name}")
-                identity_updated = True
-            elif line.strip().startswith("- **My name**:"):
-                updated.append(f"- **My name**: {extracted_name}")
                 identity_updated = True
             else:
                 updated.append(line)

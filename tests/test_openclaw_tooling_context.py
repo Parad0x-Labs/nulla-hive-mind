@@ -16,6 +16,7 @@ from core.curiosity_roamer import CuriosityResult
 from core.hive_activity_tracker import session_hive_state, set_hive_interaction_state, update_session_hive_state
 from core.human_input_adapter import HumanInputInterpretation
 from core.identity_manager import load_active_persona
+from core.live_quote_contract import LiveQuoteResult
 from core.memory_first_router import ModelExecutionDecision
 from core.prompt_normalizer import normalize_prompt
 from core.public_hive_bridge import PublicHiveBridgeConfig
@@ -3136,8 +3137,13 @@ class OpenClawToolingContextTests(unittest.TestCase):
                 accelerator="mps",
             ),
         ), mock.patch(
-            "core.runtime_execution_tools.select_qwen_tier",
-            return_value=SimpleNamespace(tier_name="mid", ollama_tag="qwen2.5:14b"),
+            "core.runtime_execution_tools.install_recommendation_machine_summary",
+            return_value={
+                "ollama_model": "qwen3:8b",
+                "selected_tier": "capacity-C",
+                "capacity_bucket": "C",
+                "recommended_bundle_models": ["qwen3:8b", "deepseek-r1:8b"],
+            },
         ), mock.patch(
             "core.runtime_execution_tools._machine_os_details",
             return_value=("macOS", "15.4"),
@@ -3174,8 +3180,13 @@ class OpenClawToolingContextTests(unittest.TestCase):
                 accelerator="mps",
             ),
         ), mock.patch(
-            "core.runtime_execution_tools.select_qwen_tier",
-            return_value=SimpleNamespace(tier_name="mid", ollama_tag="qwen2.5:14b"),
+            "core.runtime_execution_tools.install_recommendation_machine_summary",
+            return_value={
+                "ollama_model": "qwen3:8b",
+                "selected_tier": "capacity-C",
+                "capacity_bucket": "C",
+                "recommended_bundle_models": ["qwen3:8b", "deepseek-r1:8b"],
+            },
         ), mock.patch(
             "core.runtime_execution_tools._machine_os_details",
             return_value=("macOS", "15.4"),
@@ -3222,6 +3233,43 @@ class OpenClawToolingContextTests(unittest.TestCase):
             )
         )
 
+    def test_openclaw_absolute_workspace_subdir_create_and_write_use_real_workspace_targets(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = str(Path(tmpdir).resolve())
+
+            create_dir = agent.run_once(
+                f"Create a folder named alpha inside {workspace}.",
+                session_id_override="openclaw:absolute-workspace-subdir-flow",
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": workspace},
+            )
+            self.assertEqual(create_dir["mode"], "tool_executed")
+            self.assertTrue((Path(workspace) / "alpha").is_dir())
+
+            create_text = agent.run_once(
+                f"Inside {workspace}/alpha create hello.txt with exactly this content: HELLO-LOCAL-TRUTH",
+                session_id_override="openclaw:absolute-workspace-subdir-flow",
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": workspace},
+            )
+            self.assertEqual(create_text["mode"], "tool_executed")
+            self.assertEqual((Path(workspace) / "alpha" / "hello.txt").read_text(encoding="utf-8"), "HELLO-LOCAL-TRUTH")
+
+            create_code = agent.run_once(
+                (
+                    f"Inside {workspace}/alpha create adder.py with exactly this code:\n\n"
+                    "def add(a: int, b: int) -> int:\n"
+                    "    return a + b\n"
+                ),
+                session_id_override="openclaw:absolute-workspace-subdir-flow",
+                source_context={"surface": "openclaw", "platform": "openclaw", "workspace": workspace},
+            )
+            self.assertEqual(create_code["mode"], "tool_executed")
+            self.assertEqual(
+                (Path(workspace) / "alpha" / "adder.py").read_text(encoding="utf-8"),
+                "def add(a: int, b: int) -> int:\n    return a + b",
+            )
+
     def test_openclaw_desktop_listing_request_uses_direct_machine_read_fast_path(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
         agent.start()
@@ -3239,6 +3287,319 @@ class OpenClawToolingContextTests(unittest.TestCase):
 
         self.assertIn("MarchTest/", result["response"])
         self.assertIn("todo.txt", result["response"])
+
+    def test_openclaw_desktop_listing_request_handles_can_you_see_phrasing(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)):
+            home = Path(tmpdir)
+            desktop = home / "Desktop"
+            desktop.mkdir(parents=True, exist_ok=True)
+            (desktop / "Marchtest").mkdir()
+            result = agent.run_once(
+                "can you see folders on my desktop?",
+                session_id_override="openclaw:desktop-list-can-you-see",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+        self.assertIn("Marchtest/", result["response"])
+        self.assertNotIn("Search results for", result["response"])
+        self.assertNotIn("Completed 1 real tool step", result["response"])
+
+    def test_openclaw_named_safe_folder_txt_write_uses_real_machine_write_lane(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            desktop = Path(tmpdir) / "Desktop"
+            marchtest = desktop / "MarchTest"
+            marchtest.mkdir(parents=True, exist_ok=True)
+
+            result = agent.run_once(
+                "can you create .txt with hello world text and place it in Marchtest folder?",
+                session_id_override="openclaw:named-safe-folder-txt-write",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = marchtest / "hello_world.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "hello world")
+
+        self.assertIn("~/Desktop/MarchTest/hello_world.txt", result["response"])
+        self.assertNotIn("workspace_stop_after_directory_bootstrap", result["response"])
+        self.assertNotIn("bounded builder step", result["response"])
+
+    def test_openclaw_price_followup_recovers_grounded_quote_in_api_surface(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        btc_note = LiveQuoteResult(
+            asset_key="bitcoin",
+            asset_name="Bitcoin",
+            symbol="BTC",
+            value=66446.0,
+            currency="USD",
+            as_of="2026-03-29 14:07 UTC",
+            source_label="CoinGecko",
+            source_url="https://www.coingecko.com/en/coins/bitcoin",
+            kind="crypto",
+            change_percent=-0.5,
+            change_window="24h",
+            timestamp_utc=1774793220,
+        ).to_note()
+
+        with mock.patch.object(agent, "_try_live_quote_note", return_value=btc_note), mock.patch(
+            "apps.nulla_agent.WebAdapter.planned_search_query",
+            side_effect=AssertionError("planned_search_query should not run for recovered BTC quote"),
+        ), mock.patch.object(
+            agent,
+            "_sync_public_presence",
+            return_value=None,
+        ):
+            result = agent.run_once(
+                "I mean btc",
+                session_id_override="openclaw:price-followup-btc",
+                source_context={
+                    "surface": "api",
+                    "platform": "api",
+                    "conversation_history": [
+                        {"role": "user", "content": "Brent price now?"},
+                        {
+                            "role": "assistant",
+                            "content": "Brent crude is $105.32 USD per barrel as of 2026-03-27 20:59 UTC. Source: Yahoo Finance.",
+                        },
+                    ],
+                },
+            )
+
+        self.assertIn("Bitcoin is $66,446.00 USD", result["response"])
+        self.assertIn("CoinGecko", result["response"])
+        self.assertNotIn("CoinMarketCap", result["response"])
+
+    def test_openclaw_direct_crypto_price_request_degrades_honestly_when_quote_is_ungrounded(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        agent.context_loader.load = mock.Mock(side_effect=AssertionError("ungrounded live price should not load context"))  # type: ignore[assignment]
+        agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("ungrounded live price should not use freeform model"))  # type: ignore[assignment]
+
+        with mock.patch.object(agent, "_try_live_quote_note", return_value=None), mock.patch(
+            "apps.nulla_agent.WebAdapter.planned_search_query",
+            return_value=[],
+        ), mock.patch(
+            "apps.nulla_agent.WebAdapter.search_query",
+            return_value=[],
+        ):
+            result = agent.run_once(
+                "solana price?",
+                session_id_override="openclaw:solana-price-no-evidence",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+        self.assertIn("could not ground a current answer confidently", result["response"].lower())
+        self.assertNotIn("CoinMarketCap", result["response"])
+        self.assertNotIn("CoinGecko", result["response"])
+
+    def test_openclaw_machine_specs_followup_reports_grounded_display_details(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with mock.patch(
+            "core.runtime_execution_tools.probe_machine",
+            return_value=SimpleNamespace(
+                cpu_cores=10,
+                ram_gb=24.0,
+                gpu_name="Apple Silicon",
+                vram_gb=24.0,
+                accelerator="mps",
+            ),
+        ), mock.patch(
+            "core.runtime_execution_tools.install_recommendation_machine_summary",
+            return_value={
+                "ollama_model": "qwen3:8b",
+                "selected_tier": "capacity-C",
+                "capacity_bucket": "C",
+                "recommended_bundle_models": ["qwen3:8b", "deepseek-r1:8b"],
+            },
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_os_details",
+            return_value=("macOS", "26.3"),
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_chip_name",
+            return_value="Apple M4",
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_display_details",
+            return_value={
+                "name": "iMac",
+                "native_resolution": "4480 x 2520",
+                "current_resolution": "2240 x 1260 @ 60.00Hz",
+                "screen_size": "24-inch (inferred from Apple 4.5K iMac panel)",
+            },
+        ):
+            result = agent.run_once(
+                "you did not answered about screen size?",
+                session_id_override="openclaw:screen-size-followup",
+                source_context={
+                    "surface": "api",
+                    "platform": "api",
+                    "conversation_history": [
+                        {"role": "user", "content": "what is the machine spec that we are running on?"},
+                        {"role": "assistant", "content": "Machine specs for this host:\n- OS: macOS 26.3"},
+                    ],
+                },
+            )
+
+        self.assertIn("Screen size: 24-inch", result["response"])
+        self.assertIn("4480 x 2520", result["response"])
+        self.assertNotIn("21 inches", result["response"])
+        self.assertNotIn("27 inches", result["response"])
+
+    def test_openclaw_machine_specs_correction_followup_stays_grounded(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with mock.patch(
+            "core.runtime_execution_tools.probe_machine",
+            return_value=SimpleNamespace(
+                cpu_cores=10,
+                ram_gb=24.0,
+                gpu_name="Apple Silicon",
+                vram_gb=24.0,
+                accelerator="mps",
+            ),
+        ), mock.patch(
+            "core.runtime_execution_tools.install_recommendation_machine_summary",
+            return_value={
+                "ollama_model": "qwen3:8b",
+                "selected_tier": "capacity-C",
+                "capacity_bucket": "C",
+                "recommended_bundle_models": ["qwen3:8b", "deepseek-r1:8b"],
+            },
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_os_details",
+            return_value=("macOS", "26.3"),
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_chip_name",
+            return_value="Apple M4",
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_display_details",
+            return_value={
+                "name": "iMac",
+                "native_resolution": "4480 x 2520",
+                "current_resolution": "2240 x 1260 @ 60.00Hz",
+                "screen_size": "24-inch (inferred from Apple 4.5K iMac panel)",
+            },
+        ):
+            result = agent.run_once(
+                "iron it is not 27.",
+                session_id_override="openclaw:screen-size-correction",
+                source_context={
+                    "surface": "api",
+                    "platform": "api",
+                    "conversation_history": [
+                        {"role": "user", "content": "what is the machine spec that we are running on? including screen size"},
+                        {"role": "assistant", "content": "Machine specs for this host:\n- Display: iMac\n- Screen size: 27 inches"},
+                        {"role": "user", "content": "you did not answered about screen size?"},
+                        {"role": "assistant", "content": "Machine specs for this host:\n- Display: iMac\n- Screen size: 24-inch (inferred from Apple 4.5K iMac panel)"},
+                    ],
+                },
+            )
+
+        self.assertIn("Grounded display data for this host", result["response"])
+        self.assertIn("Screen size: 24-inch", result["response"])
+        self.assertIn("4480 x 2520", result["response"])
+        self.assertNotIn("27 inches", result["response"])
+        self.assertNotIn("no specific tasks", result["response"].lower())
+
+    def test_openclaw_machine_specs_criticism_followup_stays_grounded(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with mock.patch(
+            "core.runtime_execution_tools.probe_machine",
+            return_value=SimpleNamespace(
+                cpu_cores=10,
+                ram_gb=24.0,
+                gpu_name="Apple Silicon",
+                vram_gb=24.0,
+                accelerator="mps",
+            ),
+        ), mock.patch(
+            "core.runtime_execution_tools.install_recommendation_machine_summary",
+            return_value={
+                "ollama_model": "qwen3:8b",
+                "selected_tier": "capacity-C",
+                "capacity_bucket": "C",
+                "recommended_bundle_models": ["qwen3:8b", "deepseek-r1:8b"],
+            },
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_os_details",
+            return_value=("macOS", "26.3"),
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_chip_name",
+            return_value="Apple M4",
+        ), mock.patch(
+            "core.runtime_execution_tools._machine_display_details",
+            return_value={
+                "name": "iMac",
+                "native_resolution": "4480 x 2520",
+                "current_resolution": "2240 x 1260 @ 60.00Hz",
+                "screen_size": "24-inch (inferred from Apple 4.5K iMac panel)",
+            },
+        ):
+            result = agent.run_once(
+                "good you lost your head I see amazing lol",
+                session_id_override="openclaw:screen-size-criticism",
+                source_context={
+                    "surface": "api",
+                    "platform": "api",
+                    "conversation_history": [
+                        {"role": "user", "content": "what is the machine spec that we are running on? including screen size"},
+                        {"role": "assistant", "content": "Machine specs for this host:\n- Display: iMac\n- Screen size: 24-inch (inferred from Apple 4.5K iMac panel)"},
+                        {"role": "user", "content": "iron it is not 27."},
+                        {"role": "assistant", "content": "Grounded display data for this host:\n- Display: iMac\n- Screen size: 24-inch (inferred from Apple 4.5K iMac panel)"},
+                    ],
+                },
+            )
+
+        self.assertIn("Grounded display data for this host", result["response"])
+        self.assertIn("Screen size: 24-inch", result["response"])
+        self.assertNotIn("macos 10.15", result["response"].lower())
+        self.assertNotIn("apple m1", result["response"].lower())
+        self.assertNotIn("27-inch", result["response"].lower())
+
+    def test_openclaw_chat_export_request_writes_real_local_transcript_file(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            result = agent.run_once(
+                "can't you export this all chat as .txt to Marchtest folder that is on desktop?",
+                session_id_override="openclaw:chat-export-local",
+                source_context={
+                    "surface": "api",
+                    "platform": "api",
+                    "conversation_history": [
+                        {"role": "user", "content": "how are ya?"},
+                        {"role": "assistant", "content": "Running stable. Memory online, mesh ready."},
+                        {"role": "user", "content": "Brent price now?"},
+                        {"role": "assistant", "content": "Brent crude is $105.32 USD per barrel."},
+                    ],
+                },
+            )
+
+            export_path = Path(tmpdir) / "Desktop" / "Marchtest" / "chat_session.txt"
+            self.assertTrue(export_path.is_file())
+            exported = export_path.read_text(encoding="utf-8")
+
+        self.assertIn("~/Desktop/Marchtest/chat_session.txt", result["response"])
+        self.assertIn("You\nhow are ya?", exported)
+        self.assertIn("NULLA\nRunning stable. Memory online, mesh ready.", exported)
+        self.assertNotIn("can't you export this all chat", exported)
 
 
 if __name__ == "__main__":

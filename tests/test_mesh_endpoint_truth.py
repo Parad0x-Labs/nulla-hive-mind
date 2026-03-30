@@ -180,6 +180,72 @@ def test_run_migrations_rebuilds_legacy_peer_endpoints_into_multi_endpoint_rows(
     ]
 
 
+def test_run_migrations_handles_very_legacy_peer_endpoints_without_verification_columns(tmp_path) -> None:
+    db_path = tmp_path / "mesh-endpoints-very-legacy.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE peer_endpoints (
+                peer_id TEXT PRIMARY KEY,
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL,
+                source TEXT NOT NULL DEFAULT 'direct',
+                last_seen_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO peer_endpoints (
+                peer_id, host, port, source, last_seen_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "peer-legacy",
+                "203.0.113.10",
+                49112,
+                "bootstrap",
+                "2026-03-26T08:00:00+00:00",
+                "2026-03-26T08:00:00+00:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    run_migrations(db_path=db_path)
+    migrated = get_connection(db_path)
+    try:
+        pk_columns = [
+            row["name"]
+            for row in migrated.execute("PRAGMA table_info(peer_endpoints)").fetchall()
+            if int(row["pk"] or 0)
+        ]
+        row = migrated.execute(
+            """
+            SELECT peer_id, host, port, source, last_verified_at, proof_timestamp,
+                   last_delivery_attempt_at, consecutive_delivery_failures
+            FROM peer_endpoints
+            WHERE peer_id = ?
+            LIMIT 1
+            """,
+            ("peer-legacy",),
+        ).fetchone()
+    finally:
+        migrated.close()
+
+    assert pk_columns == ["peer_id", "host", "port"]
+    assert row["host"] == "203.0.113.10"
+    assert row["port"] == 49112
+    assert row["source"] == "bootstrap"
+    assert row["last_verified_at"] == ""
+    assert row["proof_timestamp"] == "2026-03-26T08:00:00+00:00"
+    assert row["last_delivery_attempt_at"] == ""
+    assert row["consecutive_delivery_failures"] == 0
+
+
 def test_run_migrations_backfills_missing_peer_endpoint_proof_timestamp_column(tmp_path) -> None:
     db_path = tmp_path / "mesh-endpoints-backfill.db"
     conn = sqlite3.connect(db_path)

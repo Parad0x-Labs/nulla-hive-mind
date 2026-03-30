@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
+VENV_PY="$(bash "${SCRIPT_DIR}/scripts/ensure_workspace_runtime.sh")"
 
 if [[ ! -f "${VENV_PY}" ]]; then
   echo "ERROR: Virtual environment not found at ${SCRIPT_DIR}/.venv"

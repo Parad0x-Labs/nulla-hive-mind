@@ -9,6 +9,7 @@ from typing import Any
 from core.adaptation_autopilot import get_adaptation_autopilot_status, schedule_adaptation_autopilot_tick
 from core.control_plane_workspace import collect_control_plane_status
 from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
+from core.persistent_memory import recent_conversation_events
 from core.runtime_capabilities import runtime_capability_snapshot
 from core.runtime_task_events import list_runtime_session_events, list_runtime_sessions
 from core.runtime_task_rail import render_runtime_task_rail_html
@@ -24,6 +25,7 @@ from .runtime import (
     normalize_chat_history,
     ollama_chat_response,
     openai_chat_response,
+    openai_sse_stream_from_ollama_chunks,
     parameter_count_for_model,
     run_agent,
     runtime_headers,
@@ -125,6 +127,110 @@ def capability_snapshot_with_runtime(
     return payload
 
 
+def _augment_history_from_session_log(
+    history: list[dict[str, str]],
+    *,
+    session_id: str,
+    user_text: str,
+    limit: int = 6,
+) -> list[dict[str, str]]:
+    normalized_history = [dict(item) for item in list(history or []) if isinstance(item, dict)]
+    if len(normalized_history) > 1:
+        return normalized_history
+    normalized_session = str(session_id or "").strip()
+    normalized_user = str(user_text or "").strip()
+    if not normalized_session or not normalized_user:
+        return normalized_history
+
+    hydrated_history: list[dict[str, str]] = []
+    for event in recent_conversation_events(normalized_session, limit=max(1, int(limit))):
+        if not isinstance(event, dict):
+            continue
+        event_user = str(event.get("user") or "").strip()
+        event_assistant = str(event.get("assistant") or "").strip()
+        if event_user:
+            hydrated_history.append({"role": "user", "content": event_user})
+        if event_assistant:
+            hydrated_history.append({"role": "assistant", "content": event_assistant})
+
+    if not hydrated_history:
+        return normalized_history
+
+    if normalized_history:
+        last_message = normalized_history[-1]
+        if (
+            str(last_message.get("role") or "").strip().lower() == "user"
+            and str(last_message.get("content") or "").strip() == normalized_user
+        ):
+            return [*hydrated_history, *normalized_history]
+    return [*hydrated_history, {"role": "user", "content": normalized_user}]
+
+
+def _runtime_model_catalog(
+    *,
+    capability_snapshot: dict[str, Any],
+    default_model_name: str,
+) -> list[dict[str, str]]:
+    catalog: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def _add(model_id: str, *, owned_by: str) -> None:
+        normalized = str(model_id or "").strip()
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        catalog.append({"id": normalized, "owned_by": str(owned_by or "nulla-runtime").strip() or "nulla-runtime"})
+
+    _add(default_model_name, owned_by="nulla-runtime")
+    for item in list(capability_snapshot.get("provider_capability_truth") or []):
+        if not isinstance(item, dict):
+            continue
+        provider_id = str(item.get("provider_id") or "").strip()
+        model_id = str(item.get("model_id") or "").strip()
+        owned_by = provider_id or "nulla-runtime"
+        if model_id:
+            _add(model_id, owned_by=owned_by)
+        if provider_id:
+            _add(provider_id, owned_by=owned_by)
+    return catalog
+
+
+def _ollama_tag_payload(*, capability_snapshot: dict[str, Any], model_name: str, runtime: RuntimeServices) -> dict[str, Any]:
+    models = []
+    for entry in _runtime_model_catalog(capability_snapshot=capability_snapshot, default_model_name=model_name):
+        models.append(
+            {
+                "name": entry["id"],
+                "model": entry["id"],
+                "modified_at": datetime.now(timezone.utc).isoformat(),
+                "size": 0,
+                "digest": "nulla-runtime",
+                "details": {
+                    "parent_model": "",
+                    "format": "nulla",
+                    "family": "qwen",
+                    "parameter_size": runtime.runtime_parameter_size,
+                    "quantization_level": "runtime",
+                },
+            }
+        )
+    return {"models": models}
+
+
+def _openai_models_payload(*, capability_snapshot: dict[str, Any], model_name: str) -> dict[str, Any]:
+    data = []
+    for entry in _runtime_model_catalog(capability_snapshot=capability_snapshot, default_model_name=model_name):
+        data.append(
+            {
+                "id": entry["id"],
+                "object": "model",
+                "created": 0,
+                "owned_by": entry["owned_by"],
+            }
+        )
+    return {"object": "list", "data": data}
+
+
 def dispatch_get(
     *,
     path: str,
@@ -152,25 +258,12 @@ def dispatch_get(
     if normalized_path == "/":
         return apply_runtime_headers(text_response(200, "Ollama is running"), runtime)
 
-    if normalized_path in {"/api/tags", "/v1/models"}:
-        payload = {
-            "models": [
-                {
-                    "name": model_name,
-                    "model": model_name,
-                    "modified_at": datetime.now(timezone.utc).isoformat(),
-                    "size": 0,
-                    "digest": "nulla-runtime",
-                    "details": {
-                        "parent_model": "",
-                        "format": "nulla",
-                        "family": "qwen",
-                        "parameter_size": runtime.runtime_parameter_size,
-                        "quantization_level": "runtime",
-                    },
-                }
-            ]
-        }
+    if normalized_path == "/api/tags":
+        payload = _ollama_tag_payload(capability_snapshot=capability_snapshot, model_name=model_name, runtime=runtime)
+        return apply_runtime_headers(json_response(200, payload), runtime)
+
+    if normalized_path == "/v1/models":
+        payload = _openai_models_payload(capability_snapshot=capability_snapshot, model_name=model_name)
         return apply_runtime_headers(json_response(200, payload), runtime)
 
     if normalized_path in {"/healthz", "/v1/healthz"}:
@@ -271,7 +364,7 @@ def dispatch_post(
 
     if normalized_path in {"/api/chat", "/v1/chat/completions"}:
         messages = list(body.get("messages", []) or [])
-        history = normalize_chat_history_provider(messages)
+        client_history = normalize_chat_history_provider(messages)
         user_text = extract_user_message_provider(messages)
         if not user_text:
             return apply_runtime_headers(json_response(400, {"error": "no user message found"}), runtime)
@@ -279,19 +372,29 @@ def dispatch_post(
         model = body.get("model", model_name)
         stream = body.get("stream", False)
         include_runtime_events = bool(body.get("stream_runtime_events") or body.get("include_runtime_events"))
-        session_id = stable_openclaw_session_id_provider(body=body, history=history, headers=headers)
+        session_id = stable_openclaw_session_id_provider(body=body, history=client_history, headers=headers)
+        history = _augment_history_from_session_log(
+            client_history,
+            session_id=session_id,
+            user_text=user_text,
+        )
         requested_workspace = str(
             body.get("workspace") or body.get("workspace_root") or body.get("cwd") or body.get("projectRoot") or ""
         ).strip()
         default_workspace = workspace_root_provider()
         source_context = {
-            "client_conversation_history": history,
-            "client_history_message_count": len(history),
+            "surface": "api",
+            "platform": "api",
+            "client_conversation_history": client_history,
+            "client_history_message_count": len(client_history),
             "conversation_history": history,
             "history_message_count": len(history),
             "workspace": requested_workspace or default_workspace,
             "workspace_root": requested_workspace or default_workspace,
         }
+        requested_model = str(model or "").strip()
+        if requested_model and requested_model not in {str(model_name or "").strip(), f"{str(model_name or '').strip()}:latest"}:
+            source_context["requested_model"] = requested_model
 
         if stream:
             stream_iter = stream_agent_with_events_provider(
@@ -302,6 +405,16 @@ def dispatch_post(
                 model=model,
                 include_runtime_events=include_runtime_events,
             )
+            if normalized_path.startswith("/v1/"):
+                return apply_runtime_headers(
+                    stream_response(
+                        200,
+                        openai_sse_stream_from_ollama_chunks(stream_iter, str(model)),
+                        content_type="text/event-stream; charset=utf-8",
+                        headers={"Cache-Control": "no-cache"},
+                    ),
+                    runtime,
+                )
             return apply_runtime_headers(
                 stream_response(200, stream_iter, content_type="application/x-ndjson"),
                 runtime,

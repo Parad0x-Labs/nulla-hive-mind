@@ -11,6 +11,12 @@ curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nu
 bash bootstrap_nulla.sh
 ```
 
+If you need the current beta branch instead of whatever is on `main`, use the branch-pinned one-liner:
+
+```bash
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --ref codex/honest-ollama-prewarm-bootstrap --install-profile ollama-max && rm -f "$tmp"
+```
+
 Windows PowerShell:
 
 ```powershell
@@ -31,11 +37,13 @@ bash Probe_NULLA_Stack.sh
 Force a supported install profile instead of taking the honest auto recommendation:
 
 ```bash
-bash bootstrap_nulla.sh --install-profile hybrid-kimi
+bash bootstrap_nulla.sh --install-profile local-only
+
+bash bootstrap_nulla.sh --install-profile local-max
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1 -InstallProfile hybrid-kimi
+powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1 -InstallProfile local-max
 ```
 
 Safe one-line profile shortcuts for macOS / Linux:
@@ -48,32 +56,26 @@ tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-
 tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile ollama-max && rm -f "$tmp"
 ```
 
-```bash
-tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && KIMI_API_KEY="replace-me" bash "$tmp" --install-profile ollama+kimi && rm -f "$tmp"
-```
-
 After install, inspect or switch profiles without editing env vars:
 
 ```bash
 cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile
 cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-only
-cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama+kimi
+cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-max
 ```
 
 Recommended profile guidance:
 
 1. `local-only` / `ollama-only` for smaller machines or anyone who wants a strict no-remote default.
 2. `local-max` / `ollama-max` for stronger local boxes, roughly 24 GiB+ unified memory or 20+ GiB VRAM / 48 GiB RAM class hardware, and the installer now pulls the local helper model too.
-3. `hybrid-kimi` / `ollama+kimi` for smaller local boxes that still want a stronger remote queen lane. Export `KIMI_API_KEY` or `MOONSHOT_API_KEY` before the one-line install, or run interactively and the installer will prompt once and persist it into the runtime config.
 
 The probe reports:
 
 1. machine hardware summary
 2. installed Ollama models
 3. whether the machine can reasonably run one local model or a primary/helper local pair
-4. which remote provider credentials are actually configured
-5. which provider stacks are real, not wired yet, or unsupported
-6. which install profile those stacks map to in the shipped runtime
+4. whether the stronger optional local verifier lane is supported on the current hardware
+5. which install profile those local stacks map to in the shipped runtime
 
 Manual local shortcut:
 

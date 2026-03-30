@@ -28,7 +28,7 @@ def resolve_workspace_path(raw_path: str | None, *, workspace_root: Path) -> Pat
     raw = str(raw_path or "").strip()
     if not raw:
         return workspace_root
-    candidate = Path(raw)
+    candidate = Path(raw).expanduser()
     candidate = (workspace_root / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
     if candidate != workspace_root and workspace_root not in candidate.parents:
         raise ValueError("Path escapes the active workspace.")

@@ -23,7 +23,7 @@ class ModelSelectionRequest:
     min_trust: float = 0.0
 
 
-def _cost_class(manifest: ModelProviderManifest) -> str:
+def provider_cost_class(manifest: ModelProviderManifest) -> str:
     if manifest.adapter_type == "cloud_fallback_provider":
         return "paid_cloud"
     base_url = str(manifest.runtime_config.get("base_url") or "")
@@ -55,7 +55,7 @@ def rank_providers(
             continue
         if request.preferred_model and manifest.model_name != request.preferred_model:
             continue
-        cost_class = _cost_class(manifest)
+        cost_class = provider_cost_class(manifest)
         if policy_engine.local_only_mode() and cost_class != "free_local":
             continue
         if cost_class == "paid_cloud" and not request.allow_paid_fallback:

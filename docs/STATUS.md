@@ -1,10 +1,26 @@
 # What Works Today
 
-Current status matrix. Updated 2026-03-27.
+Current status matrix. Updated 2026-03-30.
 
-## 2026-03-27 Greenloop Closure
+## 2026-03-30 Working Branch Checkpoint
 
-Current head: `15948c7`.
+Working branch head: `467e739` (`codex/honest-ollama-prewarm-bootstrap`).
+
+Freshly verified on this branch head:
+
+- `python3 ops/cumulative_stabilization.py --through G` passed on 2026-03-30
+- targeted cumulative packs: `193 passed, 2 skipped, 1 warning in 22.32s`
+- appended full suite: `1811 passed, 11 skipped, 13 xfailed, 15 xpassed, 3 warnings in 89.10s`
+
+What this checkpoint does not prove:
+
+- it is not a rerun of the locked live LLM acceptance path
+- the latest archived live LLM proof snapshot is still the 2026-03-27/2026-03-28 greenloop evidence on `15948c7`
+- use [`LOCAL_ACCEPTANCE.md`](./LOCAL_ACCEPTANCE.md) and [`LLM_ACCEPTANCE_REPORT.md`](./LLM_ACCEPTANCE_REPORT.md) as archived measured proof unless those commands are rerun on the current head
+
+## 2026-03-27 Archived Greenloop Closure
+
+Archived measured head: `15948c7`.
 
 This checkpoint reran the proof path on the landed install/provider slice and closed the missing concurrency lane:
 
@@ -33,9 +49,9 @@ Proof bundle:
 - [`reports/greenloop/summary.json`](../reports/greenloop/summary.json)
 - [`reports/greenloop/final_signoff.md`](../reports/greenloop/final_signoff.md)
 
-## Latest Stabilization Checkpoint
+## Archived 2026-03-27 Stabilization Checkpoint
 
-The current `main` checkpoint materially improved one hundred and forty-seven areas:
+The 2026-03-27 `main` checkpoint materially improved one hundred and forty-seven areas:
 
 1. **Provider routing and model orchestration**
    NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.

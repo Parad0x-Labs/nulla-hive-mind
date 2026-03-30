@@ -284,6 +284,17 @@ class FastPathFacadeMixin:
     def _extract_requested_builder_root(self, query_text: str) -> str:
         return agent_fast_paths.extract_requested_builder_root(query_text)
 
+    def _recover_price_lookup_query(
+        self,
+        text: str,
+        *,
+        source_context: dict[str, Any] | None,
+    ) -> str:
+        return agent_fast_paths.recover_price_lookup_query(
+            text,
+            source_context=source_context,
+        )
+
     def _normalize_live_info_query(self, text: str, *, mode: str) -> str:
         return agent_fast_paths.normalize_live_info_query(
             text,
@@ -318,6 +329,9 @@ class FastPathFacadeMixin:
             notes=notes,
             mode=mode,
         )
+
+    def _looks_like_grounded_price_lookup(self, query: str) -> bool:
+        return agent_fast_paths.looks_like_grounded_price_lookup(query)
 
     def _notes_include_grounded_price_signal(self, notes: list[dict[str, Any]]) -> bool:
         return agent_fast_paths.notes_include_grounded_price_signal(notes)

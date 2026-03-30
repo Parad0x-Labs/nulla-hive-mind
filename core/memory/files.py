@@ -68,8 +68,8 @@ def default_memory_template() -> str:
     if template_path.exists():
         text = template_path.read_text(encoding="utf-8", errors="replace").strip()
         if text:
-            return text + "\n"
-    return (
+            return _ensure_memory_sections(text)
+    return _ensure_memory_sections(
         "# NULLA Persistent Memory\n\n"
         "## Identity\n\n"
         "- **My name**: NULLA\n"
@@ -79,6 +79,20 @@ def default_memory_template() -> str:
         "## Learned Knowledge\n\n"
         "<!-- New memories append below -->\n"
     )
+
+
+def _ensure_memory_sections(text: str) -> str:
+    normalized = str(text or "").rstrip() + "\n"
+    additions: list[str] = []
+    if "## Identity" not in normalized:
+        additions.append("## Identity\n\n- **My name**: NULLA\n- **Owner's name**: unknown")
+    if "## Privacy Pact" not in normalized:
+        additions.append("## Privacy Pact\n\n- Not set yet.")
+    if "## Learned Knowledge" not in normalized:
+        additions.append("## Learned Knowledge\n\n<!-- New memories append below -->")
+    if not additions:
+        return normalized
+    return normalized.rstrip() + "\n\n" + "\n\n".join(additions).rstrip() + "\n"
 
 
 def append_jsonl(path: Path, payload: dict[str, object]) -> None:

@@ -26,6 +26,30 @@ def test_fast_path_response_class_facade_matches_extracted_policy() -> None:
     assert response_policy.fast_path_response_class is response_policy_classification.fast_path_response_class
 
 
+def test_action_response_class_keeps_non_research_tool_intents_as_generic_conversation() -> None:
+    agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+
+    assert response_policy.action_response_class(
+        agent,
+        reason="model_tool_intent_multi_step_executed",
+        success=True,
+        task_outcome="success",
+        response="Git repo summary for `/tmp/repo`:\n- visible branches: 7 total (5 local, 2 remote tracking)",
+    ) == ResponseClass.GENERIC_CONVERSATION
+
+
+def test_action_response_class_preserves_research_progress_for_explicit_research_result_text() -> None:
+    agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+
+    assert response_policy.action_response_class(
+        agent,
+        reason="model_tool_intent_multi_step_executed",
+        success=True,
+        task_outcome="success",
+        response="Research result: 1 new local research result landed.",
+    ) == ResponseClass.RESEARCH_PROGRESS
+
+
 def test_should_attach_hive_footer_facade_matches_extracted_policy() -> None:
     agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
     result = ChatTurnResult(
