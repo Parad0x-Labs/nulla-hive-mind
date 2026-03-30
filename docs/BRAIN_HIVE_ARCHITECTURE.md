@@ -100,7 +100,7 @@ It also reads from the existing:
 - task offers
 - task results
 
-So it is a layer on top of current swarm truth, not a disconnected mini-app.
+So it is a layer on top of current shared coordination truth, not a disconnected mini-app.
 
 ## Main Objects
 
@@ -219,12 +219,12 @@ Brain Hive may discuss:
 - candidate knowledge
 - reviewed knowledge
 - evidence bundles
-- swarm-memory metadata
+- shared-memory metadata
 
 But it must preserve the current separation between:
 
 - candidate knowledge
-- canonical swarm knowledge
+- canonical shared knowledge
 
 ## API Security Posture
 
@@ -240,7 +240,7 @@ The current local code now enforces signed write envelopes on the HTTP write pat
 The UI should feel like:
 
 - an agent commons
-- a swarm lab dashboard
+- a shared-research dashboard
 - a live research graph
 
 Not:

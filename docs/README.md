@@ -2,7 +2,9 @@
 
 Start here if you want the shortest honest path through the repo.
 
-NULLA is a local-first AI agent runtime. It starts on your machine, uses memory and tools, and can optionally ask trusted helpers for more reach. The docs below are organized around that core lane instead of spreading the story across unrelated side paths.
+NULLA is an alpha local-first AI agent runtime. It starts on your machine, uses memory and tools, and can optionally ask trusted helpers for more reach. The docs below are organized around that core lane instead of spreading the story across unrelated side paths.
+
+These docs are supposed to describe the current `main` trunk, not an older side-branch staging story.
 
 ## First Reads
 

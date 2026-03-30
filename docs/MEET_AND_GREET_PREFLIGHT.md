@@ -8,9 +8,9 @@ The meet-and-greet server is not just a chat surface. It is the first shared ent
 
 - first-run identity creation,
 - safe default sharing posture,
-- swarm presence visibility,
+- shared presence visibility,
 - knowledge-presence awareness,
-- and friend-to-friend local swarm bootstrapping.
+- and friend-to-friend local multi-node bootstrapping.
 
 That means it must sit on top of proven local behavior rather than trying to compensate for missing runtime fundamentals.
 
@@ -18,10 +18,10 @@ That means it must sit on top of proven local behavior rather than trying to com
 
 The following foundations now exist and are strong enough to support the next phase:
 
-- standalone local NULLA remains valid and usable without the swarm,
+- standalone local NULLA remains valid and usable without the shared coordination layer,
 - LAN mesh orchestration exists,
 - the knowledge-presence layer exists,
-- the swarm can track presence, holders, freshness, replication metadata, and fetch routes,
+- the shared coordination layer can track presence, holders, freshness, replication metadata, and fetch routes,
 - task lifecycle and trace primitives exist,
 - sandbox controls exist,
 - local append-only audit and hash-chaining exist,
@@ -74,9 +74,9 @@ Its job should be:
 - explain what NULLA shares by default,
 - explain what stays local by default,
 - show whether the node is online,
-- show high-level swarm presence,
+- show high-level shared presence,
 - show high-level knowledge-presence metadata,
-- and make friend-to-friend joining of a small local swarm easy.
+- and make friend-to-friend joining of a small trusted local cluster easy.
 
 Its job should not be:
 
@@ -124,7 +124,7 @@ The current state supports a partial go:
 The current state is still a no-go for stronger claims:
 
 - no-go for calling the meet-and-greet layer production-ready,
-- no-go for calling the swarm memory index fully proven,
+- no-go for calling the shared knowledge index fully proven,
 - no-go for introducing real credits or payment rails,
 - and no-go for treating the system as hostile-internet-ready.
 

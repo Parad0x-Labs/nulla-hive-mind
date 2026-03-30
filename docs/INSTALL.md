@@ -2,6 +2,8 @@
 
 This is the canonical install and quickstart doc.
 
+`main` is the current alpha trunk. Use the default `main` installer path unless you are deliberately reproducing an older checkpoint.
+
 ## Fast Path
 
 macOS / Linux:
@@ -11,10 +13,10 @@ curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nu
 bash bootstrap_nulla.sh
 ```
 
-If you need the current beta branch instead of whatever is on `main`, use the branch-pinned one-liner:
+If you need a reproducible historical install instead of the latest alpha trunk on `main`, pin an exact ref:
 
 ```bash
-tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --ref codex/honest-ollama-prewarm-bootstrap --install-profile ollama-max && rm -f "$tmp"
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --ref 2f17895ede500d85372269cb516083abd09c013c --install-profile ollama-max && rm -f "$tmp"
 ```
 
 Windows PowerShell:
@@ -178,6 +180,7 @@ If you deliberately run NULLA from a custom runtime home, set `NULLA_HOME` befor
 ## Common Notes
 
 - NULLA is alpha. Read [STATUS.md](STATUS.md) before assuming a surface is production-ready.
+- `main` is the current alpha truth; do not keep reading the repo as if the real runtime lives on an unmerged side branch.
 - The strongest current lane is local-first runtime plus Hive/public-web/OpenClaw surfaces.
 - The strongest default install lane is still honest auto selection from current hardware and configured providers.
 - A configured Kimi lane is now a real first-class supported profile through the shared OpenAI-compatible runtime bootstrap, but it is still optional rather than the default local-first path.

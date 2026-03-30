@@ -14,7 +14,7 @@ It exists to keep the model layer:
 - local-first,
 - memory-first,
 - license-safe,
-- and separated from canonical swarm truth.
+- and separated from canonical shared knowledge.
 
 ## Core Rule
 
@@ -27,7 +27,7 @@ NULLA still owns:
 - policy,
 - persona,
 - validation,
-- swarm logic,
+- shared coordination logic,
 - candidate promotion rules,
 - and final response shaping.
 
@@ -74,7 +74,7 @@ Before any provider call, NULLA should prefer:
 - exact cached candidate hits,
 - strong local memory,
 - tiered relevant context,
-- and metadata-first swarm memory
+- and metadata-first shared memory
 
 over fresh provider execution.
 
@@ -87,7 +87,7 @@ All provider output is candidate knowledge first.
 It must not automatically become:
 
 - canonical local memory,
-- canonical swarm truth,
+- canonical shared knowledge,
 - or automatic shard advertisement
 
 without existing review or validation gates.

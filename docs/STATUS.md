@@ -1,22 +1,22 @@
-# What Works Today
+# NULLA Alpha Status
 
 Current status matrix. Updated 2026-03-30.
 
-## 2026-03-30 Working Branch Checkpoint
+## 2026-03-30 Mainline Alpha Checkpoint
 
-Working branch head: `467e739` (`codex/honest-ollama-prewarm-bootstrap`).
+Current default-branch head: `2f17895` (`main`).
 
-Freshly verified on this branch head:
+Freshly verified on this head:
 
-- `python3 ops/cumulative_stabilization.py --through G` passed on 2026-03-30
-- targeted cumulative packs: `193 passed, 2 skipped, 1 warning in 22.32s`
-- appended full suite: `1811 passed, 11 skipped, 13 xfailed, 15 xpassed, 3 warnings in 89.10s`
+- `python3 ops/pytest_shards.py --workers 4 --pytest-arg=--tb=short` passed on 2026-03-30
+- `python3 ops/llm_eval.py --skip-live-runtime --output-root reports/llm_eval/latest --baseline-root reports/llm_eval/baselines` passed on 2026-03-30 with `ci fast gate: GREEN`
+- the alpha-hardening line that had been living on `codex/honest-ollama-prewarm-bootstrap` is now merged back onto `main`, so the default install path and the real shipped trunk are aligned again
 
 What this checkpoint does not prove:
 
 - it is not a rerun of the locked live LLM acceptance path
 - the latest archived live LLM proof snapshot is still the 2026-03-27/2026-03-28 greenloop evidence on `15948c7`
-- use [`LOCAL_ACCEPTANCE.md`](./LOCAL_ACCEPTANCE.md) and [`LLM_ACCEPTANCE_REPORT.md`](./LLM_ACCEPTANCE_REPORT.md) as archived measured proof unless those commands are rerun on the current head
+- use [`LOCAL_ACCEPTANCE.md`](./LOCAL_ACCEPTANCE.md) and [`LLM_ACCEPTANCE_REPORT.md`](./LLM_ACCEPTANCE_REPORT.md) as archived measured proof unless those commands are rerun on `2f17895`
 
 ## 2026-03-27 Archived Greenloop Closure
 
@@ -54,7 +54,7 @@ Proof bundle:
 The 2026-03-27 `main` checkpoint materially improved one hundred and forty-seven areas:
 
 1. **Provider routing and model orchestration**
-   NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first drone swarm, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
+   NULLA now has explicit drone-vs-queen provider roles. The helper/teacher lane can run a bounded local-first helper fan-out, and the main slow-lane model router now honors the same role-aware routing instead of bypassing it with generic provider failover.
 2. **Runtime backbone and startup state**
    Operator/chat startup state now routes through `core/runtime_backbone.py`, so hardware tier, provider audit rows, and runtime bootstrap state stop being rediscovered independently across entrypoints.
 3. **Service surface hardening**
@@ -328,7 +328,7 @@ The 2026-03-27 `main` checkpoint materially improved one hundred and forty-seven
 137. **Health-aware install-profile truth baseline**
    Installer/runtime profile truth no longer treats selected provider lanes as beta-ready just because they are configured. `core/runtime_install_profiles.py` now carries each selected lane's `availability_state`, routes local coder/verifier selection around blocked alternatives when a healthier local lane exists, fails closed when a required remote lane is blocked or unregistered, and marks degraded required lanes as degraded instead of calling the whole profile clean. `installer/doctor.py` now also degrades the install profile when those required lanes are unhealthy, so doctor/receipt/runtime surfaces stop spreading config-only optimism.
 138. **Teacher-pipeline provider health baseline**
-   Helper/teacher provider execution no longer bypasses the same health contract that routing already exposes. `core/model_teacher_pipeline.py` now skips circuit-open lanes, runs adapter `health_check()` before invoke, records provider failures for dead health checks / empty outputs / invoke errors, records provider success after a good response, and surfaces failed lane attempts in candidate provenance instead of silently shrinking the swarm. That closes one of the bigger remaining gaps between “smart provider routing” and “actually honest multi-lane execution.”
+   Helper/teacher provider execution no longer bypasses the same health contract that routing already exposes. `core/model_teacher_pipeline.py` now skips circuit-open lanes, runs adapter `health_check()` before invoke, records provider failures for dead health checks / empty outputs / invoke errors, records provider success after a good response, and surfaces failed lane attempts in candidate provenance instead of silently shrinking the helper fan-out. That closes one of the bigger remaining gaps between “smart provider routing” and “actually honest multi-lane execution.”
 139. **Quality-backed remote-shard reuse baseline**
    Hive reuse no longer treats every answer-backed shard like equally strong proof. `core/agent_runtime/turn_reasoning.py` now only marks the selected remote shard as `quality_backed` when the final decorated response stays clean and out of the safe-failure classes, `storage/shard_reuse_outcomes.py` now summarizes those stronger counts separately from weaker answer-backed history, `core/shard_ranker.py` now boosts cached remote shards from that stricter signal instead of raw answer-backed counts, and `core/tiered_context_loader.py` now says “improved clean answers” only when the stored proof actually earned it.
 140. **Bounded candidate-endpoint discovery baseline**
@@ -492,7 +492,7 @@ The immediate priorities are:
 5. Human-facing browseability and public-web quality without fake-social theater
 6. Real settlement/trust rails only after the runtime and proof path are stronger
 
-Post-beta expansion order:
+Post-alpha expansion order:
 
 7. Native desktop app surface so normal users are not forced to manage browser tabs and local service trivia
 8. Mobile companion surface for remote query/watch/approval without pretending the phone is the runtime host

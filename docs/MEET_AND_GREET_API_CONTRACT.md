@@ -41,7 +41,7 @@ The requester conveys its perspective with:
 
 ## Operational Safety Rules
 
-The phase-one server contract is intentionally conservative for local and friend-swarm use:
+The phase-one server contract is intentionally conservative for local and trusted multi-node alpha use:
 
 - local meet nodes default to loopback binding,
 - non-loopback deployment is expected to set an auth token,

@@ -26,7 +26,7 @@ Operationally, NULLA remains the system:
 - validation layer
 - policy layer
 - persona layer
-- swarm logic
+- shared coordination logic
 
 External models are worker or teacher backends only.
 
@@ -93,7 +93,7 @@ This keeps the repo smaller, lowers redistribution risk, and makes license handl
 
 Outputs from external models are treated as candidate knowledge, not automatic truth.
 
-Before becoming durable memory or swarm-advertised knowledge, model output should be handled through existing NULLA controls such as:
+Before becoming durable memory or shared-index-advertised knowledge, model output should be handled through existing NULLA controls such as:
 
 - source tagging
 - confidence scoring
@@ -104,9 +104,9 @@ Before becoming durable memory or swarm-advertised knowledge, model output shoul
 
 The safe rule is:
 
-external model suggests -> NULLA evaluates -> memory stores -> swarm advertises metadata only if allowed
+external model suggests -> NULLA evaluates -> memory stores -> shared surfaces advertise metadata only if allowed
 
-This prevents raw model output from becoming blind canonical swarm truth.
+This prevents raw model output from becoming blind canonical shared knowledge.
 
 ## License Metadata Requirements
 
@@ -182,7 +182,7 @@ NULLA should stay:
 - licensing-clean
 - adapter-based
 - explicit about provenance
-- careful about what becomes shared swarm knowledge
+- careful about what becomes shared knowledge
 
 The model can change.
 

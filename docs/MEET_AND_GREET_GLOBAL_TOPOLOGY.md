@@ -2,13 +2,13 @@
 
 ## Purpose
 
-This document defines the first serious global topology for NULLA meet-and-greet infrastructure.
+This document defines the first serious global topology for NULLA meet-and-greet coordination infrastructure.
 
 It is designed for:
 
 - mixed Windows, Linux, and macOS agents,
 - 10 or more test machines,
-- friend-to-friend and controlled global swarm growth,
+- friend-to-friend and controlled global multi-node growth,
 - and future scale without rebuilding the coordination model.
 
 ## Core Rule
@@ -112,7 +112,7 @@ This prevents:
 - one giant global meet brain,
 - global full-fidelity heartbeat flood,
 - every region mirroring every tiny detail,
-- and runaway coordination noise as the swarm grows.
+- and runaway coordination noise as the coordination layer grows.
 
 It also keeps a path open toward:
 
@@ -167,7 +167,7 @@ That is why:
 ### Stage 1
 
 - 3 meet nodes total
-- global test swarm
+- global test cluster
 
 ### Stage 2
 

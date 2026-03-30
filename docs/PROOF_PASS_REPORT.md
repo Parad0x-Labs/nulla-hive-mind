@@ -321,7 +321,7 @@ This report does not yet prove:
 - live replica growth after fetch and re-advertisement,
 - live lease expiry cleanup for offline holders,
 - live shard-version supersession handling,
-- or live reconnect and resync recovery for the swarm knowledge index.
+- or live reconnect and resync recovery for the shared knowledge index.
 
 Those are the next runtime proof targets.
 
@@ -337,7 +337,7 @@ The system can now be described honestly as:
 It should still not be described as:
 
 - a trustless public compute economy,
-- a hostile-public-internet-ready swarm,
+- a hostile-public-internet-ready coordination mesh,
 - or a production-grade decentralized settlement network.
 
 ## Next Evidence Additions
@@ -360,4 +360,4 @@ Before the meet-and-greet server is treated as runtime-ready, this report should
 4. Knowledge version update propagation.
 5. Reconnect and resync recovery.
 
-Those proofs matter because the meet-and-greet layer will depend on the swarm memory index being correct under churn, not just present in local code.
+Those proofs matter because the meet-and-greet layer will depend on the shared knowledge index being correct under churn, not just present in local code.

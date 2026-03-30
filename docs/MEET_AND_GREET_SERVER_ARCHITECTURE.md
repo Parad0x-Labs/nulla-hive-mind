@@ -2,11 +2,11 @@
 
 ## Purpose
 
-The meet-and-greet server is the first shared entry point for a small NULLA swarm.
+The meet-and-greet server is the first shared entry point for trusted multi-node NULLA alpha.
 
-Its job is to make local and friend-to-friend swarm joining simple, redundant, and safe without turning the live coordination loop into a heavy archive system.
+Its job is to make local and friend-to-friend multi-node joining simple, redundant, and safe without turning the live coordination loop into a heavy archive system.
 
-This service is not the whole swarm.
+This service is not the product center.
 
 It is the coordination layer that helps agents:
 
@@ -38,7 +38,7 @@ Current default posture:
 - write requests are body-size capped,
 - and write traffic is rate-limited.
 
-This is a safer default for local and friend-swarm deployment. It is still not a complete hostile-internet security story.
+This is a safer default for local and trusted multi-node deployment. It is still not a complete hostile-internet security story.
 
 ## Plane 1: Hot Coordination Plane
 
@@ -69,7 +69,7 @@ This plane should stay:
 - cheap to update,
 - and easy to expire.
 
-It should not depend on unpacking compressed vaults during normal swarm operation.
+It should not depend on unpacking compressed vaults during normal coordination operation.
 
 ## Plane 2: Content Plane
 
@@ -82,7 +82,7 @@ Liquefy should be used for:
 - task and result bundles,
 - replicated shard payloads,
 - audit and proof bundles,
-- exported swarm snapshots,
+- exported coordination snapshots,
 - and historical archives.
 
 This fits the current NULLA and Liquefy shape because the project already has:
@@ -221,7 +221,7 @@ Recommended rule for phase one:
 
 ## Redundancy Model
 
-For a small or early global swarm, run three meet-and-greet nodes.
+For a small or early global multi-node alpha, run three meet-and-greet nodes.
 
 For heavier global testing across 10 or more agent machines, expand to three or five meet-and-greet nodes rather than trying to make every agent machine a coordinator.
 
@@ -232,7 +232,7 @@ Each meet node should keep:
 - a periodic compacted snapshot,
 - and enough cache state to rebuild after restart.
 
-Each agent should also keep a local cache of the knowledge-presence view so the swarm does not become useless if every meet node is temporarily offline.
+Each agent should also keep a local cache of the knowledge-presence view so shared coordination does not become useless if every meet node is temporarily offline.
 
 This gives:
 
@@ -259,7 +259,7 @@ The meet-and-greet service should replicate metadata using:
 
 The current implementation uses pull-based replication first.
 
-That is the safer default for a mixed Windows, Linux, and macOS test swarm because it reduces inbound dependency assumptions and works better across uneven NAT and firewall conditions.
+That is the safer default for a mixed Windows, Linux, and macOS test cluster because it reduces inbound dependency assumptions and works better across uneven NAT and firewall conditions.
 
 The current federation rule is:
 
@@ -273,7 +273,7 @@ That means:
 - and remote regions are not treated as if they were local high-fidelity hot state.
 
 The goal is not perfect global consensus.
-The goal is fast practical convergence for a trusted local or friend swarm.
+The goal is fast practical convergence for a trusted local or friend-to-friend cluster.
 
 ## Region Model
 
@@ -385,7 +385,7 @@ The service must fail in ways that preserve local usefulness.
 If a meet-and-greet node is down:
 
 - local NULLA still works,
-- cached swarm metadata still works,
+- cached coordination metadata still works,
 - shard fetch can still work peer-to-peer if routes are known,
 - and new presence updates can be retried later.
 
@@ -457,7 +457,7 @@ Phase one should not try to deliver:
 
 ## Final Rule
 
-The meet-and-greet service should be the swarm's live directory, not its entire brain and not its entire vault.
+The meet-and-greet service should be the shared coordination layer's live directory, not its entire brain and not its entire vault.
 
 Plain metadata for coordination.
 Packed content for storage and transfer.

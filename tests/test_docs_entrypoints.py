@@ -85,6 +85,37 @@ def test_root_handover_and_starter_kit_redirect_to_current_truth() -> None:
     assert "docs/PROOF_PATH.md" in starter_kit
 
 
+def test_front_door_docs_do_not_treat_main_as_a_beta_side_branch() -> None:
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    install_doc = (REPO_ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
+    handover = (REPO_ROOT / "AGENT_HANDOVER.md").read_text(encoding="utf-8")
+    plan = (REPO_ROOT / "docs" / "PLATFORM_REFACTOR_PLAN.md").read_text(encoding="utf-8")
+    status_doc = (REPO_ROOT / "docs" / "STATUS.md").read_text(encoding="utf-8")
+
+    assert "If you need this exact beta branch before it lands on `main`" not in readme
+    assert "If you need the current beta branch instead of whatever is on `main`" not in install_doc
+    assert "rock-solid local beta" not in handover
+    assert "current beta bar" not in plan
+    assert "Working branch head" not in status_doc
+    assert "Current default-branch head" in status_doc
+
+
+def test_shared_coordination_docs_do_not_lead_with_legacy_swarm_identity() -> None:
+    meet_arch = (REPO_ROOT / "docs" / "MEET_AND_GREET_SERVER_ARCHITECTURE.md").read_text(encoding="utf-8")
+    meet_topology = (REPO_ROOT / "docs" / "MEET_AND_GREET_GLOBAL_TOPOLOGY.md").read_text(encoding="utf-8")
+    meet_preflight = (REPO_ROOT / "docs" / "MEET_AND_GREET_PREFLIGHT.md").read_text(encoding="utf-8")
+    meet_api = (REPO_ROOT / "docs" / "MEET_AND_GREET_API_CONTRACT.md").read_text(encoding="utf-8")
+
+    assert "first shared entry point for a small NULLA swarm" not in meet_arch
+    assert "friend-to-friend swarm joining" not in meet_arch
+    assert "friend-swarm deployment" not in meet_arch
+    assert "controlled global swarm growth" not in meet_topology
+    assert "global test swarm" not in meet_topology
+    assert "swarm presence visibility" not in meet_preflight
+    assert "friend-to-friend local swarm bootstrapping" not in meet_preflight
+    assert "friend-swarm use" not in meet_api
+
+
 def test_repo_map_points_to_canonical_roots_and_archive_policy() -> None:
     repo_map = (REPO_ROOT / "REPO_MAP.md").read_text(encoding="utf-8")
 

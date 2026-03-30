@@ -27,7 +27,7 @@ The current repo now includes these operator-facing helpers:
 Tonight's soak should judge the system against this bar:
 
 - standalone local runtime stability,
-- trusted LAN or friend-swarm behavior,
+- trusted LAN or small multi-node alpha behavior,
 - knowledge-presence coherence,
 - meet-and-greet scaffold sanity,
 - tiered-context discipline,

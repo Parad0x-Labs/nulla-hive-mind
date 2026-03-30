@@ -1,8 +1,10 @@
 # NULLA Starter Kit
 
-Last updated: 2026-03-24
+Last updated: 2026-03-30
 
 This file is now the short operator quickstart, not a second giant reference doc.
+
+`main` is the current alpha trunk.
 
 If you want the current explanation path, use:
 
@@ -25,7 +27,7 @@ Core identity:
 
 ## Capability Snapshot
 
-Implemented now:
+Implemented now on the alpha trunk:
 
 - local standalone runtime and task flow
 - LAN/trusted helper coordination
@@ -68,7 +70,7 @@ Use when:
 - you are validating behavior on one machine
 - you need deterministic baseline before mesh tests
 
-### Trusted Mesh (Closed Test)
+### Trusted Multi-Node Alpha
 
 Use when:
 

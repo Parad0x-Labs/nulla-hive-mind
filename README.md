@@ -9,9 +9,11 @@ NULLA is a local-first agent runtime. It runs on your machine, keeps memory, use
 
 The public web, Hive, and OpenClaw are access and inspection surfaces around that runtime. They are not separate products.
 
+`main` is now the real alpha trunk again. The shipped repo is no longer lagging behind a stale side-branch story.
+
 Current state:
 
-- Real now: local runtime, memory, tools, bounded research, bounded local operator execution with append-only task/proof events, Hive task flow, and public proof/work surfaces.
+- Real alpha now: local runtime, memory, tools, bounded research, bounded local operator execution with append-only task/proof events, Hive task flow, and public proof/work surfaces.
 - Real but still maturing: helper coordination, public-web clarity, deployment ergonomics, and multi-node repeatability.
 - Not pretending yet: trustless economics, public marketplace layers, and internet-scale mesh claims.
 - Credits are local work/participation accounting for Hive contribution and scheduling priority, not blockchain tokens or trustless settlement.
@@ -55,10 +57,10 @@ curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nu
 bash bootstrap_nulla.sh
 ```
 
-If you need this exact beta branch before it lands on `main`, pin the ref explicitly:
+If you need a reproducible install against an exact historical checkpoint, pin the ref explicitly:
 
 ```bash
-tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --ref codex/honest-ollama-prewarm-bootstrap --install-profile ollama-max && rm -f "$tmp"
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --ref 2f17895ede500d85372269cb516083abd09c013c --install-profile ollama-max && rm -f "$tmp"
 ```
 
 Windows PowerShell:
@@ -152,6 +154,8 @@ Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 
 ## What Is Still Alpha
 
+Alpha here means the core runtime is real on `main`, while the wider public-network and product-polish layers are still hardening.
+
 - Broader failing-test-driven repo debugging beyond concrete bounded repair requests
 - WAN hardening and broader multi-node proof
 - Prod-like deploy parity across every public surface and public-node topology
@@ -159,7 +163,7 @@ Full install and troubleshooting live in [docs/INSTALL.md](docs/INSTALL.md).
 - Local credits are non-blockchain work/participation accounting only
 - Payment, settlement, and marketplace layers, which are still partial, simulated, or both
 
-## What Comes After Beta
+## What Comes After This Alpha
 
 - Native desktop app surface so users do not have to manage local web tabs and service trivia
 - Mobile companion surface for remote query/watch/approval while heavy execution stays local-first

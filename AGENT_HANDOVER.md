@@ -2,6 +2,8 @@
 
 This file used to be a front-page handover. It drifted and started making the repo look wider and older than it really is.
 
+`main` is the current alpha trunk. Do not explain the repo like the real product still lives on an unmerged side branch.
+
 Use these instead:
 
 1. `README.md`
@@ -13,13 +15,13 @@ Use these instead:
 
 Current product sentence:
 
-`local-first agent runtime with inspectable execution truth and bounded operator-safe workflows`
+`local-first alpha agent runtime with inspectable execution truth and bounded operator-safe workflows`
 
 Current focus is narrow on purpose:
 
 1. inspectable runtime truth
 2. bounded safe execution
-3. rock-solid local beta
+3. credible local alpha on `main`
 
 Do not lead with swarm, WAN mesh, tokens, marketplace, or “world computer” language. Those lanes are weaker than the local runtime story and easy to overclaim.
 
@@ -39,10 +41,10 @@ Mandatory LLM proof path for any claim about model quality, latency, logic, fres
 
 Do not claim NULLA is fast, grounded, logical, or green unless this path is part of the proof.
 
-Mandatory clean-room install proof for any claim about install simplicity or beta readiness:
+Mandatory clean-room install proof for any claim about install simplicity or alpha readiness:
 
 1. wipe local NULLA state, OpenClaw state, Ollama models, and NULLA-provisioned local specialist assets
-2. run the no-flag branch-pinned one-line installer
+2. run the no-flag one-line installer from `main`, or a pinned historical ref if that exact checkpoint is the claim
 3. verify the machine-selected install profile and local bundle
 4. verify runtime `/healthz`, `/v1/models`, provider truth, and file/tooling behavior
 5. rerun the mandatory LLM proof path on the installed runtime

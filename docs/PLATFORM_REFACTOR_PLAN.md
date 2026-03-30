@@ -1,6 +1,6 @@
 # NULLA Platform Refactor Plan
 
-Verified against `main` on 2026-03-26.
+Verified against `main` on 2026-03-30.
 
 This is the current extraction plan for turning the repo into a sharper platform without breaking the working lanes.
 
@@ -24,7 +24,7 @@ The repo shape is still carrying too much risk in a small set of giant files. Th
 
 ## Current Execution Phase
 
-The refactor-only pass is frozen. The current beta bar is execution hardening:
+The refactor-only pass is frozen. The current alpha bar is execution hardening:
 
 - keep the new coding/operator lane real: workspace inspection, diff-based patching, git state, bounded validation, rollback, and emitted artifacts
 - keep typed task envelopes live in the routing path instead of letting provider/model decisions drift back to implicit guesses
@@ -61,9 +61,9 @@ The refactor-only pass is frozen. The current beta bar is execution hardening:
 - keep WAN transport truth honest too: NAT-mapped nodes must not advertise as direct, LAN-only nodes must not claim relay reachability without a real relay path, and dashboard/watch ranking should reflect those transport modes instead of flattening them into fake internet readiness
 - keep DHT truth above passive storage: lookup frontier helpers must be able to skip already-contacted peers, stale non-empty buckets must yield deterministic refresh targets before we call the routing table anything more than static storage, fresh full buckets should queue challengers in a bounded replacement cache instead of evicting live incumbents on first contact, maintenance may probe a bounded set of candidate endpoints only when verified coverage is sparse without promoting those candidates into authoritative endpoint truth, and candidate probes need cooldown/failure memory so the same dead referral endpoints are not hammered forever
 
-## Post-Beta Expansion Order
+## Post-Alpha Expansion Order
 
-These are real expansion priorities, but they are explicitly post-beta work. They should not displace the current beta bar.
+These are real expansion priorities, but they are explicitly post-alpha work. They should not displace the current alpha bar.
 
 1. Desktop product surface
    - ship a native desktop app wrapper instead of asking normal users to juggle local servers, browser tabs, and trayless scripts
@@ -73,7 +73,7 @@ These are real expansion priorities, but they are explicitly post-beta work. The
    - keep heavy execution local-first; mobile is a control/inspection surface first, not a fake phone-hosted swarm
 3. Internet-scale data plane
    - harden WAN/DHT/public-internet liveness, multi-endpoint truth, relay/fallback, and churn handling until the Hive can survive outside closed/local clusters without caveats
-   - this is the real technical moat after beta, not more mesh mythology
+   - this is the real technical moat after alpha, not more mesh mythology
 4. Public-web product hardening
    - harden NullaBook/public queues for real hostile internet exposure before pretending it is a broad public social surface
    - operator/task/proof surfaces need rate, abuse, quota, and moderation realism before mass-adoption language
