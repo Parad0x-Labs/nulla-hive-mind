@@ -471,8 +471,69 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(first.next_payload["arguments"]["path"], "nulla_test_01.txt")
         self.assertEqual(first.next_payload["arguments"]["content"], "ALPHA-LOCAL-FILE-01")
 
+    def test_workflow_planner_routes_exact_file_create_with_literal_modifiers(self) -> None:
+        first = plan_tool_workflow(
+            user_text=(
+                "Create a file named nulla_test_02.txt in the current workspace "
+                "with exactly this content, no extra characters and no newline: ALPHA-LOCAL-FILE-02"
+            ),
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-acceptance"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_workspace_write_file")
+        self.assertEqual(first.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(first.next_payload["arguments"]["path"], "nulla_test_02.txt")
+        self.assertEqual(first.next_payload["arguments"]["content"], "ALPHA-LOCAL-FILE-02")
+
     def test_workflow_planner_routes_inside_absolute_workspace_subdir_file_create(self) -> None:
         prompt = "Inside /tmp/nulla_local_tooling_truth/alpha create hello.txt with exactly this content: HELLO-LOCAL-TRUTH"
+        first = plan_tool_workflow(
+            user_text=prompt,
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla_local_tooling_truth"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_workspace_directory_bootstrap")
+        self.assertEqual(first.next_payload["intent"], "workspace.ensure_directory")
+        self.assertEqual(first.next_payload["arguments"]["path"], "alpha")
+
+        second = plan_tool_workflow(
+            user_text=prompt,
+            task_class="unknown",
+            executed_steps=[
+                {
+                    "tool_name": "workspace.ensure_directory",
+                    "arguments": {"path": "alpha"},
+                    "observation": {
+                        "intent": "workspace.ensure_directory",
+                        "tool_surface": "workspace",
+                        "ok": True,
+                        "status": "executed",
+                        "path": "alpha",
+                        "action": "confirmed",
+                        "already_present": True,
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla_local_tooling_truth"},
+        )
+
+        self.assertTrue(second.handled)
+        self.assertEqual(second.reason, "planned_workspace_write_after_bootstrap")
+        self.assertEqual(second.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(second.next_payload["arguments"]["path"], "alpha/hello.txt")
+        self.assertEqual(second.next_payload["arguments"]["content"], "HELLO-LOCAL-TRUTH")
+
+    def test_workflow_planner_preserves_exact_content_after_literal_modifiers_inside_workspace_subdir(self) -> None:
+        prompt = (
+            "Inside /tmp/nulla_local_tooling_truth/alpha create hello.txt with exactly this content, "
+            "no extra characters and no newline: HELLO-LOCAL-TRUTH"
+        )
         first = plan_tool_workflow(
             user_text=prompt,
             task_class="unknown",
