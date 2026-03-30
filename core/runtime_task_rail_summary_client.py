@@ -1,36 +1,76 @@
 RUNTIME_TASK_RAIL_SUMMARY_CLIENT_SCRIPT = r"""
 function buildSummary(session, events) {
+  const serverSummary = session && session.execution_history ? session.execution_history : {};
+  const serverBounded = serverSummary && serverSummary.bounded_execution ? serverSummary.bounded_execution : {};
+  const serverStages = serverSummary && serverSummary.stages ? serverSummary.stages : {};
   const artifactIds = new Set();
   const packetArtifactIds = new Set();
   const bundleArtifactIds = new Set();
   const candidateIds = new Set();
-  const queryRuns = [];
+  const queryRuns = Array.isArray(serverSummary.query_runs)
+    ? serverSummary.query_runs.map((item) => ({
+        label: String(item.label || ''),
+        index: Number(item.index || 0),
+        total: Number(item.total || 0),
+        state: String(item.state || 'running'),
+      }))
+    : [];
   const startedQueries = new Set();
   const completedQueries = new Set();
-  let topicId = '';
-  let topicTitle = '';
-  let claimId = '';
-  let resultStatus = '';
-  let activeStatus = String(session?.status || 'running');
-  let lastMessage = String(session?.last_message || '');
-  let latestTool = '';
-  let postId = '';
-  let queryCount = 0;
-  let artifactCount = 0;
-  let candidateCount = 0;
-  let stopReason = '';
-  const changedPaths = [];
-  const failureItems = [];
-  const artifactRows = [];
-  const retryHistory = [];
+  for (const item of Array.isArray(serverSummary.artifact_ids) ? serverSummary.artifact_ids : []) artifactIds.add(String(item));
+  for (const item of Array.isArray(serverSummary.packet_artifact_ids) ? serverSummary.packet_artifact_ids : []) packetArtifactIds.add(String(item));
+  for (const item of Array.isArray(serverSummary.bundle_artifact_ids) ? serverSummary.bundle_artifact_ids : []) bundleArtifactIds.add(String(item));
+  for (const item of Array.isArray(serverSummary.candidate_ids) ? serverSummary.candidate_ids : []) candidateIds.add(String(item));
+  let topicId = String(serverSummary.topic_id || '');
+  let topicTitle = String(serverSummary.title || '');
+  let claimId = String(serverSummary.claim_id || '');
+  let resultStatus = String(serverSummary.topic_status || serverSummary.result_status || '');
+  let activeStatus = String(serverSummary.request_status || session?.status || 'running');
+  let lastMessage = String(serverSummary.last_message || session?.last_message || '');
+  let latestTool = String(serverSummary.latest_tool || '');
+  let postId = String(serverSummary.post_id || '');
+  let queryCount = Number(serverSummary.query_started_count || 0);
+  let artifactCount = Number(serverSummary.artifact_count || 0);
+  let candidateCount = Number(serverSummary.candidate_count || 0);
+  let stopReason = String(serverSummary.stop_reason || '');
+  let approvalState = String(serverBounded.approval_state || 'not_required');
+  let rollbackState = String(serverBounded.rollback_state || 'not_triggered');
+  let restoreState = String(serverBounded.restore_state || 'not_triggered');
+  let verifierState = String(serverBounded.verifier_state || 'not_run');
+  let toolAttemptCount = Number(serverBounded.tool_attempt_count || 0);
+  let toolReceiptCount = Number(serverBounded.tool_receipt_count || 0);
+  let mutatingToolCount = Number(serverBounded.mutating_tool_count || 0);
+  const changedPaths = Array.isArray(serverSummary.changed_paths) ? serverSummary.changed_paths.map((item) => String(item)) : [];
+  const failureItems = Array.isArray(serverSummary.failure_items)
+    ? serverSummary.failure_items.map((item) => ({
+        type: String(item.type || 'failed'),
+        tool: String(item.tool || ''),
+        message: String(item.message || ''),
+      }))
+    : [];
+  const artifactRows = Array.isArray(serverSummary.artifact_rows)
+    ? serverSummary.artifact_rows.map((item) => ({
+        artifactId: String(item.artifact_id || item.artifactId || ''),
+        role: String(item.role || 'artifact'),
+        path: String(item.path || ''),
+        toolName: String(item.tool_name || item.toolName || ''),
+      }))
+    : [];
+  const retryHistory = Array.isArray(serverSummary.retry_history)
+    ? serverSummary.retry_history.map((item) => ({
+        tool: String(item.tool || 'runtime.step'),
+        retryCount: Number(item.retry_count || item.retryCount || 0),
+        reason: String(item.reason || ''),
+      }))
+    : [];
   const toolAttempts = new Map();
   const stages = {
-    received: false,
-    claimed: false,
-    packet: false,
-    queries: false,
-    bundle: false,
-    result: false,
+    received: Boolean(serverStages.received),
+    claimed: Boolean(serverStages.claimed),
+    packet: Boolean(serverStages.packet),
+    queries: Boolean(serverStages.queries),
+    bundle: Boolean(serverStages.bundle),
+    result: Boolean(serverStages.result),
   };
 
   for (const event of events) {
@@ -45,6 +85,16 @@ function buildSummary(session, events) {
     if (!stopReason && event.stop_reason) stopReason = String(event.stop_reason);
     if (!stopReason && event.loop_stop_reason) stopReason = String(event.loop_stop_reason);
     if (!stopReason && event.final_stop_reason) stopReason = String(event.final_stop_reason);
+    if (event.event_type === 'tool_preview' || event.event_type === 'task_pending_approval' || String(event.status || '').toLowerCase() === 'pending_approval') approvalState = 'pending';
+    if (event.event_type === 'task_envelope_rollback_completed') rollbackState = 'completed';
+    if (event.event_type === 'task_envelope_rollback_failed') rollbackState = 'failed';
+    if (event.event_type === 'task_envelope_restore_completed') restoreState = 'completed';
+    if (event.event_type === 'task_envelope_restore_failed') restoreState = 'failed';
+    if (String(event.task_role || '').toLowerCase() === 'verifier' || ['workspace.run_tests', 'workspace.run_lint', 'workspace.run_formatter'].includes(String(event.tool_name || event.intent || ''))) {
+      if (String(event.event_type || '').includes('failed')) verifierState = 'failed';
+      else if (['task_envelope_completed', 'task_envelope_step_completed'].includes(String(event.event_type || '')) && verifierState !== 'failed') verifierState = 'passed';
+      else if (verifierState === 'not_run') verifierState = 'running';
+    }
 
     if (event.event_type === 'task_received' || event.event_type === 'task_envelope_started') stages.received = true;
     if (event.claim_id || event.tool_name === 'hive.claim_task') stages.claimed = true;
@@ -124,18 +174,23 @@ function buildSummary(session, events) {
       });
     }
   }
+  toolAttemptCount = Math.max(toolAttemptCount, Array.from(toolAttempts.values()).reduce((total, item) => total + Number(item || 0), 0));
+  if (approvalState !== 'pending' && String(serverBounded.approval_state || '') === 'cleared') approvalState = 'cleared';
+  if (verifierState === 'not_run' && String(serverBounded.verifier_state || '')) verifierState = String(serverBounded.verifier_state || 'not_run');
+  if (rollbackState === 'not_triggered' && String(serverBounded.rollback_state || '')) rollbackState = String(serverBounded.rollback_state || 'not_triggered');
+  if (restoreState === 'not_triggered' && String(serverBounded.restore_state || '')) restoreState = String(serverBounded.restore_state || 'not_triggered');
 
-  const title = topicTitle || session?.request_preview || session?.session_id || 'Recent runtime session';
+  const title = topicTitle || String(serverSummary.title || '') || session?.request_preview || session?.session_id || 'Recent runtime session';
   const requestStatus = String(session?.status || activeStatus || 'running').toLowerCase();
   const topicStatus = String(resultStatus || '').toLowerCase();
-  const displayStatus = topicStatus || (String(session?.task_class || '').toLowerCase() === 'autonomous_research' && requestStatus === 'completed'
+  const displayStatus = topicStatus || (String(serverSummary.task_class || session?.task_class || '').toLowerCase() === 'autonomous_research' && requestStatus === 'completed'
     ? 'request_done'
     : requestStatus || 'running');
-  const requestStateLabel = requestStatus === 'completed' && topicStatus && topicStatus !== 'solved' && topicStatus !== 'completed'
+  const requestStateLabel = String(serverSummary.request_state_label || '') || (requestStatus === 'completed' && topicStatus && topicStatus !== 'solved' && topicStatus !== 'completed'
     ? 'request finished; topic still active'
-    : requestStatus === 'completed' && String(session?.task_class || '').toLowerCase() === 'autonomous_research'
+    : requestStatus === 'completed' && String(serverSummary.task_class || session?.task_class || '').toLowerCase() === 'autonomous_research'
       ? 'request finished after the first bounded pass'
-      : requestStatus;
+      : requestStatus);
   return {
     sessionId: session?.session_id || '',
     title,
@@ -167,6 +222,13 @@ function buildSummary(session, events) {
     artifactCount,
     candidateCount,
     stages,
+    approvalState,
+    rollbackState,
+    restoreState,
+    verifierState,
+    toolAttemptCount,
+    toolReceiptCount,
+    mutatingToolCount,
   };
 }
 """

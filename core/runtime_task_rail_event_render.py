@@ -19,6 +19,8 @@ function renderSessions() {
           <span>${escapeHtml(session.task_class || 'unknown')}</span>
           <span>${escapeHtml(String(session.event_count || 0))} events</span>
           ${session.resume_available ? `<span>resume ready from ${escapeHtml(String(session.checkpoint_step_count || 0))} step(s)</span>` : ''}
+          ${summary.approvalState === 'pending' ? '<span>approval pending</span>' : ''}
+          ${summary.verifierState && summary.verifierState !== 'not_run' ? `<span>verifier ${escapeHtml(summary.verifierState)}</span>` : ''}
           <span>${escapeHtml(shortTime(session.updated_at))}</span>
         </div>
       </button>
@@ -182,6 +184,11 @@ function renderSummary() {
   if (summary.latestTool) meta.push(`<span class="meta-chip">tool ${escapeHtml(summary.latestTool)}</span>`);
   if (summary.topicId) meta.push(`<span class="meta-chip">topic ${escapeHtml(summary.topicId)}</span>`);
   if (summary.stopReason) meta.push(`<span class="meta-chip">stop ${escapeHtml(summary.stopReason)}</span>`);
+  if (summary.approvalState && summary.approvalState !== 'not_required') meta.push(`<span class="meta-chip">approval ${escapeHtml(summary.approvalState)}</span>`);
+  if (summary.verifierState && summary.verifierState !== 'not_run') meta.push(`<span class="meta-chip">verifier ${escapeHtml(summary.verifierState)}</span>`);
+  if ((summary.rollbackState && summary.rollbackState !== 'not_triggered') || (summary.restoreState && summary.restoreState !== 'not_triggered')) {
+    meta.push(`<span class="meta-chip">recovery ${escapeHtml(summary.rollbackState !== 'not_triggered' ? summary.rollbackState : summary.restoreState)}</span>`);
+  }
   metaRowEl.innerHTML = meta.join('');
 
   const focusItems = [];
@@ -189,6 +196,10 @@ function renderSummary() {
   if (summary.claimId) focusItems.push(`<div class="inspector-item">Claim <code>${escapeHtml(summary.claimId)}</code></div>`);
   focusItems.push(`<div class="inspector-item">Request state: <code>${escapeHtml(summary.requestStatus || 'running')}</code></div>`);
   focusItems.push(`<div class="inspector-item">Topic state: <code>${escapeHtml(summary.resultStatus || summary.status || 'running')}</code></div>`);
+  focusItems.push(`<div class="inspector-item">Approval: <code>${escapeHtml(summary.approvalState || 'not_required')}</code></div>`);
+  focusItems.push(`<div class="inspector-item">Verifier: <code>${escapeHtml(summary.verifierState || 'not_run')}</code></div>`);
+  focusItems.push(`<div class="inspector-item">Rollback: <code>${escapeHtml(summary.rollbackState || 'not_triggered')}</code></div>`);
+  focusItems.push(`<div class="inspector-item">Restore: <code>${escapeHtml(summary.restoreState || 'not_triggered')}</code></div>`);
   if (summary.stopReason) focusItems.push(`<div class="inspector-item">Stop reason: <code>${escapeHtml(summary.stopReason)}</code></div>`);
   if (summary.changedPaths.length) {
     summary.changedPaths.slice(0, 6).forEach((path) => {
@@ -235,6 +246,36 @@ function renderSummary() {
         : 'No failed runtime steps in this session.',
     },
     {
+      tone: summary.approvalState === 'pending' ? 'warn' : summary.approvalState === 'cleared' ? 'good' : '',
+      label: 'Approval',
+      value: summary.approvalState || 'not_required',
+      detail: summary.approvalState === 'pending'
+        ? 'A bounded action is waiting for operator confirmation.'
+        : 'No active approval gate is blocking this session.',
+    },
+    {
+      tone: summary.verifierState === 'failed' ? 'bad' : summary.verifierState === 'passed' ? 'good' : summary.verifierState === 'running' ? 'warn' : '',
+      label: 'Verifier',
+      value: summary.verifierState || 'not_run',
+      detail: summary.verifierState === 'failed'
+        ? 'A validation or verifier lane finished red.'
+        : summary.verifierState === 'passed'
+          ? 'The latest verifier or validation lane finished green.'
+          : summary.verifierState === 'running'
+            ? 'Verification is still in flight.'
+            : 'No verifier lane recorded for this session.',
+    },
+    {
+      tone: summary.rollbackState === 'failed' || summary.restoreState === 'failed' ? 'bad' : summary.rollbackState === 'completed' || summary.restoreState === 'completed' ? 'good' : '',
+      label: 'Recovery',
+      value: summary.rollbackState !== 'not_triggered' ? summary.rollbackState : (summary.restoreState || 'not_triggered'),
+      detail: summary.rollbackState !== 'not_triggered'
+        ? `Rollback ${summary.rollbackState}`
+        : summary.restoreState !== 'not_triggered'
+          ? `Restore ${summary.restoreState}`
+          : 'No rollback or restore path was triggered.',
+    },
+    {
       tone: retryCount ? 'warn' : '',
       label: 'Retries',
       value: String(retryCount),
@@ -243,12 +284,14 @@ function renderSummary() {
         : 'No repeated runtime retries.',
     },
     {
-      tone: changedCount ? 'good' : '',
+      tone: changedCount ? 'good' : summary.toolReceiptCount ? 'warn' : '',
       label: 'Changed',
       value: String(changedCount),
       detail: changedCount
         ? summary.changedPaths.slice(0, 2).join(' | ')
-        : 'No file or target path changes recorded.',
+        : summary.toolReceiptCount
+          ? `No path mutation recorded across ${summary.toolReceiptCount} tool receipt(s).`
+          : 'No file or target path changes recorded.',
     },
   ];
   opsGridEl.innerHTML = opsCards.map((item) => `

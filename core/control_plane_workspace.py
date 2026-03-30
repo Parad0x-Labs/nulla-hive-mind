@@ -13,6 +13,7 @@ from core.control_plane import queue_views as control_plane_queue_views
 from core.control_plane import runtime_views as control_plane_runtime_views
 from core.control_plane import schemas as control_plane_schemas
 from core.control_plane import templates as control_plane_templates
+from core.runtime_execution_history import summarize_runtime_surface
 from storage.db import DEFAULT_DB_PATH, get_connection
 from storage.migrations import run_migrations
 from storage.useful_output_store import summarize_useful_outputs, sync_useful_outputs
@@ -110,6 +111,7 @@ def sync_control_plane_workspace(
         "proof_of_useful_work": proof_of_useful_work,
         "adaptation": adaptation_status,
         "adaptation_proof": adaptation_proof,
+        "runtime_truth": summarize_runtime_surface(runtime_sessions),
     }
 
     writes = 0
@@ -145,6 +147,7 @@ def sync_control_plane_workspace(
     writes += _write_json(control_root / "budgets" / "public_hive_quota_today.json", public_hive_budget)
     writes += _write_json(control_root / "metrics" / "proof_of_useful_work.json", proof_of_useful_work)
     writes += _write_json(control_root / "metrics" / "adaptation_proof.json", adaptation_proof)
+    writes += _write_json(control_root / "metrics" / "runtime_truth.json", summarize_runtime_surface(runtime_sessions))
     writes += _write_json(control_root / "approvals" / "pending_operator_actions.json", {"generated_at": _utcnow(), "items": pending_actions})
     writes += _write_json(control_root / "approvals" / "pending_runtime_checkpoints.json", {"generated_at": _utcnow(), "items": pending_runtime})
     writes += _write_json(control_root / "deadletters" / "failed_runtime_sessions.json", {"generated_at": _utcnow(), "items": failed_runs})
@@ -231,6 +234,7 @@ def collect_control_plane_status(
         "proof_of_useful_work": proof_of_useful_work,
         "adaptation": adaptation_status,
         "adaptation_proof": adaptation_proof,
+        "runtime_truth": summarize_runtime_surface(runtime_sessions),
     }
 
 

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.runtime_execution_history import build_runtime_execution_history
 from storage.db import DEFAULT_DB_PATH, get_connection
 
 _DB_PATH_OVERRIDE: str | Path | None = None
@@ -144,6 +145,7 @@ def list_runtime_sessions(*, limit: int = 20) -> list[dict[str, Any]]:
         finally:
             conn.close()
     for row in session_rows:
+        session_id = str(row.get("session_id") or "")
         checkpoint = get_runtime_checkpoint(str(row.get("last_checkpoint_id") or ""))
         if checkpoint:
             row["resume_available"] = bool(checkpoint.get("status") in _RESUMABLE_STATUSES)
@@ -153,6 +155,14 @@ def list_runtime_sessions(*, limit: int = 20) -> list[dict[str, Any]]:
             row["resume_available"] = False
             row["checkpoint_status"] = ""
             row["checkpoint_step_count"] = 0
+        events = list_runtime_session_events(session_id, after_seq=0, limit=200)
+        receipts = list_runtime_tool_receipts(session_id, limit=64)
+        row["execution_history"] = build_runtime_execution_history(
+            session=row,
+            checkpoint=checkpoint,
+            events=events,
+            receipts=receipts,
+        )
     return session_rows
 
 
@@ -194,6 +204,40 @@ def list_runtime_session_events(
         item.update(_json_loads(row["details_json"], fallback={}))
         events.append(item)
     return events
+
+
+def list_runtime_tool_receipts(
+    session_id: str,
+    *,
+    limit: int = 64,
+) -> list[dict[str, Any]]:
+    clean_session_id = str(session_id or "").strip()
+    if not clean_session_id:
+        return []
+    bounded_limit = max(1, min(int(limit), 200))
+    with _LOCK:
+        conn = get_connection(_runtime_db_path())
+        try:
+            rows = conn.execute(
+                """
+                SELECT receipt_key, session_id, checkpoint_id, tool_name, idempotency_key,
+                       arguments_json, execution_json, created_at, updated_at
+                FROM runtime_tool_receipts
+                WHERE session_id = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (clean_session_id, bounded_limit),
+            ).fetchall()
+        finally:
+            conn.close()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["arguments"] = _json_loads(item.pop("arguments_json"), fallback={})
+        item["execution"] = _json_loads(item.pop("execution_json"), fallback={})
+        out.append(item)
+    return out
 
 
 def create_runtime_checkpoint(

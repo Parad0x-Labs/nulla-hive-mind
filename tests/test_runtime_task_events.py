@@ -50,6 +50,9 @@ class RuntimeTaskEventsTests(unittest.TestCase):
         self.assertEqual(sessions[0]["event_count"], 2)
         self.assertEqual(sessions[0]["request_preview"], "inspect the repo")
         self.assertEqual(sessions[0]["task_class"], "debugging")
+        self.assertEqual(sessions[0]["execution_history"]["latest_tool"], "workspace.search_text")
+        self.assertEqual(sessions[0]["execution_history"]["bounded_execution"]["tool_attempt_count"], 1)
+        self.assertEqual(sessions[0]["execution_history"]["timeline"][0]["value"], "accepted")
 
         events = list_runtime_session_events("openclaw:test-session", after_seq=0, limit=10)
         self.assertEqual(len(events), 2)

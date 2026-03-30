@@ -237,6 +237,7 @@ class ControlPlaneWorkspaceTests(unittest.TestCase):
             self.assertTrue((workspace_root / "control" / "approvals" / "pending_operator_actions.json").exists())
             self.assertTrue((workspace_root / "control" / "runs" / "sessions" / "session-1.json").exists())
             self.assertTrue((workspace_root / "control" / "metrics" / "proof_of_useful_work.json").exists())
+            self.assertTrue((workspace_root / "control" / "metrics" / "runtime_truth.json").exists())
             self.assertTrue((workspace_root / "templates" / "reviewer" / "spawn.json").exists())
 
             overview = json.loads((workspace_root / "control" / "metrics" / "overview.json").read_text(encoding="utf-8"))
@@ -244,6 +245,12 @@ class ControlPlaneWorkspaceTests(unittest.TestCase):
             self.assertEqual(overview["pending_approval_count"], 1)
             self.assertEqual(overview["proof_of_useful_work"]["finalized_count"], 1)
             self.assertEqual(overview["proof_of_useful_work"]["recent_receipts"][0]["stage"], "finalized")
+            self.assertEqual(overview["runtime_truth"]["session_count"], 1)
+            self.assertEqual(overview["runtime_truth"]["status_counts"]["completed"], 1)
+
+            session_payload = json.loads((workspace_root / "control" / "runs" / "sessions" / "session-1.json").read_text(encoding="utf-8"))
+            self.assertEqual(session_payload["execution_history"]["checkpoint"]["status"], "completed")
+            self.assertIn("/tmp/output.txt", session_payload["execution_history"]["touched_paths"])
 
             reviewer_lane = json.loads((workspace_root / "control" / "queue" / "reviewer_lane.json").read_text(encoding="utf-8"))
             self.assertEqual(len(reviewer_lane["items"]), 1)
@@ -402,6 +409,8 @@ class ControlPlaneWorkspaceTests(unittest.TestCase):
             self.assertEqual(payload["proof_of_useful_work"]["confirmed_count"], 1)
             self.assertEqual(payload["adaptation_proof"]["proof_state"], "candidate_beating_baseline")
             self.assertEqual(payload["adaptation_proof"]["promoted_job_count"], 1)
+            self.assertIn("runtime_truth", payload)
+            self.assertEqual(payload["runtime_truth"]["session_count"], 0)
 
 
 if __name__ == "__main__":
