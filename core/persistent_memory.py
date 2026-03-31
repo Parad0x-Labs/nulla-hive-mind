@@ -239,9 +239,11 @@ def _assistant_failure_closes_topic(text: str, *, response_class: str) -> bool:
         "i couldn't ",
         "i can't ",
         "i cant ",
+        "i cannot ",
         "sorry, i couldn't ",
         "sorry, i can't ",
         "sorry, i cant ",
+        "sorry, i cannot ",
         "i checked, but i couldn't ",
     )
     return any(lowered.startswith(prefix) for prefix in failure_prefixes)

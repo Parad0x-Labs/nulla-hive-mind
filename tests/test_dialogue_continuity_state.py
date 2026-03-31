@@ -136,3 +136,27 @@ def test_failed_assistant_turn_closes_dialogue_topic_into_archive() -> None:
     assert archived[0]["closure_reason"] == "assistant_failure"
     assert archived[0]["closure_status"] == "unresolved"
     assert "btc price" in str(archived[0]["summary"] or "").lower()
+
+
+def test_failed_assistant_turn_with_cannot_prefix_closes_dialogue_topic_into_archive() -> None:
+    session_id = _session_id("continuity-failure-cannot-close")
+
+    adapt_user_input("read /private/tmp/secret.txt exactly", session_id=session_id)
+    append_conversation_event(
+        session_id=session_id,
+        user_input="read /private/tmp/secret.txt exactly",
+        assistant_output="I cannot read that path in this lane. I can only read files inside: ~/Desktop, ~/Downloads, ~/Documents.",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+        response_class="utility_answer",
+    )
+
+    session = get_dialogue_session(session_id)
+    archived = recent_archived_dialogue_topics(session_id, limit=3)
+
+    assert session["current_user_goal"] is None
+    assert session["assistant_commitments"] == []
+    assert session["unresolved_followups"] == []
+    assert archived
+    assert archived[0]["closure_reason"] == "assistant_failure"
+    assert archived[0]["closure_status"] == "unresolved"
+    assert "secret" in str(archived[0]["summary"] or "").lower()
