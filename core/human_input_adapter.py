@@ -7,6 +7,7 @@ from core.context_understanding import WorkingInterpretation, expand_unfinished_
 from core.input_normalizer import NormalizationResult, normalize_user_text
 from core.structured_literal_input import looks_like_structured_literal_input
 from storage.dialogue_memory import (
+    archive_dialogue_topic,
     get_dialogue_session,
     recent_dialogue_turns,
     record_dialogue_turn,
@@ -349,6 +350,35 @@ def _derive_continuity_state(
     }
 
 
+def _archive_topic_shift_if_needed(
+    *,
+    session_id: str,
+    previous_session_state: dict[str, object],
+    continuity: dict[str, object],
+    closing_user_input: str,
+) -> None:
+    if bool(continuity.get("same_thread")):
+        return
+    last_subject = str(previous_session_state.get("last_subject") or "").strip() or None
+    topic_hints = [str(item).strip() for item in list(previous_session_state.get("topic_hints") or []) if str(item).strip()]
+    current_user_goal = str(previous_session_state.get("current_user_goal") or "").strip() or None
+    assistant_commitments = [str(item).strip() for item in list(previous_session_state.get("assistant_commitments") or []) if str(item).strip()]
+    unresolved_followups = [str(item).strip() for item in list(previous_session_state.get("unresolved_followups") or []) if str(item).strip()]
+    if not any([last_subject, topic_hints, current_user_goal, assistant_commitments, unresolved_followups]):
+        return
+    archive_dialogue_topic(
+        session_id,
+        last_subject=last_subject,
+        topic_hints=topic_hints,
+        current_user_goal=current_user_goal,
+        assistant_commitments=assistant_commitments,
+        unresolved_followups=unresolved_followups,
+        closure_status="unresolved" if (assistant_commitments or unresolved_followups) else "resolved",
+        closure_reason="topic_shift",
+        closing_user_input=closing_user_input,
+    )
+
+
 def _resolve_reference_targets(
     normalized_text: str,
     *,
@@ -469,6 +499,12 @@ def adapt_user_input(user_input: str, *, session_id: str) -> HumanInputInterpret
         intent_mode=intent_mode,
         session_state=session,
         recent_turns=continuity_turns,
+    )
+    _archive_topic_shift_if_needed(
+        session_id=session_id,
+        previous_session_state=session,
+        continuity=continuity,
+        closing_user_input=normalized.normalized_text,
     )
     update_dialogue_session(
         session_id,

@@ -5,6 +5,7 @@ from typing import Any
 from core.persistent_memory import memory_lifecycle_snapshot
 from core.runtime_execution_history import summarize_runtime_surface
 from core.runtime_task_events import list_runtime_session_events, list_runtime_sessions
+from storage.dialogue_memory import recent_archived_dialogue_topics
 
 
 def build_runtime_operator_snapshot(
@@ -33,6 +34,7 @@ def build_runtime_operator_snapshot(
         query_text=query_text,
         topic_hints=topic_hints,
     )
+    archived_topics = recent_archived_dialogue_topics(selected_session_id, limit=4) if selected_session_id else []
     return {
         "session_id": selected_session_id,
         "query_text": str(query_text or "").strip(),
@@ -49,10 +51,15 @@ def build_runtime_operator_snapshot(
             "recent_runtime_events": recent_runtime_events[-max(1, min(int(event_limit or 12), 200)):],
         },
         "memory_lifecycle": memory_snapshot,
+        "dialogue_lifecycle": {
+            "recent_archived_topic_count": len(archived_topics),
+            "recent_archived_topics": archived_topics,
+        },
         "inspection_summary": _inspection_summary(
             runtime_surface=runtime_surface,
             execution_history=execution_history,
             memory_snapshot=memory_snapshot,
+            archived_topics=archived_topics,
         ),
     }
 
@@ -91,6 +98,7 @@ def _inspection_summary(
     runtime_surface: dict[str, Any],
     execution_history: dict[str, Any],
     memory_snapshot: dict[str, Any],
+    archived_topics: list[dict[str, Any]],
 ) -> list[str]:
     summary: list[str] = []
     latest_tool = str(execution_history.get("latest_tool") or "").strip()
@@ -106,6 +114,12 @@ def _inspection_summary(
     changed_paths = [str(item).strip() for item in list(execution_history.get("changed_paths") or []) if str(item).strip()]
     if changed_paths:
         summary.append(f"Changed paths: {', '.join(changed_paths[:3])}.")
+    if archived_topics:
+        latest_closed = dict(archived_topics[0] or {})
+        latest_summary = str(latest_closed.get("summary") or latest_closed.get("current_user_goal") or "").strip()
+        latest_status = str(latest_closed.get("closure_status") or "unknown").strip()
+        if latest_summary:
+            summary.append(f"Latest closed topic: {latest_summary} ({latest_status}).")
     summary.append(str(memory_snapshot.get("selection_summary") or "").strip())
     return [item for item in summary if item]
 

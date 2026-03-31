@@ -749,6 +749,7 @@ def chat_surface_model_wording_result(
         user_input=user_input,
         assistant_output=decorated_response,
         source_context=source_context,
+        response_class=turn_result.response_class.value,
     )
     confidence = max(
         0.35,

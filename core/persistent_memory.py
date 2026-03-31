@@ -38,6 +38,11 @@ from core.memory.policies import (
     parse_session_scope_command as _parse_session_scope_command,
 )
 from core.privacy_guard import share_scope_label
+from storage.dialogue_memory import (
+    archive_dialogue_topic,
+    get_dialogue_session,
+    update_dialogue_session,
+)
 
 add_memory_fact = memory_entries.add_memory_fact
 forget_memory = memory_entries.forget_memory
@@ -132,6 +137,7 @@ def append_conversation_event(
     user_input: str,
     assistant_output: str,
     source_context: dict[str, Any] | None = None,
+    response_class: str | None = None,
 ) -> None:
     ensure_memory_files()
     history = _normalized_history((source_context or {}).get("conversation_history"))
@@ -157,6 +163,12 @@ def append_conversation_event(
         session_id=session_id,
         assistant_output=assistant_text,
     )
+    _close_failed_dialogue_topic_if_needed(
+        session_id=session_id,
+        user_input=user_input,
+        assistant_output=assistant_text,
+        response_class=response_class,
+    )
     _auto_capture_memory(session_id=session_id, user_input=user_input)
     _update_user_heuristics(session_id=session_id, user_input=user_input)
     _detect_implicit_feedback(
@@ -170,6 +182,69 @@ def append_conversation_event(
         assistant_output=assistant_output,
     )
     refresh_operator_dense_profile(session_id=session_id)
+
+
+def _close_failed_dialogue_topic_if_needed(
+    *,
+    session_id: str,
+    user_input: str,
+    assistant_output: str,
+    response_class: str | None,
+) -> None:
+    normalized_session = str(session_id or "").strip()
+    normalized_output = " ".join(str(assistant_output or "").split()).strip()
+    normalized_class = str(response_class or "").strip().lower()
+    if not normalized_session or not normalized_output:
+        return
+    if not _assistant_failure_closes_topic(normalized_output, response_class=normalized_class):
+        return
+    state = get_dialogue_session(normalized_session)
+    last_subject = str(state.get("last_subject") or "").strip() or None
+    topic_hints = [str(item).strip() for item in list(state.get("topic_hints") or []) if str(item).strip()]
+    current_user_goal = str(state.get("current_user_goal") or "").strip() or None
+    assistant_commitments = [str(item).strip() for item in list(state.get("assistant_commitments") or []) if str(item).strip()]
+    unresolved_followups = [str(item).strip() for item in list(state.get("unresolved_followups") or []) if str(item).strip()]
+    if not any([last_subject, topic_hints, current_user_goal, assistant_commitments, unresolved_followups]):
+        return
+    archive_dialogue_topic(
+        normalized_session,
+        last_subject=last_subject,
+        topic_hints=topic_hints,
+        current_user_goal=current_user_goal,
+        assistant_commitments=assistant_commitments,
+        unresolved_followups=unresolved_followups,
+        closure_status="unresolved",
+        closure_reason="assistant_failure",
+        closing_user_input=user_input,
+        closing_assistant_output=normalized_output,
+    )
+    update_dialogue_session(
+        normalized_session,
+        last_subject=last_subject,
+        topic_hints=topic_hints,
+        last_intent_mode=str(state.get("last_intent_mode") or "").strip() or None,
+        current_user_goal="",
+        assistant_commitments=[],
+        unresolved_followups=[],
+        user_stance=str(state.get("user_stance") or "").strip() or None,
+        emotional_tone=str(state.get("emotional_tone") or "").strip() or None,
+    )
+
+
+def _assistant_failure_closes_topic(text: str, *, response_class: str) -> bool:
+    if response_class in {"task_failed_user_safe", "system_error_user_safe"}:
+        return True
+    lowered = str(text or "").strip().lower()
+    failure_prefixes = (
+        "i couldn't ",
+        "i can't ",
+        "i cant ",
+        "sorry, i couldn't ",
+        "sorry, i can't ",
+        "sorry, i cant ",
+        "i checked, but i couldn't ",
+    )
+    return any(lowered.startswith(prefix) for prefix in failure_prefixes)
 
 
 def augment_history_from_session_log(

@@ -69,6 +69,28 @@ def _init_tables() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS dialogue_topic_archives (
+                archive_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                last_subject TEXT,
+                topic_hints_json TEXT NOT NULL DEFAULT '[]',
+                current_user_goal TEXT,
+                assistant_commitments_json TEXT NOT NULL DEFAULT '[]',
+                unresolved_followups_json TEXT NOT NULL DEFAULT '[]',
+                closure_status TEXT NOT NULL DEFAULT 'resolved',
+                closure_reason TEXT NOT NULL DEFAULT 'topic_shift',
+                summary TEXT NOT NULL DEFAULT '',
+                closing_user_input TEXT,
+                closing_assistant_output TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_dialogue_topic_archives_session_created ON dialogue_topic_archives(session_id, created_at DESC)"
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS adaptive_lexicon (
                 term TEXT NOT NULL,
                 canonical TEXT NOT NULL,
@@ -189,6 +211,11 @@ def update_dialogue_session(
 ) -> None:
     _init_tables()
     existing = get_dialogue_session(session_id)
+    resolved_last_subject = existing.get("last_subject") if last_subject is None else (str(last_subject).strip() or None)
+    resolved_last_intent_mode = existing.get("last_intent_mode") if last_intent_mode is None else (str(last_intent_mode).strip() or None)
+    resolved_current_user_goal = existing.get("current_user_goal") if current_user_goal is None else (str(current_user_goal).strip() or None)
+    resolved_user_stance = existing.get("user_stance") if user_stance is None else (str(user_stance).strip() or None)
+    resolved_emotional_tone = existing.get("emotional_tone") if emotional_tone is None else (str(emotional_tone).strip() or None)
     conn = get_connection()
     try:
         conn.execute(
@@ -201,10 +228,10 @@ def update_dialogue_session(
             """,
             (
                 session_id,
-                last_subject,
+                resolved_last_subject,
                 json.dumps(topic_hints, sort_keys=True),
-                last_intent_mode,
-                current_user_goal if current_user_goal is not None else existing.get("current_user_goal"),
+                resolved_last_intent_mode,
+                resolved_current_user_goal,
                 json.dumps(
                     list(assistant_commitments if assistant_commitments is not None else existing.get("assistant_commitments") or []),
                     sort_keys=True,
@@ -213,12 +240,128 @@ def update_dialogue_session(
                     list(unresolved_followups if unresolved_followups is not None else existing.get("unresolved_followups") or []),
                     sort_keys=True,
                 ),
-                user_stance if user_stance is not None else existing.get("user_stance"),
-                emotional_tone if emotional_tone is not None else existing.get("emotional_tone"),
+                resolved_user_stance,
+                resolved_emotional_tone,
                 _utcnow(),
             ),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def _archive_summary(
+    *,
+    last_subject: str | None,
+    current_user_goal: str | None,
+    assistant_commitments: list[str] | None,
+    unresolved_followups: list[str] | None,
+) -> str:
+    fragments: list[str] = []
+    goal = str(current_user_goal or "").strip()
+    subject = str(last_subject or "").strip()
+    commitments = [str(item).strip() for item in list(assistant_commitments or []) if str(item).strip()]
+    unresolved = [str(item).strip() for item in list(unresolved_followups or []) if str(item).strip()]
+    if goal:
+        fragments.append(goal)
+    elif subject:
+        fragments.append(subject)
+    if unresolved:
+        fragments.append(f"unresolved: {unresolved[0]}")
+    elif commitments:
+        fragments.append(f"commitment: {commitments[0]}")
+    summary = " | ".join(fragment for fragment in fragments if fragment).strip()
+    return summary[:280]
+
+
+def archive_dialogue_topic(
+    session_id: str,
+    *,
+    last_subject: str | None,
+    topic_hints: list[str] | None,
+    current_user_goal: str | None,
+    assistant_commitments: list[str] | None = None,
+    unresolved_followups: list[str] | None = None,
+    closure_status: str,
+    closure_reason: str,
+    closing_user_input: str | None = None,
+    closing_assistant_output: str | None = None,
+) -> str | None:
+    _init_tables()
+    normalized_session = str(session_id or "").strip()
+    normalized_goal = str(current_user_goal or "").strip()
+    normalized_subject = str(last_subject or "").strip()
+    normalized_topics = [str(item).strip() for item in list(topic_hints or []) if str(item).strip()]
+    normalized_commitments = [str(item).strip() for item in list(assistant_commitments or []) if str(item).strip()]
+    normalized_unresolved = [str(item).strip() for item in list(unresolved_followups or []) if str(item).strip()]
+    if not normalized_session:
+        return None
+    if not any([normalized_goal, normalized_subject, normalized_topics, normalized_commitments, normalized_unresolved]):
+        return None
+    archive_id = str(uuid.uuid4())
+    summary = _archive_summary(
+        last_subject=normalized_subject,
+        current_user_goal=normalized_goal,
+        assistant_commitments=normalized_commitments,
+        unresolved_followups=normalized_unresolved,
+    )
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO dialogue_topic_archives (
+                archive_id, session_id, last_subject, topic_hints_json, current_user_goal,
+                assistant_commitments_json, unresolved_followups_json, closure_status,
+                closure_reason, summary, closing_user_input, closing_assistant_output, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                archive_id,
+                normalized_session,
+                normalized_subject or None,
+                json.dumps(normalized_topics, sort_keys=True),
+                normalized_goal or None,
+                json.dumps(normalized_commitments, sort_keys=True),
+                json.dumps(normalized_unresolved, sort_keys=True),
+                str(closure_status or "resolved").strip().lower() or "resolved",
+                str(closure_reason or "topic_shift").strip().lower() or "topic_shift",
+                summary,
+                str(closing_user_input or "").strip() or None,
+                str(closing_assistant_output or "").strip() or None,
+                _utcnow(),
+            ),
+        )
+        conn.commit()
+        return archive_id
+    finally:
+        conn.close()
+
+
+def recent_archived_dialogue_topics(session_id: str, *, limit: int = 5) -> list[dict[str, Any]]:
+    _init_tables()
+    normalized_session = str(session_id or "").strip()
+    if not normalized_session:
+        return []
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM dialogue_topic_archives
+            WHERE session_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (normalized_session, max(1, int(limit))),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            data = dict(row)
+            data["topic_hints"] = json.loads(data.pop("topic_hints_json") or "[]")
+            data["assistant_commitments"] = json.loads(data.pop("assistant_commitments_json") or "[]")
+            data["unresolved_followups"] = json.loads(data.pop("unresolved_followups_json") or "[]")
+            out.append(data)
+        return out
     finally:
         conn.close()
 

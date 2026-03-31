@@ -138,6 +138,7 @@ def fast_path_result(
         user_input=user_input,
         assistant_output=decorated_response,
         source_context=source_context,
+        response_class=turn_result.response_class.value,
     )
     audit_logger_module.log(
         "agent_fast_path_response",
@@ -235,6 +236,7 @@ def action_fast_path_result(
         user_input=user_input,
         assistant_output=decorated_response,
         source_context=source_context,
+        response_class=turn_result.response_class.value,
     )
     agent._update_task_result(
         task_id,

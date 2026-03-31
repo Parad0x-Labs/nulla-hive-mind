@@ -64,6 +64,16 @@ def test_generate_procedural_pack_includes_memory_lifecycle_and_snapshot_checks(
     assert "snapshot_field_equals" in pack["scoring_schema"]["check_types"]
     assert "snapshot_field_contains_any" in pack["scoring_schema"]["check_types"]
     assert any(item["family"] == "memory_lifecycle" for item in pack["scenarios"])
+    assert any(item["family"] == "failed_turn_reset" for item in pack["scenarios"])
+
+
+def test_generate_procedural_pack_archives_failed_turns_in_operator_snapshot_checks(tmp_path: Path) -> None:
+    pack = generate_procedural_pack(seed=20260331, output_root=tmp_path, include_blind=False)
+    scenario = next(item for item in pack["scenarios"] if item["family"] == "failed_turn_reset")
+    checks = {item["check_id"]: item for item in scenario["checks"]}
+
+    assert checks["failed_reset_snapshot_archives_closed_topic"]["field_path"] == "dialogue_lifecycle.recent_archived_topic_count"
+    assert checks["failed_reset_snapshot_marks_unresolved_failure"]["field_path"] == "dialogue_lifecycle.recent_archived_topics.0.closure_reason"
 
 
 def test_generate_procedural_pack_accepts_live_non_scripted_openers(tmp_path: Path) -> None:

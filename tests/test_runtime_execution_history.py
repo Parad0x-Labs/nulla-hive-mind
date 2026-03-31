@@ -305,6 +305,15 @@ def test_runtime_operator_snapshot_merges_execution_and_memory_truth(monkeypatch
             "selection_summary": "query `continue the file work` selected 1 durable memory entries, 0 prior session summaries, and 1 heuristic signals.",
         },
     )
+    monkeypatch.setattr(
+        "core.runtime_operator_snapshot.recent_archived_dialogue_topics",
+        lambda session_id, limit=4: [
+            {
+                "summary": "bitcoin price lookup | unresolved: couldn't ground fresh quote",
+                "closure_status": "unresolved",
+            }
+        ],
+    )
 
     snapshot = build_runtime_operator_snapshot(
         session_id="openclaw:operator",
@@ -314,4 +323,6 @@ def test_runtime_operator_snapshot_merges_execution_and_memory_truth(monkeypatch
     assert snapshot["session"]["execution_history"]["latest_tool"] == "workspace.read_file"
     assert snapshot["session"]["recent_runtime_event_count"] == 1
     assert snapshot["memory_lifecycle"]["relevant_memory_count"] == 1
+    assert snapshot["dialogue_lifecycle"]["recent_archived_topic_count"] == 1
     assert any("workspace/notes.txt" in line for line in snapshot["inspection_summary"])
+    assert any("Latest closed topic" in line for line in snapshot["inspection_summary"])

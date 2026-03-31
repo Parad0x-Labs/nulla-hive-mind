@@ -7,7 +7,7 @@ from core.human_input_adapter import adapt_user_input
 from core.identity_manager import load_active_persona
 from core.persistent_memory import append_conversation_event
 from core.task_router import create_task_record
-from storage.dialogue_memory import get_dialogue_session
+from storage.dialogue_memory import get_dialogue_session, recent_archived_dialogue_topics
 
 
 def _session_id(label: str) -> str:
@@ -101,9 +101,38 @@ def test_unrelated_turn_clears_stale_continuity_state() -> None:
         session_id=session_id,
     )
     continuity_items = [item for item in items if item.source_type == "dialogue_continuity"]
+    archived = recent_archived_dialogue_topics(session_id, limit=3)
 
     assert "eat after lifting" in str(session.get("current_user_goal") or "").lower()
     assert session["assistant_commitments"] == []
     assert session["unresolved_followups"] == []
+    assert archived
+    assert archived[0]["closure_reason"] == "topic_shift"
+    assert archived[0]["closure_status"] == "unresolved"
+    assert "telegram bot" in str(archived[0]["summary"] or "").lower()
     if continuity_items:
         assert "compare the tradeoffs and sketch a cleaner plan next" not in continuity_items[0].content.lower()
+
+
+def test_failed_assistant_turn_closes_dialogue_topic_into_archive() -> None:
+    session_id = _session_id("continuity-failure-close")
+
+    adapt_user_input("what is the btc price now?", session_id=session_id)
+    append_conversation_event(
+        session_id=session_id,
+        user_input="what is the btc price now?",
+        assistant_output="I checked, but I couldn't ground a confident answer from the evidence I found.",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+        response_class="task_failed_user_safe",
+    )
+
+    session = get_dialogue_session(session_id)
+    archived = recent_archived_dialogue_topics(session_id, limit=3)
+
+    assert session["current_user_goal"] is None
+    assert session["assistant_commitments"] == []
+    assert session["unresolved_followups"] == []
+    assert archived
+    assert archived[0]["closure_reason"] == "assistant_failure"
+    assert archived[0]["closure_status"] == "unresolved"
+    assert "btc price" in str(archived[0]["summary"] or "").lower()
