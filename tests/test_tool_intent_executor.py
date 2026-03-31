@@ -832,6 +832,108 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(decision.next_payload["arguments"]["path"], "alpha/adder.py")
         self.assertTrue(decision.next_payload["arguments"]["verbatim"])
 
+    def test_workflow_planner_handles_folder_first_workspace_chain_prompts(self) -> None:
+        prompt = "make folder march_shift_folder_f0dc here and put weekly_notes_file_0252.txt inside with exact text: alpha line 3525eb"
+        first = plan_tool_workflow(
+            user_text=prompt,
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-procedural"},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_workspace_directory_bootstrap")
+        self.assertEqual(first.next_payload["intent"], "workspace.ensure_directory")
+        self.assertEqual(first.next_payload["arguments"]["path"], "march_shift_folder_f0dc")
+
+        second = plan_tool_workflow(
+            user_text=prompt,
+            task_class="unknown",
+            executed_steps=[
+                {
+                    "tool_name": "workspace.ensure_directory",
+                    "arguments": {"path": "march_shift_folder_f0dc"},
+                    "observation": {
+                        "intent": "workspace.ensure_directory",
+                        "tool_surface": "workspace",
+                        "ok": True,
+                        "status": "executed",
+                        "path": "march_shift_folder_f0dc",
+                        "action": "created",
+                        "already_present": False,
+                    },
+                }
+            ],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-procedural"},
+        )
+
+        self.assertTrue(second.handled)
+        self.assertEqual(second.reason, "planned_workspace_write_after_bootstrap")
+        self.assertEqual(second.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(second.next_payload["arguments"]["path"], "march_shift_folder_f0dc/weekly_notes_file_0252.txt")
+        self.assertEqual(second.next_payload["arguments"]["content"], "alpha line 3525eb")
+
+    def test_workflow_planner_recovers_folder_first_history_for_readback_and_append(self) -> None:
+        history_prompt = "make folder march_shift_folder_f0dc here and put weekly_notes_file_0252.txt inside with exact text: alpha line 3525eb"
+        source_context = {
+            "surface": "openclaw",
+            "platform": "openclaw",
+            "workspace": "/tmp/nulla-procedural",
+            "conversation_history": [{"role": "user", "content": history_prompt}],
+        }
+
+        readback = plan_tool_workflow(
+            user_text="read it back exactly first",
+            task_class="unknown",
+            executed_steps=[],
+            source_context=source_context,
+        )
+
+        self.assertTrue(readback.handled)
+        self.assertEqual(readback.reason, "planned_workspace_readback")
+        self.assertEqual(readback.next_payload["intent"], "workspace.read_file")
+        self.assertEqual(readback.next_payload["arguments"]["path"], "march_shift_folder_f0dc/weekly_notes_file_0252.txt")
+        self.assertTrue(readback.next_payload["arguments"]["verbatim"])
+
+        append = plan_tool_workflow(
+            user_text="now add one more line exactly: beta line 882",
+            task_class="unknown",
+            executed_steps=[],
+            source_context=source_context,
+        )
+
+        self.assertTrue(append.handled)
+        self.assertEqual(append.reason, "planned_read_before_append")
+        self.assertEqual(append.next_payload["intent"], "workspace.read_file")
+        self.assertEqual(append.next_payload["arguments"]["path"], "march_shift_folder_f0dc/weekly_notes_file_0252.txt")
+
+    def test_workflow_planner_supports_inside_workspace_create_and_explicit_exact_read(self) -> None:
+        write = plan_tool_workflow(
+            user_text="fine then. inside this workspace create recovered_fix_4d82.txt with exact text: recovery succeeded 3525eb",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-procedural"},
+        )
+
+        self.assertTrue(write.handled)
+        self.assertEqual(write.reason, "planned_workspace_write_file")
+        self.assertEqual(write.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(write.next_payload["arguments"]["path"], "recovered_fix_4d82.txt")
+        self.assertEqual(write.next_payload["arguments"]["content"], "recovery succeeded 3525eb")
+
+        read = plan_tool_workflow(
+            user_text="now read recovered_fix_4d82.txt exactly",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw", "workspace": "/tmp/nulla-procedural"},
+        )
+
+        self.assertTrue(read.handled)
+        self.assertEqual(read.reason, "planned_workspace_readback")
+        self.assertEqual(read.next_payload["intent"], "workspace.read_file")
+        self.assertEqual(read.next_payload["arguments"]["path"], "recovered_fix_4d82.txt")
+        self.assertTrue(read.next_payload["arguments"]["verbatim"])
+
     def test_should_attempt_tool_intent_for_live_recency_lookup(self) -> None:
         should_run = should_attempt_tool_intent(
             "What happened five minutes ago in global markets?",
@@ -1247,6 +1349,44 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertTrue(decision.handled)
         self.assertEqual(decision.reason, "planned_workspace_git_summary")
         self.assertEqual(decision.next_payload["intent"], "workspace.git_summary")
+
+    def test_workflow_planner_routes_branch_and_commit_prompt_into_runtime_git_summary(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="what branch and commit are you running on right now?",
+            task_class="file_inspection",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertEqual(decision.reason, "planned_workspace_git_summary")
+        self.assertEqual(decision.next_payload["intent"], "workspace.git_summary")
+
+    def test_workflow_planner_routes_last_n_commits_prompt_into_runtime_git_summary(self) -> None:
+        decision = plan_tool_workflow(
+            user_text="list the last 3 commits in this repo",
+            task_class="file_inspection",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertEqual(decision.reason, "planned_workspace_git_summary")
+        self.assertEqual(decision.next_payload["intent"], "workspace.git_summary")
+        self.assertEqual(decision.next_payload["arguments"]["recent_limit"], 3)
+
+    def test_workflow_planner_routes_workspace_search_prompt_into_search_text(self) -> None:
+        decision = plan_tool_workflow(
+            user_text='find a file in this workspace mentioning "runtime_capabilities"',
+            task_class="file_inspection",
+            executed_steps=[],
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertTrue(decision.handled)
+        self.assertEqual(decision.reason, "planned_workspace_search_text")
+        self.assertEqual(decision.next_payload["intent"], "workspace.search_text")
+        self.assertEqual(decision.next_payload["arguments"]["query"], "runtime_capabilities")
 
     def test_workflow_planner_stops_after_git_inspection(self) -> None:
         decision = plan_tool_workflow(

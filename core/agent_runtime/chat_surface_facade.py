@@ -10,6 +10,9 @@ class ChatSurfaceFacadeMixin:
     def _chat_surface_smalltalk_model_input(self, *, user_input: str, phrase: str) -> str:
         return agent_chat_surface_runtime.smalltalk_model_input(self, user_input=user_input, phrase=phrase)
 
+    def _chat_surface_evaluative_model_input(self, *, user_input: str) -> str:
+        return agent_chat_surface_runtime.evaluative_model_input(user_input=user_input)
+
     def _chat_surface_observation_prompt(
         self,
         *,

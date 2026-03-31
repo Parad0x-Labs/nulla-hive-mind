@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import subprocess
 import tempfile
 import unittest
 import uuid
@@ -18,6 +19,7 @@ from core.human_input_adapter import HumanInputInterpretation
 from core.identity_manager import load_active_persona
 from core.live_quote_contract import LiveQuoteResult
 from core.memory_first_router import ModelExecutionDecision
+from core.onboarding import get_agent_display_name
 from core.prompt_normalizer import normalize_prompt
 from core.public_hive_bridge import PublicHiveBridgeConfig
 from core.runtime_task_events import register_runtime_event_sink, unregister_runtime_event_sink
@@ -247,7 +249,7 @@ class OpenClawToolingContextTests(unittest.TestCase):
         response = agent._smalltalk_fast_path("gm", source_surface="openclaw", session_id="openclaw:smalltalk-gm")
         self.assertIsNotNone(response)
         assert response is not None
-        self.assertIn("what do you need", response.lower())
+        self.assertIn("what are we working on", response.lower())
 
     def test_smalltalk_repeated_greetings_stop_using_identical_canned_reply(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
@@ -256,10 +258,10 @@ class OpenClawToolingContextTests(unittest.TestCase):
         third = agent._smalltalk_fast_path("hello", source_surface="openclaw", session_id="openclaw:smalltalk-repeat")
 
         assert first is not None and second is not None and third is not None
-        self.assertNotEqual(first, second)
-        self.assertNotEqual(second, third)
-        self.assertIn("what do you want me to do", second.lower())
-        self.assertIn("skip the greeting", third.lower())
+        self.assertIn("what do you need", first.lower())
+        self.assertIn("what needs fixing", second.lower())
+        self.assertIn("what do you need", third.lower())
+        self.assertNotIn("skip the greeting", third.lower())
 
     def test_openclaw_ui_command_fast_path_handles_new_and_trace(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
@@ -3445,6 +3447,413 @@ class OpenClawToolingContextTests(unittest.TestCase):
         self.assertNotIn("I created `please`", result["response"])
         self.assertNotIn("bounded builder step", result["response"])
 
+    def test_openclaw_natural_save_it_as_txt_phrase_uses_real_machine_write_lane(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            desktop = Path(tmpdir) / "Desktop"
+            marchtest = desktop / "MarchTest"
+            marchtest.mkdir(parents=True, exist_ok=True)
+
+            result = agent.run_once(
+                "create hello world file and save it as .txt in Marchtest folder",
+                session_id_override="openclaw:natural-save-it-as-txt",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = marchtest / "hello_world.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "hello world")
+
+        self.assertIn("~/Desktop/MarchTest/hello_world.txt", result["response"])
+        self.assertNotIn("bounded builder path", result["response"].lower())
+
+    def test_openclaw_spaced_dot_txt_phrase_uses_real_machine_write_lane(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            desktop = Path(tmpdir) / "Desktop"
+            marchtest = desktop / "MarchTest"
+            marchtest.mkdir(parents=True, exist_ok=True)
+
+            result = agent.run_once(
+                "create hello world file and save it as . txt in Marchtest folder",
+                session_id_override="openclaw:spaced-dot-txt",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = marchtest / "hello_world.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "hello world")
+
+        self.assertIn("~/Desktop/MarchTest/hello_world.txt", result["response"])
+        self.assertNotIn("bounded builder path", result["response"].lower())
+
+    def test_openclaw_mixed_insult_and_file_request_still_executes_real_write(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            desktop = Path(tmpdir) / "Desktop"
+            marchtest = desktop / "MarchTest"
+            marchtest.mkdir(parents=True, exist_ok=True)
+
+            result = agent.run_once(
+                "Jesus you are dumb so can you create file? create hello world file and save it as .txt in Marchtest folder",
+                session_id_override="openclaw:mixed-insult-file-write",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = marchtest / "hello_world.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "hello world")
+
+        self.assertIn("~/Desktop/MarchTest/hello_world.txt", result["response"])
+        self.assertNotIn("wrapper got better", result["response"].lower())
+
+    def test_openclaw_session_followup_mixed_evaluative_desktop_write_executes_real_write(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            session_id = "openclaw:mixed-session-desktop-write"
+            agent.run_once(
+                "hello there",
+                session_id_override=session_id,
+                source_context={"surface": "api", "platform": "api"},
+            )
+            agent.run_once(
+                "how are ya rn?",
+                session_id_override=session_id,
+                source_context={"surface": "api", "platform": "api"},
+            )
+            result = agent.run_once(
+                "you are acting weird but on my desktop make NULLAProbe and save hello_world.txt with text hello world",
+                session_id_override=session_id,
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = Path(tmpdir) / "Desktop" / "NULLAProbe" / "hello_world.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "hello world")
+
+        self.assertIn("~/Desktop/NULLAProbe/hello_world.txt", result["response"])
+        self.assertNotIn("bounded builder path", result["response"].lower())
+
+    def test_openclaw_typo_heavy_safe_folder_txt_write_recovers(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            desktop = Path(tmpdir) / "Desktop"
+            marchtest = desktop / "MarchTest"
+            marchtest.mkdir(parents=True, exist_ok=True)
+
+            result = agent.run_once(
+                "create typo riddled txt in marchtest fldre pls with hello wrld",
+                session_id_override="openclaw:typo-heavy-machine-write",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = marchtest / "hello_wrld.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "hello wrld")
+
+        self.assertIn("~/Desktop/MarchTest/hello_wrld.txt", result["response"])
+        self.assertNotIn("bounded builder path", result["response"].lower())
+
+    def test_openclaw_named_folder_plus_file_write_stays_inside_named_folder(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            result = agent.run_once(
+                "make a folder called NULLATEST on Desktop and put a file named note.txt with text hello there",
+                session_id_override="openclaw:named-folder-plus-file",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = Path(tmpdir) / "Desktop" / "NULLATEST" / "note.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "hello there")
+            self.assertFalse((Path(tmpdir) / "Desktop" / "note.txt").exists())
+
+        self.assertIn("~/Desktop/NULLATEST/note.txt", result["response"])
+
+    def test_openclaw_desktop_make_folder_then_save_file_variant_stays_inside_named_folder(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            result = agent.run_once(
+                "on my desktop make NULLATEST and save note.txt with text hello there",
+                session_id_override="openclaw:desktop-make-folder-save-file",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = Path(tmpdir) / "Desktop" / "NULLATEST" / "note.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "hello there")
+            self.assertFalse((Path(tmpdir) / "Desktop" / "note.txt").exists())
+
+        self.assertIn("~/Desktop/NULLATEST/note.txt", result["response"])
+
+    def test_openclaw_make_named_target_on_desktop_then_put_file_stays_inside_named_folder(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            result = agent.run_once(
+                "make NULLATEST on my desktop and put note.txt saying hello there",
+                session_id_override="openclaw:make-target-on-desktop-put-file",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = Path(tmpdir) / "Desktop" / "NULLATEST" / "note.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "hello there")
+            self.assertFalse((Path(tmpdir) / "Desktop" / "note.txt").exists())
+
+        self.assertIn("~/Desktop/NULLATEST/note.txt", result["response"])
+
+    def test_openclaw_create_folder_on_desktop_and_inside_it_write_file_stays_inside_named_folder(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            result = agent.run_once(
+                "create folder NULLATEST on desktop and inside it write note.txt with hello there",
+                session_id_override="openclaw:create-folder-desktop-inside-it",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = Path(tmpdir) / "Desktop" / "NULLATEST" / "note.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "hello there")
+            self.assertFalse((Path(tmpdir) / "Desktop" / "note.txt").exists())
+
+        self.assertIn("~/Desktop/NULLATEST/note.txt", result["response"])
+
+    def test_openclaw_quoted_filename_with_spaces_is_preserved(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            desktop = Path(tmpdir) / "Desktop"
+            marchtest = desktop / "MarchTest"
+            marchtest.mkdir(parents=True, exist_ok=True)
+
+            result = agent.run_once(
+                "create file 'weekly notes.txt' in Marchtest folder with text: this is a typo stress test",
+                session_id_override="openclaw:quoted-filename-spaces",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = marchtest / "weekly notes.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "this is a typo stress test")
+            self.assertFalse((marchtest / "notes.txt").exists())
+
+        self.assertIn("~/Desktop/MarchTest/weekly notes.txt", result["response"])
+
+    def test_openclaw_quoted_filename_inside_existing_folder_without_literal_folder_word_stays_grounded(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            desktop = Path(tmpdir) / "Desktop"
+            marchtest = desktop / "MarchTest"
+            marchtest.mkdir(parents=True, exist_ok=True)
+
+            result = agent.run_once(
+                "pls make 'weekly notes.txt' inside MarchTest with text fresh prompts must still work",
+                session_id_override="openclaw:quoted-filename-inside-folder",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = marchtest / "weekly notes.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "fresh prompts must still work")
+
+        self.assertIn("~/Desktop/MarchTest/weekly notes.txt", result["response"])
+        self.assertNotIn("bounded builder path", result["response"].lower())
+        self.assertNotIn("swarm task", result["response"].lower())
+
+    def test_openclaw_safe_local_file_read_returns_grounded_text(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            desktop = Path(tmpdir) / "Desktop"
+            fixtures = desktop / "NULLAProbeFixtures"
+            fixtures.mkdir(parents=True, exist_ok=True)
+            target = fixtures / "read_me.txt"
+            target.write_text("fresh evidence or it did not happen", encoding="utf-8")
+
+            result = agent.run_once(
+                f"open {target} and quote the text inside",
+                session_id_override="openclaw:safe-local-file-read",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+        self.assertIn("fresh evidence or it did not happen", result["response"])
+        self.assertNotIn("usable model response", result["response"].lower())
+
+    def test_openclaw_workspace_chain_folder_first_prompts_stay_grounded(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            workspace = Path(tmpdir) / "workspace"
+            workspace.mkdir(parents=True, exist_ok=True)
+            session_id = "openclaw:workspace-chain-folder-first"
+            source_context = {"surface": "openclaw", "platform": "openclaw", "workspace": str(workspace), "workspace_root": str(workspace)}
+
+            create = agent.run_once(
+                "make folder march_shift_folder_f0dc here and put weekly_notes_file_0252.txt inside with exact text: alpha line 3525eb",
+                session_id_override=session_id,
+                source_context=source_context,
+            )
+            first_read = agent.run_once(
+                "read it back exactly first",
+                session_id_override=session_id,
+                source_context=source_context,
+            )
+            append = agent.run_once(
+                "now add one more line exactly: beta line 882",
+                session_id_override=session_id,
+                source_context=source_context,
+            )
+            final_read = agent.run_once(
+                "cool, now read the whole file back exactly",
+                session_id_override=session_id,
+                source_context=source_context,
+            )
+
+            target = workspace / "march_shift_folder_f0dc" / "weekly_notes_file_0252.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "alpha line 3525eb\nbeta line 882")
+
+        self.assertNotIn("bounded builder path", create["response"].lower())
+        self.assertIn("alpha line 3525eb", first_read["response"])
+        self.assertNotIn("usable model response", append["response"].lower())
+        self.assertIn("alpha line 3525eb", final_read["response"])
+        self.assertIn("beta line 882", final_read["response"])
+
+    def test_openclaw_blocked_machine_read_then_workspace_recovery_stays_honest(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            workspace = Path(tmpdir) / "workspace"
+            workspace.mkdir(parents=True, exist_ok=True)
+            session_id = "openclaw:blocked-machine-then-workspace-recovery"
+            source_context = {"surface": "openclaw", "platform": "openclaw", "workspace": str(workspace), "workspace_root": str(workspace)}
+
+            blocked = agent.run_once(
+                "read /private/tmp/nulla-procedural-blocked-3525eb/blocked_3525eb.txt exactly",
+                session_id_override=session_id,
+                source_context=source_context,
+            )
+            create = agent.run_once(
+                "fine then. inside this workspace create recovered_fix_4d82.txt with exact text: recovery succeeded 3525eb",
+                session_id_override=session_id,
+                source_context=source_context,
+            )
+            read = agent.run_once(
+                "now read recovered_fix_4d82.txt exactly",
+                session_id_override=session_id,
+                source_context=source_context,
+            )
+
+            target = workspace / "recovered_fix_4d82.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "recovery succeeded 3525eb")
+
+        self.assertIn("cannot read that path", blocked["response"].lower())
+        self.assertNotIn("bounded builder path", create["response"].lower())
+        self.assertIn("recovery succeeded 3525eb", read["response"])
+
     def test_openclaw_new_folder_on_desktop_phrase_uses_real_machine_directory_create(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
         agent.start()
@@ -3727,8 +4136,314 @@ class OpenClawToolingContextTests(unittest.TestCase):
 
         self.assertIn("~/Desktop/Marchtest/chat_session.txt", result["response"])
         self.assertIn("You\nhow are ya?", exported)
-        self.assertIn("NULLA\nRunning stable. Memory online, mesh ready.", exported)
+        self.assertIn(f"{get_agent_display_name()}\nRunning stable. Memory online, mesh ready.", exported)
         self.assertNotIn("can't you export this all chat", exported)
+
+    def test_openclaw_api_surface_branch_and_commit_prompt_uses_real_git_summary(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "config", "user.name", "sls_0x"], cwd=repo, check=True, capture_output=True, text=True)
+            subprocess.run(
+                ["git", "config", "user.email", "240776969+Parad0x-Labs@users.noreply.github.com"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            (repo / "README.md").write_text("hello\n", encoding="utf-8")
+            subprocess.run(["git", "add", "README.md"], cwd=repo, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True)
+
+            result = agent.run_once(
+                "what branch and commit are you running on right now?",
+                session_id_override="openclaw:api-branch-commit",
+                source_context={"surface": "api", "platform": "api", "workspace": str(repo), "workspace_root": str(repo)},
+            )
+
+        self.assertIn("Git summary: branch main @", result["response"])
+        self.assertNotIn("I don't have access", result["response"])
+        self.assertNotIn("training data", result["response"].lower())
+
+    def test_openclaw_api_surface_workspace_search_prompt_returns_grounded_matches(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "workspace"
+            workspace.mkdir()
+            (workspace / "notes.md").write_text("runtime_capabilities are described here\n", encoding="utf-8")
+
+            result = agent.run_once(
+                'find a file in this workspace mentioning "runtime_capabilities"',
+                session_id_override="openclaw:api-workspace-search",
+                source_context={"surface": "api", "platform": "api", "workspace": str(workspace), "workspace_root": str(workspace)},
+            )
+
+        self.assertIn('Search matches for "runtime_capabilities"', result["response"])
+        self.assertIn("notes.md:1", result["response"])
+        self.assertNotIn("generated/workspace-starter", result["response"])
+        self.assertNotIn("bounded builder steps", result["response"].lower())
+
+    def test_openclaw_api_surface_generic_workspace_search_prompt_returns_grounded_matches(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "workspace"
+            workspace.mkdir()
+            (workspace / "notes.md").write_text("runtime_capabilities are described here\n", encoding="utf-8")
+
+            result = agent.run_once(
+                'look through the workspace and find "runtime_capabilities"',
+                session_id_override="openclaw:api-workspace-search-generic",
+                source_context={"surface": "api", "platform": "api", "workspace": str(workspace), "workspace_root": str(workspace)},
+            )
+
+        self.assertIn('Search matches for "runtime_capabilities"', result["response"])
+        self.assertIn("notes.md:1", result["response"])
+        self.assertNotIn("generated/workspace-starter", result["response"])
+
+    def test_openclaw_api_surface_workspace_search_keeps_grounded_token_named_like_routing_field(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "workspace"
+            workspace.mkdir()
+            (workspace / "notes.md").write_text("provider_capability_truth is documented here\n", encoding="utf-8")
+
+            result = agent.run_once(
+                'find a file in this workspace mentioning "provider_capability_truth"',
+                session_id_override="openclaw:api-workspace-search-provider-capability-truth",
+                source_context={"surface": "api", "platform": "api", "workspace": str(workspace), "workspace_root": str(workspace)},
+            )
+
+        self.assertIn('Search matches for "provider_capability_truth"', result["response"])
+        self.assertIn("notes.md:1", result["response"])
+        self.assertNotIn("stripped the internal routing details", result["response"].lower())
+
+    def test_openclaw_download_to_downloads_writes_real_file(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        class _FakeHeaders:
+            @staticmethod
+            def get_content_type() -> str:
+                return "text/html"
+
+            @staticmethod
+            def get_content_charset(default: str | None = None) -> str:
+                return "utf-8"
+
+            @staticmethod
+            def get(_name: str, default: str | None = None) -> str | None:
+                return default
+
+        class _FakeResponse:
+            headers = _FakeHeaders()
+
+            def __enter__(self) -> _FakeResponse:
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                return False
+
+            @staticmethod
+            def read(_limit: int | None = None) -> bytes:
+                return b"<html><body>example live check</body></html>"
+
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch("core.agent_runtime.fast_paths_machine.urllib_request.urlopen", return_value=_FakeResponse()), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            result = agent.run_once(
+                "download https://example.com and save it in Downloads as example.html",
+                session_id_override="openclaw:download-example-html",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = Path(tmpdir) / "Downloads" / "example.html"
+            self.assertTrue(target.is_file())
+            self.assertIn("example live check", target.read_text(encoding="utf-8"))
+
+        self.assertIn("~/Downloads/example.html", result["response"])
+
+    def test_openclaw_download_followup_reads_grounded_page_title(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        class _FakeHeaders:
+            @staticmethod
+            def get_content_type() -> str:
+                return "text/html"
+
+            @staticmethod
+            def get_content_charset(default: str | None = None) -> str:
+                return "utf-8"
+
+            @staticmethod
+            def get(_name: str, default: str | None = None) -> str | None:
+                return default
+
+        class _FakeResponse:
+            headers = _FakeHeaders()
+
+            def __enter__(self) -> _FakeResponse:
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                return False
+
+            @staticmethod
+            def read(_limit: int | None = None) -> bytes:
+                return b"<html><head><title>Example Domain</title></head><body>example live check</body></html>"
+
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch("core.agent_runtime.fast_paths_machine.urllib_request.urlopen", return_value=_FakeResponse()), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            session_id = "openclaw:download-followup-page-title"
+            source_context = {"surface": "openclaw", "platform": "openclaw"}
+            download = agent.run_once(
+                "download https://example.com and save it in Downloads as example-3525eb.html",
+                session_id_override=session_id,
+                source_context=source_context,
+            )
+            title = agent.run_once(
+                "now tell me the page title exactly",
+                session_id_override=session_id,
+                source_context=source_context,
+            )
+
+            target = Path(tmpdir) / "Downloads" / "example-3525eb.html"
+            self.assertTrue(target.is_file())
+            self.assertIn("Example Domain", target.read_text(encoding="utf-8"))
+
+        self.assertIn("~/Downloads/example-3525eb.html", download["response"])
+        self.assertEqual(title["response"], "Example Domain")
+
+    def test_openclaw_grab_into_downloads_path_writes_real_file(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        class _FakeHeaders:
+            @staticmethod
+            def get_content_type() -> str:
+                return "text/html"
+
+            @staticmethod
+            def get_content_charset(default: str | None = None) -> str:
+                return "utf-8"
+
+            @staticmethod
+            def get(_name: str, default: str | None = None) -> str | None:
+                return default
+
+        class _FakeResponse:
+            headers = _FakeHeaders()
+
+            def __enter__(self) -> _FakeResponse:
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                return False
+
+            @staticmethod
+            def read(_limit: int | None = None) -> bytes:
+                return b"<html><body>example live check</body></html>"
+
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch("core.agent_runtime.fast_paths_machine.urllib_request.urlopen", return_value=_FakeResponse()), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            result = agent.run_once(
+                "grab https://example.com into Downloads/example.html",
+                session_id_override="openclaw:grab-into-downloads-path",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = Path(tmpdir) / "Downloads" / "example.html"
+            self.assertTrue(target.is_file())
+            self.assertIn("example live check", target.read_text(encoding="utf-8"))
+
+        self.assertIn("~/Downloads/example.html", result["response"])
+
+    def test_openclaw_you_alive_or_what_uses_bounded_status_fast_path(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        result = agent.run_once(
+            "you alive or what",
+            session_id_override="openclaw:you-alive-or-what",
+            source_context={"surface": "api", "platform": "api"},
+        )
+
+        self.assertEqual(result["response"], "Running clean. What do you need?")
+
+    def test_openclaw_hello_there_uses_bounded_greeting_fast_path(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        result = agent.run_once(
+            "hello there",
+            session_id_override="openclaw:hello-there",
+            source_context={"surface": "api", "platform": "api"},
+        )
+
+        self.assertEqual(result["response"], "Hello. What do you need?")
+
+    def test_openclaw_how_r_u_rn_uses_bounded_status_fast_path(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+
+        result = agent.run_once(
+            "how r u rn?",
+            session_id_override="openclaw:how-r-u-rn",
+            source_context={"surface": "api", "platform": "api"},
+        )
+
+        self.assertEqual(result["response"], "Running clean. What do you need?")
+
+    def test_openclaw_mixed_evaluative_create_phrase_does_not_trigger_rename_and_still_writes(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch(
+            "core.agent_runtime.fast_paths_machine.Path.home",
+            return_value=Path(tmpdir),
+        ), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            desktop = Path(tmpdir) / "Desktop"
+            marchtest = desktop / "MarchTest"
+            marchtest.mkdir(parents=True, exist_ok=True)
+
+            result = agent.run_once(
+                "you are acting weird but create hello world file and save it as .txt in Marchtest folder",
+                session_id_override="openclaw:mixed-evaluative-create",
+                source_context={"surface": "api", "platform": "api"},
+            )
+
+            target = marchtest / "hello_world.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "hello world")
+
+        self.assertIn("~/Desktop/MarchTest/hello_world.txt", result["response"])
+        self.assertNotIn("I'll go by", result["response"])
 
 
 if __name__ == "__main__":

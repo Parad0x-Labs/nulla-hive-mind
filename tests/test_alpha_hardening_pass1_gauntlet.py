@@ -36,9 +36,10 @@ ALPHA_SHIP_THRESHOLDS = {
 }
 
 FAST_PATH_CHAT_CASES = (
+    ("help", "utility_answer", "wired on this runtime:"),
     ("hey", "smalltalk", "what do you need?"),
     ("hello", "smalltalk", "what do you need?"),
-    ("how are you", "smalltalk", "running stable. memory online, mesh ready."),
+    ("how are you", "smalltalk", "running clean. what do you need?"),
 )
 
 MODEL_FINAL_CHAT_CASES = (
@@ -480,11 +481,7 @@ def _run_fast_path_chat_case(
     expected_snippet: str,
 ) -> tuple[bool, str]:
     agent = make_agent()
-    _configure_model_chat_path(
-        agent,
-        context_result_factory,
-        decision=_provider_decision(task_hash=f"alpha-fast-chat-{uuid.uuid4().hex}", output_text="stale provider text"),
-    )
+    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("fast chat should stay on fast path"))  # type: ignore[assignment]
     with mock.patch("apps.nulla_agent.audit_logger.log") as audit_log, _common_runtime_patch_stack():
         result = agent.run_once(
             prompt,
@@ -1149,7 +1146,7 @@ def test_alpha_hardening_definition_is_complete() -> None:
         "builder_bounded_truth",
         "honest_degradation",
     }
-    assert len(FAST_PATH_CHAT_CASES) + len(MODEL_FINAL_CHAT_CASES) + len(FAST_PATH_LIVE_INFO_CASES) + len(MODEL_FINAL_LIVE_INFO_CASES) + 2 == 18
+    assert len(FAST_PATH_CHAT_CASES) + len(MODEL_FINAL_CHAT_CASES) + len(FAST_PATH_LIVE_INFO_CASES) + len(MODEL_FINAL_LIVE_INFO_CASES) + 2 == 19
     assert len(PLANNER_LEAK_CORPUS) == 12
     assert len(CAPABILITY_TRUTH_CASES) == 5
     assert len(HIVE_TRUTH_CASES) == 5

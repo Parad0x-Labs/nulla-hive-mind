@@ -35,6 +35,14 @@ def smalltalk_model_input(agent: Any, *, user_input: str, phrase: str) -> str:
     ).strip()
 
 
+def evaluative_model_input(*, user_input: str) -> str:
+    return (
+        f"{str(user_input or '').strip()}\n\n"
+        "Reply like a sharp local operator. Acknowledge friction briefly without arguing, posturing, or dumping canned status slogans. "
+        "Keep it short, natural, and direct."
+    ).strip()
+
+
 def observation_prompt(
     *,
     user_input: str,

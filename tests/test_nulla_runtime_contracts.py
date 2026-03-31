@@ -182,20 +182,31 @@ def test_startup_sequence_stays_deterministic(make_agent):
 
 
 @pytest.mark.parametrize(
-    ("prompt", "expected"),
+    ("prompt", "provider_text", "expected"),
     [
-        ("ohmy gad yu not a dumbs anymore?!", "better than before"),
-        ("you sound weird", "routing is still too stitched together"),
-        ("why are you acting like this", "routing is still too stitched together"),
+        ("ohmy gad yu not a dumbs anymore?!", "Better than before, yes. The conversation lane still needs work.", "better than before"),
+        ("you sound weird", "The routing is still too stitched together.", "routing is still too stitched together"),
+        ("why are you acting like this", "The routing is still too stitched together.", "routing is still too stitched together"),
     ],
 )
 def test_evaluative_turns_stay_conversational_and_do_not_carry_hive_footer(
     make_agent,
     prompt,
+    provider_text,
     expected,
 ):
     agent = make_agent()
-    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("evaluative turns should stay deterministic"))  # type: ignore[assignment]
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="provider",
+            task_hash=f"evaluative-{prompt}",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text=provider_text,
+            confidence=0.84,
+            trust_score=0.84,
+        )
+    )
     result = agent.run_once(
         prompt,
         source_context={"surface": "openclaw", "platform": "openclaw"},
@@ -208,16 +219,16 @@ def test_evaluative_turns_stay_conversational_and_do_not_carry_hive_footer(
 
 
 @pytest.mark.parametrize(
-    ("prompt", "marker"),
+    ("prompt", "expected_snippet"),
     [
         ("hey", "what do you need"),
         ("hello", "what do you need"),
-        ("how are you", "memory online"),
+        ("how are you", "running clean. what do you need"),
     ],
 )
-def test_chat_surface_smalltalk_uses_deterministic_fast_path(make_agent, prompt, marker):
+def test_chat_surface_smalltalk_uses_bounded_fast_path_on_openclaw_surface(make_agent, prompt, expected_snippet):
     agent = make_agent()
-    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("smalltalk should not hit model wording"))  # type: ignore[assignment]
+    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("trivial smalltalk should not hit model wording"))  # type: ignore[assignment]
 
     result = agent.run_once(
         prompt,
@@ -225,15 +236,16 @@ def test_chat_surface_smalltalk_uses_deterministic_fast_path(make_agent, prompt,
         source_context={"surface": "openclaw", "platform": "openclaw"},
     )
 
-    assert marker in result["response"].lower()
+    assert expected_snippet in result["response"].lower()
     assert result["model_execution"]["used_model"] is False
     assert result["model_execution"]["source"] == "fast_path"
+    assert agent.memory_router.resolve.call_count == 0
 
 
 def test_chat_surface_help_uses_deterministic_fast_path(make_agent):
     agent = make_agent()
-    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("help should not hit model wording"))  # type: ignore[assignment]
     agent._help_capabilities_text = mock.Mock(return_value="deterministic help lane")  # type: ignore[method-assign]
+    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("help should stay on deterministic fast path"))  # type: ignore[assignment]
 
     result = agent.run_once(
         "help",
@@ -242,13 +254,14 @@ def test_chat_surface_help_uses_deterministic_fast_path(make_agent):
     )
 
     assert result["response"] == "deterministic help lane"
+    assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
     assert result["model_execution"]["used_model"] is False
     assert result["model_execution"]["source"] == "fast_path"
 
 
-def test_repeated_chat_greetings_stay_on_deterministic_fast_path(make_agent):
+def test_repeated_chat_greetings_on_openclaw_surface_use_bounded_fast_path(make_agent):
     agent = make_agent()
-    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("greetings should not hit model wording"))  # type: ignore[assignment]
+    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("trivial smalltalk should stay on bounded fast path"))  # type: ignore[assignment]
 
     first = agent.run_once(
         "hey",
@@ -267,14 +280,14 @@ def test_repeated_chat_greetings_stay_on_deterministic_fast_path(make_agent):
     )
 
     assert "what do you need" in first["response"].lower()
-    assert "what do you want me to do" in second["response"].lower()
-    assert "skip the greeting" in third["response"].lower()
+    assert "what needs fixing" in second["response"].lower()
+    assert "skip the greeting" not in third["response"].lower()
     assert first["model_execution"]["used_model"] is False
     assert second["model_execution"]["used_model"] is False
     assert third["model_execution"]["used_model"] is False
 
 
-def test_api_surface_smalltalk_uses_deterministic_fast_path(make_agent):
+def test_api_surface_smalltalk_uses_bounded_fast_path(make_agent):
     agent = make_agent()
     agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("api smalltalk should not hit model wording"))  # type: ignore[assignment]
 

@@ -91,7 +91,6 @@ def controller_profile(
         and workflow_probe.handled
         and workflow_probe.next_payload
         and workflow_intent in {
-            "workspace.search_text",
             "workspace.read_file",
             "workspace.write_file",
             "workspace.ensure_directory",
@@ -120,7 +119,6 @@ def controller_profile(
         and workflow_probe.handled
         and workflow_probe.next_payload
         and workflow_intent in {
-            "workspace.search_text",
             "workspace.read_file",
             "workspace.write_file",
             "workspace.ensure_directory",
@@ -484,9 +482,15 @@ def controller_direct_response(
     if not executed_steps:
         return None
     last_step = dict(executed_steps[-1] or {})
+    last_tool_name = str(last_step.get("tool_name") or "").strip()
+    normalized_input = f" {' '.join(str(effective_input or '').split()).strip().lower()} "
+    explicit_exact_read_request = bool(
+        any(marker in normalized_input for marker in (" read ", " open ", " quote "))
+        and any(marker in normalized_input for marker in (" exact", " verbatim"))
+    )
     if (
-        agent._looks_like_exact_workspace_readback_request(effective_input)
-        and str(last_step.get("tool_name") or "").strip() == "workspace.read_file"
+        last_tool_name in {"workspace.read_file", "machine.read_file"}
+        and (agent._looks_like_exact_workspace_readback_request(effective_input) or explicit_exact_read_request)
     ):
         response_text = str(last_step.get("response_text") or "").strip()
         if response_text:

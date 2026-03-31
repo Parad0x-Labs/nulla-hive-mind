@@ -62,6 +62,7 @@ from core.persistent_memory import (
     append_conversation_event,
     ensure_memory_files,
     maybe_handle_memory_command,
+    recent_conversation_events,
     search_user_heuristics,
 )
 from core.public_hive_bridge import PublicHiveBridge
@@ -104,6 +105,45 @@ from retrieval.swarm_query import dispatch_query_shard
 from retrieval.web_adapter import WebAdapter
 
 _log = logging.getLogger(__name__)
+
+
+def _augment_history_from_session_log(
+    history: list[dict[str, str]] | None,
+    *,
+    session_id: str,
+    user_text: str,
+    limit: int = 6,
+) -> list[dict[str, str]]:
+    normalized_history = [dict(item) for item in list(history or []) if isinstance(item, dict)]
+    if len(normalized_history) > 1:
+        return normalized_history
+    normalized_session = str(session_id or "").strip()
+    normalized_user = str(user_text or "").strip()
+    if not normalized_session or not normalized_user:
+        return normalized_history
+
+    hydrated_history: list[dict[str, str]] = []
+    for event in recent_conversation_events(normalized_session, limit=max(1, int(limit))):
+        if not isinstance(event, dict):
+            continue
+        event_user = str(event.get("user") or "").strip()
+        event_assistant = str(event.get("assistant") or "").strip()
+        if event_user:
+            hydrated_history.append({"role": "user", "content": event_user})
+        if event_assistant:
+            hydrated_history.append({"role": "assistant", "content": event_assistant})
+
+    if not hydrated_history:
+        return normalized_history
+
+    if normalized_history:
+        last_message = normalized_history[-1]
+        if (
+            str(last_message.get("role") or "").strip().lower() == "user"
+            and str(last_message.get("content") or "").strip() == normalized_user
+        ):
+            return [*hydrated_history, *normalized_history]
+    return [*hydrated_history, {"role": "user", "content": normalized_user}]
 
 _PATCH_COMPAT_EXPORTS = (
     pick_autonomous_research_signal,
@@ -255,6 +295,11 @@ class NullaAgent(
         session_id = session_id_override or runtime_session_id(device=self.device, persona_id=self.persona_id)
         self._mark_user_activity()
         runtime_source_context = dict(source_context or {})
+        runtime_source_context["conversation_history"] = _augment_history_from_session_log(
+            runtime_source_context.get("conversation_history"),
+            session_id=session_id,
+            user_text=user_input,
+        )
         interpreted = adapt_user_input(user_input, session_id=session_id)
         effective_input = interpreted.reconstructed_text or interpreted.normalized_text or user_input
         normalized_input = str(interpreted.normalized_text or "").strip()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from core.reasoning_engine import explicit_planner_style_requested
@@ -61,6 +62,28 @@ def explicit_runtime_workflow_request(*, user_input: str, task_class: str) -> bo
         return False
     lowered = f" {text.lower()} "
     if looks_like_execution_request(text, task_class="unknown"):
+        return True
+    if any(
+        marker in lowered
+        for marker in (
+            " what branch and commit ",
+            " current branch ",
+            " head commit ",
+            " recent commits ",
+            " git summary ",
+            " git activity ",
+            " git status ",
+            " working tree ",
+            " how many branches ",
+            " how many commits ",
+            " branch count ",
+            " commit count ",
+            " commits today ",
+            " commits yesterday ",
+        )
+    ):
+        return True
+    if re.search(r"\b(?:last|recent)\s+\d+\s+commits?\b", lowered):
         return True
     if any(marker in lowered for marker in (" retry ", " rerun ", " rerun it ", " run tests ", " inspect logs ")):
         return True

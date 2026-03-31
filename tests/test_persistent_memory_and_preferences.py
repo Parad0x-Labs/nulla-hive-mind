@@ -152,6 +152,7 @@ def test_extract_requested_agent_name_handles_natural_language_rename() -> None:
     assert extract_requested_agent_name("I renaming you to Cornholio, and my name is SLS") == "Cornholio"
     assert extract_requested_agent_name("rename yourself to Cornholio") == "Cornholio"
     assert extract_requested_agent_name("your name is Cornholio now") == "Cornholio"
+    assert extract_requested_agent_name("you are acting weird but create hello world file and save it as .txt in Marchtest folder") is None
 
 
 def test_rename_command_respects_owner_authority() -> None:

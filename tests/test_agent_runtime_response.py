@@ -153,3 +153,22 @@ def test_routing_payload_is_stripped_from_generic_user_reply() -> None:
     )
 
     assert decorated == "I finished the work and stripped the internal routing details from the reply."
+
+
+def test_grounded_workspace_search_result_is_not_mistaken_for_routing_leak() -> None:
+    agent = _build_agent()
+
+    decorated = agent._decorate_chat_response(
+        ChatTurnResult(
+            text=(
+                'Search matches for "provider_capability_truth":\n'
+                "- notes.md:1 provider_capability_truth is documented here"
+            ),
+            response_class=ResponseClass.UTILITY_ANSWER,
+        ),
+        session_id="openclaw:workspace-search-provider-capability-truth",
+        source_context={"surface": "openclaw", "platform": "openclaw"},
+    )
+
+    assert decorated.startswith('Search matches for "provider_capability_truth"')
+    assert "stripped the internal routing details" not in decorated.lower()

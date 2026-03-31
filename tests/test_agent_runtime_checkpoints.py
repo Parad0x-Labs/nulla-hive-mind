@@ -172,3 +172,18 @@ def test_should_keep_ai_first_chat_lane_facade_matches_extracted_policy() -> Non
         source_context={"surface": "channel"},
         checkpoint_state={},
     )
+
+
+def test_should_not_keep_ai_first_lane_for_runtime_git_truth_prompt() -> None:
+    agent = _build_agent()
+    interpretation = SimpleNamespace(as_context=lambda: {}, topic_hints=[])
+
+    keep_lane = agent._should_keep_ai_first_chat_lane(
+        user_input="what branch and commit are you running on right now?",
+        classification={"task_class": "unknown"},
+        interpretation=interpretation,
+        source_context={"surface": "api", "platform": "api"},
+        checkpoint_state={},
+    )
+
+    assert keep_lane is False

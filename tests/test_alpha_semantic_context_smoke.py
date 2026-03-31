@@ -52,8 +52,8 @@ ORDINARY_CHAT_SMOKE_CASES = (
 )
 ORDINARY_CHAT_FAST_PATH_PROMPTS = {"hi", "yo"}
 ORDINARY_CHAT_FAST_PATH_SNIPPETS = {
-    "hi": "what do you need?",
-    "yo": "what do you need?",
+    "hi": "what are we solving?",
+    "yo": "what needs fixing?",
 }
 
 

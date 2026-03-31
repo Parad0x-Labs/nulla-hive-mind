@@ -199,6 +199,15 @@ def handle_turn_frontdoor(
             )
         }
 
+    machine_download = agent._maybe_handle_direct_machine_download_request(
+        raw_user_input,
+        session_id=session_id,
+        source_surface=source_surface,
+        source_context=source_context,
+    )
+    if machine_download is not None:
+        return {"result": machine_download}
+
     machine_write = agent._maybe_handle_direct_machine_write_request(
         raw_user_input,
         session_id=session_id,
@@ -218,13 +227,22 @@ def handle_turn_frontdoor(
         return {"result": machine_write_guard}
 
     machine_read = agent._maybe_handle_direct_machine_read_request(
-        effective_input,
+        raw_user_input,
         session_id=session_id,
         source_surface=source_surface,
         source_context=source_context,
     )
     if machine_read is not None:
         return {"result": machine_read}
+
+    workspace_runtime = agent._maybe_handle_direct_workspace_runtime_request(
+        effective_input,
+        session_id=session_id,
+        source_surface=source_surface,
+        source_context=source_context,
+    )
+    if workspace_runtime is not None:
+        return {"result": workspace_runtime}
 
     capability_truth = agent._maybe_handle_capability_truth_request(
         effective_input,
@@ -265,13 +283,17 @@ def handle_turn_frontdoor(
             )
         }
 
-    smalltalk = agent._smalltalk_fast_path(
-        normalized_input,
-        source_surface=source_surface,
-        session_id=session_id,
-    )
+    smalltalk = None
+    for candidate in (normalized_input, effective_input, raw_user_input):
+        smalltalk = agent._smalltalk_fast_path(
+            candidate,
+            source_surface=source_surface,
+            session_id=session_id,
+        )
+        if smalltalk:
+            break
     if smalltalk:
-        smalltalk_phrase = normalized_input.lower().strip(" \t\r\n?!.,")
+        smalltalk_phrase = " ".join(str(raw_user_input or normalized_input).lower().split()).strip(" \t\r\n?!.,")
         return {
             "result": agent._fast_path_result(
                 session_id=session_id,

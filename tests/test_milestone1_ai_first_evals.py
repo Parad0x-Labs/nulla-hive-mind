@@ -20,10 +20,10 @@ FORBIDDEN_PLANNER_LEAKS = (
 )
 
 TRIVIAL_CHAT_FAST_PATH_CASES = (
+    ("help", "utility_answer", "wired on this runtime:"),
     ("hey", "smalltalk", "what do you need?"),
     ("hello", "smalltalk", "what do you need?"),
-    ("how are you", "smalltalk", "running stable. memory online, mesh ready."),
-    ("help", "utility_answer", "wired on this runtime:"),
+    ("how are you", "smalltalk", "running clean. what do you need?"),
 )
 
 PLAIN_TEXT_ROUTING_CASES = (
@@ -187,11 +187,7 @@ def test_eval_trivial_chat_fast_path(
     expected_snippet: str,
 ) -> None:
     agent = make_agent()
-    _configure_model_chat_path(
-        agent,
-        context_result_factory,
-        decision=_provider_decision(task_hash=f"greeting-{prompt}", output_text="stale provider text"),
-    )
+    agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("trivial chat should stay on fast path"))  # type: ignore[assignment]
 
     with mock.patch("apps.nulla_agent.audit_logger.log") as audit_log, _common_runtime_patch_stack():
         result = agent.run_once(
@@ -200,7 +196,7 @@ def test_eval_trivial_chat_fast_path(
         )
 
     events = _chat_truth_events(audit_log)
-    assert expected_snippet in result["response"].lower()
+    assert expected_snippet.lower() in result["response"].lower()
     assert result["response_class"] == expected_class
     assert len(events) == 1
     assert events[0]["fast_path_hit"] is True
@@ -208,6 +204,7 @@ def test_eval_trivial_chat_fast_path(
     assert events[0]["model_final_answer_hit"] is False
     assert events[0]["template_renderer_hit"] is False
     assert result["model_execution"]["used_model"] is False
+    assert agent.memory_router.resolve.call_count == 0
     assert agent.memory_router.resolve.call_count == 0
 
 

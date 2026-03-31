@@ -212,6 +212,49 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
             self.assertEqual(hints["path"], "~/Desktop/MarchTest")
             self.assertEqual(hints["action"], "created")
 
+    def test_machine_read_file_reads_safe_local_text_file_and_hints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            desktop = Path(tmpdir) / "Desktop"
+            desktop.mkdir(parents=True, exist_ok=True)
+            target = desktop / "probe.txt"
+            target.write_text("alpha\nbeta\n", encoding="utf-8")
+
+            read = execute_runtime_tool(
+                "machine.read_file",
+                {"path": "~/Desktop/probe.txt", "start_line": 1, "max_lines": 10, "verbatim": True},
+                source_context={"workspace": tmpdir},
+            )
+            assert read is not None
+            self.assertTrue(read.ok)
+            self.assertEqual(read.response_text, "alpha\nbeta")
+
+            hints = extract_observation_followup_hints(read.details["observation"])
+            self.assertEqual(hints["path"], "~/Desktop/probe.txt")
+            self.assertTrue(hints["verbatim"])
+            self.assertEqual(hints["content"], "alpha\nbeta")
+            self.assertEqual(hints["lines"][1]["text"], "beta")
+
+    def test_machine_read_file_blocked_path_is_explicitly_honest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch.dict(
+            os.environ,
+            {"HOME": tmpdir},
+            clear=False,
+        ):
+            blocked = execute_runtime_tool(
+                "machine.read_file",
+                {"path": "/private/tmp/nulla-secret.txt", "start_line": 1, "max_lines": 10, "verbatim": True},
+                source_context={"workspace": tmpdir},
+            )
+            assert blocked is not None
+            self.assertFalse(blocked.ok)
+            self.assertEqual(blocked.status, "not_allowed")
+            self.assertIn("cannot read that path", blocked.response_text.lower())
+            self.assertIn("read files inside", blocked.response_text.lower())
+
     def test_machine_write_file_creates_safe_local_text_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir, mock.patch("core.runtime_execution_tools.Path.home", return_value=Path(tmpdir)), mock.patch.dict(
             os.environ,

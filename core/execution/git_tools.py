@@ -120,6 +120,8 @@ def git_summary_workspace(arguments: dict[str, Any], *, workspace_root: Path) ->
         f"--since={yesterday_start.isoformat()}",
         f"--before={today_cutoff.isoformat()}",
     )
+    recent_limit = max(0, min(int(arguments.get("recent_limit") or 0), 10))
+    recent_commits = _git_recent_commits(target, limit=recent_limit) if recent_limit else []
     total_branch_count = len(local_branches) + len(remote_branches)
     summary_head = (
         f"Git summary: branch {branch or '(detached HEAD)'} @ {commit or 'unknown'}; "
@@ -143,6 +145,10 @@ def git_summary_workspace(arguments: dict[str, Any], *, workspace_root: Path) ->
             f"- commit day boundary timezone: {timezone_label}",
         ]
     )
+    if recent_commits:
+        response_text += "\n- recent commits:"
+        for row in recent_commits:
+            response_text += f"\n  - {row['commit']} ({row['date']}): {row['subject']}"
     return {
         "ok": True,
         "status": "executed",
@@ -161,6 +167,7 @@ def git_summary_workspace(arguments: dict[str, Any], *, workspace_root: Path) ->
             "today_commit_count": today_commit_count,
             "yesterday_date": yesterday_date,
             "yesterday_commit_count": yesterday_commit_count,
+            "recent_commits": recent_commits,
             "commit_count_scope": "all_visible_refs_unique",
             "timezone_label": timezone_label,
             "artifacts": [
@@ -239,3 +246,26 @@ def _git_rev_list_count(cwd: Path, *args: str) -> int:
         return max(0, int(str(result.get("stdout") or "0").strip() or "0"))
     except Exception:
         return 0
+
+
+def _git_recent_commits(cwd: Path, *, limit: int) -> list[dict[str, str]]:
+    if limit <= 0:
+        return []
+    result = _run_git(
+        ["log", f"-n{limit}", "--date=short", "--pretty=format:%h%x09%ad%x09%s"],
+        cwd=cwd,
+    )
+    rows: list[dict[str, str]] = []
+    for line in str(result.get("stdout") or "").splitlines():
+        commit, _, rest = line.partition("\t")
+        date, _, subject = rest.partition("\t")
+        if not str(commit).strip():
+            continue
+        rows.append(
+            {
+                "commit": str(commit).strip(),
+                "date": str(date).strip(),
+                "subject": str(subject).strip(),
+            }
+        )
+    return rows

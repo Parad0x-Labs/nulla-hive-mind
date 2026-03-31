@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
 from typing import Any
+from urllib import request as urllib_request
 
 from core.bootstrap_context import canonical_runtime_transcript
 from core.onboarding import get_agent_display_name
+from core.persistent_memory import recent_conversation_events
 from core.runtime_execution_tools import execute_runtime_tool
 
 _MACHINE_DIRECTORY_MARKERS = (" desktop ", " downloads ", " documents ", " docs ")
@@ -85,6 +88,7 @@ _MACHINE_SPEC_MARKERS = (
 _TRANSCRIPT_EXPORT_VERBS = (" export ", " save ", " write ", " dump ")
 _TRANSCRIPT_EXPORT_SUBJECTS = (" chat ", " conversation ", " transcript ", " session ")
 _SAFE_MACHINE_TEXT_EXTENSIONS = ("txt", "md", "json", "yaml", "yml", "toml")
+_SAFE_MACHINE_DOWNLOAD_EXTENSIONS = ("html", "htm", "txt", "md", "json", "xml", "csv", "js", "css")
 _MACHINE_SPEC_HISTORY_MARKERS = (
     "machine specs for this host",
     "screen size:",
@@ -104,6 +108,11 @@ _MACHINE_SPEC_CORRECTION_MARKERS = (
     " mix-up ",
     " mixed up ",
     " lost your head ",
+)
+_MACHINE_DOWNLOAD_TITLE_MARKERS = (
+    " page title ",
+    " title exactly ",
+    " title verbatim ",
 )
 
 
@@ -155,6 +164,8 @@ def looks_like_supported_machine_read_request(user_input: str) -> bool:
         for phrase in ("folders and files", "files and folders", "folder and file")
     )
     if asks_for_directory and asks_for_listing:
+        return True
+    if _extract_machine_file_read_target(user_input) is not None:
         return True
     return any(marker in padded for marker in _MACHINE_SPEC_MARKERS)
 
@@ -344,6 +355,75 @@ def maybe_handle_direct_machine_write_request(
     )
 
 
+def maybe_handle_direct_machine_download_request(
+    agent: Any,
+    user_input: str,
+    *,
+    session_id: str,
+    source_surface: str,
+    source_context: dict[str, object] | None,
+) -> dict[str, Any] | None:
+    if source_surface not in {"channel", "openclaw", "api"}:
+        return None
+    download_target = _extract_machine_download_target(user_input)
+    if download_target is None:
+        return None
+    try:
+        with urllib_request.urlopen(download_target["url"], timeout=20) as response:
+            raw_bytes = response.read(1_500_001)
+            content_type = str(getattr(response.headers, "get_content_type", lambda: "")() or response.headers.get("Content-Type") or "").lower()
+            charset = str(getattr(response.headers, "get_content_charset", lambda _default=None: None)() or "utf-8").strip() or "utf-8"
+    except Exception as exc:
+        return agent._fast_path_result(
+            session_id=session_id,
+            user_input=user_input,
+            response=f"I couldn't download that URL in this run: {exc!s}",
+            confidence=0.82,
+            source_context=source_context,
+            reason="machine_download_fast_path",
+        )
+    if len(raw_bytes) > 1_500_000:
+        return agent._fast_path_result(
+            session_id=session_id,
+            user_input=user_input,
+            response="That download is too large for the bounded local text download lane.",
+            confidence=0.9,
+            source_context=source_context,
+            reason="machine_download_fast_path",
+        )
+    if content_type and not (
+        content_type.startswith("text/")
+        or content_type in {"application/json", "application/javascript", "application/xml"}
+    ):
+        return agent._fast_path_result(
+            session_id=session_id,
+            user_input=user_input,
+            response=f"I only save bounded text-like downloads in this lane, and that URL returned `{content_type}`.",
+            confidence=0.9,
+            source_context=source_context,
+            reason="machine_download_fast_path",
+        )
+    try:
+        content = raw_bytes.decode(charset, errors="replace")
+    except Exception:
+        content = raw_bytes.decode("utf-8", errors="replace")
+    execution = execute_runtime_tool(
+        "machine.write_file",
+        {"path": download_target["path"], "content": content},
+        source_context=dict(source_context or {}),
+    )
+    if execution is None:
+        return None
+    return agent._fast_path_result(
+        session_id=session_id,
+        user_input=user_input,
+        response=str(execution.response_text or "").strip(),
+        confidence=0.98 if execution.ok else 0.88,
+        source_context=source_context,
+        reason="machine_download_fast_path",
+    )
+
+
 def _extract_machine_transcript_export_target(user_input: str) -> str:
     raw = " ".join(str(user_input or "").split()).strip()
     lowered = f" {raw.lower()} "
@@ -373,6 +453,43 @@ def _extract_machine_transcript_export_target(user_input: str) -> str:
     if folder:
         return f"{root}/{folder}/{filename}".replace("//", "/")
     return f"{root}/{filename}"
+
+
+def _extract_machine_file_read_target(raw: str) -> dict[str, Any] | None:
+    text = " ".join(str(raw or "").split()).strip()
+    lowered = f" {text.lower()} "
+    if not text:
+        return None
+    if not any(
+        marker in lowered
+        for marker in (
+            " read ",
+            " open ",
+            " quote ",
+            " what does ",
+            " tell me exactly ",
+            " tell me what ",
+        )
+    ):
+        return None
+    quoted_match = re.search(r"[`\"'](?P<path>(?:~|/)[^`\"']+)[`\"']", text)
+    if quoted_match:
+        path = str(quoted_match.group("path") or "").strip()
+    else:
+        plain_match = re.search(r"(?P<path>(?:~|/)[^\s`\"']+\.[A-Za-z0-9_+-]+)", text)
+        if not plain_match:
+            return None
+        path = str(plain_match.group("path") or "").strip()
+    if not path:
+        return None
+    normalized_text = re.sub(r"[\?\!\.,:;]+", " ", text.lower())
+    verbatim = bool(re.search(r"\b(?:exactly|quote|verbatim)\b", normalized_text)) or "whole file" in normalized_text
+    return {
+        "path": path,
+        "start_line": 1,
+        "max_lines": 120,
+        "verbatim": verbatim,
+    }
 
 
 def _extract_machine_text_file_write_target(
@@ -421,9 +538,18 @@ def _extract_machine_text_file_content(raw: str) -> str:
             r"\bcreate\s+(?:a\s+)?(?P<content>[A-Za-z0-9][A-Za-z0-9 _-]{0,120}?)\s+(?:text|txt)\s+file(?=\s+(?:in|into|inside|under|to|place|put|save|write|store)\b|$)",
             re.IGNORECASE | re.DOTALL,
         ),
+        re.compile(
+            rf"\bcreate\s+(?:a\s+)?(?P<content>[A-Za-z0-9][A-Za-z0-9 _-]{{0,120}}?)\s+file(?=\s+(?:and\s+)?save\s+it\s+as\s*\.\s*(?:{'|'.join(_SAFE_MACHINE_TEXT_EXTENSIONS)})\b)",
+            re.IGNORECASE | re.DOTALL,
+        ),
         re.compile(r"\bwith(?: exactly)?(?: this)?(?: file)?(?: content| text)?\s*:\s*(?P<content>.+)$", re.IGNORECASE | re.DOTALL),
+        re.compile(
+            r"\bwith\s+text\s*:?\s*(?P<content>.+?)(?=\s+(?:and\s+)?(?:place|put|save|write|store)\b|\s+(?:in|into|inside|under|to)\b|$)",
+            re.IGNORECASE | re.DOTALL,
+        ),
         re.compile(r"\bthat says\s+(?P<content>.+?)(?=\s+(?:and\s+)?(?:place|put|save|write|store)\b|\s+(?:in|into|inside|under|to)\b|$)", re.IGNORECASE | re.DOTALL),
         re.compile(r"\bthat reads\s+(?P<content>.+?)(?=\s+(?:and\s+)?(?:place|put|save|write|store)\b|\s+(?:in|into|inside|under|to)\b|$)", re.IGNORECASE | re.DOTALL),
+        re.compile(r"\bsaying\s+(?P<content>.+?)(?=\s+(?:and\s+)?(?:place|put|save|write|store)\b|\s+(?:in|into|inside|under|to)\b|$)", re.IGNORECASE | re.DOTALL),
         re.compile(r"\bwith\s+(?P<content>.+?)\s+text(?=\s+(?:and\s+)?(?:place|put|save|write|store)\b|\s+(?:in|into|inside|under|to)\b|$)", re.IGNORECASE | re.DOTALL),
         re.compile(r"\bwith\s+(?P<content>.+?)(?=\s+(?:and\s+)?(?:place|put|save|write|store)\b|\s+(?:in|into|inside|under|to)\b|$)", re.IGNORECASE | re.DOTALL),
     )
@@ -434,11 +560,26 @@ def _extract_machine_text_file_content(raw: str) -> str:
         content = str(match.group("content") or "").strip().strip("`")
         if content:
             content = re.sub(r"^(?:a|an|the)\s+", "", content, flags=re.IGNORECASE)
+            content = re.sub(r"^(?:file\s+)?text\s+", "", content, flags=re.IGNORECASE)
             return content
     return ""
 
 
 def _extract_machine_text_filename(raw: str) -> str:
+    quoted_match = re.search(
+        rf"[`\"'](?P<name>[^`\"']+?\.(?:{'|'.join(_SAFE_MACHINE_TEXT_EXTENSIONS)}))[`\"']",
+        raw,
+        re.IGNORECASE,
+    )
+    if quoted_match:
+        return str(quoted_match.group("name") or "").strip()
+    named_match = re.search(
+        rf"\bfile\s+named\s+(?P<name>[A-Za-z0-9][A-Za-z0-9 _.:-]*?\.(?:{'|'.join(_SAFE_MACHINE_TEXT_EXTENSIONS)}))(?=\s+(?:with|that|in|inside|under|to|on)\b|$)",
+        raw,
+        re.IGNORECASE,
+    )
+    if named_match:
+        return str(named_match.group("name") or "").strip()
     match = re.search(
         rf"\b(?P<name>[A-Za-z0-9_.-]+(?:\.({'|'.join(_SAFE_MACHINE_TEXT_EXTENSIONS)})))\b",
         raw,
@@ -453,24 +594,73 @@ def _extract_machine_text_extension(raw: str, *, explicit_filename: str) -> str:
     if explicit_filename and "." in explicit_filename:
         return explicit_filename.rsplit(".", 1)[-1].lower()
     match = re.search(
-        rf"(?P<ext>\.({'|'.join(_SAFE_MACHINE_TEXT_EXTENSIONS)}))\b",
+        rf"(?P<ext>\.\s*({'|'.join(_SAFE_MACHINE_TEXT_EXTENSIONS)}))\b",
         raw,
         re.IGNORECASE,
     )
-    if not match:
-        return "txt" if re.search(r"\b(?:text|txt)\s+file\b", raw, re.IGNORECASE) else ""
-    return str(match.group("ext") or "").strip().lstrip(".").lower()
+    if match:
+        return re.sub(r"^\.\s*", "", str(match.group("ext") or "").strip()).lower()
+    if re.search(r"\b(?:text|txt)\s+file\b", raw, re.IGNORECASE):
+        return "txt"
+    naked_match = re.search(
+        rf"\b(?P<ext>{'|'.join(_SAFE_MACHINE_TEXT_EXTENSIONS)}|text)\b",
+        raw,
+        re.IGNORECASE,
+    )
+    if not naked_match:
+        return ""
+    ext = str(naked_match.group("ext") or "").strip().lower()
+    return "txt" if ext == "text" else ext
 
 
 def _extract_machine_folder_target(raw: str) -> str:
-    match = re.search(
-        r"\b(?:in|into|inside|under|to|place it in|put it in|save it in|write it in|place it under|put it under|save it under|write it under)\s+(?:the\s+)?(?P<folder>[A-Za-z0-9 _.-]+?)\s+folder\b",
+    desktop_make_match = re.search(
+        r"\bon\s+(?:my\s+)?(?:desktop|downloads|documents|docs)\s+(?:make|create)\s+(?P<folder>[A-Za-z0-9 _.-]+?)(?=\s+and\s+(?:put|save|write|store)\b)",
         raw,
         re.IGNORECASE,
     )
-    if not match:
+    if desktop_make_match:
+        return _sanitize_safe_machine_segment(str(desktop_make_match.group("folder") or "").strip())
+    match = re.search(
+        r"\b(?:in|into|inside|under|to|place it in|put it in|save it in|write it in|place it under|put it under|save it under|write it under)\s+(?:the\s+)?(?P<folder>[A-Za-z0-9 _.-]+?)\s+(?:folder|fldr|fldre|floder)\b",
+        raw,
+        re.IGNORECASE,
+    )
+    if match:
+        return _sanitize_safe_machine_segment(str(match.group("folder") or "").strip())
+    named_folder_match = re.search(
+        r"\b(?:folder|directory)\s+(?:called|named)\s+(?P<folder>[A-Za-z0-9 _.-]+?)(?=\s+on\s+(?:my\s+)?(?:desktop|downloads|documents|docs)\b)",
+        raw,
+        re.IGNORECASE,
+    )
+    if not named_folder_match:
+        named_folder_match = re.search(
+            r"\b(?:create|make)\s+(?:a\s+)?(?:folder|directory)\s+(?P<folder>[A-Za-z0-9 _.-]+?)(?=\s+on\s+(?:my\s+)?(?:desktop|downloads|documents|docs)\b)",
+            raw,
+            re.IGNORECASE,
+        )
+    if named_folder_match:
+        named_folder = _sanitize_safe_machine_segment(str(named_folder_match.group("folder") or "").strip())
+        if named_folder:
+            return named_folder
+    desktop_suffix_match = re.search(
+        r"\b(?:make|create)\s+(?P<folder>[A-Za-z0-9 _.-]+?)\s+on\s+(?:my\s+)?(?:desktop|downloads|documents|docs)(?=\s+and\s+(?:put|save|write|store)\b)",
+        raw,
+        re.IGNORECASE,
+    )
+    if desktop_suffix_match:
+        return _sanitize_safe_machine_segment(str(desktop_suffix_match.group("folder") or "").strip())
+    implicit_match = re.search(
+        r"\b(?:in|into|inside|under|to)\s+(?:the\s+)?(?P<folder>[A-Za-z0-9 _.-]+?)(?=\s+(?:with|that|saying|and|as)\b|$)",
+        raw,
+        re.IGNORECASE,
+    )
+    if not implicit_match:
         return ""
-    return _sanitize_safe_machine_segment(str(match.group("folder") or "").strip())
+    implicit_folder = _sanitize_safe_machine_segment(str(implicit_match.group("folder") or "").strip())
+    if _normalized_safe_machine_segment(implicit_folder) in {"it", "there", "here", "desktop", "downloads", "documents", "docs"}:
+        return ""
+    return implicit_folder
 
 
 def _explicit_safe_machine_root_label(lowered: str) -> str:
@@ -568,6 +758,80 @@ def _render_plaintext_transcript(history: list[dict[str, str]], *, agent_name: s
     return "\n\n".join(blocks).strip()
 
 
+def _extract_machine_download_target(raw: str) -> dict[str, str] | None:
+    text = " ".join(str(raw or "").split()).strip()
+    lowered = f" {text.lower()} "
+    if not text:
+        return None
+    if not any(marker in lowered for marker in (" download ", " fetch ", " grab ")):
+        return None
+    url_match = re.search(r"https?://[^\s'\"`]+", text, re.IGNORECASE)
+    if not url_match:
+        return None
+    url = str(url_match.group(0) or "").rstrip(".,!?);:]")
+    if not url:
+        return None
+    direct_path = _extract_machine_download_path(text)
+    if direct_path:
+        return {"url": url, "path": direct_path}
+    explicit_filename = _extract_machine_download_filename(text)
+    folder = _extract_machine_folder_target(text)
+    root_label = _explicit_safe_machine_root_label(lowered)
+    root_dir = _resolve_safe_machine_root_directory(folder=folder, root_label=root_label)
+    if root_dir is None:
+        return None
+    filename = explicit_filename or _infer_machine_download_filename(url=url)
+    if not filename:
+        return None
+    return {"url": url, "path": _home_relative_safe_machine_path(root_dir / filename)}
+
+
+def _extract_machine_download_filename(raw: str) -> str:
+    quoted_match = re.search(
+        rf"[`\"'](?P<name>[^`\"']+?\.(?:{'|'.join(_SAFE_MACHINE_DOWNLOAD_EXTENSIONS)}))[`\"']",
+        raw,
+        re.IGNORECASE,
+    )
+    if quoted_match:
+        return str(quoted_match.group("name") or "").strip()
+    as_match = re.search(
+        rf"\bas\s+(?P<name>[A-Za-z0-9][A-Za-z0-9 _.:-]*?\.(?:{'|'.join(_SAFE_MACHINE_DOWNLOAD_EXTENSIONS)}))\b",
+        raw,
+        re.IGNORECASE,
+    )
+    if as_match:
+        return str(as_match.group("name") or "").strip()
+    return ""
+
+
+def _extract_machine_download_path(raw: str) -> str:
+    match = re.search(
+        rf"\b(?:into|to|in)\s+(?P<root>desktop|downloads|documents|docs)/(?P<rest>[A-Za-z0-9][A-Za-z0-9 _./-]*?\.(?:{'|'.join(_SAFE_MACHINE_DOWNLOAD_EXTENSIONS)}))\b",
+        raw,
+        re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    root = str(match.group("root") or "").strip().lower()
+    rest = str(match.group("rest") or "").strip().strip("/")
+    if not rest or ".." in rest.split("/"):
+        return ""
+    if root == "desktop":
+        return f"~/Desktop/{rest}"
+    if root == "downloads":
+        return f"~/Downloads/{rest}"
+    return f"~/Documents/{rest}"
+
+
+def _infer_machine_download_filename(*, url: str) -> str:
+    tail = str(url or "").rstrip("/").rsplit("/", 1)[-1].strip()
+    if tail and "." in tail:
+        ext = tail.rsplit(".", 1)[-1].lower()
+        if ext in _SAFE_MACHINE_DOWNLOAD_EXTENSIONS:
+            return tail
+    return "downloaded_page.html"
+
+
 def _recent_machine_specs_context(source_context: dict[str, object] | None) -> bool:
     history = [dict(item) for item in list((source_context or {}).get("conversation_history") or []) if isinstance(item, dict)]
     for message in reversed(history[-8:]):
@@ -617,6 +881,55 @@ def _render_machine_specs_correction_response(execution: Any) -> str:
     return "\n".join(lines)
 
 
+def _looks_like_machine_download_title_followup(
+    user_input: str,
+    *,
+    session_id: str,
+    source_context: dict[str, object] | None,
+) -> bool:
+    normalized = f" {' '.join(str(user_input or '').split()).strip().lower()} "
+    if not normalized.strip():
+        return False
+    if not any(marker in normalized for marker in _MACHINE_DOWNLOAD_TITLE_MARKERS):
+        return False
+    return bool(_recover_recent_machine_download_path(source_context, session_id=session_id))
+
+
+def _recover_recent_machine_download_path(
+    source_context: dict[str, object] | None,
+    *,
+    session_id: str,
+) -> str:
+    history = [dict(item) for item in list((source_context or {}).get("conversation_history") or []) if isinstance(item, dict)]
+    if not history:
+        for event in recent_conversation_events(str(session_id or "").strip(), limit=6):
+            if not isinstance(event, dict):
+                continue
+            event_user = str(event.get("user") or "").strip()
+            event_assistant = str(event.get("assistant") or "").strip()
+            if event_user:
+                history.append({"role": "user", "content": event_user})
+            if event_assistant:
+                history.append({"role": "assistant", "content": event_assistant})
+    for message in reversed(history[-10:]):
+        content = str(message.get("content") or "")
+        direct_match = re.search(r"(~/(?:Desktop|Downloads|Documents)/[^`\s\"']+\.[A-Za-z0-9_+-]+)", content)
+        if direct_match:
+            return str(direct_match.group(1) or "").strip()
+        download_target = _extract_machine_download_target(content)
+        if download_target is not None:
+            return str(download_target.get("path") or "").strip()
+    return ""
+
+
+def _extract_html_title(text: str) -> str:
+    match = re.search(r"<title[^>]*>\s*(?P<title>.*?)\s*</title>", str(text or ""), re.IGNORECASE | re.DOTALL)
+    if not match:
+        return ""
+    title = html.unescape(str(match.group("title") or "").strip())
+    return " ".join(title.split())
+
+
 def maybe_handle_direct_machine_read_request(
     agent: Any,
     user_input: str,
@@ -627,6 +940,33 @@ def maybe_handle_direct_machine_read_request(
 ) -> dict[str, Any] | None:
     if source_surface not in {"channel", "openclaw", "api"}:
         return None
+    if _looks_like_machine_download_title_followup(
+        user_input,
+        session_id=session_id,
+        source_context=source_context,
+    ):
+        download_path = _recover_recent_machine_download_path(source_context, session_id=session_id)
+        execution = execute_runtime_tool(
+            "machine.read_file",
+            {
+                "path": download_path,
+                "start_line": 1,
+                "max_lines": 200,
+                "verbatim": True,
+            },
+            source_context=dict(source_context or {}),
+        )
+        if execution is not None and getattr(execution, "ok", False):
+            title = _extract_html_title(str(getattr(execution, "response_text", "") or ""))
+            if title:
+                return agent._fast_path_result(
+                    session_id=session_id,
+                    user_input=user_input,
+                    response=title,
+                    confidence=0.99,
+                    source_context=source_context,
+                    reason="machine_download_title_fast_path",
+                )
     correction_followup = _looks_like_machine_specs_correction_followup(
         user_input,
         source_context=source_context,
@@ -641,19 +981,25 @@ def maybe_handle_direct_machine_read_request(
             source_context=dict(source_context or {}),
         )
     else:
-        decision = agent._plan_tool_workflow(
-            user_text=user_input,
-            task_class="unknown",
-            executed_steps=[],
-            source_context=dict(source_context or {}),
-        )
-        payload = dict(decision.next_payload or {})
-        intent = str(payload.get("intent") or "").strip()
-        if intent not in {"machine.list_directory", "machine.inspect_specs"}:
-            return None
+        file_read_target = _extract_machine_file_read_target(user_input)
+        if file_read_target is not None:
+            intent = "machine.read_file"
+            payload_arguments = file_read_target
+        else:
+            decision = agent._plan_tool_workflow(
+                user_text=user_input,
+                task_class="unknown",
+                executed_steps=[],
+                source_context=dict(source_context or {}),
+            )
+            payload = dict(decision.next_payload or {})
+            intent = str(payload.get("intent") or "").strip()
+            if intent not in {"machine.list_directory", "machine.inspect_specs"}:
+                return None
+            payload_arguments = dict(payload.get("arguments") or {})
         execution = execute_runtime_tool(
             intent,
-            dict(payload.get("arguments") or {}),
+            payload_arguments,
             source_context=dict(source_context or {}),
         )
     if execution is None:

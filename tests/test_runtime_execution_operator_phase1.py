@@ -201,6 +201,38 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
             self.assertEqual(observation["today_commit_count"], 2)
             self.assertEqual(observation["yesterday_commit_count"], 1)
 
+    def test_workspace_git_summary_can_include_recent_commit_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "tests@example.test"], cwd=workspace, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "Tests"], cwd=workspace, check=True, capture_output=True)
+
+            env = {
+                **os.environ,
+                "GIT_AUTHOR_DATE": "2026-03-30T12:00:00+00:00",
+                "GIT_COMMITTER_DATE": "2026-03-30T12:00:00+00:00",
+            }
+            for index in range(1, 4):
+                (workspace / "tracked.py").write_text(f"print('{index}')\n", encoding="utf-8")
+                subprocess.run(["git", "add", "tracked.py"], cwd=workspace, check=True, capture_output=True, env=env)
+                subprocess.run(["git", "commit", "-m", f"commit-{index}"], cwd=workspace, check=True, capture_output=True, env=env)
+
+            summary = execute_runtime_tool(
+                "workspace.git_summary",
+                {"recent_limit": 3},
+                source_context={"workspace": tmpdir},
+            )
+            assert summary is not None
+            self.assertTrue(summary.ok)
+            self.assertIn("- recent commits:", summary.response_text)
+            self.assertIn("commit-3", summary.response_text)
+            self.assertIn("commit-2", summary.response_text)
+            self.assertIn("commit-1", summary.response_text)
+            recent_commits = summary.details["observation"]["recent_commits"]
+            self.assertEqual(len(recent_commits), 3)
+            self.assertEqual(recent_commits[0]["subject"], "commit-3")
+
     def test_workspace_run_tests_executes_validation_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir)

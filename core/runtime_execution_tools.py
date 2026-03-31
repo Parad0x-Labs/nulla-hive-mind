@@ -269,6 +269,17 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
             "display_current_resolution": str(payload.get("display_current_resolution") or "").strip(),
             "screen_size": str(payload.get("screen_size") or "").strip(),
         }
+    if intent == "machine.read_file":
+        lines = [dict(item) for item in list(payload.get("lines") or []) if isinstance(item, dict)]
+        return {
+            "intent": intent,
+            "path": str(payload.get("path") or "").strip(),
+            "start_line": int(payload.get("start_line") or 1),
+            "line_count": int(payload.get("line_count") or 0),
+            "lines": lines,
+            "content": "\n".join(str(item.get("text") or "") for item in lines),
+            "verbatim": bool(payload.get("verbatim", False)),
+        }
     if intent == "machine.ensure_directory":
         return {
             "intent": intent,
@@ -386,6 +397,7 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
             "today_commit_count": int(payload.get("today_commit_count") or 0),
             "yesterday_date": str(payload.get("yesterday_date") or "").strip(),
             "yesterday_commit_count": int(payload.get("yesterday_commit_count") or 0),
+            "recent_commits": [dict(item) for item in list(payload.get("recent_commits") or []) if isinstance(item, dict)],
             "commit_count_scope": str(payload.get("commit_count_scope") or "").strip(),
             "timezone_label": str(payload.get("timezone_label") or "").strip(),
         }
@@ -481,6 +493,8 @@ def execute_runtime_tool(
             return _list_machine_directory(arguments)
         if intent == "machine.inspect_specs":
             return _inspect_machine_specs()
+        if intent == "machine.read_file":
+            return _read_machine_file(arguments)
         if intent == "machine.ensure_directory":
             return _ensure_machine_directory(arguments)
         if intent == "machine.write_file":
@@ -749,19 +763,20 @@ def _list_files(arguments: dict[str, Any], *, workspace_root: Path) -> RuntimeEx
 def _list_machine_directory(arguments: dict[str, Any]) -> RuntimeExecutionResult:
     try:
         target = _resolve_machine_directory(arguments.get("path"))
-    except ValueError as exc:
+    except ValueError:
+        allowed_roots = [_home_relative_label(root) for root in _safe_machine_roots()]
         return RuntimeExecutionResult(
             handled=True,
             ok=False,
             status="not_allowed",
-            response_text=str(exc),
+            response_text=f"I can only inspect safe local directories in this lane: {', '.join(allowed_roots)}.",
             details={
                 "observation": _tool_observation(
                     intent="machine.list_directory",
                     tool_surface="machine",
                     ok=False,
                     status="not_allowed",
-                    allowed_roots=[_home_relative_label(root) for root in _safe_machine_roots()],
+                    allowed_roots=allowed_roots,
                 ),
             },
         )
@@ -847,6 +862,144 @@ def _list_machine_directory(arguments: dict[str, Any]) -> RuntimeExecutionResult
                 count=len(entries),
                 directories_only=directories_only,
                 entries=entries,
+            ),
+        },
+    )
+
+
+def _read_machine_file(arguments: dict[str, Any]) -> RuntimeExecutionResult:
+    if not policy_engine.get("filesystem.allow_read_workspace", True):
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="disabled",
+            response_text="Safe local file reads are disabled by policy.",
+            details={
+                "observation": _tool_observation(
+                    intent="machine.read_file",
+                    tool_surface="machine",
+                    ok=False,
+                    status="disabled",
+                ),
+            },
+        )
+    try:
+        target = _resolve_machine_directory(arguments.get("path"))
+    except ValueError:
+        allowed_roots = [_home_relative_label(root) for root in _safe_machine_roots()]
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="not_allowed",
+            response_text=(
+                "I cannot read that path in this lane. "
+                f"I can only read files inside: {', '.join(allowed_roots)}."
+            ),
+            details={
+                "observation": _tool_observation(
+                    intent="machine.read_file",
+                    tool_surface="machine",
+                    ok=False,
+                    status="not_allowed",
+                    allowed_roots=allowed_roots,
+                ),
+            },
+        )
+    if not target.exists() or not target.is_file():
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="not_found",
+            response_text=f"Local file `{_home_relative_label(target)}` does not exist.",
+            details={
+                "path": _home_relative_label(target),
+                "observation": _tool_observation(
+                    intent="machine.read_file",
+                    tool_surface="machine",
+                    ok=False,
+                    status="not_found",
+                    path=_home_relative_label(target),
+                ),
+            },
+        )
+    if not _is_probably_text(target):
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="binary_file",
+            response_text=f"Local file `{_home_relative_label(target)}` does not look like readable text.",
+            details={
+                "path": _home_relative_label(target),
+                "observation": _tool_observation(
+                    intent="machine.read_file",
+                    tool_surface="machine",
+                    ok=False,
+                    status="binary_file",
+                    path=_home_relative_label(target),
+                ),
+            },
+        )
+    start_line = max(1, int(arguments.get("start_line") or 1))
+    max_lines = max(1, min(int(arguments.get("max_lines") or 160), 400))
+    verbatim = bool(arguments.get("verbatim", False))
+    content = target.read_text(encoding="utf-8", errors="replace").splitlines()
+    chunk = content[start_line - 1 : start_line - 1 + max_lines]
+    if not chunk:
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=True,
+            status="empty_slice",
+            response_text=f"Local file `{_home_relative_label(target)}` has no lines in that range.",
+            details={
+                "path": _home_relative_label(target),
+                "start_line": start_line,
+                "line_count": 0,
+                "lines": [],
+                "observation": _tool_observation(
+                    intent="machine.read_file",
+                    tool_surface="machine",
+                    ok=True,
+                    status="empty_slice",
+                    path=_home_relative_label(target),
+                    start_line=start_line,
+                    line_count=0,
+                    lines=[],
+                    verbatim=verbatim,
+                ),
+            },
+        )
+    numbered = [f"{start_line + offset}: {line}" for offset, line in enumerate(chunk)]
+    line_rows = [
+        {"line_number": start_line + offset, "text": line}
+        for offset, line in enumerate(chunk)
+    ]
+    rendered_body = "\n".join(chunk) if verbatim else "\n".join(numbered)
+    response_text = (
+        rendered_body
+        if verbatim
+        else f"Local file `{_home_relative_label(target)}`:\n" + rendered_body
+    )
+    return RuntimeExecutionResult(
+        handled=True,
+        ok=True,
+        status="executed",
+        response_text=response_text,
+        details={
+            "path": _home_relative_label(target),
+            "start_line": start_line,
+            "line_count": len(chunk),
+            "lines": line_rows,
+            "verbatim": verbatim,
+            "observation": _tool_observation(
+                intent="machine.read_file",
+                tool_surface="machine",
+                ok=True,
+                status="executed",
+                path=_home_relative_label(target),
+                start_line=start_line,
+                line_count=len(chunk),
+                lines=line_rows,
+                verbatim=verbatim,
             ),
         },
     )
@@ -1731,6 +1884,7 @@ def _git_summary(arguments: dict[str, Any], *, workspace_root: Path) -> RuntimeE
         today_commit_count=int(details.get("today_commit_count") or 0),
         yesterday_date=str(details.get("yesterday_date") or ""),
         yesterday_commit_count=int(details.get("yesterday_commit_count") or 0),
+        recent_commits=[dict(item) for item in list(details.get("recent_commits") or []) if isinstance(item, dict)],
         commit_count_scope=str(details.get("commit_count_scope") or ""),
         timezone_label=str(details.get("timezone_label") or ""),
     )

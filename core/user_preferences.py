@@ -416,4 +416,31 @@ def _looks_like_real_name(value: str) -> bool:
     lowered = value.strip().lower()
     if lowered in {"wrong", "bad", "stupid", "crazy", "broken"}:
         return False
+    tokens = re.findall(r"[a-z0-9'-]+", lowered)
+    if not 1 <= len(tokens) <= 4:
+        return False
+    if any(
+        token in {
+            "acting",
+            "weird",
+            "create",
+            "make",
+            "write",
+            "save",
+            "file",
+            "folder",
+            "directory",
+            "download",
+            "fetch",
+            "grab",
+            "please",
+            "repo",
+            "workspace",
+            "desktop",
+            "downloads",
+            "documents",
+        }
+        for token in tokens
+    ):
+        return False
     return bool(value.strip())

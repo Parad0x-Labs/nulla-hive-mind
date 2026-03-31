@@ -278,6 +278,8 @@ def humanize_orchestration_leak(
     if not clean:
         return None
     lowered = clean.lower()
+    if lowered.startswith("search matches for ") or lowered.startswith("file `") or lowered.startswith("local file `"):
+        return None
     if not any(marker in lowered for marker in _ORCHESTRATION_LEAK_MARKERS) and not any(
         marker in lowered for marker in _ENVELOPE_ROLE_MARKERS
     ):

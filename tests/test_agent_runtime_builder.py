@@ -246,3 +246,15 @@ def test_workspace_build_response_facade_matches_extracted_module() -> None:
         verification=verification,
         sources=sources,
     )
+
+
+def test_builder_controller_does_not_hijack_plain_workspace_search_requests() -> None:
+    agent = _build_agent()
+
+    should_run = agent._should_run_builder_controller(
+        effective_input='find a file in this workspace mentioning "runtime_capabilities"',
+        classification={"task_class": "research"},
+        source_context={"workspace": "/tmp/test-builder", "workspace_root": "/tmp/test-builder"},
+    )
+
+    assert should_run is False

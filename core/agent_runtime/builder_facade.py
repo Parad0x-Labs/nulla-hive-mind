@@ -90,7 +90,6 @@ class BuilderFacadeMixin:
         )
         workflow_intent = str(dict(workflow_probe.next_payload or {}).get("intent") or "").strip()
         if workflow_probe.handled and workflow_probe.next_payload and workflow_intent in {
-            "workspace.search_text",
             "workspace.read_file",
             "workspace.write_file",
             "workspace.ensure_directory",
@@ -343,12 +342,18 @@ class BuilderFacadeMixin:
             source_context=dict(source_context or {}),
         )
         workflow_intent = str(dict(workflow_probe.next_payload or {}).get("intent") or "").strip()
+        pure_inspection_workflow = workflow_intent in {
+            "workspace.search_text",
+            "workspace.symbol_search",
+            "workspace.git_summary",
+            "workspace.git_status",
+            "workspace.list_files",
+        }
         workflow_supported_request = bool(
             workflow_probe.handled
             and workflow_probe.next_payload
             and workflow_intent
             in {
-                "workspace.search_text",
                 "workspace.read_file",
                 "workspace.write_file",
                 "workspace.ensure_directory",
@@ -357,6 +362,8 @@ class BuilderFacadeMixin:
                 "hive.create_topic",
             }
         )
+        if pure_inspection_workflow and not explicit_file_request and not generic_bootstrap_request and not self._looks_like_builder_request(lowered):
+            return False
         if task_class not in {
             "system_design",
             "integration_orchestration",

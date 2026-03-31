@@ -15,8 +15,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.llm_eval import (
+    DEFAULT_BLIND_PACK_ROOT,
     collect_recent_llm_inventory,
     compare_pytest_results,
+    run_procedural_audit,
     run_pytest_pack,
     summarize_latency_rows,
 )
@@ -579,6 +581,7 @@ def _render_summary_markdown(payload: dict[str, Any]) -> str:
         "",
         f"- recent 48h regression: {payload['regression_48h']['status']}",
         f"- live runtime acceptance: {payload['live_acceptance']['status']}",
+        f"- procedural audit: {payload['procedural_audit']['status']}",
         f"- context discipline: {payload['context_discipline']['status']}",
         f"- research quality: {payload['research_quality']['status']}",
         f"- hive integrity: {payload['hive_integrity']['status']}",
@@ -605,11 +608,37 @@ def _render_summary_markdown(payload: dict[str, Any]) -> str:
         )
 
     for heading, key in (
+        ("Procedural Audit Findings", "procedural_audit"),
         ("Context Discipline Findings", "context_discipline"),
         ("Research Quality Findings", "research_quality"),
         ("Hive Integrity Findings", "hive_integrity"),
         ("NullaBook Provenance Findings", "nullabook_provenance"),
     ):
+        if key == "procedural_audit":
+            lines.extend(
+                [
+                    "",
+                    f"## {heading}",
+                    "",
+                    f"- seed: {payload[key].get('seed')}",
+                    f"- comparison: {payload[key].get('comparison', {}).get('status', 'n/a')}",
+                    "",
+                    "| Category | Status | Passed | Total |",
+                    "| --- | --- | ---: | ---: |",
+                ]
+            )
+            for item in list(payload[key].get("category_results") or []):
+                lines.append(
+                    f"| {item['category']} | {item['status']} | {item['checks_passed']} | {item['checks_total']} |"
+                )
+            failing_scenarios = list(payload[key].get("failing_scenarios") or [])
+            lines.extend(
+                [
+                    "",
+                    f"- failing scenarios: {', '.join(failing_scenarios) if failing_scenarios else 'none'}",
+                ]
+            )
+            continue
         lines.extend(["", f"## {heading}", "", *_render_category_table(payload[key])])
 
     lines.extend(
@@ -658,6 +687,7 @@ def _render_summary_markdown(payload: dict[str, Any]) -> str:
         if report_path:
             lines.append(f"- Latest live acceptance evidence: `{report_path}`.")
         lines.append("- Re-run the live lane whenever the runtime model, tool path, or acceptance thresholds change.")
+        lines.append("- Keep the procedural seed logged so any live failure can be reproduced exactly.")
     else:
         lines.append("- Run the live acceptance lane on a model-provisioned machine before public claims about UX latency.")
     return "\n".join(lines)
@@ -700,11 +730,14 @@ def _regression_payload(
 
 
 def run(args: argparse.Namespace) -> int:
+    procedural_seed = int(getattr(args, "procedural_seed", 1337))
+    skip_blind_pack = bool(getattr(args, "skip_blind_pack", False))
     output_root = Path(args.output_root).expanduser().resolve()
     baseline_root = Path(args.baseline_root).expanduser().resolve()
     live_run_root = Path(args.live_run_root).expanduser().resolve()
     profile_path = Path(args.profile).expanduser().resolve()
     docs_report_path = _resolve_optional_output_path(getattr(args, "docs_report_path", ""))
+    blind_pack_root = Path(args.blind_pack_root).expanduser().resolve() if str(getattr(args, "blind_pack_root", "") or "").strip() else DEFAULT_BLIND_PACK_ROOT
     output_root.mkdir(parents=True, exist_ok=True)
     baseline_root.mkdir(parents=True, exist_ok=True)
     preserved_output_root = _preserve_previous_output_bundle(output_root)
@@ -726,11 +759,28 @@ def run(args: argparse.Namespace) -> int:
     blockers: list[str] = []
     live_acceptance: dict[str, Any]
     latency_rows: list[dict[str, Any]]
+    procedural_audit: dict[str, Any]
     if args.skip_live_runtime:
         live_acceptance = {
             "status": "blocked",
             "reason": "Live runtime acceptance was skipped explicitly.",
             "summary": {},
+        }
+        procedural_audit = {
+            "status": "blocked",
+            "reason": "Procedural audit requires a live runtime lane and was skipped with --skip-live-runtime.",
+            "seed": procedural_seed,
+            "category_results": [],
+            "failing_scenarios": [],
+            "comparison": {
+                "status": "blocked",
+                "baseline_available": False,
+                "regressed_categories": [],
+                "improved_categories": [],
+                "duration_regressed": False,
+            },
+            "summary_markdown": "# Procedural LLM Audit Summary\n\n- blocked: live runtime was skipped.\n",
+            "failure_report_markdown": "# Procedural LLM Audit Failures\n\n- blocked: live runtime was skipped.\n",
         }
         blockers.append("Live runtime speed/research acceptance was skipped, so full LLM acceptance is not proven in this run.")
         latency_rows = []
@@ -748,8 +798,18 @@ def run(args: argparse.Namespace) -> int:
             online_payload=live_acceptance["online"],
             offline_payload=live_acceptance["offline"],
         )
+        procedural_audit = run_procedural_audit(
+            base_url=args.base_url,
+            output_root=output_root,
+            baseline_root=baseline_root,
+            seed=procedural_seed,
+            blind_pack_root=blind_pack_root,
+            include_blind=not skip_blind_pack,
+        )
         if live_acceptance["status"] != "pass":
             blockers.append("Live runtime acceptance failed.")
+        if procedural_audit["status"] != "pass":
+            blockers.append("Procedural live audit failed.")
 
     if regression_48h["status"] != "pass":
         blockers.append("The rerun of recent 48h LLM/runtime tests regressed or failed.")
@@ -775,6 +835,7 @@ def run(args: argparse.Namespace) -> int:
                 failing_targets.append(scenario["target"])
     if regression_48h["status"] != "pass":
         failing_targets.extend(regression_48h["current"]["targets"])
+    failing_targets.extend(f"procedural:{item}" for item in list(procedural_audit.get("failing_scenarios") or []))
 
     live_profile_meta = dict(live_acceptance.get("online", {}).get("profile") or {})
     runtime_bundle_models = list(
@@ -804,6 +865,7 @@ def run(args: argparse.Namespace) -> int:
         },
         "regression_48h": regression_48h,
         "live_acceptance": live_acceptance,
+        "procedural_audit": procedural_audit,
         "latency_summary": latency_summary,
         "context_discipline": context_discipline,
         "research_quality": research_quality,
@@ -850,6 +912,11 @@ def run(args: argparse.Namespace) -> int:
     _write_json(output_root / "research_quality.json", public_payload["research_quality"])
     _write_json(output_root / "hive_integrity.json", public_payload["hive_integrity"])
     _write_json(output_root / "nullabook_provenance.json", public_payload["nullabook_provenance"])
+    _write_json(output_root / "procedural_audit.json", public_payload["procedural_audit"])
+    _write_json(output_root / "procedural_generated_scenarios.json", public_payload["procedural_audit"].get("generated_scenarios") or {})
+    _write_json(output_root / "procedural_runner_output.json", public_payload["procedural_audit"].get("runner_output") or {})
+    _write_markdown(output_root / "procedural_failures.md", str(public_payload["procedural_audit"].get("failure_report_markdown") or ""))
+    _write_markdown(output_root / "procedural_summary.md", str(public_payload["procedural_audit"].get("summary_markdown") or ""))
     _write_markdown(output_root / "regression_48h.md", regression_md)
     _write_markdown(output_root / "failures.md", failures_md)
     write_proof_manifest(output_root / "proof_manifest.json", proof_manifest)
@@ -871,6 +938,9 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--runtime-home", default="")
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--skip-live-runtime", action="store_true")
+    parser.add_argument("--procedural-seed", type=int, default=1337)
+    parser.add_argument("--blind-pack-root", default=str(DEFAULT_BLIND_PACK_ROOT))
+    parser.add_argument("--skip-blind-pack", action="store_true")
     args = parser.parse_args(argv)
     if bool(args.runtime_home) ^ bool(args.workspace_root):
         parser.error("`llm_eval` requires both `--runtime-home` and `--workspace-root`, or neither.")

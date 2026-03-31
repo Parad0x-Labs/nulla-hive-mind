@@ -134,12 +134,29 @@ _INLINE_CREATE_FILE_RE = re.compile(
     rf"\bcreate\s+(?:a\s+file(?:\s+named)?\s+)?[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?\s+(?:with(?:\s+exactly)?(?:\s+(?:this|the))?(?:\s+(?:line|content|code))(?:(?:\s*,?\s*[^:\n.]+?)\s*:|:\s*|\s+)|that\s+says:)\s*(?P<content>.+?)(?=(?:\.\s*(?:Then|Now|Inside it|Do not)\b)|$)",
     re.IGNORECASE | re.DOTALL,
 )
+_FOLDER_FIRST_CREATE_FILE_RE = re.compile(
+    rf"\b(?:pls\s+)?(?:make|create|setup|set up)\s+(?:a\s+)?folder\s+(?P<directory>[A-Za-z0-9_./-]+)"
+    r"(?:\s+(?:here|in\s+this\s+workspace))?"
+    r"\s+(?:and\s+)?(?:inside\s+it\s+)?(?:save|put|write|create)\s+[`\"']?(?P<path>"
+    rf"{_WORKSPACE_FILE_RE})[`\"']?(?:\s+inside)?\s+with(?:\s+exact(?:ly)?)?(?:\s+(?:this|the))?\s+text\s*:\s*(?P<content>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+_IN_WORKSPACE_CREATE_FILE_RE = re.compile(
+    r"\binside\s+this\s+workspace\s+create\s+[`\"']?(?P<path>[^`\"']+?\.[A-Za-z0-9_+-]+)[`\"']?"
+    r"\s+with(?:\s+exact(?:ly)?)?(?:\s+(?:this|the))?\s+text\s*:\s*(?P<content>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+_FILE_IN_FOLDER_SAYING_RE = re.compile(
+    r"\bcreate\s+(?:a\s+)?file\s+[`\"']?(?P<path>[^`\"']+?\.[A-Za-z0-9_+-]+)[`\"']?"
+    r"\s+in\s+(?:the\s+)?(?P<directory>[A-Za-z0-9 _./-]+?)\s+folder\s+saying\s+(?P<content>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
 _APPEND_FILE_RE = re.compile(
     rf"\bappend(?:\s+a)?(?:\s+\w+)?\s+line\s+to\s+[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?\s*:\s*(?P<content>.+)$",
     re.IGNORECASE | re.DOTALL,
 )
 _APPEND_CONTENT_ONLY_RE = re.compile(
-    r"\bappend(?:\s+a)?(?:\s+\w+)?\s+line\s*:?\s*(?P<content>.+)$",
+    r"\b(?:append|add)\s+(?:(?:a|one)\s+more\s+|another\s+|a\s+second\s+|second\s+)?line(?:\s+exactly)?\s*:?\s*(?P<content>.+)$",
     re.IGNORECASE | re.DOTALL,
 )
 _OVERWRITE_FILE_RE = re.compile(
@@ -150,7 +167,15 @@ _CREATE_EXACT_FILES_RE = re.compile(
     rf"\bcreate\s+exactly\s+\w+\s+files:\s*(?P<paths>{_WORKSPACE_FILE_RE}(?:\s*,\s*{_WORKSPACE_FILE_RE})+)\.\s*put\s+(?P<contents>.+?)\s+respectively\b",
     re.IGNORECASE | re.DOTALL,
 )
-_EXACT_READBACK_RE = re.compile(r"\bread(?:\s+the)?\s+whole\s+file\s+back\s+exactly\b", re.IGNORECASE)
+_EXPLICIT_WORKSPACE_READ_RE = re.compile(
+    r"\b(?:read|open|quote)\s+(?:the\s+file\s+)?[`\"']?(?P<path>[^`\"']+?\.[A-Za-z0-9_+-]+)[`\"']?"
+    r"(?:\s+back)?\s+(?:exactly|verbatim)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_EXACT_READBACK_RE = re.compile(
+    r"\b(?:read(?:\s+(?:the\s+whole\s+file|the\s+file|it))?\s+back\s+exactly(?:\s+first)?|read(?:\s+it)?\s+exactly(?:\s+first)?|quote(?:\s+it)?\s+exactly)\b",
+    re.IGNORECASE,
+)
 _PATH_STOP_WORDS = {
     "a",
     "an",

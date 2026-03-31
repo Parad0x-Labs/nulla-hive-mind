@@ -26,10 +26,14 @@ from .constants import (
     _ENTITY_LOOKUP_DROP_TOKENS,
     _ENTITY_LOOKUP_KEEP_SHORT_TOKENS,
     _EXACT_READBACK_RE,
+    _EXPLICIT_WORKSPACE_READ_RE,
+    _FILE_IN_FOLDER_SAYING_RE,
+    _FOLDER_FIRST_CREATE_FILE_RE,
     _FOLDER_PATH_RE,
     _GENERIC_HIVE_TITLE_MARKERS,
     _HIVE_ACTION_PATTERNS,
     _HIVE_CREATE_PREFIXES,
+    _IN_WORKSPACE_CREATE_FILE_RE,
     _INLINE_CREATE_FILE_RE,
     _INTEGRATION_DOMAIN_MARKERS,
     _INTO_PATH_RE,
@@ -239,6 +243,13 @@ def _planned_git_payload(text: str) -> tuple[str, dict[str, Any]] | None:
         return ("planned_workspace_git_diff", {"intent": "workspace.git_diff", "arguments": {}})
     if any(marker in lowered for marker in (" git status ", " working tree ", " dirty ", " clean repo ", " clean working tree ", " untracked ", " staged ", " unstaged ")):
         return ("planned_workspace_git_status", {"intent": "workspace.git_status", "arguments": {}})
+    recent_commits_match = re.search(r"\b(?:last|recent)\s+(?P<count>\d+)\s+commits?\b", lowered)
+    if recent_commits_match is not None:
+        try:
+            recent_limit = max(1, min(int(recent_commits_match.group("count") or "3"), 10))
+        except Exception:
+            recent_limit = 3
+        return ("planned_workspace_git_summary", {"intent": "workspace.git_summary", "arguments": {"recent_limit": recent_limit}})
     if any(
         marker in lowered
         for marker in (
@@ -257,6 +268,48 @@ def _planned_git_payload(text: str) -> tuple[str, dict[str, Any]] | None:
         )
     ):
         return ("planned_workspace_git_summary", {"intent": "workspace.git_summary", "arguments": {}})
+    if " what branch and commit " in lowered or (
+        " branch " in lowered
+        and " commit " in lowered
+        and any(marker in lowered for marker in (" right now ", " running on ", " current ", " are you on "))
+    ):
+        return ("planned_workspace_git_summary", {"intent": "workspace.git_summary", "arguments": {}})
+    return None
+
+
+def _planned_workspace_search_payload(text: str) -> tuple[str, dict[str, Any]] | None:
+    normalized = " ".join(str(text or "").strip().split())
+    if not normalized:
+        return None
+    patterns = (
+        re.compile(
+            r"\b(?:find|search|look for)\s+(?:a\s+)?file(?:s)?\s+(?:in|inside|under)\s+(?:this\s+)?(?:workspace|repo(?:sitory)?|project)\s+(?:mentioning|containing|matching)\s+[`\"']?(?P<query>.+?)[`\"']?$",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bsearch\s+(?:this\s+)?(?:workspace|repo(?:sitory)?|project)\s+for\s+[`\"']?(?P<query>.+?)[`\"']?$",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:look\s+through|scan)\s+(?:the\s+)?(?:workspace|repo(?:sitory)?|project)\s+and\s+find\s+[`\"']?(?P<query>.+?)[`\"']?$",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bshow\s+me\s+(?:a\s+)?file(?:s)?\s+(?:in|inside|under)\s+(?:this\s+)?(?:workspace|repo(?:sitory)?|project)\s+(?:that\s+mentions?|matching|containing)\s+[`\"']?(?P<query>.+?)[`\"']?$",
+            re.IGNORECASE,
+        ),
+    )
+    for pattern in patterns:
+        match = pattern.search(normalized)
+        if not match:
+            continue
+        query = str(match.group("query") or "").strip().strip("`\"'")
+        if not query:
+            continue
+        return (
+            "planned_workspace_search_text",
+            {"intent": "workspace.search_text", "arguments": {"query": query, "limit": 10}},
+        )
     return None
 
 
@@ -531,19 +584,81 @@ def _recover_last_workspace_path_from_history(source_context: dict[str, Any] | N
         if str(message.get("role") or "").strip().lower() != "user":
             continue
         content = str(message.get("content") or "")
-        base_dir = _extract_workspace_parent_directory(content, workspace_root=workspace_root)
-        for pattern in (_APPEND_FILE_RE, _OVERWRITE_FILE_RE, _CREATE_NAMED_FILE_WITH_CONTENT_RE, _INLINE_CREATE_FILE_RE):
-            match = pattern.search(content)
-            if not match:
-                continue
+        history_writes, _history_directory = _extract_workspace_writes_from_text(
+            content,
+            workspace_root=workspace_root,
+        )
+        if history_writes:
+            return str(history_writes[-1].get("path") or "").strip()
+    return ""
+
+
+def _extract_workspace_writes_from_text(
+    text: str,
+    *,
+    workspace_root: str = "",
+) -> tuple[list[dict[str, Any]], str]:
+    raw = str(text or "").strip()
+    if not raw:
+        return [], ""
+
+    base_dir = _extract_workspace_parent_directory(raw, workspace_root=workspace_root)
+    if not base_dir and any(marker in raw.lower() for marker in _DIRECTORY_CREATE_MARKERS):
+        base_dir = _extract_workspace_bootstrap_path(raw)
+
+    folder_first_match = _FOLDER_FIRST_CREATE_FILE_RE.search(raw)
+    if folder_first_match is not None:
+        directory = _clean_workspace_directory_path(
+            str(folder_first_match.group("directory") or "").strip(),
+            workspace_root=workspace_root,
+        )
+        path = _clean_workspace_file_path(
+            str(folder_first_match.group("path") or "").strip(),
+            base_dir=directory,
+            workspace_root=workspace_root,
+        )
+        content = str(folder_first_match.group("content") or "").strip()
+        if path and content:
+            return ([{"path": path, "content": content, "mode": "write"}], directory)
+
+    workspace_root_create_match = _IN_WORKSPACE_CREATE_FILE_RE.search(raw)
+    if workspace_root_create_match is not None:
+        path = _clean_workspace_file_path(
+            str(workspace_root_create_match.group("path") or "").strip(),
+            base_dir="",
+            workspace_root=workspace_root,
+        )
+        content = str(workspace_root_create_match.group("content") or "").strip()
+        if path and content:
+            return ([{"path": path, "content": content, "mode": "write"}], "")
+
+    file_in_folder_match = _FILE_IN_FOLDER_SAYING_RE.search(raw)
+    if file_in_folder_match is not None:
+        directory = _clean_workspace_directory_path(
+            str(file_in_folder_match.group("directory") or "").strip(),
+            workspace_root=workspace_root,
+        )
+        path = _clean_workspace_file_path(
+            str(file_in_folder_match.group("path") or "").strip(),
+            base_dir=directory,
+            workspace_root=workspace_root,
+        )
+        content = str(file_in_folder_match.group("content") or "").strip()
+        if path and content:
+            return ([{"path": path, "content": content, "mode": "write"}], directory)
+
+    writes: list[dict[str, Any]] = []
+    for pattern in (_OVERWRITE_FILE_RE, _CREATE_NAMED_FILE_WITH_CONTENT_RE, _INLINE_CREATE_FILE_RE):
+        for match in pattern.finditer(raw):
             path = _clean_workspace_file_path(
                 str(match.group("path") or "").strip(),
                 base_dir=base_dir,
                 workspace_root=workspace_root,
             )
-            if path:
-                return path
-    return ""
+            content = str(match.group("content") or "").strip()
+            if path and content:
+                writes.append({"path": path, "content": content, "mode": "write"})
+    return writes, base_dir
 
 
 def _extract_workspace_file_plan(
@@ -591,16 +706,16 @@ def _extract_workspace_file_plan(
                 list_path = "" if parent in {"", "."} else parent
             return {"directory": "", "writes": writes, "read_path": "", "verbatim_read": False, "list_path": list_path}
 
-    overwrite_match = _OVERWRITE_FILE_RE.search(raw)
-    if overwrite_match is not None:
-        path = _clean_workspace_file_path(str(overwrite_match.group("path") or "").strip(), base_dir=base_dir)
-        content = str(overwrite_match.group("content") or "").strip()
-        if path and content:
-            list_path = base_dir
-            if list_requested and not list_path:
-                parent = str(Path(path).parent)
-                list_path = "" if parent in {"", "."} else parent
-            return {"directory": "", "writes": [{"path": path, "content": content, "mode": "write"}], "read_path": "", "verbatim_read": False, "list_path": list_path}
+    writes, planned_directory = _extract_workspace_writes_from_text(
+        raw,
+        workspace_root=workspace_root,
+    )
+    if writes:
+        list_path = planned_directory or base_dir
+        if list_requested and not list_path:
+            parent = str(Path(str(writes[0].get("path") or "")).parent)
+            list_path = "" if parent in {"", "."} else parent
+        return {"directory": planned_directory, "writes": writes, "read_path": "", "verbatim_read": False, "list_path": list_path}
 
     append_match = _APPEND_FILE_RE.search(raw)
     if append_match is not None:
@@ -629,23 +744,15 @@ def _extract_workspace_file_plan(
                 list_path = "" if parent in {"", "."} else parent
             return {"directory": "", "writes": [{"path": path, "content": content, "mode": "append"}], "read_path": "", "verbatim_read": False, "list_path": list_path}
 
-    writes: list[dict[str, Any]] = []
-    for pattern in (_CREATE_NAMED_FILE_WITH_CONTENT_RE, _INLINE_CREATE_FILE_RE):
-        for match in pattern.finditer(raw):
-            path = _clean_workspace_file_path(
-                str(match.group("path") or "").strip(),
-                base_dir=base_dir,
-                workspace_root=workspace_root,
-            )
-            content = str(match.group("content") or "").strip()
-            if path and content:
-                writes.append({"path": path, "content": content, "mode": "write"})
-    if writes:
-        list_path = base_dir
-        if list_requested and not list_path:
-            parent = str(Path(str(writes[0].get("path") or "")).parent)
-            list_path = "" if parent in {"", "."} else parent
-        return {"directory": base_dir, "writes": writes, "read_path": "", "verbatim_read": False, "list_path": list_path}
+    explicit_read_match = _EXPLICIT_WORKSPACE_READ_RE.search(raw)
+    if explicit_read_match is not None:
+        path = _clean_workspace_file_path(
+            str(explicit_read_match.group("path") or "").strip(),
+            base_dir=base_dir,
+            workspace_root=workspace_root,
+        )
+        if path:
+            return {"directory": "", "writes": [], "read_path": path, "verbatim_read": True, "list_path": ""}
 
     if _EXACT_READBACK_RE.search(raw):
         path = _recover_last_workspace_path_from_history(source_context)
@@ -1699,6 +1806,7 @@ def plan_tool_workflow(
     machine_directory_create = _extract_safe_machine_directory_create(text)
     machine_specs_request = _extract_machine_specs_request(text)
     git_payload = _planned_git_payload(text)
+    workspace_search_payload = _planned_workspace_search_payload(text)
     workspace_bootstrap_path = _extract_workspace_bootstrap_path(text)
     workspace_bootstrap_request = _looks_like_workspace_bootstrap_request(text)
     workspace_file_plan = _extract_workspace_file_plan(raw_text, source_context=source_context)
@@ -1766,6 +1874,13 @@ def plan_tool_workflow(
             )
         if git_payload is not None:
             reason, next_payload = git_payload
+            return WorkflowPlannerDecision(
+                handled=True,
+                reason=reason,
+                next_payload=next_payload,
+            )
+        if workspace_search_payload is not None:
+            reason, next_payload = workspace_search_payload
             return WorkflowPlannerDecision(
                 handled=True,
                 reason=reason,

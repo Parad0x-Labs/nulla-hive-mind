@@ -698,20 +698,20 @@ def test_credit_status_emits_model_wording_metrics(make_agent):
 
 @mock.patch("apps.nulla_agent.audit_logger.log")
 @mock.patch("apps.nulla_agent.adapt_user_input")
-def test_greeting_evaluative_and_help_emit_model_wording_metrics(
+def test_greeting_evaluative_and_help_emit_fast_path_metrics(
     adapt_user_input_mock: mock.Mock,
     audit_log: mock.Mock,
     make_agent,
     context_result_factory,
 ):
     agent = make_agent()
-    agent.context_loader.load = mock.Mock(return_value=context_result_factory())  # type: ignore[assignment]
 
     prompts = [
-        ("hey", "Hey. What do you need?"),
-        ("hello", "Hello. What do you need?"),
-        ("how are you", "Running clean. What do you need?"),
-        ("help", "I can help with coding, research, and grounded runtime tasks."),
+        ("hey", "hey. what do you need?"),
+        ("hello", "hello. what do you need?"),
+        ("how are you", "running clean. what do you need?"),
+        ("help", "wired on this runtime:"),
+        ("you sound weird", "routing is still too stitched together."),
     ]
 
     def _adapt(text: str, session_id: str | None = None):
@@ -728,27 +728,18 @@ def test_greeting_evaluative_and_help_emit_model_wording_metrics(
     session_prefix = uuid.uuid4().hex
 
     for prompt, reply in prompts:
-        agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
-            return_value=ModelExecutionDecision(
-                source="provider",
-                task_hash=f"metric-{prompt}",
-                provider_id="ollama:qwen",
-                used_model=True,
-                output_text=reply,
-                confidence=0.84,
-                trust_score=0.84,
-            )
-        )
-        agent.run_once(
+        agent.memory_router.resolve = mock.Mock(side_effect=AssertionError("greeting/evaluative/help metrics should stay on fast path"))  # type: ignore[assignment]
+        result = agent.run_once(
             prompt,
             session_id_override=f"openclaw:{session_prefix}:{prompt}",
             source_context={"surface": "openclaw", "platform": "openclaw"},
         )
+        assert reply in result["response"].lower()
 
     events = _chat_truth_events(audit_log)
     fast_path_events = [event for event in events if event.get("rendered_via") == "fast_path"]
 
-    assert len(fast_path_events) == 4
+    assert len(fast_path_events) == 5
     for event in fast_path_events:
         assert event["fast_path_hit"] is True
         assert event["model_inference_used"] is False

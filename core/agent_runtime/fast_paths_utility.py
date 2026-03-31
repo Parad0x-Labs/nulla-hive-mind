@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from core.hive_activity_tracker import note_smalltalk_turn, session_hive_state
 from core.onboarding import get_agent_display_name
+from core.runtime_execution_tools import execute_runtime_tool
 from core.task_router import evaluate_direct_math_request, evaluate_word_math_request
 from core.user_preferences import load_preferences
 
@@ -39,7 +40,62 @@ _TIME_FOLLOWUP_EXCLUSION_MARKERS = (
     "queue",
     "work",
 )
-_STATUS_CHECK_RE = re.compile(r"\bhow\s+are\s+(?:you(?:\s+doing)?|u|r\s+u)\b")
+_STATUS_CHECK_RE = re.compile(r"\b(?:how\s+are\s+(?:you(?:\s+doing)?|ya|u)(?:\s+rn)?|how\s+r\s+u(?:\s+rn)?|you\s+alive(?:\s+or\s+what)?)\b")
+_EMBEDDED_ACTION_VERBS = (
+    " create ",
+    " make ",
+    " write ",
+    " save ",
+    " put ",
+    " place ",
+    " read ",
+    " list ",
+    " find ",
+    " inspect ",
+    " open ",
+    " download ",
+    " fetch ",
+    " run ",
+    " search ",
+    " check ",
+)
+_EMBEDDED_ACTION_TARGETS = (
+    " file ",
+    " files ",
+    " folder ",
+    " folders ",
+    " directory ",
+    " directories ",
+    " desktop ",
+    " downloads ",
+    " documents ",
+    " workspace ",
+    " repo ",
+    " repository ",
+    " branch ",
+    " commit ",
+    ".txt",
+    ".md",
+    ".json",
+    "http://",
+    "https://",
+)
+_SHORT_EVALUATIVE_TOKENS = {
+    "bad",
+    "bot",
+    "braindead",
+    "broken",
+    "canned",
+    "dumb",
+    "fake",
+    "lame",
+    "off",
+    "stupid",
+    "trash",
+    "useless",
+    "weak",
+    "weird",
+}
 
 
 def smalltalk_fast_path(agent: Any, normalized_input: str, *, source_surface: str, session_id: str) -> str | None:
@@ -52,18 +108,32 @@ def smalltalk_fast_path(agent: Any, normalized_input: str, *, source_surface: st
     prefs = load_preferences()
     with_joke = prefs.humor_percent >= 70
     character = str(prefs.character_mode or "").strip()
+    track_repeats = source_surface == "channel"
 
-    if phrase in {"hi", "hello", "hey", "yo", "sup", "gm", "good morning", "morning"}:
-        repeat_count = note_smalltalk_turn(session_id, key="greeting")
-        if repeat_count >= 3:
-            return "Yep, I got the hello. Skip the greeting and tell me what you want me to do."
-        if repeat_count == 2:
-            return "Yep, got your hello. What do you want me to do?"
+    if phrase in {"hi", "hello", "hello there", "hey", "yo", "sup", "gm", "good morning", "morning"}:
+        if not track_repeats:
+            if phrase in {"yo", "sup"}:
+                return "Yo. What needs fixing?"
+            if phrase in {"hi"}:
+                return "Hi. What are we solving?"
+            if phrase == "hello there":
+                return "Hello. What do you need?"
+            if phrase in {"gm", "good morning", "morning"}:
+                return "Morning. What are we working on?"
+            if phrase == "hello":
+                return "Hello. What do you need?"
+            return "Hey. What do you need?"
+        if track_repeats:
+            repeat_count = note_smalltalk_turn(session_id, key="greeting")
+            if repeat_count >= 3:
+                return "Yep, I got the hello. Skip the greeting and tell me what you want me to do."
+            if repeat_count == 2:
+                return "Yep, got your hello. What do you want me to do?"
         msg = f"Hey. I’m {name}. What do you need?"
         if with_joke:
             msg += " Keep it sharp and I’ll keep it fast."
         return msg
-    if phrase in {"how are you", "how are you doing", "how are u", "how r u"} or (
+    if phrase in {"how are you", "how are you doing", "how are ya", "how are u", "how r u", "how r u rn", "you alive or what", "you alive"} or (
         _STATUS_CHECK_RE.search(phrase)
         and not any(
             marker in phrase
@@ -84,9 +154,12 @@ def smalltalk_fast_path(agent: Any, normalized_input: str, *, source_surface: st
             )
         )
     ):
-        repeat_count = note_smalltalk_turn(session_id, key="status_check")
-        if repeat_count >= 2:
-            return "Still stable. Memory online, mesh ready. Give me the task."
+        if not track_repeats:
+            return "Running clean. What do you need?"
+        if track_repeats:
+            repeat_count = note_smalltalk_turn(session_id, key="status_check")
+            if repeat_count >= 2:
+                return "Still stable. Memory online, mesh ready. Give me the task."
         msg = "Running stable. Memory online, mesh ready."
         if with_joke:
             msg += " Caffeine level: synthetic but dangerous."
@@ -170,6 +243,8 @@ def evaluative_conversation_fast_path(agent: Any, normalized_input: str, *, sour
     phrase = " ".join(str(normalized_input or "").strip().lower().split())
     if not phrase:
         return None
+    if contains_embedded_action_request(phrase):
+        return None
     if not looks_like_evaluative_turn(phrase):
         return None
     if "not a dumb" in phrase or "better now" in phrase or "not dumb" in phrase:
@@ -184,6 +259,8 @@ def evaluative_conversation_fast_path(agent: Any, normalized_input: str, *, sour
 def looks_like_evaluative_turn(normalized_input: str) -> bool:
     text = " ".join(str(normalized_input or "").strip().lower().split())
     if not text:
+        return False
+    if contains_embedded_action_request(text):
         return False
     markers = (
         "you sound dumb",
@@ -200,7 +277,62 @@ def looks_like_evaluative_turn(normalized_input: str) -> bool:
         "dumbs anymore",
         "bot-grade",
     )
-    return any(marker in text for marker in markers)
+    if any(marker in text for marker in markers):
+        return True
+    tokens = [token for token in re.findall(r"[a-z0-9'-]+", text) if token]
+    return 0 < len(tokens) <= 3 and any(token in _SHORT_EVALUATIVE_TOKENS for token in tokens)
+
+
+def contains_embedded_action_request(normalized_input: str) -> bool:
+    text = re.sub(r"[\?\!\.,:;]+", " ", str(normalized_input or "").strip().lower())
+    text = f" {' '.join(text.split())} "
+    if not text.strip():
+        return False
+    if "what branch and commit" in text or "list the last " in text:
+        return True
+    has_action_verb = any(marker in text for marker in _EMBEDDED_ACTION_VERBS)
+    has_action_target = any(marker in text for marker in _EMBEDDED_ACTION_TARGETS)
+    return has_action_verb and has_action_target
+
+
+def maybe_handle_direct_workspace_runtime_request(
+    agent: Any,
+    user_input: str,
+    *,
+    session_id: str,
+    source_surface: str,
+    source_context: dict[str, object] | None,
+) -> dict[str, Any] | None:
+    if source_surface not in {"channel", "openclaw", "api"}:
+        return None
+    workspace_root = str((source_context or {}).get("workspace") or (source_context or {}).get("workspace_root") or "").strip()
+    if not workspace_root:
+        return None
+    decision = agent._plan_tool_workflow(
+        user_text=user_input,
+        task_class="file_inspection",
+        executed_steps=[],
+        source_context=dict(source_context or {}),
+    )
+    payload = dict(decision.next_payload or {})
+    intent = str(payload.get("intent") or "").strip()
+    if intent not in {"workspace.git_summary", "workspace.git_status", "workspace.search_text"}:
+        return None
+    execution = execute_runtime_tool(
+        intent,
+        dict(payload.get("arguments") or {}),
+        source_context=dict(source_context or {}),
+    )
+    if execution is None:
+        return None
+    return agent._fast_path_result(
+        session_id=session_id,
+        user_input=user_input,
+        response=str(execution.response_text or "").strip(),
+        confidence=0.99 if execution.ok else 0.9,
+        source_context=source_context,
+        reason="workspace_runtime_fast_path",
+    )
 
 
 def date_time_fast_path(
