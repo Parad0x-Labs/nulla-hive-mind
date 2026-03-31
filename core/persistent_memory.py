@@ -63,6 +63,7 @@ _update_session_summary = memory_learning.update_session_summary
 __all__ = [
     "add_memory_fact",
     "append_conversation_event",
+    "augment_history_from_session_log",
     "conversation_log_path",
     "describe_session_memory_policy",
     "ensure_memory_files",
@@ -71,6 +72,7 @@ __all__ = [
     "load_operator_dense_profile",
     "maybe_handle_memory_command",
     "memory_entries_path",
+    "memory_lifecycle_snapshot",
     "memory_path",
     "operator_dense_profile_path",
     "recent_conversation_events",
@@ -87,6 +89,37 @@ __all__ = [
 
 _REMEMBER_RE = re.compile(r"^(?:remember(?: that)?|note(?: that)?|store(?: this)?)\s+(.+)$", re.IGNORECASE)
 _FORGET_RE = re.compile(r"^(?:forget|erase)\s+(.+)$", re.IGNORECASE)
+_SNAPSHOT_GENERIC_OPERATION_TOKENS = {
+    "append",
+    "back",
+    "create",
+    "desktop",
+    "directory",
+    "download",
+    "exact",
+    "exactly",
+    "file",
+    "files",
+    "folder",
+    "inside",
+    "make",
+    "path",
+    "paths",
+    "read",
+    "readback",
+    "save",
+    "text",
+    "whole",
+    "workspace",
+    "write",
+}
+_SNAPSHOT_UTILITY_MARKERS = (
+    "what time",
+    "date and time",
+    "what date",
+    "what day",
+    "weather",
+)
 
 
 def ensure_memory_files() -> None:
@@ -137,6 +170,199 @@ def append_conversation_event(
         assistant_output=assistant_output,
     )
     refresh_operator_dense_profile(session_id=session_id)
+
+
+def augment_history_from_session_log(
+    history: list[dict[str, str]] | None,
+    *,
+    session_id: str,
+    user_text: str,
+    limit: int = 6,
+) -> list[dict[str, str]]:
+    normalized_history = [dict(item) for item in list(history or []) if isinstance(item, dict)]
+    if len(normalized_history) > 1:
+        return normalized_history
+    normalized_session = str(session_id or "").strip()
+    normalized_user = str(user_text or "").strip()
+    if not normalized_session or not normalized_user:
+        return normalized_history
+
+    hydrated_history: list[dict[str, str]] = []
+    for event in recent_conversation_events(normalized_session, limit=max(1, int(limit))):
+        if not isinstance(event, dict):
+            continue
+        event_user = str(event.get("user") or "").strip()
+        event_assistant = str(event.get("assistant") or "").strip()
+        if event_user:
+            hydrated_history.append({"role": "user", "content": event_user})
+        if event_assistant:
+            hydrated_history.append({"role": "assistant", "content": event_assistant})
+
+    if not hydrated_history:
+        return normalized_history
+
+    if normalized_history:
+        last_message = normalized_history[-1]
+        if (
+            str(last_message.get("role") or "").strip().lower() == "user"
+            and str(last_message.get("content") or "").strip() == normalized_user
+        ):
+            return [*hydrated_history, *normalized_history]
+    return [*hydrated_history, {"role": "user", "content": normalized_user}]
+
+
+def memory_lifecycle_snapshot(
+    *,
+    session_id: str,
+    query_text: str = "",
+    topic_hints: list[str] | None = None,
+    recent_limit: int = 6,
+    memory_limit: int = 4,
+    heuristic_limit: int = 4,
+    summary_limit: int = 3,
+) -> dict[str, Any]:
+    ensure_memory_files()
+    normalized_session = str(session_id or "").strip()
+    recent = recent_conversation_events(normalized_session, limit=max(1, int(recent_limit))) if normalized_session else []
+    recent_user_turns = [
+        str(item.get("user") or "").strip()
+        for item in recent
+        if str(item.get("user") or "").strip()
+    ]
+    inferred_query = str(query_text or "").strip()
+    if not inferred_query and recent_user_turns:
+        inferred_query = " ".join(recent_user_turns[-2:])
+    normalized_topic_hints = [
+        str(item).strip()
+        for item in list(topic_hints or [])
+        if str(item).strip()
+    ]
+    if not normalized_topic_hints and inferred_query:
+        normalized_topic_hints = _keyword_tokens(inferred_query, limit=6)
+
+    skip_durable_selection = _should_skip_durable_snapshot_selection(
+        query_text=inferred_query,
+        recent_user_turns=recent_user_turns,
+    )
+    relevant_memory: list[dict[str, Any]] = []
+    session_summaries: list[dict[str, Any]] = []
+    heuristics: list[dict[str, Any]] = []
+    if not skip_durable_selection and inferred_query:
+        relevant_memory = [
+            row
+            for row in search_relevant_memory(
+                inferred_query,
+                topic_hints=normalized_topic_hints,
+                limit=max(1, int(memory_limit)),
+            )
+            if float(row.get("score") or 0.0) >= 0.35
+        ]
+        session_summaries = [
+            row
+            for row in search_session_summaries(
+                inferred_query,
+                topic_hints=normalized_topic_hints,
+                limit=max(1, int(summary_limit)),
+                exclude_session_id=normalized_session or None,
+            )
+            if float(row.get("score") or 0.0) >= 0.45
+        ]
+    if not skip_durable_selection and (inferred_query or normalized_topic_hints):
+        heuristics = [
+            row
+            for row in search_user_heuristics(
+                inferred_query,
+                topic_hints=normalized_topic_hints,
+                limit=max(1, int(heuristic_limit)),
+            )
+            if float(row.get("score") or 0.0) >= 0.40
+        ]
+    dense_profile = dict(load_operator_dense_profile() or {})
+    policy = session_memory_policy(normalized_session)
+
+    recent_turns = [
+        {
+            "ts": str(item.get("ts") or "").strip(),
+            "user": _trim_text(str(item.get("user") or ""), 180),
+            "assistant": _trim_text(str(item.get("assistant") or ""), 220),
+        }
+        for item in recent
+    ]
+    selection_summary = (
+        f"query `{_trim_text(inferred_query or 'recent session context', 90)}` selected "
+        f"{len(relevant_memory)} durable memory entries, "
+        f"{len(session_summaries)} prior session summaries, and "
+        f"{len(heuristics)} heuristic signals."
+    )
+    return {
+        "session_id": normalized_session,
+        "selection_query": inferred_query,
+        "topic_hints": normalized_topic_hints,
+        "share_scope": str(policy.get("share_scope") or "local_only"),
+        "realm_label": str(policy.get("realm_label") or share_scope_label(policy.get("share_scope"))),
+        "restricted_terms": list(policy.get("restricted_terms") or []),
+        "recent_conversation_event_count": len(recent),
+        "recent_turns": recent_turns,
+        "recent_user_turns": recent_user_turns[-3:],
+        "relevant_memory_count": len(relevant_memory),
+        "relevant_memory": [
+            {
+                "text": _trim_text(str(item.get("text") or ""), 180),
+                "category": str(item.get("category") or "").strip(),
+                "score": float(item.get("score") or 0.0),
+                "share_scope": str(item.get("share_scope") or "").strip(),
+            }
+            for item in relevant_memory
+        ],
+        "session_summary_count": len(session_summaries),
+        "session_summaries": [
+            {
+                "session_id": str(item.get("session_id") or "").strip(),
+                "summary": _trim_text(str(item.get("summary") or ""), 220),
+                "score": float(item.get("score") or 0.0),
+            }
+            for item in session_summaries
+        ],
+        "heuristic_count": len(heuristics),
+        "user_heuristics": [
+            {
+                "category": str(item.get("category") or "").strip(),
+                "signal": str(item.get("signal") or "").strip(),
+                "text": _trim_text(str(item.get("text") or ""), 140),
+                "score": float(item.get("score") or 0.0),
+                "mentions": int(item.get("mentions") or 0),
+            }
+            for item in heuristics
+        ],
+        "dense_profile": {
+            "dense_summary": _trim_text(str(dense_profile.get("dense_summary") or ""), 280),
+            "response_style": list(dense_profile.get("response_style") or []),
+            "source_preferences": list(dense_profile.get("source_preferences") or []),
+            "preferred_stacks": list(dense_profile.get("preferred_stacks") or []),
+            "active_projects": list(dense_profile.get("active_projects") or []),
+            "last_session_id": str(dense_profile.get("last_session_id") or "").strip(),
+        },
+        "selection_summary": selection_summary,
+    }
+
+
+def _should_skip_durable_snapshot_selection(
+    *,
+    query_text: str,
+    recent_user_turns: list[str],
+) -> bool:
+    normalized_query = " ".join(str(query_text or "").lower().split())
+    if any(marker in normalized_query for marker in _SNAPSHOT_UTILITY_MARKERS):
+        return True
+    query_tokens = set(_keyword_tokens(normalized_query, limit=8))
+    if query_tokens and query_tokens.issubset(_SNAPSHOT_GENERIC_OPERATION_TOKENS):
+        return True
+    recent_tokens = set(_keyword_tokens(" ".join(recent_user_turns[-3:]), limit=24))
+    return bool(
+        query_tokens
+        and query_tokens.issubset(_SNAPSHOT_GENERIC_OPERATION_TOKENS)
+        and recent_tokens & _SNAPSHOT_GENERIC_OPERATION_TOKENS
+    )
 
 
 def maybe_handle_memory_command(user_text: str, *, session_id: str | None = None) -> tuple[bool, str]:

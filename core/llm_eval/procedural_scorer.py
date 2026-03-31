@@ -17,6 +17,28 @@ def _find_observation(scenario_result: dict[str, Any], observation_id: str) -> d
     return dict(dict(scenario_result.get("observations") or {}).get(str(observation_id or ""), {}))
 
 
+def _snapshot_field(snapshot: dict[str, Any], path: str) -> Any:
+    current: Any = snapshot
+    for part in [item for item in str(path or "").split(".") if item]:
+        if isinstance(current, dict):
+            current = current.get(part)
+            continue
+        if isinstance(current, list) and part.isdigit():
+            index = int(part)
+            current = current[index] if 0 <= index < len(current) else None
+            continue
+        return None
+    return current
+
+
+def _snapshot_text(value: Any) -> str:
+    if isinstance(value, list):
+        return " ".join(_snapshot_text(item) for item in value)
+    if isinstance(value, dict):
+        return " ".join(_snapshot_text(item) for item in value.values())
+    return str(value or "")
+
+
 def _score_check(check: dict[str, Any], scenario_result: dict[str, Any]) -> dict[str, Any]:
     check_type = str(check.get("type") or "").strip()
     payload = {
@@ -59,6 +81,43 @@ def _score_check(check: dict[str, Any], scenario_result: dict[str, Any]) -> dict
             payload["pass"] = bool(pattern and re.search(pattern, text))
         else:
             payload["evidence"]["error"] = f"unsupported turn check type: {check_type}"
+        return payload
+
+    if check_type.startswith("snapshot_"):
+        snapshot = dict(scenario_result.get("operator_snapshot") or {})
+        field_path = str(check.get("field_path") or "").strip()
+        field_value = _snapshot_field(snapshot, field_path)
+        field_text = _snapshot_text(field_value).lower()
+        payload["evidence"] = {
+            "field_path": field_path,
+            "field_value": field_value,
+            "snapshot_ok": bool(snapshot.get("ok", False)),
+            "snapshot_error": str(snapshot.get("error") or ""),
+        }
+        if check_type == "snapshot_field_equals":
+            payload["pass"] = field_value == check.get("expected")
+        elif check_type == "snapshot_field_gte":
+            try:
+                payload["pass"] = float(field_value) >= float(check.get("expected") or 0)
+            except Exception:
+                payload["pass"] = False
+        elif check_type == "snapshot_field_contains_any":
+            terms = [str(item) for item in list(check.get("terms") or []) if str(item).strip()]
+            matched = [term for term in terms if term.lower() in field_text]
+            payload["evidence"]["matched_terms"] = matched
+            payload["pass"] = bool(matched)
+        elif check_type == "snapshot_field_contains_all":
+            terms = [str(item) for item in list(check.get("terms") or []) if str(item).strip()]
+            missing = [term for term in terms if term.lower() not in field_text]
+            payload["evidence"]["missing_terms"] = missing
+            payload["pass"] = not missing
+        elif check_type == "snapshot_field_absent_terms":
+            terms = [str(item) for item in list(check.get("terms") or []) if str(item).strip()]
+            hits = [term for term in terms if term.lower() in field_text]
+            payload["evidence"]["hits"] = hits
+            payload["pass"] = not hits
+        else:
+            payload["evidence"]["error"] = f"unsupported snapshot check type: {check_type}"
         return payload
 
     observation = _find_observation(scenario_result, str(check.get("observation_id") or ""))
@@ -114,6 +173,7 @@ def score_procedural_run(
                 "turns": list(scenario_result.get("turns") or []),
                 "observations": dict(scenario_result.get("observations") or {}),
                 "runtime_events": dict(scenario_result.get("runtime_events") or {}),
+                "operator_snapshot": dict(scenario_result.get("operator_snapshot") or {}),
             }
         )
 

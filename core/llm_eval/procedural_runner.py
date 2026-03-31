@@ -79,6 +79,30 @@ def _collect_runtime_events(base_url: str, conversation_id: str) -> dict[str, An
     }
 
 
+def _collect_operator_snapshot(
+    base_url: str,
+    *,
+    conversation_id: str,
+    query_text: str,
+    topic_hints: list[str] | None = None,
+) -> dict[str, Any]:
+    try:
+        query = parse.urlencode(
+            [
+                ("session", conversation_id),
+                ("query", query_text),
+                *[("topic_hint", str(item)) for item in list(topic_hints or []) if str(item).strip()],
+            ]
+        )
+        payload = _read_json(f"{base_url.rstrip('/')}/api/runtime/operator-snapshot?{query}", timeout=10.0)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+        }
+    return {"ok": True, **dict(payload or {})}
+
+
 def run_procedural_pack(
     *,
     base_url: str,
@@ -146,6 +170,21 @@ def run_procedural_pack(
             for spec in list(scenario.get("observations") or [])
         }
         runtime_events = _collect_runtime_events(base_url, conversation_id)
+        operator_snapshot_query = str(
+            scenario.get("operator_snapshot_query")
+            or (turns_out[-1]["prompt"] if turns_out else "")
+            or ""
+        ).strip()
+        operator_snapshot = _collect_operator_snapshot(
+            base_url,
+            conversation_id=conversation_id,
+            query_text=operator_snapshot_query,
+            topic_hints=[
+                str(item).strip()
+                for item in list(scenario.get("operator_snapshot_topic_hints") or [])
+                if str(item).strip()
+            ],
+        )
         scenarios_out.append(
             {
                 "scenario_id": str(scenario.get("scenario_id") or ""),
@@ -159,6 +198,7 @@ def run_procedural_pack(
                 "turns": turns_out,
                 "observations": observations,
                 "runtime_events": runtime_events,
+                "operator_snapshot": operator_snapshot,
             }
         )
 

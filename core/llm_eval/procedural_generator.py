@@ -42,10 +42,13 @@ _OPENING_PASS_MARKERS = (
     "hey",
     "hi",
     "alive",
+    "active",
     "awake",
+    "ready",
     "running",
     "stable",
     "good",
+    "help",
     "here",
 )
 _CAPABILITY_MARKERS = (
@@ -185,6 +188,11 @@ def _scoring_schema() -> dict[str, Any]:
             "turn_contains_all",
             "turn_absent_terms",
             "turn_matches_regex",
+            "snapshot_field_equals",
+            "snapshot_field_gte",
+            "snapshot_field_contains_any",
+            "snapshot_field_contains_all",
+            "snapshot_field_absent_terms",
             "observation_file_exists",
             "observation_file_equals",
             "observation_file_contains",
@@ -216,6 +224,7 @@ def generate_procedural_pack(
     blocked_workspace = (workspace_root / f"blocked_{seed_tag}").resolve()
     download_workspace = (workspace_root / f"download_{seed_tag}").resolve()
     local_read_workspace = (workspace_root / f"local_read_{seed_tag}").resolve()
+    memory_workspace = (workspace_root / f"memory_{seed_tag}").resolve()
 
     folder_name = f"march_shift_{_token(rng, 'folder')}"
     file_name = f"weekly_notes_{_token(rng, 'file')}.txt"
@@ -234,6 +243,8 @@ def generate_procedural_pack(
     local_fixture_name = f"read_me_{_token(rng, 'local')}.txt"
     local_fixture_path = local_fixture_dir / local_fixture_name
     local_fixture_text = f"fixture truth beats rehearsed demos {seed_tag}"
+    durable_project = f"orchid_{_token(rng, 'project')}"
+    durable_stack = f"python_{_token(rng, 'stack')}"
 
     chain_turns: list[dict[str, Any]]
     chain_checks: list[dict[str, Any]]
@@ -288,6 +299,22 @@ def generate_procedural_pack(
                 expected_entries=[file_name],
                 why="The chain should only create the requested file inside the requested folder.",
             ),
+            _check(
+                check_id="chain_snapshot_latest_tool_visible",
+                category="multi_turn_execution_discipline",
+                check_type="snapshot_field_contains_any",
+                field_path="session.execution_history.latest_tool",
+                terms=["workspace.read_file"],
+                why="The operator snapshot should expose the last grounded tool for inspection.",
+            ),
+            _check(
+                check_id="chain_snapshot_changed_path_visible",
+                category="tool_result_grounding",
+                check_type="snapshot_field_contains_any",
+                field_path="session.execution_history.changed_paths",
+                terms=[file_name],
+                why="The operator snapshot should expose the changed file path for the session.",
+            ),
         ]
     else:
         chain_turns = [
@@ -339,6 +366,22 @@ def generate_procedural_pack(
                 observation_id="chain_file",
                 expected=final_text,
                 why="The full chain must preserve every prior step and finish with the expected file content.",
+            ),
+            _check(
+                check_id="chain_snapshot_latest_tool_visible",
+                category="multi_turn_execution_discipline",
+                check_type="snapshot_field_contains_any",
+                field_path="session.execution_history.latest_tool",
+                terms=["workspace.read_file"],
+                why="The operator snapshot should expose the last grounded tool for inspection.",
+            ),
+            _check(
+                check_id="chain_snapshot_changed_path_visible",
+                category="tool_result_grounding",
+                check_type="snapshot_field_contains_any",
+                field_path="session.execution_history.changed_paths",
+                terms=[file_name],
+                why="The operator snapshot should expose the changed file path for the session.",
             ),
         ]
 
@@ -410,6 +453,7 @@ def generate_procedural_pack(
             "source_context": _scenario_source_context(),
             "fixtures": [],
             "observations": chain_observations,
+            "operator_snapshot_query": "read the whole file back exactly",
             "turns": chain_turns,
             "checks": chain_checks,
             "categories": [
@@ -471,6 +515,57 @@ def generate_procedural_pack(
                 "memory_relevance_filtering",
             ],
             "tags": ["context_bleed", "time", "decoy"],
+        },
+        {
+            "scenario_id": f"memory_lifecycle_{seed_tag}",
+            "family": "memory_lifecycle",
+            "title": "Durable memory filtered for unrelated utility turns",
+            "description": "Remembered project facts should stay available without contaminating unrelated utility turns.",
+            "workspace": str(memory_workspace),
+            "conversation_id": f"procedural-memory-{seed_tag}",
+            "source_context": _scenario_source_context(),
+            "fixtures": [],
+            "observations": [],
+            "operator_snapshot_query": f"what time is it in Vilnius right now and do not mention {durable_project}",
+            "operator_snapshot_topic_hints": ["time", "vilnius"],
+            "turns": [
+                {
+                    "turn_id": "remember",
+                    "prompt": f"remember that project codename is {durable_project} and the stack is {durable_stack}",
+                },
+                {
+                    "turn_id": "utility",
+                    "prompt": f"what time is it in Vilnius right now? do not mention {durable_project}",
+                },
+            ],
+            "checks": [
+                _check(
+                    check_id="memory_utility_filters_durable_fact",
+                    category="memory_relevance_filtering",
+                    check_type="turn_absent_terms",
+                    turn_id="utility",
+                    terms=[durable_project, durable_stack],
+                    why="Unrelated utility answers must not bleed durable project facts back into chat.",
+                ),
+                _check(
+                    check_id="memory_snapshot_recent_turns_visible",
+                    category="memory_relevance_filtering",
+                    check_type="snapshot_field_gte",
+                    field_path="memory_lifecycle.recent_conversation_event_count",
+                    expected=2,
+                    why="The operator snapshot should expose the recent local memory lifecycle for the session.",
+                ),
+                _check(
+                    check_id="memory_snapshot_filters_irrelevant_memory",
+                    category="memory_relevance_filtering",
+                    check_type="snapshot_field_equals",
+                    field_path="memory_lifecycle.relevant_memory_count",
+                    expected=0,
+                    why="The operator snapshot should show that unrelated utility queries selected no durable memory.",
+                ),
+            ],
+            "categories": ["memory_relevance_filtering"],
+            "tags": ["memory", "filtering", "utility"],
         },
         {
             "scenario_id": f"blocked_recovery_{seed_tag}",

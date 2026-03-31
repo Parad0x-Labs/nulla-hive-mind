@@ -9,8 +9,9 @@ from typing import Any
 from core.adaptation_autopilot import get_adaptation_autopilot_status, schedule_adaptation_autopilot_tick
 from core.control_plane_workspace import collect_control_plane_status
 from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
-from core.persistent_memory import recent_conversation_events
+from core.persistent_memory import augment_history_from_session_log
 from core.runtime_capabilities import runtime_capability_snapshot
+from core.runtime_operator_snapshot import build_runtime_operator_snapshot
 from core.runtime_task_events import list_runtime_session_events, list_runtime_sessions
 from core.runtime_task_rail import render_runtime_task_rail_html
 from storage.adaptation_store import (
@@ -134,36 +135,12 @@ def _augment_history_from_session_log(
     user_text: str,
     limit: int = 6,
 ) -> list[dict[str, str]]:
-    normalized_history = [dict(item) for item in list(history or []) if isinstance(item, dict)]
-    if len(normalized_history) > 1:
-        return normalized_history
-    normalized_session = str(session_id or "").strip()
-    normalized_user = str(user_text or "").strip()
-    if not normalized_session or not normalized_user:
-        return normalized_history
-
-    hydrated_history: list[dict[str, str]] = []
-    for event in recent_conversation_events(normalized_session, limit=max(1, int(limit))):
-        if not isinstance(event, dict):
-            continue
-        event_user = str(event.get("user") or "").strip()
-        event_assistant = str(event.get("assistant") or "").strip()
-        if event_user:
-            hydrated_history.append({"role": "user", "content": event_user})
-        if event_assistant:
-            hydrated_history.append({"role": "assistant", "content": event_assistant})
-
-    if not hydrated_history:
-        return normalized_history
-
-    if normalized_history:
-        last_message = normalized_history[-1]
-        if (
-            str(last_message.get("role") or "").strip().lower() == "user"
-            and str(last_message.get("content") or "").strip() == normalized_user
-        ):
-            return [*hydrated_history, *normalized_history]
-    return [*hydrated_history, {"role": "user", "content": normalized_user}]
+    return augment_history_from_session_log(
+        history,
+        session_id=session_id,
+        user_text=user_text,
+        limit=limit,
+    )
 
 
 def _inbound_source_context(body: dict[str, Any]) -> dict[str, Any]:
@@ -312,6 +289,22 @@ def dispatch_get(
 
     if normalized_path == "/api/runtime/control-plane/status":
         return apply_runtime_headers(json_response(200, collect_control_plane_status()), runtime)
+
+    if normalized_path == "/api/runtime/operator-snapshot":
+        session_id = str((query.get("session") or [""])[0] or "").strip()
+        query_text = str((query.get("query") or [""])[0] or "").strip()
+        topic_hints = [str(item).strip() for item in list(query.get("topic_hint") or []) if str(item).strip()]
+        return apply_runtime_headers(
+            json_response(
+                200,
+                build_runtime_operator_snapshot(
+                    session_id=session_id,
+                    query_text=query_text,
+                    topic_hints=topic_hints,
+                ),
+            ),
+            runtime,
+        )
 
     if normalized_path in {"/api/adaptation/status", "/api/adaptation/loop"}:
         return apply_runtime_headers(json_response(200, get_adaptation_autopilot_status()), runtime)

@@ -265,6 +265,7 @@ def maybe_run_builder_controller(
             confidence=0.95,
             source_context=loop_source_context,
             reason="builder_controller_direct_response",
+            runtime_event_details={"builder_controller": builder_details},
         )
         result["mode"] = "tool_failed" if failed_execution is not None else ("tool_executed" if executed_steps else "advice_only")
         result["workflow_summary"] = workflow_summary

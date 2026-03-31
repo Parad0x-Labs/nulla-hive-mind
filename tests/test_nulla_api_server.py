@@ -103,6 +103,30 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertIn("kimi-mock", ids)
         self.assertIn("openai-compatible-remote:gpt-mock", ids)
 
+    def test_create_app_runtime_operator_snapshot_endpoint_returns_snapshot_payload(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA", runtime_version_stamp={"release_version": "0.4.0"})
+        app = create_app(runtime)
+
+        with mock.patch(
+            "core.web.api.service.build_runtime_operator_snapshot",
+            return_value={
+                "session_id": "openclaw:snapshot",
+                "memory_lifecycle": {"relevant_memory_count": 0},
+                "session": {"execution_history": {"latest_tool": "workspace.read_file"}},
+            },
+        ):
+            status, _, body = asgi_request(
+                app,
+                method="GET",
+                path="/api/runtime/operator-snapshot?session=openclaw%3Asnapshot&query=what%20time",
+            )
+
+        payload = json.loads(body.decode("utf-8"))
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["session_id"], "openclaw:snapshot")
+        self.assertEqual(payload["memory_lifecycle"]["relevant_memory_count"], 0)
+        self.assertEqual(payload["session"]["execution_history"]["latest_tool"], "workspace.read_file")
+
     def test_dispatch_post_marks_chat_requests_as_api_surface_and_carries_requested_model(self) -> None:
         runtime = RuntimeServices(display_name="NULLA")
         seen_contexts: list[dict[str, Any]] = []
@@ -191,7 +215,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
             return {"response": "ok", "confidence": 1.0}
 
         with mock.patch("apps.nulla_api_server._run_agent", side_effect=fake_run_agent), mock.patch(
-            "core.web.api.service.recent_conversation_events",
+            "core.persistent_memory.recent_conversation_events",
             return_value=[
                 {
                     "user": "Create a folder named alpha inside /tmp/work.",

@@ -60,9 +60,9 @@ from core.onboarding import get_agent_display_name
 from core.parent_orchestrator import orchestrate_parent_task
 from core.persistent_memory import (
     append_conversation_event,
+    augment_history_from_session_log,
     ensure_memory_files,
     maybe_handle_memory_command,
-    recent_conversation_events,
     search_user_heuristics,
 )
 from core.public_hive_bridge import PublicHiveBridge
@@ -114,36 +114,12 @@ def _augment_history_from_session_log(
     user_text: str,
     limit: int = 6,
 ) -> list[dict[str, str]]:
-    normalized_history = [dict(item) for item in list(history or []) if isinstance(item, dict)]
-    if len(normalized_history) > 1:
-        return normalized_history
-    normalized_session = str(session_id or "").strip()
-    normalized_user = str(user_text or "").strip()
-    if not normalized_session or not normalized_user:
-        return normalized_history
-
-    hydrated_history: list[dict[str, str]] = []
-    for event in recent_conversation_events(normalized_session, limit=max(1, int(limit))):
-        if not isinstance(event, dict):
-            continue
-        event_user = str(event.get("user") or "").strip()
-        event_assistant = str(event.get("assistant") or "").strip()
-        if event_user:
-            hydrated_history.append({"role": "user", "content": event_user})
-        if event_assistant:
-            hydrated_history.append({"role": "assistant", "content": event_assistant})
-
-    if not hydrated_history:
-        return normalized_history
-
-    if normalized_history:
-        last_message = normalized_history[-1]
-        if (
-            str(last_message.get("role") or "").strip().lower() == "user"
-            and str(last_message.get("content") or "").strip() == normalized_user
-        ):
-            return [*hydrated_history, *normalized_history]
-    return [*hydrated_history, {"role": "user", "content": normalized_user}]
+    return augment_history_from_session_log(
+        history,
+        session_id=session_id,
+        user_text=user_text,
+        limit=limit,
+    )
 
 _PATCH_COMPAT_EXPORTS = (
     pick_autonomous_research_signal,
@@ -558,6 +534,7 @@ class NullaAgent(
         source_context: dict[str, object] | None,
         reason: str,
         classification_details: dict[str, Any] | None = None,
+        runtime_event_details: dict[str, Any] | None = None,
     ) -> dict:
         kwargs: dict[str, Any] = {
             "session_id": session_id,
@@ -571,6 +548,8 @@ class NullaAgent(
         }
         if classification_details is not None:
             kwargs["classification_details"] = classification_details
+        if runtime_event_details is not None:
+            kwargs["runtime_event_details"] = runtime_event_details
         return agent_fast_command_surface.fast_path_result(
             self,
             **kwargs,

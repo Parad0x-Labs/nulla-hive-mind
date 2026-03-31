@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.runtime_execution_history import build_runtime_execution_history, summarize_runtime_surface
+from core.runtime_operator_snapshot import build_runtime_operator_snapshot
 
 
 def test_execution_history_surfaces_pending_approval_and_touched_paths() -> None:
@@ -51,6 +52,44 @@ def test_execution_history_surfaces_pending_approval_and_touched_paths() -> None
     assert "alpha/tmp" in history["changed_paths"]
     assert "alpha/plan.txt" in history["touched_paths"]
     assert history["timeline"][1]["value"] == "pending"
+
+
+def test_execution_history_uses_runtime_event_details_for_tool_and_changed_paths() -> None:
+    history = build_runtime_execution_history(
+        session={
+            "session_id": "openclaw:builder-chain",
+            "request_preview": "read the file back exactly",
+            "task_class": "unknown",
+            "status": "completed",
+            "last_message": "Fast-path response ready.",
+            "updated_at": "2026-03-31T05:47:58+00:00",
+            "resume_available": False,
+        },
+        checkpoint={
+            "checkpoint_id": "runtime-builder-chain",
+            "status": "completed",
+            "step_count": 0,
+            "resume_count": 0,
+            "last_tool_name": "",
+            "pending_intent": {},
+        },
+        events=[
+            {
+                "event_type": "task_completed",
+                "message": "Fast-path response ready: alpha line",
+                "status": "builder_controller_direct_response",
+                "details": {
+                    "tool_name": "workspace.read_file",
+                    "changed_paths": ["march_shift_folder/weekly_notes.txt"],
+                },
+            }
+        ],
+        receipts=[],
+    )
+
+    assert history["latest_tool"] == "workspace.read_file"
+    assert "march_shift_folder/weekly_notes.txt" in history["changed_paths"]
+    assert "march_shift_folder/weekly_notes.txt" in history["touched_paths"]
 
 
 def test_execution_history_surfaces_verifier_failure_and_completed_rollback() -> None:
@@ -224,3 +263,55 @@ def test_execution_history_clears_stale_approval_after_completion() -> None:
 
     assert history["bounded_execution"]["approval_state"] == "cleared"
     assert history["timeline"][1]["value"] == "cleared"
+
+
+def test_runtime_operator_snapshot_merges_execution_and_memory_truth(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "core.runtime_operator_snapshot.list_runtime_sessions",
+        lambda limit: [
+            {
+                "session_id": "openclaw:operator",
+                "status": "completed",
+                "updated_at": "2026-03-31T01:00:00Z",
+                "request_preview": "Read the file",
+                "execution_history": {
+                    "title": "Read the file",
+                    "status": "completed",
+                    "request_status": "completed",
+                    "latest_tool": "workspace.read_file",
+                    "changed_paths": ["workspace/notes.txt"],
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "core.runtime_operator_snapshot.list_runtime_session_events",
+        lambda session_id, after_seq=0, limit=12: [
+            {
+                "seq": 1,
+                "event_type": "task_completed",
+                "status": "completed",
+                "tool_name": "workspace.read_file",
+                "message": "Completed readback.",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "core.runtime_operator_snapshot.memory_lifecycle_snapshot",
+        lambda **kwargs: {
+            "session_id": "openclaw:operator",
+            "recent_conversation_event_count": 2,
+            "relevant_memory_count": 1,
+            "selection_summary": "query `continue the file work` selected 1 durable memory entries, 0 prior session summaries, and 1 heuristic signals.",
+        },
+    )
+
+    snapshot = build_runtime_operator_snapshot(
+        session_id="openclaw:operator",
+        query_text="continue the file work",
+    )
+
+    assert snapshot["session"]["execution_history"]["latest_tool"] == "workspace.read_file"
+    assert snapshot["session"]["recent_runtime_event_count"] == 1
+    assert snapshot["memory_lifecycle"]["relevant_memory_count"] == 1
+    assert any("workspace/notes.txt" in line for line in snapshot["inspection_summary"])

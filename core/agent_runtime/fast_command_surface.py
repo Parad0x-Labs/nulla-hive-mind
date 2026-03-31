@@ -117,6 +117,7 @@ def fast_path_result(
     source_context: dict[str, object] | None,
     reason: str,
     classification_details: dict[str, Any] | None = None,
+    runtime_event_details: dict[str, Any] | None = None,
     append_conversation_event_fn: Any,
     audit_logger_module: Any,
 ) -> dict[str, Any]:
@@ -163,6 +164,7 @@ def fast_path_result(
         message=f"Fast-path response ready: {agent._runtime_preview(decorated_response)}",
         task_id=pseudo_task_id,
         status=reason,
+        **_builder_runtime_event_details(runtime_event_details),
     )
     agent._finalize_runtime_checkpoint(
         source_context,
@@ -289,6 +291,7 @@ def action_fast_path_result(
         ),
         task_id=task_id,
         status=reason,
+        **_builder_runtime_event_details(dict(details or {})),
     )
     agent._finalize_runtime_checkpoint(
         source_context,
@@ -323,6 +326,33 @@ def action_fast_path_result(
     }
 
 
+def _builder_runtime_event_details(payload: dict[str, Any] | None) -> dict[str, Any]:
+    builder = dict((payload or {}).get("builder_controller") or {})
+    if not builder:
+        return {}
+    tool_steps = [
+        str(item).strip()
+        for item in list(builder.get("tool_steps") or [])
+        if str(item).strip()
+    ]
+    artifacts = dict(builder.get("artifacts") or {})
+    changed_paths: list[str] = []
+    for item in list(artifacts.get("file_diffs") or []):
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        if path and path not in changed_paths:
+            changed_paths.append(path)
+    details: dict[str, Any] = {}
+    if tool_steps:
+        details["tool_name"] = tool_steps[-1]
+        details["tool_steps"] = tool_steps
+    if changed_paths:
+        details["changed_paths"] = changed_paths
+        details["touched_paths"] = list(changed_paths)
+    return details
+
+
 def maybe_handle_capability_truth_request(
     agent: Any,
     user_input: str,
@@ -336,8 +366,22 @@ def maybe_handle_capability_truth_request(
         user_input,
         extra_entries=agent._capability_ledger_entries(),
     )
+    normalized = _normalize_capability_prompt(user_input)
     if not report:
-        normalized = " ".join(str(user_input or "").strip().lower().split()).strip(" \t\r\n?!.,")
+        if _looks_like_capability_inventory_prompt(normalized):
+            response_text = (
+                compact_capabilities_text(agent)
+                if _wants_compact_capability_inventory(normalized)
+                else agent._help_capabilities_text()
+            )
+            return agent._fast_path_result(
+                session_id=session_id,
+                user_input=user_input,
+                response=response_text,
+                confidence=0.96,
+                source_context=source_context,
+                reason="capability_truth_query",
+            )
         if normalized in {
             "what can you do",
             "what can you do right now",
@@ -400,6 +444,53 @@ def help_capabilities_text(agent: Any) -> str:
             if reason:
                 lines.append(f"- {reason}")
     return "\n".join(lines)
+
+
+def compact_capabilities_text(agent: Any) -> str:
+    supported_entries = [entry for entry in agent._capability_ledger_entries() if entry.get("supported")]
+    claims = " ".join(str(entry.get("claim") or "").lower() for entry in supported_entries)
+    includes_download = "download" in claims
+    includes_sandbox = "sandbox" in claims or "command" in claims
+    parts = [
+        "Local powers here:",
+        "workspace file/folder read-write",
+    ]
+    if includes_download:
+        parts.append("downloads")
+    if includes_sandbox:
+        parts.append("bounded sandbox commands")
+    parts.append("runtime and machine inspection")
+    return ", ".join(parts[:-1]) + ", and " + parts[-1] + "."
+
+
+def _normalize_capability_prompt(text: str) -> str:
+    return " ".join(str(text or "").strip().lower().split()).strip(" \t\r\n?!.,")
+
+
+def _looks_like_capability_inventory_prompt(normalized: str) -> bool:
+    if not normalized:
+        return False
+    if "what are your actual local powers" in normalized:
+        return True
+    if "what can you actually do" in normalized and any(marker in normalized for marker in ("machine", "local", "locally", "right now")):
+        return True
+    return "what can you do" in normalized and any(
+        marker in normalized
+        for marker in ("machine", "local", "locally", "right now")
+    )
+
+
+def _wants_compact_capability_inventory(normalized: str) -> bool:
+    return any(
+        marker in normalized
+        for marker in (
+            "one short line",
+            "one clean line",
+            "one line only",
+            "real quick",
+            "short answer only",
+        )
+    )
 
 
 def render_credit_status(normalized_input: str) -> str:

@@ -58,6 +58,23 @@ def test_generate_procedural_pack_loads_local_blind_pack(tmp_path: Path) -> None
     assert any(item["scenario_id"].startswith("blind_") for item in pack["scenarios"])
 
 
+def test_generate_procedural_pack_includes_memory_lifecycle_and_snapshot_checks(tmp_path: Path) -> None:
+    pack = generate_procedural_pack(seed=20260331, output_root=tmp_path, include_blind=False)
+
+    assert "snapshot_field_equals" in pack["scoring_schema"]["check_types"]
+    assert "snapshot_field_contains_any" in pack["scoring_schema"]["check_types"]
+    assert any(item["family"] == "memory_lifecycle" for item in pack["scenarios"])
+
+
+def test_generate_procedural_pack_accepts_live_non_scripted_openers(tmp_path: Path) -> None:
+    pack = generate_procedural_pack(seed=20260331, output_root=tmp_path, include_blind=False)
+    opening = next(item for item in pack["scenarios"] if item["family"] == "opening_sanity")
+    opening_check = next(item for item in opening["checks"] if item["check_id"] == "opening_reply_addresses_human_turn")
+
+    assert "active" in opening_check["terms"]
+    assert "ready" in opening_check["terms"]
+
+
 def test_score_procedural_run_marks_failing_categories_with_exact_evidence() -> None:
     pack = {
         "scenarios": [
@@ -113,6 +130,58 @@ def test_score_procedural_run_marks_failing_categories_with_exact_evidence() -> 
     assert category_map["failure_honesty"]["status"] == "fail"
     failed_check = category_map["no_fake_visibility_access_claims"]["failed_checks"][0]
     assert failed_check["evidence"]["response_text"] == "super secret"
+
+
+def test_score_procedural_run_supports_operator_snapshot_checks() -> None:
+    pack = {
+        "scenarios": [
+            {
+                "scenario_id": "snapshot_case",
+                "checks": [
+                    {
+                        "check_id": "snapshot_tool_visible",
+                        "category": "multi_turn_execution_discipline",
+                        "type": "snapshot_field_contains_any",
+                        "field_path": "session.execution_history.latest_tool",
+                        "terms": ["workspace.read_file"],
+                        "why": "Operator snapshot should expose the last grounded tool.",
+                    },
+                    {
+                        "check_id": "snapshot_memory_filtered",
+                        "category": "memory_relevance_filtering",
+                        "type": "snapshot_field_equals",
+                        "field_path": "memory_lifecycle.relevant_memory_count",
+                        "expected": 0,
+                        "why": "Operator snapshot should show no relevant durable memory for an unrelated utility query.",
+                    },
+                ],
+            }
+        ]
+    }
+    run_result = {
+        "duration_seconds": 1.0,
+        "scenarios": [
+            {
+                "scenario_id": "snapshot_case",
+                "family": "memory_lifecycle",
+                "title": "snapshot",
+                "turns": [],
+                "observations": {},
+                "runtime_events": {},
+                "operator_snapshot": {
+                    "ok": True,
+                    "session": {"execution_history": {"latest_tool": "workspace.read_file"}},
+                    "memory_lifecycle": {"relevant_memory_count": 0},
+                },
+            }
+        ],
+    }
+
+    scored = score_procedural_run(pack=pack, run_result=run_result)
+
+    category_map = {item["category"]: item for item in scored["category_results"]}
+    assert category_map["multi_turn_execution_discipline"]["status"] == "pass"
+    assert category_map["memory_relevance_filtering"]["status"] == "pass"
 
 
 def test_compare_procedural_scores_detects_regression() -> None:

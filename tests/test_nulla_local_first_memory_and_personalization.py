@@ -4,6 +4,7 @@ from core.persistent_memory import (
     append_conversation_event,
     load_operator_dense_profile,
     maybe_handle_memory_command,
+    memory_lifecycle_snapshot,
     recent_conversation_events,
     search_session_summaries,
     search_user_heuristics,
@@ -120,3 +121,60 @@ def test_dense_operator_profile_and_continuity_drive_companion_followup(make_age
     assert "continuing the telegram bot build" in lowered
     assert "official docs first" in lowered
     assert "next step" in lowered
+
+
+def test_memory_lifecycle_snapshot_filters_irrelevant_durable_memory_current_contract():
+    session_id = "openclaw:memory-lifecycle-filter"
+    handled, _ = maybe_handle_memory_command(
+        "remember that project codename is orchid shadow and the stack is python lantern",
+        session_id=session_id,
+    )
+    assert handled is True
+    append_conversation_event(
+        session_id=session_id,
+        user_input="remember that project codename is orchid shadow and the stack is python lantern",
+        assistant_output="Locked in.",
+        source_context={"surface": "openclaw", "platform": "openclaw", "conversation_history": []},
+    )
+    append_conversation_event(
+        session_id=session_id,
+        user_input="what time is it in Vilnius right now?",
+        assistant_output="Current time in Vilnius is 12:34.",
+        source_context={"surface": "openclaw", "platform": "openclaw", "conversation_history": []},
+    )
+
+    snapshot = memory_lifecycle_snapshot(
+        session_id=session_id,
+        query_text="what time is it in Vilnius right now?",
+        topic_hints=["time", "vilnius"],
+    )
+
+    assert snapshot["recent_conversation_event_count"] >= 2
+    assert snapshot["relevant_memory_count"] == 0
+    assert snapshot["session_summary_count"] == 0
+    assert snapshot["heuristic_count"] == 0
+    assert any("what time is it in vilnius right now?" in row["user"].lower() for row in snapshot["recent_turns"])
+
+
+def test_memory_lifecycle_snapshot_surfaces_relevant_durable_memory_current_contract():
+    session_id = "openclaw:memory-lifecycle-relevant"
+    handled, _ = maybe_handle_memory_command(
+        "remember that I am building a telegram moderation bot in python",
+        session_id=session_id,
+    )
+    assert handled is True
+    append_conversation_event(
+        session_id=session_id,
+        user_input="remember that I am building a telegram moderation bot in python",
+        assistant_output="Stored.",
+        source_context={"surface": "openclaw", "platform": "openclaw", "conversation_history": []},
+    )
+
+    snapshot = memory_lifecycle_snapshot(
+        session_id=session_id,
+        query_text="continue the telegram moderation bot in python",
+        topic_hints=["telegram", "python"],
+    )
+
+    assert snapshot["relevant_memory_count"] >= 1
+    assert any("telegram moderation bot" in row["text"].lower() for row in snapshot["relevant_memory"])

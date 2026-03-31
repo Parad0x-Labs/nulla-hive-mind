@@ -456,8 +456,10 @@ def _extract_machine_specs_request(text: str) -> dict[str, Any] | None:
         marker in lowered
         for marker in (
             "what can you do",
+            "what can you actually do",
             "what are your capabilities",
             "what can you help with",
+            "actual local powers",
         )
     ):
         return None

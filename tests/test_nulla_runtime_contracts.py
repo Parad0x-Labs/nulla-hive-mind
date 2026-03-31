@@ -607,6 +607,60 @@ def test_generic_capability_inventory_prompt_uses_grounded_fast_path(make_agent)
     assert "not a full autonomous build/debug/test loop" in lowered
 
 
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "one short line only: what can you actually do on this machine right now?",
+        "real quick, what can you do locally on this machine right now?",
+        "in one clean line, what are your actual local powers here?",
+    ],
+)
+def test_wrapped_capability_inventory_prompts_still_return_grounded_local_powers(make_agent, prompt):
+    agent = make_agent()
+    agent.context_loader.load.side_effect = AssertionError("capability inventory should not load context")  # type: ignore[attr-defined]
+
+    with mock.patch.object(
+        agent,
+        "_capability_ledger_entries",
+        return_value=[
+            {
+                "capability_id": "workspace.write",
+                "surface": "workspace",
+                "supported": True,
+                "support_level": "full",
+                "claim": "read and write files inside the active workspace",
+            },
+            {
+                "capability_id": "operator.download",
+                "surface": "operator",
+                "supported": True,
+                "support_level": "full",
+                "claim": "download files into local bounded roots",
+            },
+            {
+                "capability_id": "sandbox.command",
+                "surface": "sandbox",
+                "supported": True,
+                "support_level": "full",
+                "claim": "run bounded local sandbox commands",
+            },
+        ],
+    ):
+        result = agent.run_once(
+            prompt,
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+    lowered = result["response"].lower()
+    assert result["response_class"] == ResponseClass.UTILITY_ANSWER.value
+    assert result["model_execution"]["used_model"] is False
+    assert "\n" not in result["response"]
+    assert "local powers here" in lowered
+    assert "workspace file/folder read-write" in lowered
+    assert "downloads" in lowered
+    assert "sandbox commands" in lowered
+
+
 def test_api_surface_greeting_falls_back_to_bounded_greeting_when_provider_is_cold(make_agent):
     agent = make_agent()
     agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
