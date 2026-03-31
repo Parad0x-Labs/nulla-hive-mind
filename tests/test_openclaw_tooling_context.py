@@ -4223,6 +4223,40 @@ class OpenClawToolingContextTests(unittest.TestCase):
         self.assertIn("notes.md:1", result["response"])
         self.assertNotIn("stripped the internal routing details", result["response"].lower())
 
+    def test_openclaw_api_surface_workspace_file_flow_ignores_topics_in_absolute_path(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        agent.start()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "dialogue-topics-clean" / "workspace" / "main"
+            workspace.mkdir(parents=True, exist_ok=True)
+            session_id = "openclaw:api-topics-path-file-flow"
+            source_context = {"surface": "api", "platform": "api", "workspace": str(workspace), "workspace_root": str(workspace)}
+
+            create = agent.run_once(
+                f"Create a file named nulla_test_01.txt in {workspace} with exactly this content: ALPHA-LOCAL-FILE-01",
+                session_id_override=session_id,
+                source_context=source_context,
+            )
+            append = agent.run_once(
+                "Append a second line: BETA-APPEND-02",
+                session_id_override=session_id,
+                source_context=source_context,
+            )
+            readback = agent.run_once(
+                "Now read the whole file back exactly",
+                session_id_override=session_id,
+                source_context=source_context,
+            )
+
+            target = workspace / "nulla_test_01.txt"
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "ALPHA-LOCAL-FILE-01\nBETA-APPEND-02")
+
+        self.assertNotIn("Ready to post this to the public Hive", create["response"])
+        self.assertNotIn("generated/workspace-starter", append["response"])
+        self.assertIn("ALPHA-LOCAL-FILE-01", readback["response"])
+        self.assertIn("BETA-APPEND-02", readback["response"])
+
     def test_openclaw_download_to_downloads_writes_real_file(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
         agent.start()

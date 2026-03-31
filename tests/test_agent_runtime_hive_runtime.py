@@ -113,3 +113,14 @@ def test_recover_hive_runtime_command_input_ignores_workspace_path_with_hive_and
     )
 
     assert recovered == ""
+
+
+def test_extract_hive_topic_create_draft_ignores_workspace_path_with_topics_segment() -> None:
+    agent = _build_agent()
+    prompt = (
+        "Create a file named nulla_test_01.txt in "
+        "/Users/test/nulla-hive-mind/artifacts/acceptance_runs/2026-03-31-dialogue-topics-clean/workspace/main "
+        "with exactly this content: ALPHA-LOCAL-FILE-01"
+    )
+
+    assert agent._extract_hive_topic_create_draft(prompt) is None
